@@ -20,7 +20,7 @@ function extractVideoId(url) {
 function parseTitle() {
   const raw = document.title;
   if (!raw || raw === 'YouTube') return null;
-  return raw.endsWith(' - YouTube') ? raw.slice(0, -' - YouTube'.length) : raw;
+  return raw.replace(/^\(\d+\)\s+/, '').replace(/\s+-\s+YouTube$/, '') || null;
 }
 
 function waitForTitle(maxRetries = 10, interval = 200) {
