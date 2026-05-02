@@ -50,7 +50,12 @@ let lastVideoId = null;
 async function handleVideoChange() {
   const videoId = extractVideoId(location.href);
 
-  if (!videoId || videoId === lastVideoId) return;
+  if (!videoId) {
+    lastVideoId = null;
+    return;
+  }
+
+  if (videoId === lastVideoId) return;
 
   lastVideoId = videoId;
 
