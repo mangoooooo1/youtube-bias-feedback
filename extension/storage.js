@@ -1,4 +1,11 @@
-export async function addVideo(videoId, title) {
+let queue = Promise.resolve();
+
+export function addVideo(videoId, title) {
+  queue = queue.then(() => _addVideo(videoId, title));
+  return queue;
+}
+
+async function _addVideo(videoId, title) {
   const { currentSession } = await chrome.storage.local.get('currentSession');
 
   const session = currentSession ?? {
