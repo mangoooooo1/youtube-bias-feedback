@@ -7,6 +7,9 @@ export async function addVideo(videoId, title) {
     videos: [],
   };
 
+  const lastSaved = session.videos.at(-1);
+  if (lastSaved?.videoId === videoId) return;
+
   session.videos.push({
     videoId,
     title,
