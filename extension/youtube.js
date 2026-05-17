@@ -4,20 +4,44 @@ const API_BASE = 'https://www.googleapis.com/youtube/v3/videos';
 const BATCH_SIZE = 50;
 
 export async function fetchVideoCategories(videoIds) {
-  const results = {};
   const chunks = chunkArray(videoIds, BATCH_SIZE);
+  const results = {};
 
   for (const chunk of chunks) {
-    const url = `${API_BASE}?part=snippet&id=${chunk.join(',')}&key=${YOUTUBE_API_KEY}`;
-    const response = await fetch(url);
-    const data = await response.json();
-
-    for (const item of data.items ?? []) {
-      results[item.id] = item.snippet.categoryId;
-    }
+    const partial = await fetchChunk(chunk);
+    Object.assign(results, partial);
   }
 
   return results;
+}
+
+async function fetchChunk(videoIds) {
+  try {
+    const url = `${API_BASE}?part=snippet&id=${videoIds.join(',')}&key=${YOUTUBE_API_KEY}`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      console.warn(`[youtube] API 오류: ${response.status}`);
+      return nullMap(videoIds);
+    }
+
+    const data = await response.json();
+
+    // null을 기본값으로 초기화 → 삭제/비공개 영상은 null로 유지됨
+    const partial = nullMap(videoIds);
+    for (const item of data.items ?? []) {
+      partial[item.id] = item.snippet.categoryId;
+    }
+
+    return partial;
+  } catch (error) {
+    console.warn('[youtube] 네트워크 오류:', error.message);
+    return nullMap(videoIds);
+  }
+}
+
+function nullMap(videoIds) {
+  return Object.fromEntries(videoIds.map((id) => [id, null]));
 }
 
 function chunkArray(arr, size) {
