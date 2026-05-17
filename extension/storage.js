@@ -40,7 +40,12 @@ export async function clearCurrentSession() {
   await chrome.storage.local.set({ currentSession: null });
 }
 
-export async function endSession() {
+export function endSession() {
+  queue = queue.then(() => _endSession());
+  return queue;
+}
+
+async function _endSession() {
   const { currentSession, sessions } = await chrome.storage.local.get([
     'currentSession',
     'sessions',
