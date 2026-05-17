@@ -6,22 +6,22 @@ export function addVideo(videoId, title) {
 }
 
 async function _addVideo(videoId, title) {
+  const now = new Date().toISOString();
   const { currentSession } = await chrome.storage.local.get('currentSession');
 
   const session = currentSession ?? {
     sessionId: String(Date.now()),
-    startTime: new Date().toISOString(),
+    startTime: now,
     videos: [],
   };
+
+  // 중복 여부와 무관하게 먼저 갱신: 같은 영상을 계속 시청 중인 경우도 활성 시청이므로
+  await chrome.storage.local.set({ lastWatchedAt: now });
 
   const lastSaved = session.videos.at(-1);
   if (lastSaved?.videoId === videoId) return;
 
-  session.videos.push({
-    videoId,
-    title,
-    watchedAt: new Date().toISOString(),
-  });
+  session.videos.push({ videoId, title, watchedAt: now });
 
   await chrome.storage.local.set({ currentSession: session });
 }
@@ -38,4 +38,9 @@ export async function getAllSessions() {
 
 export async function clearCurrentSession() {
   await chrome.storage.local.set({ currentSession: null });
+}
+
+export async function getLastWatchedAt() {
+  const { lastWatchedAt } = await chrome.storage.local.get('lastWatchedAt');
+  return lastWatchedAt ?? null;
 }
