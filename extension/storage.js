@@ -40,6 +40,27 @@ export async function clearCurrentSession() {
   await chrome.storage.local.set({ currentSession: null });
 }
 
+export async function endSession() {
+  const { currentSession, sessions } = await chrome.storage.local.get([
+    'currentSession',
+    'sessions',
+  ]);
+
+  if (!currentSession || currentSession.videos.length === 0) return;
+
+  const closedSession = {
+    ...currentSession,
+    endTime: new Date().toISOString(),
+  };
+
+  const updatedSessions = [...(sessions ?? []), closedSession];
+
+  await chrome.storage.local.set({
+    sessions: updatedSessions,
+    currentSession: null,
+  });
+}
+
 export async function getLastWatchedAt() {
   const { lastWatchedAt } = await chrome.storage.local.get('lastWatchedAt');
   return lastWatchedAt ?? null;
