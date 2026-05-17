@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YouTube Bias Feedback",
   "version": "0.1.0",
-  "permissions": ["storage", "activeTab"],
+  "permissions": ["storage", "activeTab", "alarms"],
   "host_permissions": ["*://*.youtube.com/*"],
   "background": {
     "service_worker": "background.js",
