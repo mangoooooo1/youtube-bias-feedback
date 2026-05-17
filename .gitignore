@@ -72,6 +72,9 @@ server/.env
 .env.*
 !.env.example
 
+# API key config (use config.example.js as template)
+extension/config.js
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache
