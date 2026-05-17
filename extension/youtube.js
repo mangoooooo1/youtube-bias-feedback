@@ -17,8 +17,12 @@ export async function fetchVideoCategories(videoIds) {
 
 async function fetchChunk(videoIds) {
   try {
-    const url = `${API_BASE}?part=snippet&id=${videoIds.join(',')}&key=${YOUTUBE_API_KEY}`;
-    const response = await fetch(url);
+    const params = new URLSearchParams({
+      part: 'snippet',
+      id: videoIds.join(','),
+      key: YOUTUBE_API_KEY,
+    });
+    const response = await fetch(`${API_BASE}?${params}`);
 
     if (!response.ok) {
       console.warn(`[youtube] API 오류: ${response.status}`);
@@ -30,7 +34,7 @@ async function fetchChunk(videoIds) {
     // null을 기본값으로 초기화 → 삭제/비공개 영상은 null로 유지됨
     const partial = nullMap(videoIds);
     for (const item of data.items ?? []) {
-      partial[item.id] = item.snippet.categoryId;
+      partial[item.id] = item.snippet?.categoryId ?? null;
     }
 
     return partial;
