@@ -45,6 +45,28 @@ function waitForTitle(maxRetries = 10, interval = 200) {
   });
 }
 
+async function sendWithRetry(message, maxRetries = 3, delay = 500) {
+  for (let i = 0; i < maxRetries; i++) {
+    const response = await new Promise((resolve) => {
+      chrome.runtime.sendMessage(message, (res) => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+        } else {
+          resolve(res);
+        }
+      });
+    });
+
+    if (response) {
+      console.log('[content] background response:', response);
+      return;
+    }
+
+    if (i < maxRetries - 1) await new Promise((r) => setTimeout(r, delay));
+  }
+  console.warn('[content] sendMessage 최종 실패:', message.videoId);
+}
+
 let lastVideoId = null;
 
 async function handleVideoChange() {
@@ -62,16 +84,7 @@ async function handleVideoChange() {
   const title = await waitForTitle();
   console.log('[content] video detected:', { videoId, title });
 
-  chrome.runtime.sendMessage(
-    { type: 'VIDEO_DETECTED', videoId, title, url: location.href },
-    (response) => {
-      if (chrome.runtime.lastError) {
-        console.warn('[content] sendMessage error:', chrome.runtime.lastError.message);
-        return;
-      }
-      console.log('[content] background response:', response);
-    }
-  );
+  sendWithRetry({ type: 'VIDEO_DETECTED', videoId, title, url: location.href });
 }
 
 handleVideoChange();
