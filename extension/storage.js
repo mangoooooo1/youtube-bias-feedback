@@ -70,3 +70,21 @@ export async function getLastWatchedAt() {
   const { lastWatchedAt } = await chrome.storage.local.get('lastWatchedAt');
   return lastWatchedAt ?? null;
 }
+
+export function saveAnalysis(sessionId, analysisResult) {
+  queue = queue.then(() => _saveAnalysis(sessionId, analysisResult));
+  return queue;
+}
+
+async function _saveAnalysis(sessionId, analysisResult) {
+  const { sessions } = await chrome.storage.local.get('sessions');
+  if (!sessions) return;
+
+  const updatedSessions = sessions.map((session) =>
+    session.sessionId === sessionId
+      ? { ...session, ...analysisResult }
+      : session
+  );
+
+  await chrome.storage.local.set({ sessions: updatedSessions });
+}
