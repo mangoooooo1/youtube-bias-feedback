@@ -1,4 +1,6 @@
-import { addVideo, endSession, getLastWatchedAt } from './storage.js';
+import { addVideo, endSession, getLastWatchedAt, getCurrentSession, saveAnalysis } from './storage.js';
+import { fetchVideoCategories } from './youtube.js';
+import { calculateDistribution, calculateEntropy } from './analysis.js';
 
 const ALARM_NAME = 'SESSION_TIMEOUT_CHECK';
 const TIMEOUT_MS = 30 * 60 * 1000;
@@ -34,6 +36,29 @@ async function checkSessionTimeout() {
   const elapsed = Date.now() - new Date(lastWatchedAt).getTime();
   if (elapsed < TIMEOUT_MS) return;
 
+  // endSession 후 currentSession이 null이 되므로 먼저 캡처
+  const session = await getCurrentSession();
+
   console.log('[background] 30분 비활성 감지, 세션 종료');
   await endSession();
+
+  if (!session || session.videos.length === 0) return;
+  await analyzeSession(session);
+}
+
+async function analyzeSession(session) {
+  const videoIds = session.videos.map((v) => v.videoId);
+  const categoryMap = await fetchVideoCategories(videoIds);
+  const categoryIds = videoIds.map((id) => categoryMap[id]);
+
+  const categoryDistribution = calculateDistribution(categoryIds);
+  const entropy = calculateEntropy(categoryDistribution);
+
+  await saveAnalysis(session.sessionId, {
+    categoryDistribution,
+    entropy,
+    videoCount: session.videos.length,
+  });
+
+  console.log('[background] 분석 완료:', { entropy, categoryDistribution });
 }
