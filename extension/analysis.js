@@ -28,5 +28,5 @@ export function calculateEntropy(distribution) {
     return sum + p * Math.log2(p);
   }, 0);
 
-  return Math.round(H * 100) / 100;
+  return Math.round(H * 100) / 100 || 0;
 }
