@@ -48,13 +48,17 @@ function waitForTitle(maxRetries = 10, interval = 200) {
 async function sendWithRetry(message, maxRetries = 3, delay = 500) {
   for (let i = 0; i < maxRetries; i++) {
     const response = await new Promise((resolve) => {
-      chrome.runtime.sendMessage(message, (res) => {
-        if (chrome.runtime.lastError) {
-          resolve(null);
-        } else {
-          resolve(res);
-        }
-      });
+      try {
+        chrome.runtime.sendMessage(message, (res) => {
+          if (chrome.runtime?.lastError) {
+            resolve(null);
+          } else {
+            resolve(res);
+          }
+        });
+      } catch {
+        resolve(null);
+      }
     });
 
     if (response) {
