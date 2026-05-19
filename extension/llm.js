@@ -1,7 +1,7 @@
 import { GEMINI_API_KEY } from './config.js';
 
 const GEMINI_API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent';
 const TIMEOUT_MS = 10000;
 
 export function buildPrompt({ categoryDistribution, entropy, videoCount }) {
