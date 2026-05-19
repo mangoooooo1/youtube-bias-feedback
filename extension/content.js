@@ -47,6 +47,11 @@ function waitForTitle(maxRetries = 10, interval = 200) {
 
 async function sendWithRetry(message, maxRetries = 3, delay = 500) {
   for (let i = 0; i < maxRetries; i++) {
+    if (!chrome.runtime?.sendMessage) {
+      console.warn('[content] Extension context invalidated');
+      return;
+    }
+
     const response = await new Promise((resolve) => {
       try {
         chrome.runtime.sendMessage(message, (res) => {
@@ -88,7 +93,7 @@ async function handleVideoChange() {
   const title = await waitForTitle();
   console.log('[content] video detected:', { videoId, title });
 
-  sendWithRetry({ type: 'VIDEO_DETECTED', videoId, title, url: location.href });
+  sendWithRetry({ type: 'VIDEO_DETECTED', videoId, title, url: location.href }).catch(() => {});
 }
 
 handleVideoChange();
