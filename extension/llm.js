@@ -1,7 +1,7 @@
 import { GEMINI_API_KEY } from './config.js';
 
 const GEMINI_API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 const TIMEOUT_MS = 10000;
 
 export function buildPrompt({ categoryDistribution, entropy, videoCount }) {
@@ -45,6 +45,8 @@ export async function generateReview(prompt) {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
+      const errorBody = await response.text();
+      console.error('[llm] API error body:', errorBody);
       throw new Error(`Gemini API error: ${response.status}`);
     }
 
