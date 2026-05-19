@@ -1,4 +1,6 @@
-import { addVideo, endSession, getLastWatchedAt } from './storage.js';
+import { addVideo, endSession, getLastWatchedAt, getCurrentSession, getAllSessions, saveAnalysis } from './storage.js';
+import { fetchVideoCategories } from './youtube.js';
+import { calculateDistribution, calculateEntropy } from './analysis.js';
 
 const ALARM_NAME = 'SESSION_TIMEOUT_CHECK';
 const TIMEOUT_MS = 30 * 60 * 1000;
@@ -34,6 +36,32 @@ async function checkSessionTimeout() {
   const elapsed = Date.now() - new Date(lastWatchedAt).getTime();
   if (elapsed < TIMEOUT_MS) return;
 
+  const currentSession = await getCurrentSession();
+  if (!currentSession) return;
+  const sessionId = currentSession.sessionId;
+
   console.log('[background] 30분 비활성 감지, 세션 종료');
   await endSession();
+
+  const sessions = await getAllSessions();
+  const session = sessions.find((s) => s.sessionId === sessionId);
+  if (!session || session.videos.length === 0) return;
+  await analyzeSession(session);
+}
+
+async function analyzeSession(session) {
+  const videoIds = session.videos.map((v) => v.videoId);
+  const categoryMap = await fetchVideoCategories(videoIds);
+  const categoryIds = videoIds.map((id) => categoryMap[id]);
+
+  const categoryDistribution = calculateDistribution(categoryIds);
+  const entropy = calculateEntropy(categoryDistribution);
+
+  await saveAnalysis(session.sessionId, {
+    categoryDistribution,
+    entropy,
+    videoCount: session.videos.length,
+  });
+
+  console.log('[background] 분석 완료:', { entropy, categoryDistribution });
 }
