@@ -1,6 +1,7 @@
 import { addVideo, endSession, getLastWatchedAt, getCurrentSession, getAllSessions, saveAnalysis } from './storage.js';
 import { fetchVideoCategories } from './youtube.js';
 import { calculateDistribution, calculateEntropy } from './analysis.js';
+import { buildPrompt, generateReview, generateFallbackReview } from './llm.js';
 
 const ALARM_NAME = 'SESSION_TIMEOUT_CHECK';
 const TIMEOUT_MS = 30 * 60 * 1000;
@@ -56,12 +57,23 @@ async function analyzeSession(session) {
 
   const categoryDistribution = calculateDistribution(categoryIds);
   const entropy = calculateEntropy(categoryDistribution);
+  const videoCount = session.videos.length;
 
-  await saveAnalysis(session.sessionId, {
-    categoryDistribution,
-    entropy,
-    videoCount: session.videos.length,
-  });
-
+  await saveAnalysis(session.sessionId, { categoryDistribution, entropy, videoCount });
   console.log('[background] 분석 완료:', { entropy, categoryDistribution });
+
+  const analysisData = { categoryDistribution, entropy, videoCount };
+  const prompt = buildPrompt(analysisData);
+
+  let review;
+  try {
+    review = await generateReview(prompt);
+    console.log('[background] 리뷰 생성 완료');
+  } catch (error) {
+    console.warn('[background] 리뷰 생성 실패, 폴백 사용:', error.message);
+    review = generateFallbackReview(analysisData);
+  }
+
+  await saveAnalysis(session.sessionId, { review });
+  console.log('[background] 리뷰 저장 완료:', review);
 }
