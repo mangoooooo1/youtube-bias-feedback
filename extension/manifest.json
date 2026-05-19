@@ -3,7 +3,7 @@
   "name": "YouTube Bias Feedback",
   "version": "0.1.0",
   "permissions": ["storage", "activeTab", "alarms"],
-  "host_permissions": ["*://*.youtube.com/*"],
+  "host_permissions": ["*://*.youtube.com/*", "*://generativelanguage.googleapis.com/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
