@@ -222,7 +222,80 @@ function renderWeeklyChart(dailyData) {
 }
 
 function renderEntropyChart(dailyData) {
-  // Step 6에서 구현
+  const container = document.getElementById('entropy-chart');
+  container.innerHTML = '';
+
+  const { dates, entropies } = dailyData;
+
+  if (dates.length === 1) {
+    const single = document.createElement('p');
+    single.className = 'entropy-single';
+    single.textContent = `현재 Entropy: ${entropies[0]}`;
+    container.appendChild(single);
+    return;
+  }
+
+  const VB_W = 300;
+  const VB_H = 80;
+  const PAD = { top: 8, right: 12, bottom: 20, left: 12 };
+  const chartW = VB_W - PAD.left - PAD.right;
+  const chartH = VB_H - PAD.top - PAD.bottom;
+
+  const yMax = Math.max(Math.max(...entropies) * 1.2, 1);
+  const xStep = chartW / (dates.length - 1);
+  const toX = (i) => PAD.left + i * xStep;
+  const toY = (val) => PAD.top + chartH - (val / yMax) * chartH;
+
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${VB_W} ${VB_H}`);
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', String(VB_H));
+  svg.setAttribute('aria-label', 'Entropy 변화 추이 라인차트');
+
+  const points = entropies.map((val, i) => `${toX(i)},${toY(val)}`).join(' ');
+  const polyline = document.createElementNS(svgNS, 'polyline');
+  polyline.setAttribute('points', points);
+  polyline.setAttribute('fill', 'none');
+  polyline.setAttribute('stroke', '#6366f1');
+  polyline.setAttribute('stroke-width', '1.5');
+  polyline.setAttribute('stroke-linejoin', 'round');
+  svg.appendChild(polyline);
+
+  for (let i = 0; i < dates.length; i++) {
+    const cx = toX(i);
+    const cy = toY(entropies[i]);
+    const isBaseline = i === 0;
+
+    const circle = document.createElementNS(svgNS, 'circle');
+    circle.setAttribute('cx', String(cx));
+    circle.setAttribute('cy', String(cy));
+    circle.setAttribute('r', isBaseline ? '4' : '3');
+    circle.setAttribute('fill', isBaseline ? '#f59e0b' : '#6366f1');
+    svg.appendChild(circle);
+
+    const label = document.createElementNS(svgNS, 'text');
+    label.setAttribute('x', String(cx));
+    label.setAttribute('y', String(VB_H - 2));
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('font-size', '9');
+    label.setAttribute('fill', '#909090');
+    label.textContent = dates[i].slice(5).replace('-', '/');
+    svg.appendChild(label);
+  }
+
+  container.appendChild(svg);
+
+  const delta = Math.round((entropies.at(-1) - entropies[0]) * 100) / 100;
+  if (delta !== 0) {
+    const deltaEl = document.createElement('p');
+    deltaEl.className = `entropy-delta entropy-delta--${delta > 0 ? 'up' : 'down'}`;
+    deltaEl.textContent =
+      delta > 0
+        ? `▲ ${delta.toFixed(2)} 다양성 증가`
+        : `▼ ${Math.abs(delta).toFixed(2)} 편향 심화`;
+    container.appendChild(deltaEl);
+  }
 }
 
 init();
