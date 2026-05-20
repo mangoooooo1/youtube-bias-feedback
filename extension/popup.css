@@ -38,6 +38,30 @@ body {
   color: #0f0f0f;
 }
 
+/* 탭 내비게이션 */
+.tab-nav {
+  display: flex;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.tab-nav__btn {
+  flex: 1;
+  padding: 9px 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #909090;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.tab-nav__btn--active {
+  color: #0f0f0f;
+  border-bottom-color: #ff4444;
+}
+
 /* Main */
 .main {
   padding: 16px;
@@ -54,6 +78,11 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-bottom: 10px;
+}
+
+/* 주간 리포트 */
+.weekly-section__entropy-title {
+  margin-top: 20px;
 }
 
 /* 막대그래프 */
