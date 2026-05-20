@@ -1,4 +1,7 @@
-import { getAllSessions } from './storage.js';
+import { getAllSessions, getRecentSessions } from './storage.js';
+import { aggregateDailyData } from './analysis.js';
+
+let hasSessionData = false;
 
 async function init() {
   const sessions = await getAllSessions();
@@ -9,6 +12,7 @@ async function init() {
     return;
   }
 
+  hasSessionData = true;
   renderChart(latestAnalyzed.categoryDistribution);
   renderReview(latestAnalyzed.review);
 }
@@ -76,4 +80,63 @@ function renderReview(review) {
   text.textContent = review;
 }
 
+function initTabs() {
+  const buttons = document.querySelectorAll('.tab-nav__btn');
+  buttons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      buttons.forEach((b) => {
+        b.classList.remove('tab-nav__btn--active');
+        b.setAttribute('aria-selected', 'false');
+      });
+      btn.classList.add('tab-nav__btn--active');
+      btn.setAttribute('aria-selected', 'true');
+
+      if (btn.dataset.tab === 'weekly') {
+        showWeeklyTab();
+      } else {
+        showSessionTab();
+      }
+    });
+  });
+}
+
+function showSessionTab() {
+  document.getElementById('weekly-section').hidden = true;
+  if (hasSessionData) {
+    document.getElementById('chart-section').hidden = false;
+    document.getElementById('review-section').hidden = false;
+  } else {
+    document.getElementById('empty-state').hidden = false;
+  }
+}
+
+async function showWeeklyTab() {
+  document.getElementById('chart-section').hidden = true;
+  document.getElementById('review-section').hidden = true;
+  document.getElementById('empty-state').hidden = true;
+  document.getElementById('weekly-section').hidden = false;
+
+  const sessions = await getRecentSessions(7);
+  const dailyData = aggregateDailyData(sessions);
+
+  const hasData = dailyData.dates.length > 0;
+  document.getElementById('weekly-empty').hidden = hasData;
+  document.getElementById('weekly-chart').hidden = !hasData;
+  document.getElementById('entropy-chart').hidden = !hasData;
+
+  if (hasData) {
+    renderWeeklyChart(dailyData);
+    renderEntropyChart(dailyData);
+  }
+}
+
+function renderWeeklyChart(dailyData) {
+  // Step 5에서 구현
+}
+
+function renderEntropyChart(dailyData) {
+  // Step 6에서 구현
+}
+
 init();
+initTabs();
