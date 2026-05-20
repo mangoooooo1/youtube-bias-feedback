@@ -1,4 +1,7 @@
-import { getAllSessions } from './storage.js';
+import { getAllSessions, getRecentSessions } from './storage.js';
+import { aggregateDailyData } from './analysis.js';
+
+let hasSessionData = false;
 
 async function init() {
   const sessions = await getAllSessions();
@@ -9,6 +12,7 @@ async function init() {
     return;
   }
 
+  hasSessionData = true;
   renderChart(latestAnalyzed.categoryDistribution);
   renderReview(latestAnalyzed.review);
 }
@@ -76,4 +80,240 @@ function renderReview(review) {
   text.textContent = review;
 }
 
+function initTabs() {
+  const buttons = document.querySelectorAll('.tab-nav__btn');
+  buttons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      buttons.forEach((b) => {
+        b.classList.remove('tab-nav__btn--active');
+        b.setAttribute('aria-selected', 'false');
+      });
+      btn.classList.add('tab-nav__btn--active');
+      btn.setAttribute('aria-selected', 'true');
+
+      if (btn.dataset.tab === 'weekly') {
+        showWeeklyTab();
+      } else {
+        showSessionTab();
+      }
+    });
+  });
+}
+
+function showSessionTab() {
+  document.getElementById('weekly-section').hidden = true;
+  if (hasSessionData) {
+    document.getElementById('chart-section').hidden = false;
+    document.getElementById('review-section').hidden = false;
+  } else {
+    document.getElementById('empty-state').hidden = false;
+  }
+}
+
+async function showWeeklyTab() {
+  document.getElementById('chart-section').hidden = true;
+  document.getElementById('review-section').hidden = true;
+  document.getElementById('empty-state').hidden = true;
+  document.getElementById('weekly-section').hidden = false;
+
+  const sessions = await getRecentSessions(7);
+  const dailyData = aggregateDailyData(sessions);
+
+  const hasData = dailyData.distributions.some((d) => d !== null);
+  document.getElementById('weekly-empty').hidden = hasData;
+  document.getElementById('weekly-content').hidden = !hasData;
+
+  if (hasData) {
+    renderWeeklyChart(dailyData);
+    renderEntropyChart(dailyData);
+  }
+}
+
+const CATEGORY_COLORS = [
+  '#ff4444', '#4a90d9', '#27ae60', '#f39c12', '#9b59b6',
+  '#e67e22', '#1abc9c', '#3498db', '#e74c3c', '#95a5a6',
+];
+const OTHER_COLOR = '#d0d0d0';
+const MAX_CATEGORIES = 5;
+
+function buildColorMap(distributions) {
+  const totals = {};
+  for (const dist of distributions) {
+    if (!dist) continue;
+    for (const [cat, ratio] of Object.entries(dist)) {
+      totals[cat] = (totals[cat] ?? 0) + ratio;
+    }
+  }
+  const sorted = Object.keys(totals).sort((a, b) => totals[b] - totals[a]);
+  const top = sorted.slice(0, MAX_CATEGORIES);
+  const colorMap = {};
+  top.forEach((cat, i) => {
+    colorMap[cat] = CATEGORY_COLORS[i];
+  });
+  return { colorMap, topCategories: top, hasOther: sorted.length > MAX_CATEGORIES };
+}
+
+function renderWeeklyChart(dailyData) {
+  const container = document.getElementById('weekly-chart');
+  container.innerHTML = '';
+
+  const { dates, distributions } = dailyData;
+  const { colorMap, topCategories, hasOther } = buildColorMap(distributions);
+
+  const barsEl = document.createElement('div');
+  barsEl.className = 'weekly-chart__bars';
+
+  for (let i = 0; i < dates.length; i++) {
+    const dist = distributions[i];
+
+    const group = document.createElement('div');
+    group.className = 'weekly-chart__bar-group';
+
+    const bar = document.createElement('div');
+
+    if (!dist) {
+      bar.className = 'weekly-chart__bar weekly-chart__bar--empty';
+    } else {
+      bar.className = 'weekly-chart__bar';
+      let otherRatio = 0;
+      const topEntries = topCategories
+        .filter((cat) => dist[cat] != null)
+        .map((cat) => [cat, dist[cat]]);
+      for (const [cat, ratio] of Object.entries(dist)) {
+        if (!topCategories.includes(cat)) otherRatio += ratio;
+      }
+      for (const [cat, ratio] of topEntries) {
+        const seg = document.createElement('div');
+        seg.className = 'weekly-chart__segment';
+        seg.style.flex = String(ratio);
+        seg.style.background = colorMap[cat];
+        bar.appendChild(seg);
+      }
+      if (otherRatio > 0) {
+        const seg = document.createElement('div');
+        seg.className = 'weekly-chart__segment';
+        seg.style.flex = String(otherRatio);
+        seg.style.background = OTHER_COLOR;
+        bar.appendChild(seg);
+      }
+    }
+
+    const dateLabel = document.createElement('span');
+    dateLabel.className = 'weekly-chart__date';
+    dateLabel.textContent = dates[i].slice(5).replace('-', '/');
+
+    group.append(bar, dateLabel);
+    barsEl.appendChild(group);
+  }
+
+  const legendEl = document.createElement('div');
+  legendEl.className = 'weekly-chart__legend';
+  const legendCategories = [...topCategories, ...(hasOther ? ['기타'] : [])];
+  for (const cat of legendCategories) {
+    const item = document.createElement('span');
+    item.className = 'legend-item';
+    const dot = document.createElement('span');
+    dot.className = 'legend-item__dot';
+    dot.style.background = colorMap[cat] ?? OTHER_COLOR;
+    const name = document.createElement('span');
+    name.textContent = cat;
+    item.append(dot, name);
+    legendEl.appendChild(item);
+  }
+
+  container.append(barsEl, legendEl);
+}
+
+function renderEntropyChart(dailyData) {
+  const container = document.getElementById('entropy-chart');
+  container.innerHTML = '';
+
+  const { dates, entropies } = dailyData;
+
+  const nonNullEntropies = entropies.filter((e) => e !== null);
+  if (nonNullEntropies.length === 1) {
+    const single = document.createElement('p');
+    single.className = 'entropy-single';
+    single.textContent = `현재 Entropy: ${nonNullEntropies[0]}`;
+    container.appendChild(single);
+    return;
+  }
+
+  const VB_W = 300;
+  const VB_H = 80;
+  const PAD = { top: 8, right: 12, bottom: 20, left: 12 };
+  const chartW = VB_W - PAD.left - PAD.right;
+  const chartH = VB_H - PAD.top - PAD.bottom;
+
+  const yMax = Math.max(Math.max(...nonNullEntropies) * 1.2, 1);
+  const xStep = chartW / (dates.length - 1); // 항상 7일 고정이므로 / 6
+  const toX = (i) => PAD.left + i * xStep;
+  const toY = (val) => PAD.top + chartH - (val / yMax) * chartH;
+
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${VB_W} ${VB_H}`);
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', String(VB_H));
+  svg.setAttribute('aria-label', 'Entropy 변화 추이 라인차트');
+
+  // null인 날에서 라인을 끊어 연속 구간별로 polyline 생성
+  let segment = [];
+  for (let i = 0; i <= dates.length; i++) {
+    if (i < dates.length && entropies[i] !== null) {
+      segment.push(i);
+    } else {
+      if (segment.length >= 2) {
+        const pts = segment.map((j) => `${toX(j)},${toY(entropies[j])}`).join(' ');
+        const polyline = document.createElementNS(svgNS, 'polyline');
+        polyline.setAttribute('points', pts);
+        polyline.setAttribute('fill', 'none');
+        polyline.setAttribute('stroke', '#6366f1');
+        polyline.setAttribute('stroke-width', '1.5');
+        polyline.setAttribute('stroke-linejoin', 'round');
+        svg.appendChild(polyline);
+      }
+      segment = [];
+    }
+  }
+
+  // 첫 번째 non-null 인덱스가 베이스라인
+  const baselineIdx = entropies.findIndex((e) => e !== null);
+
+  for (let i = 0; i < dates.length; i++) {
+    const label = document.createElementNS(svgNS, 'text');
+    label.setAttribute('x', String(toX(i)));
+    label.setAttribute('y', String(VB_H - 2));
+    label.setAttribute('text-anchor', 'middle');
+    label.setAttribute('font-size', '9');
+    label.setAttribute('fill', '#909090');
+    label.textContent = dates[i].slice(5).replace('-', '/');
+    svg.appendChild(label);
+
+    if (entropies[i] === null) continue;
+
+    const circle = document.createElementNS(svgNS, 'circle');
+    circle.setAttribute('cx', String(toX(i)));
+    circle.setAttribute('cy', String(toY(entropies[i])));
+    circle.setAttribute('r', i === baselineIdx ? '4' : '3');
+    circle.setAttribute('fill', i === baselineIdx ? '#f59e0b' : '#6366f1');
+    svg.appendChild(circle);
+  }
+
+  container.appendChild(svg);
+
+  const latestEntropy = nonNullEntropies.at(-1);
+  const delta = Math.round((latestEntropy - nonNullEntropies[0]) * 100) / 100;
+  if (delta !== 0) {
+    const deltaEl = document.createElement('p');
+    deltaEl.className = `entropy-delta entropy-delta--${delta > 0 ? 'up' : 'down'}`;
+    deltaEl.textContent =
+      delta > 0
+        ? `▲ ${delta.toFixed(2)} 다양성 증가`
+        : `▼ ${Math.abs(delta).toFixed(2)} 편향 심화`;
+    container.appendChild(deltaEl);
+  }
+}
+
 init();
+initTabs();
