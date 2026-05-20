@@ -38,7 +38,7 @@ export function aggregateDailyData(sessions) {
 
   const byDate = {};
   for (const session of analyzed) {
-    const date = new Date(session.endTime).toLocaleDateString('sv'); // KST 기준 YYYY-MM-DD
+    const date = new Date(session.endTime).toLocaleDateString('sv'); // 로컬 시간대 기준 YYYY-MM-DD
     if (!byDate[date]) byDate[date] = [];
     byDate[date].push(session);
   }
