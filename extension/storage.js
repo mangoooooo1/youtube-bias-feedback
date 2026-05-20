@@ -38,7 +38,8 @@ export async function getAllSessions() {
 
 export async function getRecentSessions(days = 7) {
   const sessions = await getAllSessions();
-  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  const now = new Date();
+  const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1)).getTime();
   return sessions.filter(
     (s) => s.endTime && new Date(s.endTime).getTime() >= cutoff
   );
