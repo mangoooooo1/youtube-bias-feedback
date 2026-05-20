@@ -7,11 +7,20 @@
   padding: 0;
 }
 
+/* display를 명시한 CSS가 hidden 속성을 덮어쓰는 것을 방지 */
+[hidden] {
+  display: none !important;
+}
+
 /* Base */
 body {
   width: 350px;
   min-height: 200px;
-  font-family: 'Noto Sans KR', system-ui, -apple-system, sans-serif;
+  font-family:
+    "Noto Sans KR",
+    system-ui,
+    -apple-system,
+    sans-serif;
   font-size: 14px;
   color: #1a1a1a;
   background: #ffffff;
@@ -63,7 +72,7 @@ body {
 .bar-item__label {
   font-size: 12px;
   color: #3c3c3c;
-  text-align: right;
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -86,6 +95,42 @@ body {
 .bar-item__value {
   font-size: 11px;
   color: #909090;
+}
+
+/* 로딩 UI */
+@keyframes pulse {
+  0%,
+  80%,
+  100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.review-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px;
+}
+
+.review-loading__dot {
+  width: 8px;
+  height: 8px;
+  background: #ff4444;
+  border-radius: 50%;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.review-loading__dot:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.review-loading__dot:nth-child(3) {
+  animation-delay: 0.32s;
 }
 
 /* AI 리뷰 */
