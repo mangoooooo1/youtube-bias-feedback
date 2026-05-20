@@ -7,6 +7,11 @@
   padding: 0;
 }
 
+/* display를 명시한 CSS가 hidden 속성을 덮어쓰는 것을 방지 */
+[hidden] {
+  display: none !important;
+}
+
 /* Base */
 body {
   width: 350px;
