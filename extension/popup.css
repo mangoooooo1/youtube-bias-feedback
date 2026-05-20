@@ -1,1 +1,37 @@
-/* Step 4에서 스타일링 추가 예정 */
+/* Step 4에서 전체 스타일링 추가 예정 */
+
+/* 막대그래프 */
+.bar-item {
+  display: grid;
+  grid-template-columns: 80px 1fr 40px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.bar-item__label {
+  font-size: 13px;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar-item__track {
+  background: #e0e0e0;
+  border-radius: 4px;
+  height: 16px;
+  overflow: hidden;
+}
+
+.bar-item__fill {
+  height: 100%;
+  background: #ff4444;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.bar-item__value {
+  font-size: 12px;
+  color: #555;
+}
