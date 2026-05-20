@@ -65,7 +65,7 @@ function renderReview(review) {
   const loading = document.getElementById('review-loading');
   const text = document.getElementById('review-text');
 
-  if (!review) {
+  if (review == null) {
     loading.hidden = false;
     text.hidden = true;
     return;
