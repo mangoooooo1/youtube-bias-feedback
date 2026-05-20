@@ -119,7 +119,7 @@ async function showWeeklyTab() {
   const sessions = await getRecentSessions(7);
   const dailyData = aggregateDailyData(sessions);
 
-  const hasData = dailyData.dates.length > 0;
+  const hasData = dailyData.distributions.some((d) => d !== null);
   document.getElementById('weekly-empty').hidden = hasData;
   document.getElementById('weekly-chart').hidden = !hasData;
   document.getElementById('entropy-chart').hidden = !hasData;
@@ -140,6 +140,7 @@ const MAX_CATEGORIES = 5;
 function buildColorMap(distributions) {
   const totals = {};
   for (const dist of distributions) {
+    if (!dist) continue;
     for (const [cat, ratio] of Object.entries(dist)) {
       totals[cat] = (totals[cat] ?? 0) + ratio;
     }
@@ -166,33 +167,36 @@ function renderWeeklyChart(dailyData) {
   for (let i = 0; i < dates.length; i++) {
     const dist = distributions[i];
 
-    let otherRatio = 0;
-    const topEntries = topCategories
-      .filter((cat) => dist[cat] != null)
-      .map((cat) => [cat, dist[cat]]);
-    for (const [cat, ratio] of Object.entries(dist)) {
-      if (!topCategories.includes(cat)) otherRatio += ratio;
-    }
-
     const group = document.createElement('div');
     group.className = 'weekly-chart__bar-group';
 
     const bar = document.createElement('div');
-    bar.className = 'weekly-chart__bar';
 
-    for (const [cat, ratio] of topEntries) {
-      const seg = document.createElement('div');
-      seg.className = 'weekly-chart__segment';
-      seg.style.flex = String(ratio);
-      seg.style.background = colorMap[cat];
-      bar.appendChild(seg);
-    }
-    if (otherRatio > 0) {
-      const seg = document.createElement('div');
-      seg.className = 'weekly-chart__segment';
-      seg.style.flex = String(otherRatio);
-      seg.style.background = OTHER_COLOR;
-      bar.appendChild(seg);
+    if (!dist) {
+      bar.className = 'weekly-chart__bar weekly-chart__bar--empty';
+    } else {
+      bar.className = 'weekly-chart__bar';
+      let otherRatio = 0;
+      const topEntries = topCategories
+        .filter((cat) => dist[cat] != null)
+        .map((cat) => [cat, dist[cat]]);
+      for (const [cat, ratio] of Object.entries(dist)) {
+        if (!topCategories.includes(cat)) otherRatio += ratio;
+      }
+      for (const [cat, ratio] of topEntries) {
+        const seg = document.createElement('div');
+        seg.className = 'weekly-chart__segment';
+        seg.style.flex = String(ratio);
+        seg.style.background = colorMap[cat];
+        bar.appendChild(seg);
+      }
+      if (otherRatio > 0) {
+        const seg = document.createElement('div');
+        seg.className = 'weekly-chart__segment';
+        seg.style.flex = String(otherRatio);
+        seg.style.background = OTHER_COLOR;
+        bar.appendChild(seg);
+      }
     }
 
     const dateLabel = document.createElement('span');
@@ -227,10 +231,11 @@ function renderEntropyChart(dailyData) {
 
   const { dates, entropies } = dailyData;
 
-  if (dates.length === 1) {
+  const nonNullEntropies = entropies.filter((e) => e !== null);
+  if (nonNullEntropies.length === 1) {
     const single = document.createElement('p');
     single.className = 'entropy-single';
-    single.textContent = `현재 Entropy: ${entropies[0]}`;
+    single.textContent = `현재 Entropy: ${nonNullEntropies[0]}`;
     container.appendChild(single);
     return;
   }
@@ -241,8 +246,8 @@ function renderEntropyChart(dailyData) {
   const chartW = VB_W - PAD.left - PAD.right;
   const chartH = VB_H - PAD.top - PAD.bottom;
 
-  const yMax = Math.max(Math.max(...entropies) * 1.2, 1);
-  const xStep = chartW / (dates.length - 1);
+  const yMax = Math.max(Math.max(...nonNullEntropies) * 1.2, 1);
+  const xStep = chartW / (dates.length - 1); // 항상 7일 고정이므로 / 6
   const toX = (i) => PAD.left + i * xStep;
   const toY = (val) => PAD.top + chartH - (val / yMax) * chartH;
 
@@ -253,40 +258,53 @@ function renderEntropyChart(dailyData) {
   svg.setAttribute('height', String(VB_H));
   svg.setAttribute('aria-label', 'Entropy 변화 추이 라인차트');
 
-  const points = entropies.map((val, i) => `${toX(i)},${toY(val)}`).join(' ');
-  const polyline = document.createElementNS(svgNS, 'polyline');
-  polyline.setAttribute('points', points);
-  polyline.setAttribute('fill', 'none');
-  polyline.setAttribute('stroke', '#6366f1');
-  polyline.setAttribute('stroke-width', '1.5');
-  polyline.setAttribute('stroke-linejoin', 'round');
-  svg.appendChild(polyline);
+  // null인 날에서 라인을 끊어 연속 구간별로 polyline 생성
+  let segment = [];
+  for (let i = 0; i <= dates.length; i++) {
+    if (i < dates.length && entropies[i] !== null) {
+      segment.push(i);
+    } else {
+      if (segment.length >= 2) {
+        const pts = segment.map((j) => `${toX(j)},${toY(entropies[j])}`).join(' ');
+        const polyline = document.createElementNS(svgNS, 'polyline');
+        polyline.setAttribute('points', pts);
+        polyline.setAttribute('fill', 'none');
+        polyline.setAttribute('stroke', '#6366f1');
+        polyline.setAttribute('stroke-width', '1.5');
+        polyline.setAttribute('stroke-linejoin', 'round');
+        svg.appendChild(polyline);
+      }
+      segment = [];
+    }
+  }
+
+  // 첫 번째 non-null 인덱스가 베이스라인
+  const baselineIdx = entropies.findIndex((e) => e !== null);
 
   for (let i = 0; i < dates.length; i++) {
-    const cx = toX(i);
-    const cy = toY(entropies[i]);
-    const isBaseline = i === 0;
-
-    const circle = document.createElementNS(svgNS, 'circle');
-    circle.setAttribute('cx', String(cx));
-    circle.setAttribute('cy', String(cy));
-    circle.setAttribute('r', isBaseline ? '4' : '3');
-    circle.setAttribute('fill', isBaseline ? '#f59e0b' : '#6366f1');
-    svg.appendChild(circle);
-
     const label = document.createElementNS(svgNS, 'text');
-    label.setAttribute('x', String(cx));
+    label.setAttribute('x', String(toX(i)));
     label.setAttribute('y', String(VB_H - 2));
     label.setAttribute('text-anchor', 'middle');
     label.setAttribute('font-size', '9');
     label.setAttribute('fill', '#909090');
     label.textContent = dates[i].slice(5).replace('-', '/');
     svg.appendChild(label);
+
+    if (entropies[i] === null) continue;
+
+    const circle = document.createElementNS(svgNS, 'circle');
+    circle.setAttribute('cx', String(toX(i)));
+    circle.setAttribute('cy', String(toY(entropies[i])));
+    circle.setAttribute('r', i === baselineIdx ? '4' : '3');
+    circle.setAttribute('fill', i === baselineIdx ? '#f59e0b' : '#6366f1');
+    svg.appendChild(circle);
   }
 
   container.appendChild(svg);
 
-  const delta = Math.round((entropies.at(-1) - entropies[0]) * 100) / 100;
+  const latestEntropy = nonNullEntropies.at(-1);
+  const delta = Math.round((latestEntropy - nonNullEntropies[0]) * 100) / 100;
   if (delta !== 0) {
     const deltaEl = document.createElement('p');
     deltaEl.className = `entropy-delta entropy-delta--${delta > 0 ? 'up' : 'down'}`;

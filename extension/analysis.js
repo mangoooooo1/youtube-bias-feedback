@@ -36,8 +36,6 @@ export function aggregateDailyData(sessions) {
     (s) => s.endTime && s.categoryDistribution && Object.keys(s.categoryDistribution).length > 0
   );
 
-  if (analyzed.length === 0) return { dates: [], distributions: [], entropies: [] };
-
   const byDate = {};
   for (const session of analyzed) {
     const date = new Date(session.endTime).toLocaleDateString('sv'); // KST 기준 YYYY-MM-DD
@@ -45,14 +43,27 @@ export function aggregateDailyData(sessions) {
     byDate[date].push(session);
   }
 
-  const dates = Object.keys(byDate).sort();
+  // 오늘 기준 최근 7일을 고정 생성 (오름차순)
+  const dates = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    dates.push(d.toLocaleDateString('sv'));
+  }
+
   const distributions = [];
   const entropies = [];
 
   for (const date of dates) {
     const daySessions = byDate[date];
-    const totalVideos = daySessions.reduce((sum, s) => sum + (s.videoCount ?? 1), 0);
+    if (!daySessions) {
+      distributions.push(null);
+      entropies.push(null);
+      continue;
+    }
 
+    const totalVideos = daySessions.reduce((sum, s) => sum + (s.videoCount ?? 1), 0);
     const merged = {};
     for (const session of daySessions) {
       const weight = (session.videoCount ?? 1) / totalVideos;
@@ -60,7 +71,6 @@ export function aggregateDailyData(sessions) {
         merged[cat] = (merged[cat] ?? 0) + ratio * weight;
       }
     }
-
     for (const cat of Object.keys(merged)) {
       merged[cat] = Math.round(merged[cat] * 1000) / 1000;
     }
