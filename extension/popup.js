@@ -121,8 +121,7 @@ async function showWeeklyTab() {
 
   const hasData = dailyData.distributions.some((d) => d !== null);
   document.getElementById('weekly-empty').hidden = hasData;
-  document.getElementById('weekly-chart').hidden = !hasData;
-  document.getElementById('entropy-chart').hidden = !hasData;
+  document.getElementById('weekly-content').hidden = !hasData;
 
   if (hasData) {
     renderWeeklyChart(dailyData);
