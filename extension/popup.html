@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>YouTube Bias Feedback</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="header">
+      <h1 class="header__title">시청 편향 분석</h1>
+    </header>
+
+    <main class="main">
+      <section id="chart-section" class="section">
+        <h2 class="section__title">카테고리 분포</h2>
+        <div id="chart-container"></div>
+      </section>
+
+      <section id="review-section" class="section">
+        <h2 class="section__title">AI 리뷰</h2>
+        <p id="review-text" class="review-text"></p>
+      </section>
+
+      <div id="empty-state" class="empty-state" hidden>
+        <p>아직 분석된 세션이 없습니다.</p>
+        <p class="empty-state__sub">YouTube를 시청한 뒤 30분이 지나면 자동으로 분석됩니다.</p>
+      </div>
+    </main>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
