@@ -62,12 +62,18 @@ function createBarItem(category, ratio) {
 }
 
 function renderReview(review) {
-  const section = document.getElementById('review-section');
+  const loading = document.getElementById('review-loading');
+  const text = document.getElementById('review-text');
+
   if (!review) {
-    section.hidden = true;
+    loading.hidden = false;
+    text.hidden = true;
     return;
   }
-  document.getElementById('review-text').textContent = review;
+
+  loading.hidden = true;
+  text.hidden = false;
+  text.textContent = review;
 }
 
 init();
