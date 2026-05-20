@@ -2,10 +2,7 @@ import { getAllSessions } from './storage.js';
 
 async function init() {
   const sessions = await getAllSessions();
-  const latestAnalyzed = sessions.filter((s) => s.categoryDistribution).at(-1);
-
-  console.log('[popup] sessions:', sessions);
-  console.log('[popup] latest analyzed session:', latestAnalyzed);
+  const latestAnalyzed = sessions.findLast((s) => s.categoryDistribution);
 
   if (!latestAnalyzed) {
     showEmptyState();
@@ -65,7 +62,12 @@ function createBarItem(category, ratio) {
 }
 
 function renderReview(review) {
-  document.getElementById('review-text').textContent = review ?? '';
+  const section = document.getElementById('review-section');
+  if (!review) {
+    section.hidden = true;
+    return;
+  }
+  document.getElementById('review-text').textContent = review;
 }
 
 init();
