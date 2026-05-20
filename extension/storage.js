@@ -36,6 +36,14 @@ export async function getAllSessions() {
   return sessions ?? [];
 }
 
+export async function getRecentSessions(days = 7) {
+  const sessions = await getAllSessions();
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  return sessions.filter(
+    (s) => s.endTime && new Date(s.endTime).getTime() >= cutoff
+  );
+}
+
 export async function clearCurrentSession() {
   await chrome.storage.local.set({ currentSession: null });
 }
