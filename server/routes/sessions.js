@@ -29,7 +29,7 @@ function validateSession(body) {
   if (videoCount !== undefined && (!Number.isInteger(videoCount) || videoCount < 0)) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "videoCount" };
   }
-  if (entropy !== undefined && (typeof entropy !== "number" || entropy < 0)) {
+  if (entropy !== undefined && (typeof entropy !== "number" || !Number.isFinite(entropy) || entropy < 0)) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "entropy" };
   }
 
