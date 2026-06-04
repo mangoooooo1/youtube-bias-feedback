@@ -1,0 +1,79 @@
+# 서버를 먼저 실행한 뒤 각 요청 위의 "Send Request" 클릭
+# 기대 응답이 맞으면 PR의 테스트 확인 체크박스를 체크하세요
+
+### 1. 정상 저장
+# PR 체크: "유효한 요청 → 200 응답, DB 레코드 저장 확인"
+# 모든 필드가 올바르게 채워진 정상 요청
+# 기대 응답: 200 { "success": true }
+POST http://localhost:3000/api/sessions
+Content-Type: application/json
+
+{
+  "anonymousId": "user-test-001",
+  "sessionId": "session-test-001",
+  "startTime": "2024-01-01T10:00:00Z",
+  "endTime": "2024-01-01T10:30:00Z",
+  "videoCount": 3,
+  "categoryDistribution": { "음악": 0.5, "게임": 0.3, "교육": 0.2 },
+  "entropy": 1.49
+}
+
+### 2. 중복 sessionId → DUPLICATE_SESSION
+# PR 체크: "동일 sessionId 재요청 → DUPLICATE_SESSION 400 응답 확인"
+# 위 1번 요청과 sessionId가 동일 (session-test-001)
+# 기대 응답: 400 { "code": "DUPLICATE_SESSION" }
+POST http://localhost:3000/api/sessions
+Content-Type: application/json
+
+{
+  "anonymousId": "user-test-001",
+  "sessionId": "session-test-001",
+  "startTime": "2024-01-01T10:00:00Z",
+  "endTime": "2024-01-01T10:30:00Z"
+}
+
+### 3. 필수 필드 누락 → MISSING_REQUIRED_FIELD
+# PR 체크: "필수 필드 누락 → MISSING_REQUIRED_FIELD 400 응답 확인"
+# sessionId 필드가 빠져 있음
+# 기대 응답: 400 { "code": "MISSING_REQUIRED_FIELD", "detail": "sessionId" }
+POST http://localhost:3000/api/sessions
+Content-Type: application/json
+
+{
+  "anonymousId": "user-test-001",
+  "startTime": "2024-01-01T10:00:00Z",
+  "endTime": "2024-01-01T10:30:00Z"
+}
+
+### 4. 날짜 형식 오류 → INVALID_FIELD_VALUE
+# PR 체크: "날짜 형식 오류 → INVALID_FIELD_VALUE 400 응답 확인"
+# startTime이 ISO 날짜 형식이 아닌 일반 문자열
+# 기대 응답: 400 { "code": "INVALID_FIELD_VALUE", "detail": "startTime" }
+POST http://localhost:3000/api/sessions
+Content-Type: application/json
+
+{
+  "anonymousId": "user-test-001",
+  "sessionId": "session-test-002",
+  "startTime": "이건날짜가아님",
+  "endTime": "2024-01-01T10:30:00Z"
+}
+
+### 5. 선택 필드 없이 최소 요청
+# PR 체크: "선택 필드 미전송 시 null로 정상 저장 확인"
+# videoCount, categoryDistribution, entropy 없이 필수 필드만 전송
+# 기대 응답: 200 { "success": true } (선택 필드는 DB에 null로 저장)
+POST http://localhost:3000/api/sessions
+Content-Type: application/json
+
+{
+  "anonymousId": "user-test-001",
+  "sessionId": "session-test-003",
+  "startTime": "2024-01-02T10:00:00Z",
+  "endTime": "2024-01-02T10:30:00Z"
+}
+
+### 6. 헬스 체크
+# 서버가 정상적으로 기동되었는지 확인
+# 기대 응답: 200 { "status": "healthy" }
+GET http://localhost:3000/health
