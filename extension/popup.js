@@ -1,4 +1,4 @@
-import { getAllSessions, getRecentSessions, getOnboarding, saveOnboarding, VALID_GROUPS } from './storage.js';
+import { getAllSessions, getRecentSessions, getOnboarding, saveOnboarding, markSurveyComplete, VALID_GROUPS } from './storage.js';
 import { aggregateDailyData } from './analysis.js';
 
 let hasSessionData = false;
@@ -359,6 +359,7 @@ async function showMainContent(onboarding) {
   document.getElementById('main-content').hidden = false;
 
   renderExperimentBar(onboarding.installDate);
+  renderSurveyBanner(onboarding);
   await init();
   initTabs();
 }
@@ -374,6 +375,36 @@ function renderExperimentBar(installDate) {
 
 function calcDaysElapsed(installDate) {
   return Math.floor((Date.now() - new Date(installDate).getTime()) / (1000 * 60 * 60 * 24));
+}
+
+const SURVEY_THRESHOLDS = { week1: 7, week2: 14, week3: 21 };
+const SURVEY_LABELS = {
+  week1: '1주차 설문을 완료해주세요.',
+  week2: '2주차 설문을 완료해주세요.',
+  week3: '3주차 설문을 완료해주세요.',
+};
+
+function renderSurveyBanner({ group, installDate, surveyStatus }) {
+  const thresholds = group === 'TEST'
+    ? { week1: 0, week2: 0, week3: 0 }
+    : SURVEY_THRESHOLDS;
+
+  const elapsed = calcDaysElapsed(installDate);
+
+  const targetWeek = ['week1', 'week2', 'week3'].find(
+    (week) => elapsed >= thresholds[week] && !surveyStatus[week]
+  );
+
+  if (!targetWeek) return;
+
+  const banner = document.getElementById('survey-banner');
+  document.getElementById('survey-banner-text').textContent = SURVEY_LABELS[targetWeek];
+  banner.hidden = false;
+
+  document.getElementById('survey-done-btn').addEventListener('click', async () => {
+    await markSurveyComplete(targetWeek);
+    banner.hidden = true;
+  });
 }
 
 bootstrap();
