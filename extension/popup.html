@@ -10,45 +10,81 @@
       <h1 class="header__title">시청 편향 분석</h1>
     </header>
 
-    <nav class="tab-nav" role="tablist">
-      <button class="tab-nav__btn tab-nav__btn--active" data-tab="session" role="tab" aria-selected="true">최근 세션</button>
-      <button class="tab-nav__btn" data-tab="weekly" role="tab" aria-selected="false">주간 리포트</button>
-    </nav>
+    <!-- 온보딩 화면: group 미설정 시 표시 -->
+    <div id="onboarding-screen">
+      <div class="onboarding">
+        <p class="onboarding__desc">연구자에게 전달받은 참여 코드를 입력해주세요.</p>
+        <input
+          id="group-code-input"
+          class="onboarding__input"
+          type="text"
+          placeholder="참여 코드 (예: EXP)"
+          maxlength="10"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="참여 코드"
+        />
+        <p id="code-error" class="onboarding__error" hidden>올바르지 않은 코드입니다.</p>
+        <button id="onboarding-submit" class="onboarding__btn">시작하기</button>
+      </div>
+    </div>
 
-    <main class="main">
-      <section id="chart-section" class="section">
-        <h2 class="section__title">카테고리 분포</h2>
-        <div id="chart-container"></div>
-      </section>
+    <!-- 메인 콘텐츠: group 설정 후 표시 -->
+    <div id="main-content" hidden>
 
-      <section id="review-section" class="section">
-        <h2 class="section__title">AI 리뷰</h2>
-        <div id="review-loading" class="review-loading" hidden role="status" aria-label="AI 리뷰 생성 중">
-          <span class="review-loading__dot" aria-hidden="true"></span>
-          <span class="review-loading__dot" aria-hidden="true"></span>
-          <span class="review-loading__dot" aria-hidden="true"></span>
-        </div>
-        <p id="review-text" class="review-text" hidden></p>
-      </section>
-
-      <div id="empty-state" class="empty-state" hidden>
-        <p>아직 분석된 세션이 없습니다.</p>
-        <p class="empty-state__sub">YouTube를 시청한 뒤 30분이 지나면 자동으로 분석됩니다.</p>
+      <!-- 실험 경과일 표시바 -->
+      <div class="experiment-bar">
+        <span id="days-elapsed"></span>
+        <span class="experiment-bar__sep">·</span>
+        <span id="days-remaining"></span>
       </div>
 
-      <section id="weekly-section" class="section" hidden>
-        <div id="weekly-content">
-          <h2 class="section__title">7일 카테고리 분포</h2>
-          <div id="weekly-chart"></div>
-          <h2 class="section__title weekly-section__entropy-title">Entropy 변화 추이</h2>
-          <div id="entropy-chart"></div>
+      <!-- 설문 알림 배너 (Step 4 에서 활성화) -->
+      <div id="survey-banner" class="survey-banner" hidden>
+        <span id="survey-banner-text"></span>
+        <button id="survey-done-btn" class="survey-banner__btn">완료</button>
+      </div>
+
+      <nav class="tab-nav" role="tablist">
+        <button class="tab-nav__btn tab-nav__btn--active" data-tab="session" role="tab" aria-selected="true">최근 세션</button>
+        <button class="tab-nav__btn" data-tab="weekly" role="tab" aria-selected="false">주간 리포트</button>
+      </nav>
+
+      <main class="main">
+        <section id="chart-section" class="section">
+          <h2 class="section__title">카테고리 분포</h2>
+          <div id="chart-container"></div>
+        </section>
+
+        <section id="review-section" class="section">
+          <h2 class="section__title">AI 리뷰</h2>
+          <div id="review-loading" class="review-loading" hidden role="status" aria-label="AI 리뷰 생성 중">
+            <span class="review-loading__dot" aria-hidden="true"></span>
+            <span class="review-loading__dot" aria-hidden="true"></span>
+            <span class="review-loading__dot" aria-hidden="true"></span>
+          </div>
+          <p id="review-text" class="review-text" hidden></p>
+        </section>
+
+        <div id="empty-state" class="empty-state" hidden>
+          <p>아직 분석된 세션이 없습니다.</p>
+          <p class="empty-state__sub">YouTube를 시청한 뒤 30분이 지나면 자동으로 분석됩니다.</p>
         </div>
-        <p id="weekly-empty" class="empty-state" hidden>
-          분석된 데이터가 없습니다.
-          <span class="empty-state__sub">세션이 쌓이면 여기에 추이가 표시됩니다.</span>
-        </p>
-      </section>
-    </main>
+
+        <section id="weekly-section" class="section" hidden>
+          <div id="weekly-content">
+            <h2 class="section__title">7일 카테고리 분포</h2>
+            <div id="weekly-chart"></div>
+            <h2 class="section__title weekly-section__entropy-title">Entropy 변화 추이</h2>
+            <div id="entropy-chart"></div>
+          </div>
+          <p id="weekly-empty" class="empty-state" hidden>
+            분석된 데이터가 없습니다.
+            <span class="empty-state__sub">세션이 쌓이면 여기에 추이가 표시됩니다.</span>
+          </p>
+        </section>
+      </main>
+    </div>
 
     <script type="module" src="popup.js"></script>
   </body>

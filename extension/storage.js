@@ -80,6 +80,43 @@ export async function getLastWatchedAt() {
   return lastWatchedAt ?? null;
 }
 
+// --- 온보딩 ---
+
+export const VALID_GROUPS = ['EXP', 'CON', 'TEST'];
+
+export async function getOnboarding() {
+  const { group, installDate, surveyStatus } = await chrome.storage.local.get([
+    'group',
+    'installDate',
+    'surveyStatus',
+  ]);
+  if (!group) return null;
+  return {
+    group,
+    installDate,
+    surveyStatus: surveyStatus ?? { week1: false, week2: false, week3: false },
+  };
+}
+
+export async function saveOnboarding(group) {
+  await chrome.storage.local.set({
+    group,
+    installDate: new Date().toISOString(),
+    surveyStatus: { week1: false, week2: false, week3: false },
+  });
+}
+
+export function markSurveyComplete(week) {
+  queue = queue.then(() => _markSurveyComplete(week));
+  return queue;
+}
+
+async function _markSurveyComplete(week) {
+  const { surveyStatus } = await chrome.storage.local.get('surveyStatus');
+  const updated = { ...(surveyStatus ?? { week1: false, week2: false, week3: false }), [week]: true };
+  await chrome.storage.local.set({ surveyStatus: updated });
+}
+
 export function saveAnalysis(sessionId, analysisResult) {
   queue = queue.then(() => _saveAnalysis(sessionId, analysisResult));
   return queue;

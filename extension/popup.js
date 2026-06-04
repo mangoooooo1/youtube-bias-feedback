@@ -1,4 +1,4 @@
-import { getAllSessions, getRecentSessions } from './storage.js';
+import { getAllSessions, getRecentSessions, getOnboarding, saveOnboarding, markSurveyComplete, VALID_GROUPS } from './storage.js';
 import { aggregateDailyData } from './analysis.js';
 
 let hasSessionData = false;
@@ -315,5 +315,112 @@ function renderEntropyChart(dailyData) {
   }
 }
 
-init();
-initTabs();
+// --- 온보딩 & 진입점 ---
+
+const EXPERIMENT_DAYS = 21;
+
+async function bootstrap() {
+  const onboarding = await getOnboarding();
+  if (!onboarding) {
+    showOnboardingScreen();
+  } else {
+    await showMainContent(onboarding);
+  }
+}
+
+function showOnboardingScreen() {
+  const input = document.getElementById('group-code-input');
+  const submitBtn = document.getElementById('onboarding-submit');
+
+  submitBtn.addEventListener('click', handleOnboardingSubmit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') handleOnboardingSubmit();
+  });
+}
+
+async function handleOnboardingSubmit() {
+  const submitBtn = document.getElementById('onboarding-submit');
+  if (submitBtn.disabled) return;
+
+  const input = document.getElementById('group-code-input');
+  const code = input.value.trim().toUpperCase();
+  const error = document.getElementById('code-error');
+
+  if (!VALID_GROUPS.includes(code)) {
+    error.hidden = false;
+    return;
+  }
+
+  submitBtn.disabled = true;
+  input.disabled = true;
+  error.hidden = true;
+
+  try {
+    await saveOnboarding(code);
+    const onboarding = await getOnboarding();
+    await showMainContent(onboarding);
+  } catch (err) {
+    console.error(err);
+    submitBtn.disabled = false;
+    input.disabled = false;
+  }
+}
+
+async function showMainContent(onboarding) {
+  document.getElementById('onboarding-screen').hidden = true;
+  document.getElementById('main-content').hidden = false;
+
+  renderExperimentBar(onboarding.installDate);
+  renderSurveyBanner(onboarding);
+  await init();
+  initTabs();
+}
+
+function renderExperimentBar(installDate) {
+  const elapsed = calcDaysElapsed(installDate);
+  const remaining = Math.max(EXPERIMENT_DAYS - elapsed, 0);
+
+  document.getElementById('days-elapsed').textContent = `설치 후 ${elapsed + 1}일째`;
+  document.getElementById('days-remaining').textContent =
+    remaining > 0 ? `실험 종료까지 ${remaining}일` : '실험 기간 종료';
+}
+
+function calcDaysElapsed(installDate) {
+  return Math.floor((Date.now() - new Date(installDate).getTime()) / (1000 * 60 * 60 * 24));
+}
+
+const SURVEY_THRESHOLDS = { week1: 7, week2: 14, week3: 21 };
+const SURVEY_LABELS = {
+  week1: '1주차 설문을 완료해주세요.',
+  week2: '2주차 설문을 완료해주세요.',
+  week3: '3주차 설문을 완료해주세요.',
+};
+
+function renderSurveyBanner({ group, installDate, surveyStatus }) {
+  const thresholds = group === 'TEST'
+    ? { week1: 0, week2: 0, week3: 0 }
+    : SURVEY_THRESHOLDS;
+
+  const elapsed = calcDaysElapsed(installDate);
+
+  const targetWeek = ['week1', 'week2', 'week3'].find(
+    (week) => elapsed >= thresholds[week] && !surveyStatus[week]
+  );
+
+  if (!targetWeek) return;
+
+  const banner = document.getElementById('survey-banner');
+  document.getElementById('survey-banner-text').textContent = SURVEY_LABELS[targetWeek];
+  banner.hidden = false;
+
+  const doneBtn = document.getElementById('survey-done-btn');
+  doneBtn.onclick = async () => {
+    if (doneBtn.disabled) return;
+    doneBtn.disabled = true;
+    banner.hidden = true;
+    await markSurveyComplete(targetWeek);
+    doneBtn.disabled = false;
+  };
+}
+
+bootstrap();
