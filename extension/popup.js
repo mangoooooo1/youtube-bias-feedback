@@ -413,10 +413,14 @@ function renderSurveyBanner({ group, installDate, surveyStatus }) {
   document.getElementById('survey-banner-text').textContent = SURVEY_LABELS[targetWeek];
   banner.hidden = false;
 
-  document.getElementById('survey-done-btn').addEventListener('click', async () => {
-    await markSurveyComplete(targetWeek);
+  const doneBtn = document.getElementById('survey-done-btn');
+  doneBtn.onclick = async () => {
+    if (doneBtn.disabled) return;
+    doneBtn.disabled = true;
     banner.hidden = true;
-  });
+    await markSurveyComplete(targetWeek);
+    doneBtn.disabled = false;
+  };
 }
 
 bootstrap();
