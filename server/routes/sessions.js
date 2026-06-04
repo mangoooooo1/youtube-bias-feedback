@@ -51,7 +51,7 @@ router.post("/", (req, res, next) => {
       startTime,
       endTime,
       videoCount: videoCount ?? null,
-      categoryDistribution: categoryDistribution !== undefined ? JSON.stringify(categoryDistribution) : null,
+      categoryDistribution: categoryDistribution != null ? JSON.stringify(categoryDistribution) : null,
       entropy: entropy ?? null,
     });
   } catch (err) {
