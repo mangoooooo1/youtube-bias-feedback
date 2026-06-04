@@ -339,6 +339,9 @@ function showOnboardingScreen() {
 }
 
 async function handleOnboardingSubmit() {
+  const submitBtn = document.getElementById('onboarding-submit');
+  if (submitBtn.disabled) return;
+
   const input = document.getElementById('group-code-input');
   const code = input.value.trim().toUpperCase();
   const error = document.getElementById('code-error');
@@ -348,10 +351,19 @@ async function handleOnboardingSubmit() {
     return;
   }
 
+  submitBtn.disabled = true;
+  input.disabled = true;
   error.hidden = true;
-  await saveOnboarding(code);
-  const onboarding = await getOnboarding();
-  await showMainContent(onboarding);
+
+  try {
+    await saveOnboarding(code);
+    const onboarding = await getOnboarding();
+    await showMainContent(onboarding);
+  } catch (err) {
+    console.error(err);
+    submitBtn.disabled = false;
+    input.disabled = false;
+  }
 }
 
 async function showMainContent(onboarding) {
@@ -368,7 +380,7 @@ function renderExperimentBar(installDate) {
   const elapsed = calcDaysElapsed(installDate);
   const remaining = Math.max(EXPERIMENT_DAYS - elapsed, 0);
 
-  document.getElementById('days-elapsed').textContent = `설치 후 ${elapsed}일째`;
+  document.getElementById('days-elapsed').textContent = `설치 후 ${elapsed + 1}일째`;
   document.getElementById('days-remaining').textContent =
     remaining > 0 ? `실험 종료까지 ${remaining}일` : '실험 기간 종료';
 }
