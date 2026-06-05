@@ -23,8 +23,7 @@ jobs:
             cd ~/youtube-bias-feedback
             git checkout main
             git pull origin main
-            cd server
-            npm install --production
-            echo "PORT=3000" > .env
-            echo "NODE_ENV=production" >> .env
+            pnpm install --prod
+            echo "PORT=3000" > server/.env
+            echo "NODE_ENV=production" >> server/.env
             pm2 restart youtube-bias-server
