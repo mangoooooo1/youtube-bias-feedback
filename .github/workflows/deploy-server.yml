@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'server/**'
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -17,6 +18,8 @@ jobs:
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             cd ~/youtube-bias-feedback
             git checkout main
             git pull origin main
