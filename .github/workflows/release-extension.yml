@@ -49,4 +49,8 @@ jobs:
         run: |
           draft_tag=$(gh release list --json tagName,isDraft \
             --jq '.[] | select(.isDraft) | .tagName' | head -1)
+          if [ -z "$draft_tag" ]; then
+            echo "No draft release found. Skipping upload."
+            exit 0
+          fi
           gh release upload "$draft_tag" youtube-bias-feedback.zip --clobber
