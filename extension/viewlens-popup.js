@@ -124,7 +124,7 @@ function buildDataForDate(allSessions, targetDate) {
   const review =
     sourceSessions.at(-1)?.review ||
     "시청 패턴을 분석하고 있어요. 잠시 후 코치 노트가 업데이트돼요.";
-  const reviewTopic = sourceSessions.at(-1)?.reviewTopic || '';
+  const reviewTopic = sourceSessions.at(-1)?.reviewTopic || "";
 
   const videos = sourceSessions
     .flatMap((sess) => {
@@ -335,7 +335,26 @@ async function boot() {
     "dark",
     "currentSession",
     "lastWatchedAt",
+    "anonymousId",
+    "serverUrl",
   ]);
+
+  // 이미 온보딩된 사용자 중 anonymousId가 없는 경우 생성
+  if (stored.group && !stored.anonymousId) {
+    stored.anonymousId = crypto.randomUUID();
+    await chrome.storage.local.set({ anonymousId: stored.anonymousId });
+    if (stored.serverUrl && !stored.serverUrl.startsWith("YOUR_")) {
+      fetch(`${stored.serverUrl.replace(/\/$/, "")}/api/participants`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          anonymousId: stored.anonymousId,
+          group_code: stored.group,
+          installDate: stored.installDate,
+        }),
+      }).catch(() => {});
+    }
+  }
 
   const sessions = stored.sessions || [];
   const installDate = stored.installDate || null;
@@ -370,7 +389,8 @@ async function boot() {
     timelineKey: calcTimelineKey(installDate),
     onChange: async ({ onboarded: ob, group: g }) => {
       if (ob && g) {
-        const { anonymousId: existing, serverUrl } = await chrome.storage.local.get(['anonymousId', 'serverUrl']);
+        const { anonymousId: existing, serverUrl } =
+          await chrome.storage.local.get(["anonymousId", "serverUrl"]);
         const anonymousId = existing || crypto.randomUUID();
         const installDate = new Date().toISOString();
 
@@ -392,12 +412,33 @@ async function boot() {
     },
   });
 
+  // sessions가 바뀌면(분석 완료, 리뷰 저장 등) 즉시 today 데이터를 갱신하고 re-render
+  chrome.storage.onChanged.addListener(async (changes, area) => {
+    if (area !== "local" || !changes.sessions) return;
+    const updatedSessions = changes.sessions.newValue || [];
+    VL._allSessions = updatedSessions;
+    const { currentSession: cs, lastWatchedAt: lwa } =
+      await chrome.storage.local.get(["currentSession", "lastWatchedAt"]);
+    const freshToday = buildDataForDate(updatedSessions, new Date());
+    freshToday.collectingCount = cs?.videos?.length ?? 0;
+    freshToday.collectingTimer = _computeTimerText(lwa);
+    VL.today = freshToday;
+    if (installDate) {
+      VL.weeks = buildWeeksData(updatedSessions, installDate);
+      VL.baselineH = VL.weeks[0]?.entropy ?? 0;
+    }
+    popup.render();
+  });
+
   // 수집 중 표시 실시간 업데이트 (1초 간격)
   // 수집 상태가 바뀌면 popup 전체를 re-render해서 DOM 엘리먼트를 생성/제거
   let prevIsCollecting = collectingCount > 0 || !!realToday.collectingTimer;
 
   setInterval(async () => {
-    const { currentSession, lastWatchedAt } = await chrome.storage.local.get(["currentSession", "lastWatchedAt"]);
+    const { currentSession, lastWatchedAt } = await chrome.storage.local.get([
+      "currentSession",
+      "lastWatchedAt",
+    ]);
     VL._lastWatchedAt = lastWatchedAt || null;
 
     const count = currentSession?.videos?.length ?? 0;
@@ -406,7 +447,11 @@ async function boot() {
 
     if (isNowCollecting !== prevIsCollecting) {
       prevIsCollecting = isNowCollecting;
-      VL.today = { ...VL.today, collectingCount: count, collectingTimer: timerText };
+      VL.today = {
+        ...VL.today,
+        collectingCount: count,
+        collectingTimer: timerText,
+      };
       popup.render();
       return;
     }
@@ -416,7 +461,8 @@ async function boot() {
     if (!countEl || !timerEl) return;
 
     countEl.textContent = count > 0 ? `영상 ${count}개 수집 중` : "분석 중...";
-    timerEl.textContent = timerText || (lastWatchedAt ? "피드백 생성 중..." : "");
+    timerEl.textContent =
+      timerText || (lastWatchedAt ? "피드백 생성 중..." : "");
   }, 1000);
 }
 
