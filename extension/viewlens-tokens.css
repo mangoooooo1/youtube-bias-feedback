@@ -132,3 +132,9 @@ body {
 .vl-pop ::-webkit-scrollbar-track {
   background: transparent;
 }
+.vl-vid-link {
+  transition: background 0.12s;
+}
+.vl-vid-link:hover {
+  background: color-mix(in oklab, var(--vl-accent) 10%, transparent) !important;
+}

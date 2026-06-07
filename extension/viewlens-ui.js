@@ -209,10 +209,8 @@ function vlReview({ text = '', topic = '', title = '오늘의 코치 노트', vi
           const label = `<span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${v.title}</span>`;
           const base  = `display:flex;align-items:center;gap:8px;min-width:0`;
           return ytUrl
-            ? `<a href="${ytUrl}" target="_blank" rel="noopener"
-                style="${base};text-decoration:none;color:var(--vl-ink);padding:3px 4px;border-radius:6px;transition:background .12s"
-                onmouseover="this.style.background='color-mix(in oklab,var(--vl-accent) 10%,transparent)'"
-                onmouseout="this.style.background='transparent'"
+            ? `<a href="${ytUrl}" target="_blank" rel="noopener" class="vl-vid-link"
+                style="${base};text-decoration:none;color:var(--vl-ink);padding:3px 4px;border-radius:6px"
               >${dot}${label}</a>`
             : `<div style="${base};padding:3px 4px">${dot}${label}</div>`;
         }).join('')}
