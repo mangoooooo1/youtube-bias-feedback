@@ -95,14 +95,21 @@ async function analyzeSession(session) {
 }
 
 async function postSessionToServer(session, categoryDistribution, entropy, videoCount) {
+  if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) {
+    console.warn("[background] SERVER_URL이 설정되지 않았습니다. config.js 설정을 확인해주세요.");
+    return;
+  }
+
   const onboarding = await getOnboarding();
   if (!onboarding?.anonymousId) {
     console.warn("[background] anonymousId 없음, 서버 전송 건너뜀");
     return;
   }
 
+  const cleanUrl = SERVER_URL.replace(/\/$/, "");
+
   try {
-    const response = await fetch(`${SERVER_URL}/api/sessions`, {
+    const response = await fetch(`${cleanUrl}/api/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -112,7 +119,7 @@ async function postSessionToServer(session, categoryDistribution, entropy, video
         endTime: session.endTime,
         videoCount,
         categoryDistribution,
-        entropy,
+        entropy: typeof entropy === "number" && Number.isFinite(entropy) ? entropy : undefined,
       }),
     });
 
@@ -124,6 +131,6 @@ async function postSessionToServer(session, categoryDistribution, entropy, video
 
     console.log("[background] 서버 전송 완료:", session.sessionId);
   } catch (error) {
-    console.warn("[background] 서버 전송 오류:", error.message);
+    console.warn("[background] 서버 전송 오류:", error);
   }
 }
