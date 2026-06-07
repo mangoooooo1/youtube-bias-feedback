@@ -82,10 +82,14 @@ function bindOnboarding(root, onSubmit) {
 
 function _collectingBanner(count) {
   if (!count) return "";
+  const timerText = VL.today?.collectingTimer || "";
   return `<div id="vl-collecting-banner" style="display:flex;align-items:center;gap:9px;padding:10px 16px;background:var(--vl-accent-soft);border-bottom:1px solid var(--vl-line)">
     <span style="width:7px;height:7px;border-radius:50%;background:var(--vl-accent);flex-shrink:0;animation:vlBlink 1.6s ease-in-out infinite"></span>
-    <span id="vl-collecting-count" style="font-size:12.5px;font-weight:600;color:var(--vl-accent)">영상 ${count}개 수집 중</span>
-    <span id="vl-collecting-timer" style="margin-left:auto;font-size:11px;color:var(--vl-accent);opacity:0.7"></span>
+    <div style="flex:1;min-width:0">
+      <div id="vl-collecting-count" style="font-size:12.5px;font-weight:600;color:var(--vl-accent)">영상 ${count}개 수집 중</div>
+      <div style="font-size:11px;color:var(--vl-accent);opacity:0.75;margin-top:1px">이 시간 안에 더 시청하지 않으면 피드백이 생성돼요</div>
+    </div>
+    <span id="vl-collecting-timer" style="font-size:11px;font-weight:600;color:var(--vl-accent);opacity:0.8;white-space:nowrap;flex-shrink:0">${timerText}</span>
   </div>`;
 }
 
@@ -138,8 +142,16 @@ function screenToday() {
     .join("");
 
   const isToday = d.dateLabel === new Date().toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "long" });
+  const isCollecting = d.collectingCount > 0 || !!d.collectingTimer;
+  const collectingRow = isCollecting ? `
+    <div style="display:flex;align-items:center;gap:6px">
+      <span style="width:6px;height:6px;border-radius:50%;background:var(--vl-accent);flex-shrink:0;animation:vlBlink 1.6s ease-in-out infinite"></span>
+      <div style="display:flex;flex-direction:column;gap:1px">
+        <span id="vl-collecting-count" style="font-size:11.5px;font-weight:600;color:var(--vl-accent)">${d.collectingCount > 0 ? `영상 ${d.collectingCount}개 수집 중` : "분석 중..."}</span>
+        <span id="vl-collecting-timer" style="font-size:10.5px;color:var(--vl-accent);opacity:0.8">${d.collectingTimer || ""}</span>
+      </div>
+    </div>` : "";
   return `<div style="display:flex;flex-direction:column">
-    ${_collectingBanner(d.collectingCount)}
     <div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
     <div style="display:flex;align-items:center;justify-content:space-between">
       <button id="vl-date-prev" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:var(--vl-ink-2);cursor:pointer;font-size:15px;display:grid;place-items:center">‹</button>
@@ -149,7 +161,8 @@ function screenToday() {
       </div>
       <button id="vl-date-next" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:${isToday ? "var(--vl-ink-3)" : "var(--vl-ink-2)"};cursor:${isToday ? "default" : "pointer"};font-size:15px;display:grid;place-items:center;opacity:${isToday ? 0.35 : 1}" ${isToday ? "disabled" : ""}>›</button>
     </div>
-    <div style="display:flex;justify-content:flex-end">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <div>${collectingRow}</div>
       ${vlBadge({ text: `${d.videoCount}개 영상 · ${d.dist.length}개 분야`, tone: "neutral" })}
     </div>
 

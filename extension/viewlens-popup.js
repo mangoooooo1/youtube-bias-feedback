@@ -334,6 +334,7 @@ async function boot() {
     "tone",
     "dark",
     "currentSession",
+    "lastWatchedAt",
   ]);
 
   const sessions = stored.sessions || [];
@@ -345,9 +346,11 @@ async function boot() {
   const collectingCount = stored.currentSession?.videos?.length ?? 0;
   VL._allSessions = sessions;
   VL._installDate = installDate;
+  VL._lastWatchedAt = stored.lastWatchedAt || null;
 
   const realToday = buildDataForDate(sessions, new Date());
   realToday.collectingCount = collectingCount;
+  realToday.collectingTimer = _computeTimerText(stored.lastWatchedAt);
   VL.today = realToday;
 
   if (installDate) {
@@ -389,27 +392,44 @@ async function boot() {
     },
   });
 
-  // 수집 중 배너 실시간 업데이트 (1초 간격)
-  const TIMEOUT_MS = 10 * 60 * 1000;
+  // 수집 중 표시 실시간 업데이트 (1초 간격)
+  // 수집 상태가 바뀌면 popup 전체를 re-render해서 DOM 엘리먼트를 생성/제거
+  let prevIsCollecting = collectingCount > 0 || !!realToday.collectingTimer;
+
   setInterval(async () => {
+    const { currentSession, lastWatchedAt } = await chrome.storage.local.get(["currentSession", "lastWatchedAt"]);
+    VL._lastWatchedAt = lastWatchedAt || null;
+
+    const count = currentSession?.videos?.length ?? 0;
+    const timerText = _computeTimerText(lastWatchedAt);
+    const isNowCollecting = count > 0 || !!timerText;
+
+    if (isNowCollecting !== prevIsCollecting) {
+      prevIsCollecting = isNowCollecting;
+      VL.today = { ...VL.today, collectingCount: count, collectingTimer: timerText };
+      popup.render();
+      return;
+    }
+
     const countEl = document.getElementById("vl-collecting-count");
     const timerEl = document.getElementById("vl-collecting-timer");
     if (!countEl || !timerEl) return;
 
-    const { currentSession, lastWatchedAt } = await chrome.storage.local.get(["currentSession", "lastWatchedAt"]);
-    const count = currentSession?.videos?.length ?? 0;
-    countEl.textContent = `영상 ${count}개 수집 중`;
-
-    if (lastWatchedAt) {
-      const elapsed = Date.now() - new Date(lastWatchedAt).getTime();
-      const remaining = Math.max(0, TIMEOUT_MS - elapsed);
-      const mins = Math.floor(remaining / 60000);
-      const secs = Math.floor((remaining % 60000) / 1000);
-      timerEl.textContent = remaining > 0
-        ? `분석까지 ${mins}분 ${String(secs).padStart(2, "0")}초`
-        : "분석 중...";
-    }
+    countEl.textContent = count > 0 ? `영상 ${count}개 수집 중` : "분석 중...";
+    timerEl.textContent = timerText || (lastWatchedAt ? "피드백 생성 중..." : "");
   }, 1000);
+}
+
+const COLLECTING_TIMEOUT_MS = 10 * 60 * 1000;
+
+function _computeTimerText(lastWatchedAt) {
+  if (!lastWatchedAt) return "";
+  const elapsed = Date.now() - new Date(lastWatchedAt).getTime();
+  const remaining = Math.max(0, COLLECTING_TIMEOUT_MS - elapsed);
+  if (remaining <= 0) return "";
+  const mins = Math.floor(remaining / 60000);
+  const secs = Math.floor((remaining % 60000) / 1000);
+  return `피드백까지 ${mins}분 ${String(secs).padStart(2, "0")}초`;
 }
 
 boot().catch((err) => {

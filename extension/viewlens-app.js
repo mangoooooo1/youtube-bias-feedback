@@ -1,3 +1,15 @@
+function _collectingTimerText() {
+  const lastWatchedAt = VL._lastWatchedAt;
+  if (!lastWatchedAt) return "";
+  const TIMEOUT_MS = 10 * 60 * 1000;
+  const elapsed = Date.now() - new Date(lastWatchedAt).getTime();
+  const remaining = Math.max(0, TIMEOUT_MS - elapsed);
+  if (remaining <= 0) return "";
+  const mins = Math.floor(remaining / 60000);
+  const secs = Math.floor((remaining % 60000) / 1000);
+  return `피드백까지 ${mins}분 ${String(secs).padStart(2, "0")}초`;
+}
+
 function _popupHeader(groupCfg, day) {
   const badge =
     groupCfg.code === "TEST"
@@ -98,9 +110,9 @@ class ViewLensPopup {
 
     if (this._tab === "today") {
       const d = buildDataForDate(VL._allSessions || [], this._selectedDate);
-      d.collectingCount = this._selectedDate.toDateString() === new Date().toDateString()
-        ? (VL.today?.collectingCount ?? 0)
-        : 0;
+      const isToday = this._selectedDate.toDateString() === new Date().toDateString();
+      d.collectingCount = isToday ? (VL.today?.collectingCount ?? 0) : 0;
+      d.collectingTimer = isToday ? _collectingTimerText() : "";
       VL.today = d;
     }
 
