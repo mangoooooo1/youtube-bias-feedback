@@ -412,16 +412,21 @@ async function boot() {
     },
   });
 
+  // 로컬 캐시 — storage.onChanged로 갱신, setInterval에서는 캐시만 읽음
+  let localCurrentSession = stored.currentSession || null;
+  let localLastWatchedAt = stored.lastWatchedAt || null;
+
   // sessions가 바뀌면(분석 완료, 리뷰 저장 등) 즉시 today 데이터를 갱신하고 re-render
-  chrome.storage.onChanged.addListener(async (changes, area) => {
-    if (area !== "local" || !changes.sessions) return;
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes.currentSession) localCurrentSession = changes.currentSession.newValue || null;
+    if (changes.lastWatchedAt) localLastWatchedAt = changes.lastWatchedAt.newValue || null;
+    if (!changes.sessions) return;
     const updatedSessions = changes.sessions.newValue || [];
     VL._allSessions = updatedSessions;
-    const { currentSession: cs, lastWatchedAt: lwa } =
-      await chrome.storage.local.get(["currentSession", "lastWatchedAt"]);
     const freshToday = buildDataForDate(updatedSessions, new Date());
-    freshToday.collectingCount = cs?.videos?.length ?? 0;
-    freshToday.collectingTimer = _computeTimerText(lwa);
+    freshToday.collectingCount = localCurrentSession?.videos?.length ?? 0;
+    freshToday.collectingTimer = _computeTimerText(localLastWatchedAt);
     VL.today = freshToday;
     if (installDate) {
       VL.weeks = buildWeeksData(updatedSessions, installDate);
@@ -430,19 +435,14 @@ async function boot() {
     popup.render();
   });
 
-  // 수집 중 표시 실시간 업데이트 (1초 간격)
-  // 수집 상태가 바뀌면 popup 전체를 re-render해서 DOM 엘리먼트를 생성/제거
+  // 수집 중 표시 실시간 업데이트 (1초 간격) — 캐시된 로컬 변수만 참조
   let prevIsCollecting = collectingCount > 0 || !!realToday.collectingTimer;
 
-  setInterval(async () => {
-    const { currentSession, lastWatchedAt } = await chrome.storage.local.get([
-      "currentSession",
-      "lastWatchedAt",
-    ]);
-    VL._lastWatchedAt = lastWatchedAt || null;
+  setInterval(() => {
+    VL._lastWatchedAt = localLastWatchedAt;
 
-    const count = currentSession?.videos?.length ?? 0;
-    const timerText = _computeTimerText(lastWatchedAt);
+    const count = localCurrentSession?.videos?.length ?? 0;
+    const timerText = _computeTimerText(localLastWatchedAt);
     const isNowCollecting = count > 0 || !!timerText;
 
     if (isNowCollecting !== prevIsCollecting) {
@@ -462,7 +462,7 @@ async function boot() {
 
     countEl.textContent = count > 0 ? `영상 ${count}개 수집 중` : "분석 중...";
     timerEl.textContent =
-      timerText || (lastWatchedAt ? "피드백 생성 중..." : "");
+      timerText || (localLastWatchedAt ? "피드백 생성 중..." : "");
   }, 1000);
 }
 
