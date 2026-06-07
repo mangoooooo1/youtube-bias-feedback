@@ -5,10 +5,12 @@ import {
   getCurrentSession,
   getAllSessions,
   saveAnalysis,
+  getOnboarding,
 } from "./storage.js";
 import { fetchVideoCategories } from "./youtube.js";
 import { calculateDistribution, calculateEntropy } from "./analysis.js";
 import { buildPrompt, generateReview, generateFallbackReview } from "./llm.js";
+import { SERVER_URL } from "./config.js";
 
 const ALARM_NAME = "SESSION_TIMEOUT_CHECK";
 const TIMEOUT_MS = 30 * 60 * 1000;
@@ -88,4 +90,40 @@ async function analyzeSession(session) {
 
   await saveAnalysis(session.sessionId, { review: result.feedback, reviewTopic: result.topic });
   console.log("[background] 리뷰 저장 완료:", result);
+
+  await postSessionToServer(session, categoryDistribution, entropy, videoCount);
+}
+
+async function postSessionToServer(session, categoryDistribution, entropy, videoCount) {
+  const onboarding = await getOnboarding();
+  if (!onboarding?.anonymousId) {
+    console.warn("[background] anonymousId 없음, 서버 전송 건너뜀");
+    return;
+  }
+
+  try {
+    const response = await fetch(`${SERVER_URL}/api/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        anonymousId: onboarding.anonymousId,
+        sessionId: session.sessionId,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        videoCount,
+        categoryDistribution,
+        entropy,
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      console.warn("[background] 서버 전송 실패:", response.status, body);
+      return;
+    }
+
+    console.log("[background] 서버 전송 완료:", session.sessionId);
+  } catch (error) {
+    console.warn("[background] 서버 전송 오류:", error.message);
+  }
 }
