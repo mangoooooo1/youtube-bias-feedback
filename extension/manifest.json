@@ -19,7 +19,7 @@
       "128": "icon128.png"
     }
   },
-  "host_permissions": ["*://*.youtube.com/*", "*://generativelanguage.googleapis.com/*"],
+  "host_permissions": ["*://*.youtube.com/*", "*://generativelanguage.googleapis.com/*", "http://168.107.51.12/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

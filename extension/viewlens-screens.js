@@ -82,10 +82,10 @@ function bindOnboarding(root, onSubmit) {
 
 function _collectingBanner(count) {
   if (!count) return "";
-  return `<div style="display:flex;align-items:center;gap:9px;padding:10px 16px;background:var(--vl-accent-soft);border-bottom:1px solid var(--vl-line)">
+  return `<div id="vl-collecting-banner" style="display:flex;align-items:center;gap:9px;padding:10px 16px;background:var(--vl-accent-soft);border-bottom:1px solid var(--vl-line)">
     <span style="width:7px;height:7px;border-radius:50%;background:var(--vl-accent);flex-shrink:0;animation:vlBlink 1.6s ease-in-out infinite"></span>
-    <span style="font-size:12.5px;font-weight:600;color:var(--vl-accent)">현재 세션 수집 중 · 영상 ${count}개</span>
-    <span style="margin-left:auto;font-size:11px;color:var(--vl-accent);opacity:0.7">종료 10분 후 분석</span>
+    <span id="vl-collecting-count" style="font-size:12.5px;font-weight:600;color:var(--vl-accent)">영상 ${count}개 수집 중</span>
+    <span id="vl-collecting-timer" style="margin-left:auto;font-size:11px;color:var(--vl-accent);opacity:0.7"></span>
   </div>`;
 }
 

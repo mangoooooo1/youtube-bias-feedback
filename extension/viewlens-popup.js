@@ -367,7 +367,9 @@ async function boot() {
     timelineKey: calcTimelineKey(installDate),
     onChange: async ({ onboarded: ob, group: g }) => {
       if (ob && g) {
+        const { anonymousId } = await chrome.storage.local.get('anonymousId');
         await chrome.storage.local.set({
+          anonymousId: anonymousId || crypto.randomUUID(),
           group: g,
           installDate: new Date().toISOString(),
           surveyStatus: { week1: false, week2: false, week3: false },
@@ -375,6 +377,28 @@ async function boot() {
       }
     },
   });
+
+  // 수집 중 배너 실시간 업데이트 (1초 간격)
+  const TIMEOUT_MS = 10 * 60 * 1000;
+  setInterval(async () => {
+    const countEl = document.getElementById("vl-collecting-count");
+    const timerEl = document.getElementById("vl-collecting-timer");
+    if (!countEl || !timerEl) return;
+
+    const { currentSession, lastWatchedAt } = await chrome.storage.local.get(["currentSession", "lastWatchedAt"]);
+    const count = currentSession?.videos?.length ?? 0;
+    countEl.textContent = `영상 ${count}개 수집 중`;
+
+    if (lastWatchedAt) {
+      const elapsed = Date.now() - new Date(lastWatchedAt).getTime();
+      const remaining = Math.max(0, TIMEOUT_MS - elapsed);
+      const mins = Math.floor(remaining / 60000);
+      const secs = Math.floor((remaining % 60000) / 1000);
+      timerEl.textContent = remaining > 0
+        ? `분석까지 ${mins}분 ${String(secs).padStart(2, "0")}초`
+        : "분석 중...";
+    }
+  }, 1000);
 }
 
 boot().catch((err) => {
