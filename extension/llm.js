@@ -64,7 +64,8 @@ export async function generateReview(prompt) {
 
     const cleaned = text.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
     const parsed = JSON.parse(cleaned);
-    return { topic: parsed.topic || '', feedback: parsed.feedback || cleaned };
+    const isObj = parsed && typeof parsed === 'object';
+    return { topic: (isObj && parsed.topic) || '', feedback: (isObj && parsed.feedback) || cleaned };
   } catch (error) {
     clearTimeout(timeoutId);
     throw error;
