@@ -337,11 +337,9 @@ class Studio {
       ])
       .addToggle("다크 모드", "dark")
       .addSection("참여 · 그룹")
-      .addRadio("그룹", "group", [
-        { value: "EXP", label: "실험군" },
-        { value: "CON", label: "대조군" },
-        { value: "TEST", label: "연구자" },
-      ])
+      .addRadio("그룹", "group",
+        Object.entries(VL.GROUPS).map(([k, v]) => ({ value: k, label: v.name })),
+      )
       .addButton(
         "온보딩 다시 보기",
         () => this._setState({ onboarded: false }),
