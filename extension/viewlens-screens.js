@@ -149,8 +149,7 @@ function screenToday() {
       </div>
       <button id="vl-date-next" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:${isToday ? "var(--vl-ink-3)" : "var(--vl-ink-2)"};cursor:${isToday ? "default" : "pointer"};font-size:15px;display:grid;place-items:center;opacity:${isToday ? 0.35 : 1}" ${isToday ? "disabled" : ""}>›</button>
     </div>
-    <div style="display:flex;align-items:baseline;justify-content:space-between">
-      <div>
+    <div style="display:flex;justify-content:flex-end">
       ${vlBadge({ text: `${d.videoCount}개 영상 · ${d.dist.length}개 분야`, tone: "neutral" })}
     </div>
 
