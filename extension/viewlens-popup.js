@@ -123,7 +123,7 @@ function buildDataForDate(allSessions, targetDate) {
   );
   const review =
     sourceSessions.at(-1)?.review ||
-    "시청 패턴을 분석하고 있어요. 잠시 후 코치 노트가 업데이트돼요.";
+    "시청 패턴을 분석하고 있어요. 잠시 후 시청 분석이 업데이트돼요.";
   const reviewTopic = sourceSessions.at(-1)?.reviewTopic || "";
 
   const videos = sourceSessions

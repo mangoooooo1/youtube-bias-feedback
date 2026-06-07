@@ -110,7 +110,8 @@ class ViewLensPopup {
 
     if (this._tab === "today") {
       const d = buildDataForDate(VL._allSessions || [], this._selectedDate);
-      const isToday = this._selectedDate.toDateString() === new Date().toDateString();
+      const isToday =
+        this._selectedDate.toDateString() === new Date().toDateString();
       d.collectingCount = isToday ? (VL.today?.collectingCount ?? 0) : 0;
       d.collectingTimer = isToday ? _collectingTimerText() : "";
       VL.today = d;
@@ -268,7 +269,7 @@ class Studio {
           ${wordmarkHTML({ size: 26, accent, sub: "YouTube Bias Feedback" })}
           <div style="text-align:right;max-width:360px">
             <div style="font-size:13px;font-weight:700;color:#3a3531">시청 편향 피드백 · 크롬 확장 프로그램</div>
-            <div style="font-size:12px;color:#8a837c;margin-top:3px;line-height:1.5">세션별 카테고리 다양성(Shannon Entropy)을 분석해 부드러운 코치 노트로 돌려줍니다.</div>
+            <div style="font-size:12px;color:#8a837c;margin-top:3px;line-height:1.5">세션별 카테고리 다양성(Shannon Entropy)을 분석해 명확한 시청 분석으로 돌려줍니다.</div>
           </div>
         </div>
 
@@ -383,8 +384,13 @@ class Studio {
       ])
       .addToggle("다크 모드", "dark")
       .addSection("참여 · 그룹")
-      .addRadio("그룹", "group",
-        Object.entries(VL.GROUPS).map(([k, v]) => ({ value: k, label: v.name })),
+      .addRadio(
+        "그룹",
+        "group",
+        Object.entries(VL.GROUPS).map(([k, v]) => ({
+          value: k,
+          label: v.name,
+        })),
       )
       .addButton(
         "온보딩 다시 보기",

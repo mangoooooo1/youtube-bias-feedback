@@ -307,7 +307,7 @@ function screenFeedback(currentWeek, selWeek) {
     `,
     })}
 
-    ${vlReview({ text: w.review, title: `${w.label} 코치 노트` })}
+    ${vlReview({ text: w.review, title: `${w.label} 돌아보기` })}
   </div>`;
 }
 
