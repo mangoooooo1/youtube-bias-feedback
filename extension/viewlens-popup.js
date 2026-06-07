@@ -94,40 +94,21 @@ function buildTodayData(allSessions) {
       Object.keys(s.categoryDistribution).length > 0,
   );
 
-  // Fallback to last available day if today has no data
-  const sourceSessions =
-    todaySess.length > 0
-      ? todaySess
-      : (() => {
-          const analyzed = allSessions
-            .filter(
-              (s) =>
-                s.endTime &&
-                s.categoryDistribution &&
-                Object.keys(s.categoryDistribution).length > 0,
-            )
-            .sort((a, b) => new Date(b.endTime) - new Date(a.endTime));
-          if (analyzed.length === 0) return [];
-          const lastDate = dateStr(new Date(analyzed[0].endTime));
-          return analyzed.filter(
-            (s) => dateStr(new Date(s.endTime)) === lastDate,
-          );
-        })();
-
-  if (sourceSessions.length === 0) {
-    // No data at all — return placeholder
+  if (todaySess.length === 0) {
     return {
+      isEmpty: true,
       dateLabel: koreanDateLabel(new Date()),
       videoCount: 0,
       sessionCount: 0,
-      dist: VL.dist({ etc: 1 }),
+      dist: [],
       prevEntropy: 0,
       prevDateLabel: "—",
       videos: [],
-      review:
-        "아직 분석된 시청 기록이 없어요. YouTube를 시청하면 세션이 자동으로 분석돼요.",
+      review: "",
     };
   }
+
+  const sourceSessions = todaySess;
 
   const sourceDate = new Date(sourceSessions[0].endTime);
   const sourceDateStr = dateStr(sourceDate);

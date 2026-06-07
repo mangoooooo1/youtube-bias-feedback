@@ -80,8 +80,28 @@ function bindOnboarding(root, onSubmit) {
 
 // ── Today ─────────────────────────────────────────────────────────────────────
 
+function screenTodayEmpty(dateLabel) {
+  return `<div style="padding:40px 24px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;text-align:center;gap:20px">
+    <div style="position:relative;width:80px;height:80px">
+      <span style="position:absolute;inset:0;border-radius:50%;background:var(--vl-accent-soft);animation:vlPulse 2.4s ease-out infinite"></span>
+      <span style="position:absolute;inset:0;border-radius:50%;border:2px solid var(--vl-accent);opacity:0.4;animation:vlPulse 2.4s ease-out infinite 0.6s"></span>
+      <span style="position:absolute;inset:0;display:grid;place-items:center">
+        ${markSVG({ size: 36, filled: false, accent: "var(--vl-accent)" })}
+      </span>
+    </div>
+    <div>
+      <div style="font-size:16px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">아직 오늘 시청 기록이 없어요</div>
+      <p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;max-width:240px">
+        유튜브를 시청하면 자동으로 수집이 시작돼요.<br>시청 종료 10분 후 분석 결과가 나타나요.
+      </p>
+    </div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--vl-ink-3)">${dateLabel}</div>
+  </div>`;
+}
+
 function screenToday() {
   const d = VL.today;
+  if (d.isEmpty) return screenTodayEmpty(d.dateLabel);
   const h = VL.entropy(d.dist);
   const delta = h - d.prevEntropy;
 
