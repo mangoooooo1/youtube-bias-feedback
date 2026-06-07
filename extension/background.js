@@ -13,7 +13,7 @@ import { buildPrompt, generateReview, generateFallbackReview } from "./llm.js";
 import { SERVER_URL } from "./config.js";
 
 const ALARM_NAME = "SESSION_TIMEOUT_CHECK";
-const TIMEOUT_MS = 30 * 60 * 1000;
+const TIMEOUT_MS = 10 * 60 * 1000;
 
 // service worker가 깨어날 때마다 실행 — 같은 이름의 alarm은 자동으로 교체됨
 chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
