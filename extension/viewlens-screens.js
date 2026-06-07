@@ -83,14 +83,7 @@ function bindOnboarding(root, onSubmit) {
 function screenToday() {
   const d = VL.today;
   const h = VL.entropy(d.dist);
-  const b = VL.band(h);
   const delta = h - d.prevEntropy;
-  const bCol =
-    b.tone === "good"
-      ? "var(--vl-good)"
-      : b.tone === "warn"
-        ? "var(--vl-warn)"
-        : "var(--vl-ink)";
 
   const catRows = d.dist
     .map(
@@ -116,38 +109,25 @@ function screenToday() {
     ${vlCard({
       pad: 16,
       children: `
-      ${vlSectionLabel({ text: "오늘의 시청 다양성" })}
-      <div style="display:flex;align-items:baseline;gap:8px;margin:2px 0 18px">
-        <span style="font-size:26px;font-weight:800;letter-spacing:-0.02em;color:${bCol}">${b.label}</span>
-        <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--vl-ink-3)">${h.toFixed(2)} / ${VL.H_MAX.toFixed(1)}</span>
-      </div>
-      ${vlDiversityMeter({ value: h })}
-      <p style="margin:16px 0 0;font-size:12px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
-        오늘 <b style="color:var(--vl-ink)">${d.sessionCount}번의 시청에서 본 영상 ${d.videoCount}개</b>를
-        <b style="color:var(--vl-ink)">${d.dist.length}개 분야</b>로 나눠 계산했어요.
-        한 분야에 몰아 볼수록 점수가 낮아 '편중', 여러 분야를 고루 볼수록 높아 '다양'이에요.
-      </p>
-      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--vl-line)">
-        <div style="font-size:11.5px;color:var(--vl-ink-3);font-weight:600;margin-bottom:11px">직전 시청일 대비 다양성</div>
-        <div style="display:flex;align-items:center;gap:13px">
-          <div style="text-align:center">
-            <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--vl-ink-3);line-height:1">${d.prevEntropy.toFixed(2)}</div>
-            <div style="font-size:10.5px;color:var(--vl-ink-3);margin-top:4px">${d.prevDateLabel}</div>
-          </div>
-          <span style="font-size:15px;color:var(--vl-ink-3)">→</span>
-          <div style="text-align:center">
-            <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:var(--vl-ink);line-height:1">${h.toFixed(2)}</div>
-            <div style="font-size:10.5px;color:var(--vl-accent);margin-top:4px;font-weight:700">오늘</div>
-          </div>
-          <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px">
-            ${vlDeltaChip({ value: delta })}
-            <span style="font-size:11px;font-weight:700;color:${delta >= 0 ? "var(--vl-good)" : "var(--vl-warn)"}">${delta >= 0 ? "더 다양해졌어요" : "더 편중됐어요"}</span>
-          </div>
+      <div style="font-size:11.5px;color:var(--vl-ink-3);font-weight:600;margin-bottom:11px">직전 시청일 대비 다양성</div>
+      <div style="display:flex;align-items:center;gap:13px">
+        <div style="text-align:center">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--vl-ink-3);line-height:1">${d.prevEntropy.toFixed(2)}</div>
+          <div style="font-size:10.5px;color:var(--vl-ink-3);margin-top:4px">${d.prevDateLabel}</div>
         </div>
-        <p style="margin:11px 0 0;font-size:10.5px;color:var(--vl-ink-3);line-height:1.5">
-          매일 보지 않아도 괜찮아요 — 어제가 아니라 마지막으로 시청한 날과 비교해요.
-        </p>
+        <span style="font-size:15px;color:var(--vl-ink-3)">→</span>
+        <div style="text-align:center">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:var(--vl-ink);line-height:1">${h.toFixed(2)}</div>
+          <div style="font-size:10.5px;color:var(--vl-accent);margin-top:4px;font-weight:700">오늘</div>
+        </div>
+        <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px">
+          ${vlDeltaChip({ value: delta })}
+          <span style="font-size:11px;font-weight:700;color:${delta >= 0 ? "var(--vl-good)" : "var(--vl-warn)"}">${delta >= 0 ? "더 다양해졌어요" : "더 편중됐어요"}</span>
+        </div>
       </div>
+      <p style="margin:11px 0 0;font-size:10.5px;color:var(--vl-ink-3);line-height:1.5">
+        매일 보지 않아도 괜찮아요 — 어제가 아니라 마지막으로 시청한 날과 비교해요.
+      </p>
     `,
     })}
 
