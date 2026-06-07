@@ -142,7 +142,7 @@ function screenToday() {
     `,
     })}
 
-    ${vlReview({ text: d.review, videos: d.videos })}
+    ${vlReview({ text: d.review, topic: d.reviewTopic, videos: d.videos })}
   </div>`;
 }
 

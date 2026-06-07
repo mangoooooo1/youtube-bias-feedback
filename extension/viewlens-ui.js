@@ -183,8 +183,14 @@ function vlMiniLine({ data = [], baseline = null, height = 64 } = {}) {
   </svg>`;
 }
 
-function vlReview({ text = '', title = '오늘의 코치 노트', videos = [] } = {}) {
+function vlReview({ text = '', topic = '', title = '오늘의 코치 노트', videos = [] } = {}) {
   const cats = VL.CATS;
+
+  const topicBlock = topic
+    ? `<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:var(--vl-ink);line-height:1.4;letter-spacing:-0.02em;text-wrap:pretty">
+        당신은 '<span style="color:var(--vl-accent)">${topic}</span>'에 관심이 많습니다!
+      </p>`
+    : '';
 
   const videoList = videos.length > 0 ? `
     <details class="vl-vid-details" style="margin-top:13px;padding-top:12px;border-top:1px solid color-mix(in oklab,var(--vl-accent) 18%,transparent)">
@@ -219,6 +225,7 @@ function vlReview({ text = '', title = '오늘의 코치 노트', videos = [] } 
       ${markSVG({ size: 18, filled: false, accent: 'var(--vl-accent)' })}
       <span style="font-size:12.5px;font-weight:700;color:var(--vl-accent)">${title}</span>
     </div>
+    ${topicBlock}
     <p style="margin:0;font-size:13.5px;line-height:1.65;color:var(--vl-ink);text-wrap:pretty">${text}</p>
     ${videoList}
   </div>`;
