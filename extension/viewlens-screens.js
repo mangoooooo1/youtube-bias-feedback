@@ -196,9 +196,6 @@ function screenToday() {
           <span style="font-size:11px;font-weight:700;color:${delta >= 0 ? "var(--vl-good)" : "var(--vl-warn)"}">${delta >= 0 ? "더 다양해졌어요" : "더 편중됐어요"}</span>
         </div>
       </div>
-      <p style="margin:11px 0 0;font-size:10.5px;color:var(--vl-ink-3);line-height:1.5">
-        매일 보지 않아도 괜찮아요 — 어제가 아니라 마지막으로 시청한 날과 비교해요.
-      </p>
     `,
     })}
 
