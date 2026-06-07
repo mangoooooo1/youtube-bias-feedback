@@ -141,11 +141,14 @@ function buildTodayData(allSessions) {
     sourceSessions.at(-1)?.review ||
     "시청 패턴을 분석하고 있어요. 잠시 후 코치 노트가 업데이트돼요.";
 
-  // Videos: assign session's top category as proxy for per-video category
   const videos = sourceSessions
     .flatMap((sess) => {
       const cat = topKey(sess);
-      return (sess.videos || []).map((v) => ({ title: v.title, cat }));
+      return (sess.videos || []).map((v) => ({
+        title: v.title,
+        cat,
+        videoId: v.videoId || null,
+      }));
     })
     .slice(0, 9);
 

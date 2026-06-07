@@ -183,33 +183,40 @@ function vlMiniLine({ data = [], baseline = null, height = 64 } = {}) {
   </svg>`;
 }
 
-function vlReview({ text = "", title = "오늘의 코치 노트", videos = [] } = {}) {
+function vlReview({ text = '', title = '오늘의 코치 노트', videos = [] } = {}) {
   const cats = VL.CATS;
-  const videoList =
-    videos.length > 0
-      ? `
-    <div style="margin-top:13px;padding-top:12px;border-top:1px solid color-mix(in oklab,var(--vl-accent) 18%,transparent)">
-      <div style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--vl-accent);margin-bottom:8px">분석한 영상 제목 (${videos.length})</div>
-      <div style="display:flex;flex-direction:column;gap:7px">
-        ${videos
-          .slice(0, 4)
-          .map(
-            (v) => `
-          <div style="display:flex;align-items:center;gap:8px">
-            <span style="width:7px;height:7px;border-radius:2.5px;background:${(cats[v.cat] || {}).color || "var(--vl-ink-3)"};flex-shrink:0"></span>
-            <span style="font-size:12px;color:var(--vl-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1">${v.title}</span>
-          </div>
-        `,
-          )
-          .join("")}
-        ${videos.length > 4 ? `<div style="font-size:11px;color:var(--vl-ink-3);margin-top:1px">외 ${videos.length - 4}개 더 분석함</div>` : ""}
+
+  const videoList = videos.length > 0 ? `
+    <details class="vl-vid-details" style="margin-top:13px;padding-top:12px;border-top:1px solid color-mix(in oklab,var(--vl-accent) 18%,transparent)">
+      <summary style="display:flex;align-items:center;justify-content:space-between;padding:2px 0;border-radius:6px;user-select:none">
+        <span style="display:flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--vl-accent)">
+          <span class="vl-vid-chevron" style="font-size:9px;line-height:1">▸</span>
+          분석한 영상
+        </span>
+        <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--vl-ink-3)">${videos.length}개</span>
+      </summary>
+      <div style="margin-top:9px;display:flex;flex-direction:column;gap:6px">
+        ${videos.map(v => {
+          const color = (cats[v.cat] || {}).color || 'var(--vl-ink-3)';
+          const ytUrl = v.videoId ? `https://www.youtube.com/watch?v=${encodeURIComponent(v.videoId)}` : null;
+          const dot   = `<span style="width:7px;height:7px;border-radius:2.5px;background:${color};flex-shrink:0"></span>`;
+          const label = `<span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${v.title}</span>`;
+          const base  = `display:flex;align-items:center;gap:8px;min-width:0`;
+          return ytUrl
+            ? `<a href="${ytUrl}" target="_blank" rel="noopener"
+                style="${base};text-decoration:none;color:var(--vl-ink);padding:3px 4px;border-radius:6px;transition:background .12s"
+                onmouseover="this.style.background='color-mix(in oklab,var(--vl-accent) 10%,transparent)'"
+                onmouseout="this.style.background='transparent'"
+              >${dot}${label}</a>`
+            : `<div style="${base};padding:3px 4px">${dot}${label}</div>`;
+        }).join('')}
       </div>
-    </div>
-  `
-      : "";
+    </details>
+  ` : '';
+
   return `<div style="background:var(--vl-accent-soft);border:1px solid color-mix(in oklab,var(--vl-accent) 22%,transparent);border-radius:16px;padding:15px">
     <div style="display:flex;align-items:center;gap:7px;margin-bottom:9px">
-      ${markSVG({ size: 18, filled: false, accent: "var(--vl-accent)" })}
+      ${markSVG({ size: 18, filled: false, accent: 'var(--vl-accent)' })}
       <span style="font-size:12.5px;font-weight:700;color:var(--vl-accent)">${title}</span>
     </div>
     <p style="margin:0;font-size:13.5px;line-height:1.65;color:var(--vl-ink);text-wrap:pretty">${text}</p>

@@ -99,6 +99,26 @@ body {
   }
 }
 
+.vl-vid-details > summary {
+  list-style: none;
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.vl-vid-details > summary::-webkit-details-marker {
+  display: none;
+}
+.vl-vid-details > summary::marker {
+  display: none;
+}
+.vl-vid-chevron {
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+.vl-vid-details[open] .vl-vid-chevron {
+  transform: rotate(90deg);
+}
+
 /* scrollbar inside popup */
 .vl-pop ::-webkit-scrollbar {
   width: 8px;
