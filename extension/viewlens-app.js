@@ -88,7 +88,7 @@ class ViewLensPopup {
       this._renderOnboarding();
       return;
     }
-    const tl = VL.TIMELINE[this._timelineKey];
+    const tl = VL.TIMELINE[this._timelineKey] || VL.TIMELINE.w1_mid;
     const groupCfg = VL.GROUPS[this._group] || VL.GROUPS.EXP;
     const selWeek = Math.min(this._selWeek, tl.currentWeek);
     const surveyWeek = tl.surveyWeek;
