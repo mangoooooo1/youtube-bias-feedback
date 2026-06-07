@@ -17,7 +17,16 @@ function initializeDB() {
       categoryDistribution TEXT,
       entropy              REAL,
       createdAt            TEXT    DEFAULT (datetime('now'))
-    )
+    );
+
+    CREATE TABLE IF NOT EXISTS video_events (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      anonymousId TEXT    NOT NULL,
+      videoId     TEXT    NOT NULL,
+      title       TEXT,
+      watchedAt   TEXT    NOT NULL,
+      createdAt   TEXT    DEFAULT (datetime('now'))
+    );
   `);
 }
 

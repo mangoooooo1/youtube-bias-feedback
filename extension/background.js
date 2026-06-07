@@ -18,6 +18,9 @@ const TIMEOUT_MS = 10 * 60 * 1000;
 // service worker가 깨어날 때마다 실행 — 같은 이름의 alarm은 자동으로 교체됨
 chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
 
+// content script가 읽을 수 있도록 SERVER_URL을 storage에 저장
+chrome.storage.local.set({ serverUrl: SERVER_URL });
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "VIDEO_DETECTED") {
     handleVideoDetected(message)

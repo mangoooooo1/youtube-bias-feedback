@@ -18,6 +18,7 @@ app.get("/health", (_req, res) => {
 
 app.use("/api/sessions", require("./routes/sessions"));
 app.use("/api/surveys", require("./routes/surveys"));
+app.use("/api/video-events", require("./routes/video-events"));
 
 app.use(errorHandler);
 
