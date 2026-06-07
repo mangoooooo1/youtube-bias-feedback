@@ -45,7 +45,7 @@ function waitForTitle(maxRetries = 10, interval = 200) {
   });
 }
 
-async function sendWithRetry(message, maxRetries = 3, delay = 1000) {
+async function sendWithRetry(message, maxRetries = 5, delay = 1000) {
   for (let i = 0; i < maxRetries; i++) {
     if (!chrome.runtime?.sendMessage) {
       console.warn("[content] Extension context invalidated");
