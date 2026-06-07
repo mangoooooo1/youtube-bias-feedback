@@ -14,8 +14,12 @@ const VL_CATS = {
 };
 
 function dist(obj) {
+  if (!obj) return [];
   return Object.entries(obj)
-    .map(([k, p]) => ({ key: k, name: VL_CATS[k].name, color: VL_CATS[k].color, p }))
+    .map(([k, p]) => {
+      const cat = VL_CATS[k] || VL_CATS.etc;
+      return { key: k, name: cat.name, color: cat.color, p };
+    })
     .sort((a, b) => b.p - a.p);
 }
 
