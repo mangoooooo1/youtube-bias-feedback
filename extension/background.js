@@ -65,6 +65,7 @@ async function analyzeSession(session) {
   const categoryDistribution = calculateDistribution(categoryIds);
   const entropy = calculateEntropy(categoryDistribution);
   const videoCount = session.videos.length;
+  const videoTitles = session.videos.map((v) => v.title).filter(Boolean);
 
   await saveAnalysis(session.sessionId, {
     categoryDistribution,
@@ -73,18 +74,18 @@ async function analyzeSession(session) {
   });
   console.log("[background] 분석 완료:", { entropy, categoryDistribution });
 
-  const analysisData = { categoryDistribution, entropy, videoCount };
+  const analysisData = { categoryDistribution, entropy, videoCount, videoTitles };
   const prompt = buildPrompt(analysisData);
 
-  let review;
+  let result;
   try {
-    review = await generateReview(prompt);
+    result = await generateReview(prompt);
     console.log("[background] 리뷰 생성 완료");
   } catch (error) {
     console.warn("[background] 리뷰 생성 실패, 폴백 사용:", error.message);
-    review = generateFallbackReview(analysisData);
+    result = generateFallbackReview(analysisData);
   }
 
-  await saveAnalysis(session.sessionId, { review });
-  console.log("[background] 리뷰 저장 완료:", review);
+  await saveAnalysis(session.sessionId, { review: result.feedback, reviewTopic: result.topic });
+  console.log("[background] 리뷰 저장 완료:", result);
 }
