@@ -13,7 +13,8 @@ router.post("/", (req, res, next) => {
   const { anonymousId, videoId, watchedAt, title } = req.body;
 
   for (const field of ["anonymousId", "videoId", "watchedAt"]) {
-    if (!req.body[field]?.toString().trim()) {
+    const value = req.body[field];
+    if (typeof value !== "string" || !value.trim()) {
       return fail(res, 400, ERROR_CODES.MISSING_REQUIRED_FIELD, `${field} 필드가 올바르지 않습니다.`, field);
     }
   }
