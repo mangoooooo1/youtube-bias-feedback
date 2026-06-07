@@ -19,6 +19,14 @@ function initializeDB() {
       createdAt            TEXT    DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS participants (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      anonymousId TEXT    NOT NULL UNIQUE,
+      group_code  TEXT    NOT NULL,
+      installDate TEXT    NOT NULL,
+      createdAt   TEXT    DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS video_events (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       anonymousId TEXT    NOT NULL,

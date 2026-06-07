@@ -367,13 +367,24 @@ async function boot() {
     timelineKey: calcTimelineKey(installDate),
     onChange: async ({ onboarded: ob, group: g }) => {
       if (ob && g) {
-        const { anonymousId } = await chrome.storage.local.get('anonymousId');
+        const { anonymousId: existing, serverUrl } = await chrome.storage.local.get(['anonymousId', 'serverUrl']);
+        const anonymousId = existing || crypto.randomUUID();
+        const installDate = new Date().toISOString();
+
         await chrome.storage.local.set({
-          anonymousId: anonymousId || crypto.randomUUID(),
+          anonymousId,
           group: g,
-          installDate: new Date().toISOString(),
+          installDate,
           surveyStatus: { week1: false, week2: false, week3: false },
         });
+
+        if (serverUrl && !serverUrl.startsWith("YOUR_")) {
+          fetch(`${serverUrl.replace(/\/$/, "")}/api/participants`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ anonymousId, group_code: g, installDate }),
+          }).catch(() => {});
+        }
       }
     },
   });
