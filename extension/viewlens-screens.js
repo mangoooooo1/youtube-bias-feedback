@@ -80,28 +80,40 @@ function bindOnboarding(root, onSubmit) {
 
 // ── Today ─────────────────────────────────────────────────────────────────────
 
-function screenTodayEmpty(dateLabel) {
-  return `<div style="padding:40px 24px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:400px;text-align:center;gap:20px">
-    <div style="position:relative;width:80px;height:80px">
-      <span style="position:absolute;inset:0;border-radius:50%;background:var(--vl-accent-soft);animation:vlPulse 2.4s ease-out infinite"></span>
-      <span style="position:absolute;inset:0;border-radius:50%;border:2px solid var(--vl-accent);opacity:0.4;animation:vlPulse 2.4s ease-out infinite 0.6s"></span>
-      <span style="position:absolute;inset:0;display:grid;place-items:center">
-        ${markSVG({ size: 36, filled: false, accent: "var(--vl-accent)" })}
-      </span>
+function _collectingBanner(count) {
+  if (!count) return "";
+  return `<div style="display:flex;align-items:center;gap:9px;padding:10px 16px;background:var(--vl-accent-soft);border-bottom:1px solid var(--vl-line)">
+    <span style="width:7px;height:7px;border-radius:50%;background:var(--vl-accent);flex-shrink:0;animation:vlBlink 1.6s ease-in-out infinite"></span>
+    <span style="font-size:12.5px;font-weight:600;color:var(--vl-accent)">현재 세션 수집 중 · 영상 ${count}개</span>
+    <span style="margin-left:auto;font-size:11px;color:var(--vl-accent);opacity:0.7">종료 10분 후 분석</span>
+  </div>`;
+}
+
+function screenTodayEmpty(dateLabel, collectingCount) {
+  return `<div style="display:flex;flex-direction:column;min-height:100%">
+    ${_collectingBanner(collectingCount)}
+    <div style="flex:1;padding:40px 24px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:20px">
+      <div style="position:relative;width:80px;height:80px">
+        <span style="position:absolute;inset:0;border-radius:50%;background:var(--vl-accent-soft);animation:vlPulse 2.4s ease-out infinite"></span>
+        <span style="position:absolute;inset:0;border-radius:50%;border:2px solid var(--vl-accent);opacity:0.4;animation:vlPulse 2.4s ease-out infinite 0.6s"></span>
+        <span style="position:absolute;inset:0;display:grid;place-items:center">
+          ${markSVG({ size: 36, filled: false, accent: "var(--vl-accent)" })}
+        </span>
+      </div>
+      <div>
+        <div style="font-size:16px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">아직 오늘 시청 기록이 없어요</div>
+        <p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;max-width:240px">
+          유튜브를 시청하면 자동으로 수집이 시작돼요.<br>시청 종료 10분 후 분석 결과가 나타나요.
+        </p>
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--vl-ink-3)">${dateLabel}</div>
     </div>
-    <div>
-      <div style="font-size:16px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">아직 오늘 시청 기록이 없어요</div>
-      <p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;max-width:240px">
-        유튜브를 시청하면 자동으로 수집이 시작돼요.<br>시청 종료 10분 후 분석 결과가 나타나요.
-      </p>
-    </div>
-    <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--vl-ink-3)">${dateLabel}</div>
   </div>`;
 }
 
 function screenToday() {
   const d = VL.today;
-  if (d.isEmpty) return screenTodayEmpty(d.dateLabel);
+  if (d.isEmpty) return screenTodayEmpty(d.dateLabel, d.collectingCount);
   const h = VL.entropy(d.dist);
   const delta = h - d.prevEntropy;
 
@@ -117,7 +129,9 @@ function screenToday() {
     )
     .join("");
 
-  return `<div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
+  return `<div style="display:flex;flex-direction:column">
+    ${_collectingBanner(d.collectingCount)}
+    <div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
     <div style="display:flex;align-items:baseline;justify-content:space-between">
       <div>
         <div style="font-size:17px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">오늘의 시청</div>
@@ -163,6 +177,7 @@ function screenToday() {
     })}
 
     ${vlReview({ text: d.review, topic: d.reviewTopic, videos: d.videos })}
+  </div>
   </div>`;
 }
 

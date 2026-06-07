@@ -83,8 +83,8 @@ function topKey(sess) {
 
 // ── Build VL.today ────────────────────────────────────────────────────────────
 
-function buildTodayData(allSessions) {
-  const todayStr = dateStr(new Date());
+function buildDataForDate(allSessions, targetDate) {
+  const todayStr = dateStr(targetDate);
 
   const todaySess = allSessions.filter(
     (s) =>
@@ -97,7 +97,7 @@ function buildTodayData(allSessions) {
   if (todaySess.length === 0) {
     return {
       isEmpty: true,
-      dateLabel: koreanDateLabel(new Date()),
+      dateLabel: koreanDateLabel(targetDate),
       videoCount: 0,
       sessionCount: 0,
       dist: [],
@@ -330,6 +330,7 @@ async function boot() {
     "sessions",
     "tone",
     "dark",
+    "currentSession",
   ]);
 
   const sessions = stored.sessions || [];
@@ -338,8 +339,10 @@ async function boot() {
   const darkMode = !!stored.dark;
 
   // Inject real data into VL globals before popup renders
+  const collectingCount = stored.currentSession?.videos?.length ?? 0;
   const realToday = buildTodayData(sessions);
-  if (realToday) VL.today = realToday;
+  realToday.collectingCount = collectingCount;
+  VL.today = realToday;
 
   if (installDate) {
     VL.weeks = buildWeeksData(sessions, installDate);
