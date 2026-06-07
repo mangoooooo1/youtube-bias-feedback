@@ -45,35 +45,43 @@ function waitForTitle(maxRetries = 10, interval = 200) {
   });
 }
 
-async function sendWithRetry(message, maxRetries = 3, delay = 1000) {
-  for (let i = 0; i < maxRetries; i++) {
-    if (!chrome.runtime?.sendMessage) {
-      console.warn("[content] Extension context invalidated");
-      return;
+// 서비스 워커 수면과 무관하게 storage에 직접 기록
+let writeQueue = Promise.resolve();
+
+function recordVideo(videoId, title) {
+  writeQueue = writeQueue.then(async () => {
+    const now = new Date().toISOString();
+    const { currentSession, anonymousId, serverUrl } = await chrome.storage.local.get([
+      "currentSession",
+      "anonymousId",
+      "serverUrl",
+    ]);
+
+    const session = currentSession ?? {
+      sessionId: String(Date.now()),
+      startTime: now,
+      videos: [],
+    };
+
+    await chrome.storage.local.set({ lastWatchedAt: now });
+
+    const lastSaved = session.videos.at(-1);
+    if (lastSaved?.videoId === videoId) return;
+
+    session.videos.push({ videoId, title, watchedAt: now });
+    await chrome.storage.local.set({ currentSession: session });
+    console.log("[content] recorded:", { videoId, title });
+
+    // 서버에 즉시 전송
+    if (anonymousId && serverUrl && !serverUrl.startsWith("YOUR_")) {
+      fetch(`${serverUrl.replace(/\/$/, "")}/api/video-events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anonymousId, videoId, title: title ?? null, watchedAt: now }),
+      }).catch(() => {});
     }
-
-    const response = await new Promise((resolve) => {
-      try {
-        chrome.runtime.sendMessage(message, (res) => {
-          if (chrome.runtime?.lastError) {
-            resolve(null);
-          } else {
-            resolve(res);
-          }
-        });
-      } catch {
-        resolve(null);
-      }
-    });
-
-    if (response) {
-      console.log("[content] background response:", response);
-      return;
-    }
-
-    if (i < maxRetries - 1) await new Promise((r) => setTimeout(r, delay));
-  }
-  console.warn("[content] sendMessage 최종 실패:", message.videoId);
+  });
+  return writeQueue;
 }
 
 let lastVideoId = null;
@@ -93,12 +101,7 @@ async function handleVideoChange() {
   const title = await waitForTitle();
   console.log("[content] video detected:", { videoId, title });
 
-  sendWithRetry({
-    type: "VIDEO_DETECTED",
-    videoId,
-    title,
-    url: location.href,
-  }).catch(() => {});
+  await recordVideo(videoId, title);
 }
 
 handleVideoChange();

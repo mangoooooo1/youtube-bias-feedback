@@ -183,16 +183,23 @@ function vlMiniLine({ data = [], baseline = null, height = 64 } = {}) {
   </svg>`;
 }
 
-function vlReview({ text = '', topic = '', title = '오늘의 코치 노트', videos = [] } = {}) {
+function vlReview({
+  text = "",
+  topic = "",
+  title = "오늘 돌아보기",
+  videos = [],
+} = {}) {
   const cats = VL.CATS;
 
   const topicBlock = topic
     ? `<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:var(--vl-ink);line-height:1.4;letter-spacing:-0.02em;text-wrap:pretty">
         당신은 '<span style="color:var(--vl-accent)">${topic}</span>'에 관심이 많습니다!
       </p>`
-    : '';
+    : "";
 
-  const videoList = videos.length > 0 ? `
+  const videoList =
+    videos.length > 0
+      ? `
     <details class="vl-vid-details" style="margin-top:13px;padding-top:12px;border-top:1px solid color-mix(in oklab,var(--vl-accent) 18%,transparent)">
       <summary style="display:flex;align-items:center;justify-content:space-between;padding:2px 0;border-radius:6px;user-select:none">
         <span style="display:flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--vl-accent)">
@@ -202,25 +209,30 @@ function vlReview({ text = '', topic = '', title = '오늘의 코치 노트', vi
         <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--vl-ink-3)">${videos.length}개</span>
       </summary>
       <div style="margin-top:9px;display:flex;flex-direction:column;gap:6px">
-        ${videos.map(v => {
-          const color = (cats[v.cat] || {}).color || 'var(--vl-ink-3)';
-          const ytUrl = v.videoId ? `https://www.youtube.com/watch?v=${encodeURIComponent(v.videoId)}` : null;
-          const dot   = `<span style="width:7px;height:7px;border-radius:2.5px;background:${color};flex-shrink:0"></span>`;
-          const label = `<span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${v.title}</span>`;
-          const base  = `display:flex;align-items:center;gap:8px;min-width:0`;
-          return ytUrl
-            ? `<a href="${ytUrl}" target="_blank" rel="noopener" class="vl-vid-link"
+        ${videos
+          .map((v) => {
+            const color = (cats[v.cat] || {}).color || "var(--vl-ink-3)";
+            const ytUrl = v.videoId
+              ? `https://www.youtube.com/watch?v=${encodeURIComponent(v.videoId)}`
+              : null;
+            const dot = `<span style="width:7px;height:7px;border-radius:2.5px;background:${color};flex-shrink:0"></span>`;
+            const label = `<span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${v.title}</span>`;
+            const base = `display:flex;align-items:center;gap:8px;min-width:0`;
+            return ytUrl
+              ? `<a href="${ytUrl}" target="_blank" rel="noopener" class="vl-vid-link"
                 style="${base};text-decoration:none;color:var(--vl-ink);padding:3px 4px;border-radius:6px"
               >${dot}${label}</a>`
-            : `<div style="${base};padding:3px 4px">${dot}${label}</div>`;
-        }).join('')}
+              : `<div style="${base};padding:3px 4px">${dot}${label}</div>`;
+          })
+          .join("")}
       </div>
     </details>
-  ` : '';
+  `
+      : "";
 
   return `<div style="background:var(--vl-accent-soft);border:1px solid color-mix(in oklab,var(--vl-accent) 22%,transparent);border-radius:16px;padding:15px">
     <div style="display:flex;align-items:center;gap:7px;margin-bottom:9px">
-      ${markSVG({ size: 18, filled: false, accent: 'var(--vl-accent)' })}
+      ${markSVG({ size: 18, filled: false, accent: "var(--vl-accent)" })}
       <span style="font-size:12.5px;font-weight:700;color:var(--vl-accent)">${title}</span>
     </div>
     ${topicBlock}

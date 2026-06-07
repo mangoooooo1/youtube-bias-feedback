@@ -1,6 +1,3 @@
-// viewlens-logo.js — ViewLens brand mark helpers (returns HTML strings)
-// Exports (window): markSVG, wordmarkHTML
-
 const VL_APERTURE_LINES = [
   [71, 50, 69.5, 16.2],
   [60.5, 31.8, 30.5, 16.2],
@@ -18,14 +15,19 @@ const VL_APERTURE_LINES = [
  * @param {string}  opts.accent  - accent color (default var(--vl-accent))
  * @param {string}  opts.face    - stroke color on filled bg (default var(--vl-on-accent))
  */
-function markSVG({ size = 40, filled = true, accent = 'var(--vl-accent)', face = 'var(--vl-on-accent)' } = {}) {
+function markSVG({
+  size = 40,
+  filled = true,
+  accent = "var(--vl-accent)",
+  face = "var(--vl-on-accent)",
+} = {}) {
   const ink = filled ? face : accent;
   const bg = filled
     ? `<rect x="0" y="0" width="100" height="100" rx="28" ry="28" fill="${accent}"/>`
-    : '';
-  const lines = VL_APERTURE_LINES
-    .map(([x1, y1, x2, y2]) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`)
-    .join('');
+    : "";
+  const lines = VL_APERTURE_LINES.map(
+    ([x1, y1, x2, y2]) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`,
+  ).join("");
   return `<svg width="${size}" height="${size}" viewBox="0 0 100 100"
       style="display:block;flex-shrink:0" aria-label="ViewLens"
       xmlns="http://www.w3.org/2000/svg">
@@ -47,11 +49,18 @@ function markSVG({ size = 40, filled = true, accent = 'var(--vl-accent)', face =
  * @param {string}  opts.color   - logotype base color
  * @param {string}  [opts.sub]   - optional subline text
  */
-function wordmarkHTML({ size = 22, gap = 11, accent = 'var(--vl-accent)', filled = true, color = 'var(--vl-ink)', sub } = {}) {
+function wordmarkHTML({
+  size = 22,
+  gap = 11,
+  accent = "var(--vl-accent)",
+  filled = true,
+  color = "var(--vl-ink)",
+  sub,
+} = {}) {
   const markSize = Math.round(size * 1.55);
   const subLine = sub
     ? `<span style="margin-top:5px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:${size * 0.42}px;letter-spacing:0.14em;text-transform:uppercase;color:var(--vl-ink-3)">${sub}</span>`
-    : '';
+    : "";
   return `<div style="display:flex;align-items:center;gap:${gap}px">
     ${markSVG({ size: markSize, filled, accent })}
     <div style="display:flex;flex-direction:column;line-height:1">

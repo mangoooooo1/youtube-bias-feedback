@@ -1,3 +1,15 @@
+function _collectingTimerText() {
+  const lastWatchedAt = VL._lastWatchedAt;
+  if (!lastWatchedAt) return "";
+  const TIMEOUT_MS = 10 * 60 * 1000;
+  const elapsed = Date.now() - new Date(lastWatchedAt).getTime();
+  const remaining = Math.max(0, TIMEOUT_MS - elapsed);
+  if (remaining <= 0) return "";
+  const mins = Math.floor(remaining / 60000);
+  const secs = Math.floor((remaining % 60000) / 1000);
+  return `피드백까지 ${mins}분 ${String(secs).padStart(2, "0")}초`;
+}
+
 function _popupHeader(groupCfg, day) {
   const badge =
     groupCfg.code === "TEST"
@@ -50,6 +62,7 @@ class ViewLensPopup {
     this._completed = {}; // { [week]: true }
     this._snoozed = false;
     this._selWeek = 1;
+    this._selectedDate = new Date();
     // External app state (set via mount)
     this._onboarded = false;
     this._group = null;
@@ -94,6 +107,15 @@ class ViewLensPopup {
     const surveyWeek = tl.surveyWeek;
     const surveyPending = surveyWeek != null && !this._completed[surveyWeek];
     const showModal = surveyPending && !this._snoozed;
+
+    if (this._tab === "today") {
+      const d = buildDataForDate(VL._allSessions || [], this._selectedDate);
+      const isToday =
+        this._selectedDate.toDateString() === new Date().toDateString();
+      d.collectingCount = isToday ? (VL.today?.collectingCount ?? 0) : 0;
+      d.collectingTimer = isToday ? _collectingTimerText() : "";
+      VL.today = d;
+    }
 
     let bodyHTML;
     if (groupCfg.feedback) {
@@ -168,6 +190,31 @@ class ViewLensPopup {
           }
         });
       });
+    // Date navigation
+    const prevBtn = this.container.querySelector("#vl-date-prev");
+    const nextBtn = this.container.querySelector("#vl-date-next");
+    if (prevBtn) {
+      prevBtn.addEventListener("click", () => {
+        const d = new Date(this._selectedDate);
+        d.setDate(d.getDate() - 1);
+        const installDate = VL._installDate ? new Date(VL._installDate) : null;
+        if (!installDate || d >= new Date(installDate.toDateString())) {
+          this._selectedDate = d;
+          this.render();
+        }
+      });
+    }
+    if (nextBtn) {
+      nextBtn.addEventListener("click", () => {
+        const today = new Date();
+        if (this._selectedDate.toDateString() !== today.toDateString()) {
+          const d = new Date(this._selectedDate);
+          d.setDate(d.getDate() + 1);
+          this._selectedDate = d;
+          this.render();
+        }
+      });
+    }
   }
 }
 
@@ -222,7 +269,7 @@ class Studio {
           ${wordmarkHTML({ size: 26, accent, sub: "YouTube Bias Feedback" })}
           <div style="text-align:right;max-width:360px">
             <div style="font-size:13px;font-weight:700;color:#3a3531">시청 편향 피드백 · 크롬 확장 프로그램</div>
-            <div style="font-size:12px;color:#8a837c;margin-top:3px;line-height:1.5">세션별 카테고리 다양성(Shannon Entropy)을 분석해 부드러운 코치 노트로 돌려줍니다.</div>
+            <div style="font-size:12px;color:#8a837c;margin-top:3px;line-height:1.5">세션별 카테고리 다양성(Shannon Entropy)을 분석해 명확한 시청 분석으로 돌려줍니다.</div>
           </div>
         </div>
 
@@ -337,8 +384,13 @@ class Studio {
       ])
       .addToggle("다크 모드", "dark")
       .addSection("참여 · 그룹")
-      .addRadio("그룹", "group",
-        Object.entries(VL.GROUPS).map(([k, v]) => ({ value: k, label: v.name })),
+      .addRadio(
+        "그룹",
+        "group",
+        Object.entries(VL.GROUPS).map(([k, v]) => ({
+          value: k,
+          label: v.name,
+        })),
       )
       .addButton(
         "온보딩 다시 보기",

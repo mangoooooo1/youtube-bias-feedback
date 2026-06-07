@@ -1,4 +1,7 @@
 const EXPERIMENT_DAYS = 21;
+
+window.buildDataForDate = buildDataForDate;
+window.koreanDateLabel = koreanDateLabel;
 const DEFAULT_TONE = "indigo";
 
 // ── Category name (Korean) → VL short key ─────────────────────────────────────
@@ -83,8 +86,8 @@ function topKey(sess) {
 
 // ── Build VL.today ────────────────────────────────────────────────────────────
 
-function buildTodayData(allSessions) {
-  const todayStr = dateStr(new Date());
+function buildDataForDate(allSessions, targetDate) {
+  const todayStr = dateStr(targetDate);
 
   const todaySess = allSessions.filter(
     (s) =>
@@ -94,42 +97,23 @@ function buildTodayData(allSessions) {
       Object.keys(s.categoryDistribution).length > 0,
   );
 
-  // Fallback to last available day if today has no data
-  const sourceSessions =
-    todaySess.length > 0
-      ? todaySess
-      : (() => {
-          const analyzed = allSessions
-            .filter(
-              (s) =>
-                s.endTime &&
-                s.categoryDistribution &&
-                Object.keys(s.categoryDistribution).length > 0,
-            )
-            .sort((a, b) => new Date(b.endTime) - new Date(a.endTime));
-          if (analyzed.length === 0) return [];
-          const lastDate = dateStr(new Date(analyzed[0].endTime));
-          return analyzed.filter(
-            (s) => dateStr(new Date(s.endTime)) === lastDate,
-          );
-        })();
-
-  if (sourceSessions.length === 0) {
-    // No data at all — return placeholder
+  if (todaySess.length === 0) {
     return {
-      dateLabel: koreanDateLabel(new Date()),
+      isEmpty: true,
+      dateLabel: koreanDateLabel(targetDate),
       videoCount: 0,
       sessionCount: 0,
-      dist: VL.dist({ etc: 1 }),
+      dist: [],
       prevEntropy: 0,
       prevDateLabel: "—",
       videos: [],
-      review:
-        "아직 분석된 시청 기록이 없어요. YouTube를 시청하면 세션이 자동으로 분석돼요.",
+      review: "",
     };
   }
 
-  const sourceDate = new Date(sourceSessions[0].endTime);
+  const sourceSessions = todaySess;
+
+  const sourceDate = targetDate;
   const sourceDateStr = dateStr(sourceDate);
   const distObj = mergeDist(sourceSessions);
   const distArr = VL.dist(distObj);
@@ -139,8 +123,8 @@ function buildTodayData(allSessions) {
   );
   const review =
     sourceSessions.at(-1)?.review ||
-    "시청 패턴을 분석하고 있어요. 잠시 후 코치 노트가 업데이트돼요.";
-  const reviewTopic = sourceSessions.at(-1)?.reviewTopic || '';
+    "시청 패턴을 분석하고 있어요. 잠시 후 시청 분석이 업데이트돼요.";
+  const reviewTopic = sourceSessions.at(-1)?.reviewTopic || "";
 
   const videos = sourceSessions
     .flatMap((sess) => {
@@ -349,7 +333,28 @@ async function boot() {
     "sessions",
     "tone",
     "dark",
+    "currentSession",
+    "lastWatchedAt",
+    "anonymousId",
+    "serverUrl",
   ]);
+
+  // 이미 온보딩된 사용자 중 anonymousId가 없는 경우 생성
+  if (stored.group && !stored.anonymousId) {
+    stored.anonymousId = crypto.randomUUID();
+    await chrome.storage.local.set({ anonymousId: stored.anonymousId });
+    if (stored.serverUrl && !stored.serverUrl.startsWith("YOUR_")) {
+      fetch(`${stored.serverUrl.replace(/\/$/, "")}/api/participants`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          anonymousId: stored.anonymousId,
+          group_code: stored.group,
+          installDate: stored.installDate,
+        }),
+      }).catch(() => {});
+    }
+  }
 
   const sessions = stored.sessions || [];
   const installDate = stored.installDate || null;
@@ -357,8 +362,15 @@ async function boot() {
   const darkMode = !!stored.dark;
 
   // Inject real data into VL globals before popup renders
-  const realToday = buildTodayData(sessions);
-  if (realToday) VL.today = realToday;
+  const collectingCount = stored.currentSession?.videos?.length ?? 0;
+  VL._allSessions = sessions;
+  VL._installDate = installDate;
+  VL._lastWatchedAt = stored.lastWatchedAt || null;
+
+  const realToday = buildDataForDate(sessions, new Date());
+  realToday.collectingCount = collectingCount;
+  realToday.collectingTimer = _computeTimerText(stored.lastWatchedAt);
+  VL.today = realToday;
 
   if (installDate) {
     VL.weeks = buildWeeksData(sessions, installDate);
@@ -377,14 +389,93 @@ async function boot() {
     timelineKey: calcTimelineKey(installDate),
     onChange: async ({ onboarded: ob, group: g }) => {
       if (ob && g) {
+        const { anonymousId: existing, serverUrl } =
+          await chrome.storage.local.get(["anonymousId", "serverUrl"]);
+        const anonymousId = existing || crypto.randomUUID();
+        const installDate = new Date().toISOString();
+
         await chrome.storage.local.set({
+          anonymousId,
           group: g,
-          installDate: new Date().toISOString(),
+          installDate,
           surveyStatus: { week1: false, week2: false, week3: false },
         });
+
+        if (serverUrl && !serverUrl.startsWith("YOUR_")) {
+          fetch(`${serverUrl.replace(/\/$/, "")}/api/participants`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ anonymousId, group_code: g, installDate }),
+          }).catch(() => {});
+        }
       }
     },
   });
+
+  // 로컬 캐시 — storage.onChanged로 갱신, setInterval에서는 캐시만 읽음
+  let localCurrentSession = stored.currentSession || null;
+  let localLastWatchedAt = stored.lastWatchedAt || null;
+
+  // sessions가 바뀌면(분석 완료, 리뷰 저장 등) 즉시 today 데이터를 갱신하고 re-render
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes.currentSession) localCurrentSession = changes.currentSession.newValue || null;
+    if (changes.lastWatchedAt) localLastWatchedAt = changes.lastWatchedAt.newValue || null;
+    if (!changes.sessions) return;
+    const updatedSessions = changes.sessions.newValue || [];
+    VL._allSessions = updatedSessions;
+    const freshToday = buildDataForDate(updatedSessions, new Date());
+    freshToday.collectingCount = localCurrentSession?.videos?.length ?? 0;
+    freshToday.collectingTimer = _computeTimerText(localLastWatchedAt);
+    VL.today = freshToday;
+    if (installDate) {
+      VL.weeks = buildWeeksData(updatedSessions, installDate);
+      VL.baselineH = VL.weeks[0]?.entropy ?? 0;
+    }
+    popup.render();
+  });
+
+  // 수집 중 표시 실시간 업데이트 (1초 간격) — 캐시된 로컬 변수만 참조
+  let prevIsCollecting = collectingCount > 0 || !!realToday.collectingTimer;
+
+  setInterval(() => {
+    VL._lastWatchedAt = localLastWatchedAt;
+
+    const count = localCurrentSession?.videos?.length ?? 0;
+    const timerText = _computeTimerText(localLastWatchedAt);
+    const isNowCollecting = count > 0 || !!timerText;
+
+    if (isNowCollecting !== prevIsCollecting) {
+      prevIsCollecting = isNowCollecting;
+      VL.today = {
+        ...VL.today,
+        collectingCount: count,
+        collectingTimer: timerText,
+      };
+      popup.render();
+      return;
+    }
+
+    const countEl = document.getElementById("vl-collecting-count");
+    const timerEl = document.getElementById("vl-collecting-timer");
+    if (!countEl || !timerEl) return;
+
+    countEl.textContent = count > 0 ? `영상 ${count}개 수집 중` : "분석 중...";
+    timerEl.textContent =
+      timerText || (localLastWatchedAt ? "피드백 생성 중..." : "");
+  }, 1000);
+}
+
+const COLLECTING_TIMEOUT_MS = 10 * 60 * 1000;
+
+function _computeTimerText(lastWatchedAt) {
+  if (!lastWatchedAt) return "";
+  const elapsed = Date.now() - new Date(lastWatchedAt).getTime();
+  const remaining = Math.max(0, COLLECTING_TIMEOUT_MS - elapsed);
+  if (remaining <= 0) return "";
+  const mins = Math.floor(remaining / 60000);
+  const secs = Math.floor((remaining % 60000) / 1000);
+  return `피드백까지 ${mins}분 ${String(secs).padStart(2, "0")}초`;
 }
 
 boot().catch((err) => {

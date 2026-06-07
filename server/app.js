@@ -16,8 +16,10 @@ app.get("/health", (_req, res) => {
   return success(res, { status: "healthy", timestamp: Date.now() });
 });
 
+app.use("/api/participants", require("./routes/participants"));
 app.use("/api/sessions", require("./routes/sessions"));
 app.use("/api/surveys", require("./routes/surveys"));
+app.use("/api/video-events", require("./routes/video-events"));
 
 app.use(errorHandler);
 
