@@ -145,13 +145,7 @@ function screenToday() {
     )
     .join("");
 
-  const isToday =
-    d.dateLabel ===
-    new Date().toLocaleDateString("ko-KR", {
-      month: "long",
-      day: "numeric",
-      weekday: "long",
-    });
+  const isToday = d.dateLabel === koreanDateLabel(new Date());
   const isCollecting = d.collectingCount > 0 || !!d.collectingTimer;
   const collectingRow = isCollecting
     ? `
