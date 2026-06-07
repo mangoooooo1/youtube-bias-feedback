@@ -1,8 +1,3 @@
-// viewlens-screens.js — screen HTML generators + event binders
-// Depends on: viewlens-logo.js, viewlens-data.js, viewlens-ui.js
-// Exports (window): screenOnboarding, bindOnboarding,
-//   screenToday, screenFeedback, screenControlHome, screenSurveyModal
-
 function _lockIcon(size = 12) {
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" style="flex-shrink:0" xmlns="http://www.w3.org/2000/svg">
     <rect x="5" y="10" width="14" height="10" rx="2.5" fill="currentColor"/>
@@ -15,7 +10,7 @@ function _lockIcon(size = 12) {
 function screenOnboarding() {
   return `<div style="padding:34px 22px 26px;display:flex;flex-direction:column;min-height:100%;box-sizing:border-box">
     <div style="display:flex;flex-direction:column;align-items:center;text-align:center;margin-top:18px">
-      ${markSVG({ size: 64, accent: 'var(--vl-accent)' })}
+      ${markSVG({ size: 64, accent: "var(--vl-accent)" })}
       <div style="margin-top:18px;font-size:25px;font-weight:800;letter-spacing:-0.03em;color:var(--vl-ink)">
         View<span style="color:var(--vl-accent)">Lens</span>
       </div>
@@ -52,27 +47,35 @@ function screenOnboarding() {
 }
 
 function bindOnboarding(root, onSubmit) {
-  const input = root.querySelector('#vl-onboard-input');
-  const errEl = root.querySelector('#vl-onboard-err');
-  const btn   = root.querySelector('#vl-onboard-btn');
+  const input = root.querySelector("#vl-onboard-input");
+  const errEl = root.querySelector("#vl-onboard-err");
+  const btn = root.querySelector("#vl-onboard-btn");
 
   function submit() {
     const c = input.value.trim().toUpperCase();
-    if (!c) { showErr('코드를 입력해 주세요.'); return; }
-    if (!VL.GROUPS[c]) { showErr('유효하지 않은 코드예요. 연구자에게 받은 코드를 확인해 주세요.'); return; }
+    if (!c) {
+      showErr("코드를 입력해 주세요.");
+      return;
+    }
+    if (!VL.GROUPS[c]) {
+      showErr("유효하지 않은 코드예요. 연구자에게 받은 코드를 확인해 주세요.");
+      return;
+    }
     onSubmit(c);
   }
   function showErr(msg) {
     errEl.textContent = msg;
-    errEl.style.display = 'block';
-    input.style.borderColor = 'var(--vl-warn)';
+    errEl.style.display = "block";
+    input.style.borderColor = "var(--vl-warn)";
   }
-  input.addEventListener('input', () => {
-    errEl.style.display = 'none';
-    input.style.borderColor = 'var(--vl-line-2)';
+  input.addEventListener("input", () => {
+    errEl.style.display = "none";
+    input.style.borderColor = "var(--vl-line-2)";
   });
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
-  btn.addEventListener('click', submit);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submit();
+  });
+  btn.addEventListener("click", submit);
 }
 
 // ── Today ─────────────────────────────────────────────────────────────────────
@@ -82,15 +85,24 @@ function screenToday() {
   const h = VL.entropy(d.dist);
   const b = VL.band(h);
   const delta = h - d.prevEntropy;
-  const bCol = b.tone === 'good' ? 'var(--vl-good)' : b.tone === 'warn' ? 'var(--vl-warn)' : 'var(--vl-ink)';
+  const bCol =
+    b.tone === "good"
+      ? "var(--vl-good)"
+      : b.tone === "warn"
+        ? "var(--vl-warn)"
+        : "var(--vl-ink)";
 
-  const catRows = d.dist.map(c => `
+  const catRows = d.dist
+    .map(
+      (c) => `
     <div style="display:flex;align-items:center;gap:8px">
       <span style="width:8px;height:8px;border-radius:3px;background:${c.color};flex-shrink:0"></span>
       <span style="font-size:12px;color:var(--vl-ink);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name}</span>
       <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--vl-ink-2)">${Math.round(c.p * 100)}%</span>
     </div>
-  `).join('');
+  `,
+    )
+    .join("");
 
   return `<div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
     <div style="display:flex;align-items:baseline;justify-content:space-between">
@@ -98,11 +110,13 @@ function screenToday() {
         <div style="font-size:17px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">오늘의 시청</div>
         <div style="font-size:12px;color:var(--vl-ink-3);margin-top:2px">${d.dateLabel}</div>
       </div>
-      ${vlBadge({ text: `${d.videoCount}개 영상 · ${d.dist.length}개 분야`, tone: 'neutral' })}
+      ${vlBadge({ text: `${d.videoCount}개 영상 · ${d.dist.length}개 분야`, tone: "neutral" })}
     </div>
 
-    ${vlCard({ pad: 16, children: `
-      ${vlSectionLabel({ text: '오늘의 시청 다양성' })}
+    ${vlCard({
+      pad: 16,
+      children: `
+      ${vlSectionLabel({ text: "오늘의 시청 다양성" })}
       <div style="display:flex;align-items:baseline;gap:8px;margin:2px 0 18px">
         <span style="font-size:26px;font-weight:800;letter-spacing:-0.02em;color:${bCol}">${b.label}</span>
         <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--vl-ink-3)">${h.toFixed(2)} / ${VL.H_MAX.toFixed(1)}</span>
@@ -127,22 +141,26 @@ function screenToday() {
           </div>
           <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px">
             ${vlDeltaChip({ value: delta })}
-            <span style="font-size:11px;font-weight:700;color:${delta >= 0 ? 'var(--vl-good)' : 'var(--vl-warn)'}">${delta >= 0 ? '더 다양해졌어요' : '더 편중됐어요'}</span>
+            <span style="font-size:11px;font-weight:700;color:${delta >= 0 ? "var(--vl-good)" : "var(--vl-warn)"}">${delta >= 0 ? "더 다양해졌어요" : "더 편중됐어요"}</span>
           </div>
         </div>
         <p style="margin:11px 0 0;font-size:10.5px;color:var(--vl-ink-3);line-height:1.5">
           매일 보지 않아도 괜찮아요 — 어제가 아니라 마지막으로 시청한 날과 비교해요.
         </p>
       </div>
-    ` })}
+    `,
+    })}
 
-    ${vlCard({ pad: 16, children: `
-      ${vlSectionLabel({ text: '카테고리 분포', right: `<span style="font-size:11px;color:var(--vl-ink-3)">오늘 ${d.videoCount}개</span>` })}
+    ${vlCard({
+      pad: 16,
+      children: `
+      ${vlSectionLabel({ text: "카테고리 분포", right: `<span style="font-size:11px;color:var(--vl-ink-3)">오늘 ${d.videoCount}개</span>` })}
       <div style="display:flex;align-items:center;gap:16px;margin-top:6px">
         ${vlDonut({ data: d.dist, size: 124 })}
         <div style="flex:1;display:flex;flex-direction:column;gap:8px">${catRows}</div>
       </div>
-    ` })}
+    `,
+    })}
 
     ${vlReview({ text: d.review, videos: d.videos })}
   </div>`;
@@ -154,26 +172,29 @@ function screenFeedback(currentWeek, selWeek) {
   const w = VL.weeks[selWeek - 1];
   const b = VL.band(w.entropy);
   const vsBase = w.entropy - VL.baselineH;
-  const badgeTone = b.tone === 'good' ? 'good' : b.tone === 'warn' ? 'warn' : 'accent';
+  const badgeTone =
+    b.tone === "good" ? "good" : b.tone === "warn" ? "warn" : "accent";
 
-  const weekBtns = VL.weeks.map(wk => {
-    const locked = wk.week > currentWeek;
-    const active = wk.week === selWeek && !locked;
-    return `<button data-week="${wk.week}" ${locked ? 'disabled' : ''}
-      style="flex:1;padding:10px 4px;border-radius:12px;cursor:${locked ? 'default' : 'pointer'};
-        border:1.5px solid ${active ? 'var(--vl-accent)' : 'var(--vl-line)'};
-        background:${active ? 'var(--vl-accent-soft)' : 'var(--vl-card)'};
-        color:${locked ? 'var(--vl-ink-3)' : active ? 'var(--vl-accent)' : 'var(--vl-ink-2)'};
+  const weekBtns = VL.weeks
+    .map((wk) => {
+      const locked = wk.week > currentWeek;
+      const active = wk.week === selWeek && !locked;
+      return `<button data-week="${wk.week}" ${locked ? "disabled" : ""}
+      style="flex:1;padding:10px 4px;border-radius:12px;cursor:${locked ? "default" : "pointer"};
+        border:1.5px solid ${active ? "var(--vl-accent)" : "var(--vl-line)"};
+        background:${active ? "var(--vl-accent-soft)" : "var(--vl-card)"};
+        color:${locked ? "var(--vl-ink-3)" : active ? "var(--vl-accent)" : "var(--vl-ink-2)"};
         font-family:inherit;font-weight:700;font-size:13px;opacity:${locked ? 0.65 : 1};
         display:flex;flex-direction:column;align-items:center;gap:3px">
       <span style="display:flex;align-items:center;gap:4px">
-        ${locked ? _lockIcon(10) : ''}${wk.label}
+        ${locked ? _lockIcon(10) : ""}${wk.label}
       </span>
       <span style="font-size:9.5px;font-weight:500;color:inherit;opacity:0.8;font-family:'JetBrains Mono',monospace">
-        ${locked ? `${wk.week}주차 공개` : wk.isBaseline ? '기준선' : ''}
+        ${locked ? `${wk.week}주차 공개` : wk.isBaseline ? "기준선" : ""}
       </span>
     </button>`;
-  }).join('');
+    })
+    .join("");
 
   const vsBaseContent = w.isBaseline
     ? `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">이 주의 점수가 이후 주차를 비교하는 <b style="color:var(--vl-ink)">기준선</b>이 돼요.</p>`
@@ -181,15 +202,17 @@ function screenFeedback(currentWeek, selWeek) {
         <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">기준선(1주차) 대비</div>
         <div style="display:flex;align-items:center;gap:7px">
           ${vlDeltaChip({ value: vsBase })}
-          <span style="font-size:12px;color:var(--vl-ink-2)">${vsBase >= 0 ? '더 다양해요' : '덜 다양해요'}</span>
+          <span style="font-size:12px;color:var(--vl-ink-2)">${vsBase >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
         </div>
       </div>`;
 
-  const baselineLegend = !w.isBaseline ? `
+  const baselineLegend = !w.isBaseline
+    ? `
     <div style="display:flex;align-items:center;gap:5px;margin-top:7px">
       <span style="width:14px;height:0;border-top:1px dashed var(--vl-ink-3)"></span>
       <span style="font-size:10.5px;color:var(--vl-ink-3)">점선 = 기준선 ${VL.baselineH.toFixed(2)}</span>
-    </div>` : '';
+    </div>`
+    : "";
 
   return `<div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
     <div style="display:flex;gap:8px" id="vl-week-btns">${weekBtns}</div>
@@ -198,14 +221,16 @@ function screenFeedback(currentWeek, selWeek) {
       <div>
         <div style="font-size:16px;font-weight:800;color:var(--vl-ink)">
           ${w.label} 리포트
-          ${w.isBaseline ? '<span style="font-size:11px;color:var(--vl-ink-3);font-weight:600"> · 베이스라인</span>' : ''}
+          ${w.isBaseline ? '<span style="font-size:11px;color:var(--vl-ink-3);font-weight:600"> · 베이스라인</span>' : ""}
         </div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--vl-ink-3);margin-top:2px">${w.range}</div>
       </div>
       ${vlBadge({ text: b.label, tone: badgeTone })}
     </div>
 
-    ${vlCard({ pad: 16, children: `
+    ${vlCard({
+      pad: 16,
+      children: `
       <div style="display:flex;align-items:center;gap:14px">
         <div style="text-align:center;flex-shrink:0">
           <div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:30px;color:var(--vl-ink);line-height:1;letter-spacing:-0.02em">${w.entropy.toFixed(2)}</div>
@@ -215,16 +240,20 @@ function screenFeedback(currentWeek, selWeek) {
         <div style="flex:1">${vsBaseContent}</div>
       </div>
       <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--vl-line)">
-        ${vlSectionLabel({ text: '일별 다양성 추이' })}
+        ${vlSectionLabel({ text: "일별 다양성 추이" })}
         ${vlMiniLine({ data: w.daily, baseline: w.isBaseline ? null : VL.baselineH })}
         ${baselineLegend}
       </div>
-    ` })}
+    `,
+    })}
 
-    ${vlCard({ pad: 16, children: `
-      ${vlSectionLabel({ text: '주간 카테고리 분포' })}
+    ${vlCard({
+      pad: 16,
+      children: `
+      ${vlSectionLabel({ text: "주간 카테고리 분포" })}
       ${vlBarChart({ data: w.dist })}
-    ` })}
+    `,
+    })}
 
     ${vlReview({ text: w.review, title: `${w.label} 코치 노트` })}
   </div>`;
@@ -234,32 +263,40 @@ function screenFeedback(currentWeek, selWeek) {
 
 function screenControlHome(day) {
   const cells = [
-    { v: `${VL.con.todayCount}개`, l: '오늘 시청한 영상' },
-    { v: `${VL.con.totalCount}개`, l: '총 누적 시청' },
-    { v: `${day}일째`,             l: '설치 후' },
-    { v: `D-${VL.TOTAL_DAYS - day}`, l: '실험 종료까지' },
+    { v: `${VL.con.todayCount}개`, l: "오늘 시청한 영상" },
+    { v: `${VL.con.totalCount}개`, l: "총 누적 시청" },
+    { v: `${day}일째`, l: "설치 후" },
+    { v: `D-${VL.TOTAL_DAYS - day}`, l: "실험 종료까지" },
   ];
-  const gridCells = cells.map((cell, i) => `
-    <div style="padding:16px 18px;border-right:${i % 2 === 0 ? '1px solid var(--vl-line)' : 'none'};border-bottom:${i < 2 ? '1px solid var(--vl-line)' : 'none'}">
+  const gridCells = cells
+    .map(
+      (cell, i) => `
+    <div style="padding:16px 18px;border-right:${i % 2 === 0 ? "1px solid var(--vl-line)" : "none"};border-bottom:${i < 2 ? "1px solid var(--vl-line)" : "none"}">
       <div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:24px;color:var(--vl-ink);letter-spacing:-0.02em;line-height:1">${cell.v}</div>
       <div style="font-size:11.5px;color:var(--vl-ink-3);margin-top:6px;font-weight:500">${cell.l}</div>
     </div>
-  `).join('');
+  `,
+    )
+    .join("");
 
   return `<div style="padding:20px 18px 24px;display:flex;flex-direction:column;gap:16px">
-    ${vlCard({ pad: 20, style: 'text-align:center', children: `
+    ${vlCard({
+      pad: 20,
+      style: "text-align:center",
+      children: `
       <div style="position:relative;width:76px;height:76px;margin:6px auto 0">
         <span style="position:absolute;inset:0;border-radius:50%;background:var(--vl-accent-soft)"></span>
         <span style="position:absolute;inset:0;border-radius:50%;border:2px solid var(--vl-accent);opacity:0.5;animation:vlPulse 2.4s ease-out infinite"></span>
         <span style="position:absolute;inset:0;display:grid;place-items:center">
-          ${markSVG({ size: 36, filled: false, accent: 'var(--vl-accent)' })}
+          ${markSVG({ size: 36, filled: false, accent: "var(--vl-accent)" })}
         </span>
       </div>
       <div style="margin-top:16px;font-size:16.5px;font-weight:800;color:var(--vl-ink)">시청 기록을 수집하고 있어요</div>
       <p style="margin:9px auto 0;max-width:250px;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
         평소처럼 유튜브를 시청해 주세요. 연구 기간 동안 시청 데이터가 기기 안에 안전하게 기록돼요.
       </p>
-    ` })}
+    `,
+    })}
 
     ${vlCard({ pad: 0, children: `<div style="display:grid;grid-template-columns:1fr 1fr">${gridCells}</div>` })}
 
@@ -280,7 +317,7 @@ function screenSurveyModal(week) {
   return `<div id="vl-survey-overlay" style="position:absolute;inset:0;z-index:40;background:color-mix(in oklab,var(--vl-ink) 42%,transparent);backdrop-filter:blur(2px)">
     <div style="position:absolute;left:0;right:0;bottom:0;background:var(--vl-card);border-radius:22px 22px 0 0;padding:22px 20px 20px;box-shadow:0 -16px 40px rgba(0,0,0,.18);animation:vlSheet .32s cubic-bezier(.2,.9,.2,1)">
       <div style="width:38px;height:4px;border-radius:999px;background:var(--vl-line-2);margin:0 auto 16px"></div>
-      ${vlBadge({ text: `${week}주차 설문`, tone: 'accent', size: 'sm' })}
+      ${vlBadge({ text: `${week}주차 설문`, tone: "accent", size: "sm" })}
       <h3 style="margin:12px 0 0;font-size:18px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${week}주차가 끝났어요!</h3>
       <p style="margin:8px 0 0;font-size:13.5px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
         연구자가 개인적으로 보내드린 <b style="color:var(--vl-ink)">설문 링크</b>에 참여해 주세요.
@@ -297,9 +334,9 @@ function screenSurveyModal(week) {
   </div>`;
 }
 
-window.screenOnboarding  = screenOnboarding;
-window.bindOnboarding    = bindOnboarding;
-window.screenToday       = screenToday;
-window.screenFeedback    = screenFeedback;
+window.screenOnboarding = screenOnboarding;
+window.bindOnboarding = bindOnboarding;
+window.screenToday = screenToday;
+window.screenFeedback = screenFeedback;
 window.screenControlHome = screenControlHome;
 window.screenSurveyModal = screenSurveyModal;
