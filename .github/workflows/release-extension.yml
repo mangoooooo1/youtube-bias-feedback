@@ -24,7 +24,7 @@ jobs:
             echo "changed=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Create config.js
+      - name: Create config.js and patch manifest.json
         if: steps.check.outputs.changed == 'true'
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
@@ -33,6 +33,16 @@ jobs:
         run: |
           printf "export const YOUTUBE_API_KEY = '%s';\nexport const GEMINI_API_KEY = '%s';\nexport const SERVER_URL = '%s';\n" \
             "$YOUTUBE_API_KEY" "$GEMINI_API_KEY" "$SERVER_URL" > extension/config.js
+
+          node -e "
+            const fs = require('fs');
+            const manifest = JSON.parse(fs.readFileSync('extension/manifest.json', 'utf8'));
+            const serverOrigin = new URL('$SERVER_URL').origin + '/*';
+            if (!manifest.host_permissions.includes(serverOrigin)) {
+              manifest.host_permissions.push(serverOrigin);
+            }
+            fs.writeFileSync('extension/manifest.json', JSON.stringify(manifest, null, 2) + '\n');
+          "
 
       - name: Zip Extension
         if: steps.check.outputs.changed == 'true'
