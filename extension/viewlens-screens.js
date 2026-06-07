@@ -39,7 +39,7 @@ function screenOnboarding() {
           ${_lockIcon(9)}
         </div>
         <p style="margin:0;font-size:11.5px;line-height:1.55;color:var(--vl-ink-2);text-wrap:pretty">
-          시청 기록은 기기 안에만 저장돼요. 연구에는 카테고리 분포와 다양성 점수 같은 분석 결과만 익명으로 쓰여요.
+          시청 기록은 익명으로 저장됩니다. 누가 어떤 영상을 봤는지는 특정되지 않으며, 수집된 데이터는 오직 연구 목적으로만 사용됩니다.
         </p>
       </div>
     </div>
@@ -111,9 +111,13 @@ function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
       </div>
       <div>
         <div style="font-size:16px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${isToday ? "아직 오늘 시청 기록이 없어요" : "이 날 시청 기록이 없어요"}</div>
-        ${isToday ? `<p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;max-width:240px">
+        ${
+          isToday
+            ? `<p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;max-width:240px">
           유튜브를 시청하면 자동으로 수집이 시작돼요.<br>시청 종료 10분 후 분석 결과가 나타나요.
-        </p>` : ""}
+        </p>`
+            : ""
+        }
       </div>
       <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--vl-ink-3)">${dateLabel}</div>
     </div>
@@ -141,16 +145,24 @@ function screenToday() {
     )
     .join("");
 
-  const isToday = d.dateLabel === new Date().toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "long" });
+  const isToday =
+    d.dateLabel ===
+    new Date().toLocaleDateString("ko-KR", {
+      month: "long",
+      day: "numeric",
+      weekday: "long",
+    });
   const isCollecting = d.collectingCount > 0 || !!d.collectingTimer;
-  const collectingRow = isCollecting ? `
+  const collectingRow = isCollecting
+    ? `
     <div style="display:flex;align-items:center;gap:6px">
       <span style="width:6px;height:6px;border-radius:50%;background:var(--vl-accent);flex-shrink:0;animation:vlBlink 1.6s ease-in-out infinite"></span>
       <div style="display:flex;flex-direction:column;gap:1px">
         <span id="vl-collecting-count" style="font-size:11.5px;font-weight:600;color:var(--vl-accent)">${d.collectingCount > 0 ? `영상 ${d.collectingCount}개 수집 중` : "분석 중..."}</span>
         <span id="vl-collecting-timer" style="font-size:10.5px;color:var(--vl-accent);opacity:0.8">${d.collectingTimer || ""}</span>
       </div>
-    </div>` : "";
+    </div>`
+    : "";
   return `<div style="display:flex;flex-direction:column">
     <div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
     <div style="display:flex;align-items:center;justify-content:space-between">
