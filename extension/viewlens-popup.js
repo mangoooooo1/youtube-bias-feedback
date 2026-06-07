@@ -1,4 +1,7 @@
 const EXPERIMENT_DAYS = 21;
+
+window.buildDataForDate = buildDataForDate;
+window.koreanDateLabel = koreanDateLabel;
 const DEFAULT_TONE = "indigo";
 
 // ── Category name (Korean) → VL short key ─────────────────────────────────────
@@ -110,7 +113,7 @@ function buildDataForDate(allSessions, targetDate) {
 
   const sourceSessions = todaySess;
 
-  const sourceDate = new Date(sourceSessions[0].endTime);
+  const sourceDate = targetDate;
   const sourceDateStr = dateStr(sourceDate);
   const distObj = mergeDist(sourceSessions);
   const distArr = VL.dist(distObj);
@@ -340,7 +343,10 @@ async function boot() {
 
   // Inject real data into VL globals before popup renders
   const collectingCount = stored.currentSession?.videos?.length ?? 0;
-  const realToday = buildTodayData(sessions);
+  VL._allSessions = sessions;
+  VL._installDate = installDate;
+
+  const realToday = buildDataForDate(sessions, new Date());
   realToday.collectingCount = collectingCount;
   VL.today = realToday;
 

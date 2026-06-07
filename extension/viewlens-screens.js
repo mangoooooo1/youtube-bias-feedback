@@ -89,10 +89,15 @@ function _collectingBanner(count) {
   </div>`;
 }
 
-function screenTodayEmpty(dateLabel, collectingCount) {
+function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
   return `<div style="display:flex;flex-direction:column;min-height:100%">
     ${_collectingBanner(collectingCount)}
-    <div style="flex:1;padding:40px 24px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:20px">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px 0">
+      <button id="vl-date-prev" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:var(--vl-ink-2);cursor:pointer;font-size:15px;display:grid;place-items:center">‹</button>
+      <div style="font-size:13px;font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : dateLabel}</div>
+      <button id="vl-date-next" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:${isToday ? "var(--vl-ink-3)" : "var(--vl-ink-2)"};cursor:${isToday ? "default" : "pointer"};font-size:15px;display:grid;place-items:center;opacity:${isToday ? 0.35 : 1}" ${isToday ? "disabled" : ""}>›</button>
+    </div>
+    <div style="flex:1;padding:24px 24px 40px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:20px">
       <div style="position:relative;width:80px;height:80px">
         <span style="position:absolute;inset:0;border-radius:50%;background:var(--vl-accent-soft);animation:vlPulse 2.4s ease-out infinite"></span>
         <span style="position:absolute;inset:0;border-radius:50%;border:2px solid var(--vl-accent);opacity:0.4;animation:vlPulse 2.4s ease-out infinite 0.6s"></span>
@@ -101,10 +106,10 @@ function screenTodayEmpty(dateLabel, collectingCount) {
         </span>
       </div>
       <div>
-        <div style="font-size:16px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">아직 오늘 시청 기록이 없어요</div>
-        <p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;max-width:240px">
+        <div style="font-size:16px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${isToday ? "아직 오늘 시청 기록이 없어요" : "이 날 시청 기록이 없어요"}</div>
+        ${isToday ? `<p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;max-width:240px">
           유튜브를 시청하면 자동으로 수집이 시작돼요.<br>시청 종료 10분 후 분석 결과가 나타나요.
-        </p>
+        </p>` : ""}
       </div>
       <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--vl-ink-3)">${dateLabel}</div>
     </div>
@@ -113,7 +118,10 @@ function screenTodayEmpty(dateLabel, collectingCount) {
 
 function screenToday() {
   const d = VL.today;
-  if (d.isEmpty) return screenTodayEmpty(d.dateLabel, d.collectingCount);
+  if (d.isEmpty) {
+    const isToday = d.dateLabel === koreanDateLabel(new Date());
+    return screenTodayEmpty(d.dateLabel, d.collectingCount, isToday);
+  }
   const h = VL.entropy(d.dist);
   const delta = h - d.prevEntropy;
 
@@ -129,14 +137,20 @@ function screenToday() {
     )
     .join("");
 
+  const isToday = d.dateLabel === new Date().toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "long" });
   return `<div style="display:flex;flex-direction:column">
     ${_collectingBanner(d.collectingCount)}
     <div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <button id="vl-date-prev" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:var(--vl-ink-2);cursor:pointer;font-size:15px;display:grid;place-items:center">‹</button>
+      <div style="text-align:center">
+        <div style="font-size:16px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${isToday ? "오늘의 시청" : d.dateLabel}</div>
+        ${isToday ? `<div style="font-size:12px;color:var(--vl-ink-3);margin-top:2px">${d.dateLabel}</div>` : ""}
+      </div>
+      <button id="vl-date-next" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:${isToday ? "var(--vl-ink-3)" : "var(--vl-ink-2)"};cursor:${isToday ? "default" : "pointer"};font-size:15px;display:grid;place-items:center;opacity:${isToday ? 0.35 : 1}" ${isToday ? "disabled" : ""}>›</button>
+    </div>
     <div style="display:flex;align-items:baseline;justify-content:space-between">
       <div>
-        <div style="font-size:17px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">오늘의 시청</div>
-        <div style="font-size:12px;color:var(--vl-ink-3);margin-top:2px">${d.dateLabel}</div>
-      </div>
       ${vlBadge({ text: `${d.videoCount}개 영상 · ${d.dist.length}개 분야`, tone: "neutral" })}
     </div>
 

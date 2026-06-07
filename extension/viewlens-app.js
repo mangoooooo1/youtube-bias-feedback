@@ -50,6 +50,7 @@ class ViewLensPopup {
     this._completed = {}; // { [week]: true }
     this._snoozed = false;
     this._selWeek = 1;
+    this._selectedDate = new Date();
     // External app state (set via mount)
     this._onboarded = false;
     this._group = null;
@@ -94,6 +95,14 @@ class ViewLensPopup {
     const surveyWeek = tl.surveyWeek;
     const surveyPending = surveyWeek != null && !this._completed[surveyWeek];
     const showModal = surveyPending && !this._snoozed;
+
+    if (this._tab === "today") {
+      const d = buildDataForDate(VL._allSessions || [], this._selectedDate);
+      d.collectingCount = this._selectedDate.toDateString() === new Date().toDateString()
+        ? (VL.today?.collectingCount ?? 0)
+        : 0;
+      VL.today = d;
+    }
 
     let bodyHTML;
     if (groupCfg.feedback) {
@@ -168,6 +177,31 @@ class ViewLensPopup {
           }
         });
       });
+    // Date navigation
+    const prevBtn = this.container.querySelector("#vl-date-prev");
+    const nextBtn = this.container.querySelector("#vl-date-next");
+    if (prevBtn) {
+      prevBtn.addEventListener("click", () => {
+        const d = new Date(this._selectedDate);
+        d.setDate(d.getDate() - 1);
+        const installDate = VL._installDate ? new Date(VL._installDate) : null;
+        if (!installDate || d >= new Date(installDate.toDateString())) {
+          this._selectedDate = d;
+          this.render();
+        }
+      });
+    }
+    if (nextBtn) {
+      nextBtn.addEventListener("click", () => {
+        const today = new Date();
+        if (this._selectedDate.toDateString() !== today.toDateString()) {
+          const d = new Date(this._selectedDate);
+          d.setDate(d.getDate() + 1);
+          this._selectedDate = d;
+          this.render();
+        }
+      });
+    }
   }
 }
 
