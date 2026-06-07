@@ -15,17 +15,17 @@ function screenOnboarding() {
         View<span style="color:var(--vl-accent)">Lens</span>
       </div>
       <p style="margin:10px 0 0;font-size:13.5px;line-height:1.6;color:var(--vl-ink-2);max-width:260px;text-wrap:pretty">
-        내 유튜브 시청 편향을 비춰 보는 연구용 렌즈예요. 시작하려면 연구자에게 받은 참여 코드를 입력해 주세요.
+        추천 알고리즘을 너머 당신의 시청 습관을 돌아봅니다. 연구자에게 받은 참여 코드를 입력하여 시작해 주세요.
       </p>
     </div>
 
     <div style="margin-top:30px">
-      <label style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--vl-ink-3)">참여 코드</label>
-      <input id="vl-onboard-input" value="" placeholder="예: EXP" spellcheck="false" autocomplete="off"
+      <label style="font-size:12px; font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--vl-ink-3)">참여 코드</label>
+      <input id="vl-onboard-input" value="" placeholder="연구자에게 받은 참여 코드" spellcheck="false" autocomplete="off"
         style="display:block;margin-top:9px;width:100%;box-sizing:border-box;padding:13px 15px;
           border:1.5px solid var(--vl-line-2);border-radius:13px;background:var(--vl-card-2);
-          color:var(--vl-ink);outline:none;font-family:'JetBrains Mono',monospace;
-          font-size:17px;font-weight:600;letter-spacing:0.22em;text-transform:uppercase"/>
+          color:var(--vl-ink);outline:none;
+          font-size:13px; letter-spacing:0.1em;text-transform:uppercase"/>
       <p id="vl-onboard-err" style="display:none;margin:9px 2px 0;font-size:12px;color:var(--vl-warn);line-height:1.5"></p>
       <button id="vl-onboard-btn"
         style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:13px;
@@ -168,8 +168,7 @@ function screenToday() {
     <div style="display:flex;align-items:center;justify-content:space-between">
       <button id="vl-date-prev" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:var(--vl-ink-2);cursor:pointer;font-size:15px;display:grid;place-items:center">‹</button>
       <div style="text-align:center">
-        <div style="font-size:16px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${isToday ? "오늘의 시청" : d.dateLabel}</div>
-        ${isToday ? `<div style="font-size:12px;color:var(--vl-ink-3);margin-top:2px">${d.dateLabel}</div>` : ""}
+        <div style="font-size:16px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${isToday ? "오늘" : d.dateLabel}</div>
       </div>
       <button id="vl-date-next" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:${isToday ? "var(--vl-ink-3)" : "var(--vl-ink-2)"};cursor:${isToday ? "default" : "pointer"};font-size:15px;display:grid;place-items:center;opacity:${isToday ? 0.35 : 1}" ${isToday ? "disabled" : ""}>›</button>
     </div>
