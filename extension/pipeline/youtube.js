@@ -1,4 +1,4 @@
-import { YOUTUBE_API_KEY } from './config.js';
+import { YOUTUBE_API_KEY } from '../config.js';
 
 const API_BASE = 'https://www.googleapis.com/youtube/v3/videos';
 const BATCH_SIZE = 50;

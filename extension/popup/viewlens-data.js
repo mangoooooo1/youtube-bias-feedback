@@ -95,29 +95,13 @@ const TIMELINE = {
 const TOTAL_DAYS = 21;
 
 const GROUPS = {
-  EXP:  { code: 'EXP',  name: '실험군',       feedback: true,  note: '시청 분석과 피드백을 받습니다.' },
-  CON:  { code: 'CON',  name: '대조군',       feedback: false, note: '실험 기간 중 피드백 제공 시점은 참여자마다 다를 수 있으며, 실험 종료 후 모든 참여자에게 결과를 공유합니다.' },
-  TEST: { code: 'TEST', name: '연구자·테스트', feedback: true,  note: '모든 화면을 미리 볼 수 있습니다.' },
+  EXP:          { code: 'EXP',      name: '실험군',          feedback: true,  note: '시청 분석과 피드백을 받습니다.' },
+  CON:          { code: 'CON',      name: '대조군',          feedback: false, note: '실험 기간 중 피드백 제공 시점은 참여자마다 다를 수 있으며, 실험 종료 후 모든 참여자에게 결과를 공유합니다.' },
+  'TEST-EXP':   { code: 'TEST-EXP', name: '연구자 (실험군)', feedback: true,  note: '모든 화면을 미리 볼 수 있습니다.' },
+  'TEST-CON':   { code: 'TEST-CON', name: '연구자 (대조군)', feedback: false, note: '모든 화면을 미리 볼 수 있습니다.' },
 };
 
 const TONES = {
-  aperture: {
-    label: '애퍼처 오렌지',
-    light: {
-      '--vl-bg': '#f4f2ef', '--vl-card': '#ffffff', '--vl-card-2': '#faf8f5',
-      '--vl-ink': '#1c1917', '--vl-ink-2': '#6b6560', '--vl-ink-3': '#a8a29e',
-      '--vl-line': '#ece8e3', '--vl-line-2': '#e2ddd6',
-      '--vl-accent': '#ea580c', '--vl-accent-2': '#c2410c', '--vl-accent-soft': '#fdeee3',
-      '--vl-on-accent': '#ffffff', '--vl-good': '#2f9e6b', '--vl-warn': '#d4781f',
-    },
-    dark: {
-      '--vl-bg': '#17140f', '--vl-card': '#211c16', '--vl-card-2': '#2a241c',
-      '--vl-ink': '#f7f3ee', '--vl-ink-2': '#b3aaa0', '--vl-ink-3': '#7c736a',
-      '--vl-line': '#332c23', '--vl-line-2': '#403830',
-      '--vl-accent': '#fb7a3c', '--vl-accent-2': '#fb923c', '--vl-accent-soft': '#3a261a',
-      '--vl-on-accent': '#1c1209', '--vl-good': '#4ec78d', '--vl-warn': '#e8a85a',
-    },
-  },
   indigo: {
     label: '인디고 포커스',
     light: {
@@ -135,27 +119,19 @@ const TONES = {
       '--vl-on-accent': '#0e1018', '--vl-good': '#34d399', '--vl-warn': '#fbbf24',
     },
   },
-  ink: {
-    label: '모노 잉크',
-    light: {
-      '--vl-bg': '#eeeeec', '--vl-card': '#ffffff', '--vl-card-2': '#f6f6f4',
-      '--vl-ink': '#121212', '--vl-ink-2': '#5e5e5b', '--vl-ink-3': '#a0a09c',
-      '--vl-line': '#e6e6e2', '--vl-line-2': '#dadad5',
-      '--vl-accent': '#111111', '--vl-accent-2': '#000000', '--vl-accent-soft': '#ededea',
-      '--vl-on-accent': '#fbfbf8', '--vl-good': '#2f7d52', '--vl-warn': '#9a6a16',
-    },
-    dark: {
-      '--vl-bg': '#101010', '--vl-card': '#1a1a1a', '--vl-card-2': '#222222',
-      '--vl-ink': '#f4f4f1', '--vl-ink-2': '#a8a8a3', '--vl-ink-3': '#6f6f6a',
-      '--vl-line': '#2a2a2a', '--vl-line-2': '#353535',
-      '--vl-accent': '#fafafa', '--vl-accent-2': '#ffffff', '--vl-accent-soft': '#262626',
-      '--vl-on-accent': '#111111', '--vl-good': '#4ec78d', '--vl-warn': '#d6a449',
-    },
-  },
 };
 
 window.VL = {
   CATS: VL_CATS, dist, entropy, band, H_MAX,
   today, weeks, baselineH, TIMELINE, TOTAL_DAYS, GROUPS, TONES,
   con: { todayCount: 12, totalCount: 47 },
+};
+
+// Studio stubs — viewlens-popup.js overrides these with real implementations in popup context
+window.koreanDateLabel = function (d) {
+  const days = ['일', '월', '화', '수', '목', '금', '토'];
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${days[d.getDay()]}요일`;
+};
+window.buildDataForDate = function () {
+  return { ...VL.today };
 };

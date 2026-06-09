@@ -1,31 +1,31 @@
 @font-face {
   font-family: "Pretendard";
   font-weight: 400;
-  src: url("fonts/Pretendard-Regular.woff2") format("woff2");
+  src: url("../assets/fonts/Pretendard-Regular.woff2") format("woff2");
   font-display: swap;
 }
 @font-face {
   font-family: "Pretendard";
   font-weight: 500;
-  src: url("fonts/Pretendard-Medium.woff2") format("woff2");
+  src: url("../assets/fonts/Pretendard-Medium.woff2") format("woff2");
   font-display: swap;
 }
 @font-face {
   font-family: "Pretendard";
   font-weight: 600;
-  src: url("fonts/Pretendard-SemiBold.woff2") format("woff2");
+  src: url("../assets/fonts/Pretendard-SemiBold.woff2") format("woff2");
   font-display: swap;
 }
 @font-face {
   font-family: "Pretendard";
   font-weight: 700;
-  src: url("fonts/Pretendard-Bold.woff2") format("woff2");
+  src: url("../assets/fonts/Pretendard-Bold.woff2") format("woff2");
   font-display: swap;
 }
 @font-face {
   font-family: "Pretendard";
   font-weight: 800;
-  src: url("fonts/Pretendard-ExtraBold.woff2") format("woff2");
+  src: url("../assets/fonts/Pretendard-ExtraBold.woff2") format("woff2");
   font-display: swap;
 }
 
@@ -58,7 +58,7 @@ body {
   min-height: 100vh;
 }
 ::selection {
-  background: rgba(234, 88, 12, 0.18);
+  background: rgba(79, 70, 229, 0.18);
 }
 
 @keyframes vlPulse {

@@ -11,10 +11,16 @@ function _collectingTimerText() {
 }
 
 function _popupHeader(groupCfg, day) {
-  const badge =
-    groupCfg.code === "TEST"
-      ? vlBadge({ text: "연구자 모드", tone: "accent", size: "sm" })
-      : vlBadge({ text: "참여 중", tone: "neutral", size: "sm" });
+  const isTest = groupCfg.code.startsWith("TEST");
+  const badge = isTest
+    ? vlBadge({ text: "연구자 모드", tone: "accent", size: "sm" })
+    : vlBadge({ text: "참여 중", tone: "neutral", size: "sm" });
+  const rightArea = isTest
+    ? `<div style="display:flex;align-items:center;gap:7px">
+        <button id="vl-researcher-reset" style="padding:3px 8px;border:1px solid var(--vl-line-2);border-radius:6px;background:transparent;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;color:var(--vl-ink-2);line-height:1.7;white-space:nowrap">↩ 온보딩</button>
+        ${badge}
+      </div>`
+    : badge;
   return `<div style="padding:13px 16px;border-bottom:1px solid var(--vl-line);display:flex;align-items:center;justify-content:space-between;background:var(--vl-card);position:sticky;top:0;z-index:10">
     <div style="display:flex;align-items:center;gap:9px">
       ${markSVG({ size: 26, accent: "var(--vl-accent)" })}
@@ -23,7 +29,7 @@ function _popupHeader(groupCfg, day) {
         <span style="font-size:10.5px;color:var(--vl-ink-3);font-family:'JetBrains Mono',monospace;margin-top:2px">설치 ${day}일째 · 종료 D-${VL.TOTAL_DAYS - day}</span>
       </div>
     </div>
-    ${badge}
+    ${rightArea}
   </div>`;
 }
 
@@ -139,7 +145,7 @@ class ViewLensPopup {
   }
 
   _renderOnboarding() {
-    this.container.innerHTML = `<div style="height:100%;overflow-y:auto">${screenOnboarding()}</div>`;
+    this.container.innerHTML = `<div style="height:100%;overflow-y:auto;background:var(--vl-bg)">${screenOnboarding()}</div>`;
     bindOnboarding(this.container, (code) => {
       this._onboarded = true;
       this._group = code;
@@ -213,6 +219,16 @@ class ViewLensPopup {
           this._selectedDate = d;
           this.render();
         }
+      });
+    }
+    // 연구자 모드 전용 — 온보딩 화면으로 돌아가기
+    const researcherReset = this.container.querySelector("#vl-researcher-reset");
+    if (researcherReset) {
+      researcherReset.addEventListener("click", () => {
+        this._onboarded = false;
+        this._group = null;
+        this._onChange({ onboarded: false, group: null });
+        this.render();
       });
     }
   }
@@ -304,28 +320,28 @@ class Studio {
             <span style="width:22px;height:22px;border-radius:50%;margin-left:4px;display:inline-block;background:linear-gradient(135deg,#8a6cff,#ff8a5c)"></span>
           </div>
           <!-- webpage backdrop + popup -->
-          <div style="position:relative;height:612px;background:#0f0f0f;overflow:hidden">
+          <div style="position:relative;height:612px;background:#ffffff;overflow:hidden">
             <!-- yt skeleton -->
             <div style="position:absolute;inset:0;padding:22px;opacity:.5">
               <div style="display:flex;gap:18px">
                 <div style="width:150px;display:flex;flex-direction:column;gap:12px">
-                  ${Array.from({ length: 6 }, (_, i) => `<div style="height:12px;border-radius:6px;background:#222;width:${90 - i * 8}%"></div>`).join("")}
+                  ${Array.from({ length: 6 }, (_, i) => `<div style="height:12px;border-radius:6px;background:#e5e5e5;width:${90 - i * 8}%"></div>`).join("")}
                 </div>
                 <div style="flex:1;display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
                   ${Array.from(
                     { length: 9 },
                     () => `
                     <div>
-                      <div style="aspect-ratio:16/9;border-radius:10px;background:#1c1c1c"></div>
-                      <div style="height:9px;border-radius:5px;background:#222;margin:9px 0 5px;width:85%"></div>
-                      <div style="height:8px;border-radius:5px;background:#1c1c1c;width:55%"></div>
+                      <div style="aspect-ratio:16/9;border-radius:10px;background:#ececec"></div>
+                      <div style="height:9px;border-radius:5px;background:#e5e5e5;margin:9px 0 5px;width:85%"></div>
+                      <div style="height:8px;border-radius:5px;background:#ececec;width:55%"></div>
                     </div>
                   `,
                   ).join("")}
                 </div>
               </div>
             </div>
-            <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(15,15,15,0) 60%,rgba(15,15,15,.5))"></div>
+            <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(255,255,255,0) 60%,rgba(255,255,255,.5))"></div>
             <!-- popup caret -->
             <div style="position:absolute;top:-1px;right:86px;width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:10px solid var(--vl-card);filter:drop-shadow(0 -2px 2px rgba(0,0,0,.1));z-index:5"></div>
             <!-- the popup -->
@@ -377,11 +393,6 @@ class Studio {
 
     this._panel
       .addSection("디자인")
-      .addRadio("톤", "tone", [
-        { value: "indigo", label: "인디고" },
-        { value: "aperture", label: "오렌지" },
-        { value: "ink", label: "모노" },
-      ])
       .addToggle("다크 모드", "dark")
       .addSection("참여 · 그룹")
       .addRadio(
