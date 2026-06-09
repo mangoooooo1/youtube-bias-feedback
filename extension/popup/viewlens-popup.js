@@ -411,6 +411,7 @@ async function boot() {
       } else if (!ob) {
         // 연구자 모드 — 온보딩 초기화 (세션 데이터는 유지)
         await chrome.storage.local.remove(['group', 'installDate', 'surveyStatus']);
+        window.location.reload();
       }
     },
   });
