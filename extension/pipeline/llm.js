@@ -1,4 +1,4 @@
-import { GEMINI_API_KEY } from './config.js';
+import { GEMINI_API_KEY } from '../config.js';
 
 const GEMINI_API_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';

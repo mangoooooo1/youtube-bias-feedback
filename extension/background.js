@@ -7,9 +7,9 @@ import {
   saveAnalysis,
   getOnboarding,
 } from "./storage.js";
-import { fetchVideoCategories } from "./youtube.js";
-import { calculateDistribution, calculateEntropy } from "./analysis.js";
-import { buildPrompt, generateReview, generateFallbackReview } from "./llm.js";
+import { fetchVideoCategories } from "./pipeline/youtube.js";
+import { calculateDistribution, calculateEntropy } from "./pipeline/analysis.js";
+import { buildPrompt, generateReview, generateFallbackReview } from "./pipeline/llm.js";
 import { SERVER_URL } from "./config.js";
 
 const ALARM_NAME = "SESSION_TIMEOUT_CHECK";
