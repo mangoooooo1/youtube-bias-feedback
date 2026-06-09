@@ -101,23 +101,6 @@ const GROUPS = {
 };
 
 const TONES = {
-  aperture: {
-    label: '애퍼처 오렌지',
-    light: {
-      '--vl-bg': '#f4f2ef', '--vl-card': '#ffffff', '--vl-card-2': '#faf8f5',
-      '--vl-ink': '#1c1917', '--vl-ink-2': '#6b6560', '--vl-ink-3': '#a8a29e',
-      '--vl-line': '#ece8e3', '--vl-line-2': '#e2ddd6',
-      '--vl-accent': '#ea580c', '--vl-accent-2': '#c2410c', '--vl-accent-soft': '#fdeee3',
-      '--vl-on-accent': '#ffffff', '--vl-good': '#2f9e6b', '--vl-warn': '#d4781f',
-    },
-    dark: {
-      '--vl-bg': '#17140f', '--vl-card': '#211c16', '--vl-card-2': '#2a241c',
-      '--vl-ink': '#f7f3ee', '--vl-ink-2': '#b3aaa0', '--vl-ink-3': '#7c736a',
-      '--vl-line': '#332c23', '--vl-line-2': '#403830',
-      '--vl-accent': '#fb7a3c', '--vl-accent-2': '#fb923c', '--vl-accent-soft': '#3a261a',
-      '--vl-on-accent': '#1c1209', '--vl-good': '#4ec78d', '--vl-warn': '#e8a85a',
-    },
-  },
   indigo: {
     label: '인디고 포커스',
     light: {
@@ -133,23 +116,6 @@ const TONES = {
       '--vl-line': '#252a3a', '--vl-line-2': '#2f354a',
       '--vl-accent': '#818cf8', '--vl-accent-2': '#a5b4fc', '--vl-accent-soft': '#23263a',
       '--vl-on-accent': '#0e1018', '--vl-good': '#34d399', '--vl-warn': '#fbbf24',
-    },
-  },
-  ink: {
-    label: '모노 잉크',
-    light: {
-      '--vl-bg': '#eeeeec', '--vl-card': '#ffffff', '--vl-card-2': '#f6f6f4',
-      '--vl-ink': '#121212', '--vl-ink-2': '#5e5e5b', '--vl-ink-3': '#a0a09c',
-      '--vl-line': '#e6e6e2', '--vl-line-2': '#dadad5',
-      '--vl-accent': '#111111', '--vl-accent-2': '#000000', '--vl-accent-soft': '#ededea',
-      '--vl-on-accent': '#fbfbf8', '--vl-good': '#2f7d52', '--vl-warn': '#9a6a16',
-    },
-    dark: {
-      '--vl-bg': '#101010', '--vl-card': '#1a1a1a', '--vl-card-2': '#222222',
-      '--vl-ink': '#f4f4f1', '--vl-ink-2': '#a8a8a3', '--vl-ink-3': '#6f6f6a',
-      '--vl-line': '#2a2a2a', '--vl-line-2': '#353535',
-      '--vl-accent': '#fafafa', '--vl-accent-2': '#ffffff', '--vl-accent-soft': '#262626',
-      '--vl-on-accent': '#111111', '--vl-good': '#4ec78d', '--vl-warn': '#d6a449',
     },
   },
 };
