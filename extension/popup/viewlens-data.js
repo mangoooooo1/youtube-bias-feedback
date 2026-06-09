@@ -159,3 +159,12 @@ window.VL = {
   today, weeks, baselineH, TIMELINE, TOTAL_DAYS, GROUPS, TONES,
   con: { todayCount: 12, totalCount: 47 },
 };
+
+// Studio stubs — viewlens-popup.js overrides these with real implementations in popup context
+window.koreanDateLabel = function (d) {
+  const days = ['일', '월', '화', '수', '목', '금', '토'];
+  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${days[d.getDay()]}요일`;
+};
+window.buildDataForDate = function () {
+  return { ...VL.today };
+};
