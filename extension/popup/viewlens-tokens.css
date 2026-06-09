@@ -58,7 +58,7 @@ body {
   min-height: 100vh;
 }
 ::selection {
-  background: rgba(234, 88, 12, 0.18);
+  background: rgba(79, 70, 229, 0.18);
 }
 
 @keyframes vlPulse {
