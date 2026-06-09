@@ -82,7 +82,7 @@ export async function getLastWatchedAt() {
 
 // --- 온보딩 ---
 
-export const VALID_GROUPS = ['EXP', 'CON', 'TEST'];
+export const VALID_GROUPS = ['EXP', 'CON', 'TEST-EXP', 'TEST-CON'];
 
 export async function getOnboarding() {
   const { anonymousId, group, installDate, surveyStatus } = await chrome.storage.local.get([

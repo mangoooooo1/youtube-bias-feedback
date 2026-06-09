@@ -95,9 +95,10 @@ const TIMELINE = {
 const TOTAL_DAYS = 21;
 
 const GROUPS = {
-  EXP:  { code: 'EXP',  name: '실험군',       feedback: true,  note: '시청 분석과 피드백을 받습니다.' },
-  CON:  { code: 'CON',  name: '대조군',       feedback: false, note: '실험 기간 중 피드백 제공 시점은 참여자마다 다를 수 있으며, 실험 종료 후 모든 참여자에게 결과를 공유합니다.' },
-  TEST: { code: 'TEST', name: '연구자·테스트', feedback: true,  note: '모든 화면을 미리 볼 수 있습니다.' },
+  EXP:          { code: 'EXP',      name: '실험군',          feedback: true,  note: '시청 분석과 피드백을 받습니다.' },
+  CON:          { code: 'CON',      name: '대조군',          feedback: false, note: '실험 기간 중 피드백 제공 시점은 참여자마다 다를 수 있으며, 실험 종료 후 모든 참여자에게 결과를 공유합니다.' },
+  'TEST-EXP':   { code: 'TEST-EXP', name: '연구자 (실험군)', feedback: true,  note: '모든 화면을 미리 볼 수 있습니다.' },
+  'TEST-CON':   { code: 'TEST-CON', name: '연구자 (대조군)', feedback: false, note: '모든 화면을 미리 볼 수 있습니다.' },
 };
 
 const TONES = {

@@ -11,10 +11,16 @@ function _collectingTimerText() {
 }
 
 function _popupHeader(groupCfg, day) {
-  const badge =
-    groupCfg.code === "TEST"
-      ? vlBadge({ text: "연구자 모드", tone: "accent", size: "sm" })
-      : vlBadge({ text: "참여 중", tone: "neutral", size: "sm" });
+  const isTest = groupCfg.code.startsWith("TEST");
+  const badge = isTest
+    ? vlBadge({ text: "연구자 모드", tone: "accent", size: "sm" })
+    : vlBadge({ text: "참여 중", tone: "neutral", size: "sm" });
+  const rightArea = isTest
+    ? `<div style="display:flex;align-items:center;gap:7px">
+        <button id="vl-researcher-reset" style="padding:3px 8px;border:1px solid var(--vl-line-2);border-radius:6px;background:transparent;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;color:var(--vl-ink-2);line-height:1.7;white-space:nowrap">↩ 온보딩</button>
+        ${badge}
+      </div>`
+    : badge;
   return `<div style="padding:13px 16px;border-bottom:1px solid var(--vl-line);display:flex;align-items:center;justify-content:space-between;background:var(--vl-card);position:sticky;top:0;z-index:10">
     <div style="display:flex;align-items:center;gap:9px">
       ${markSVG({ size: 26, accent: "var(--vl-accent)" })}
@@ -23,7 +29,7 @@ function _popupHeader(groupCfg, day) {
         <span style="font-size:10.5px;color:var(--vl-ink-3);font-family:'JetBrains Mono',monospace;margin-top:2px">설치 ${day}일째 · 종료 D-${VL.TOTAL_DAYS - day}</span>
       </div>
     </div>
-    ${badge}
+    ${rightArea}
   </div>`;
 }
 
@@ -213,6 +219,16 @@ class ViewLensPopup {
           this._selectedDate = d;
           this.render();
         }
+      });
+    }
+    // 연구자 모드 전용 — 온보딩 화면으로 돌아가기
+    const researcherReset = this.container.querySelector("#vl-researcher-reset");
+    if (researcherReset) {
+      researcherReset.addEventListener("click", () => {
+        this._onboarded = false;
+        this._group = null;
+        this._onChange({ onboarded: false, group: null });
+        this.render();
       });
     }
   }
