@@ -82,16 +82,18 @@ export async function getLastWatchedAt() {
 
 // --- 온보딩 ---
 
-export const VALID_GROUPS = ['EXP', 'CON', 'TEST'];
+export const VALID_GROUPS = ['EXP', 'CON', 'TEST-EXP', 'TEST-CON'];
 
 export async function getOnboarding() {
-  const { group, installDate, surveyStatus } = await chrome.storage.local.get([
+  const { anonymousId, group, installDate, surveyStatus } = await chrome.storage.local.get([
+    'anonymousId',
     'group',
     'installDate',
     'surveyStatus',
   ]);
   if (!group) return null;
   return {
+    anonymousId,
     group,
     installDate,
     surveyStatus: surveyStatus ?? { week1: false, week2: false, week3: false },
@@ -100,6 +102,7 @@ export async function getOnboarding() {
 
 export async function saveOnboarding(group) {
   await chrome.storage.local.set({
+    anonymousId: crypto.randomUUID(),
     group,
     installDate: new Date().toISOString(),
     surveyStatus: { week1: false, week2: false, week3: false },

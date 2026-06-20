@@ -1,0 +1,140 @@
+@font-face {
+  font-family: "Pretendard";
+  font-weight: 400;
+  src: url("../assets/fonts/Pretendard-Regular.woff2") format("woff2");
+  font-display: swap;
+}
+@font-face {
+  font-family: "Pretendard";
+  font-weight: 500;
+  src: url("../assets/fonts/Pretendard-Medium.woff2") format("woff2");
+  font-display: swap;
+}
+@font-face {
+  font-family: "Pretendard";
+  font-weight: 600;
+  src: url("../assets/fonts/Pretendard-SemiBold.woff2") format("woff2");
+  font-display: swap;
+}
+@font-face {
+  font-family: "Pretendard";
+  font-weight: 700;
+  src: url("../assets/fonts/Pretendard-Bold.woff2") format("woff2");
+  font-display: swap;
+}
+@font-face {
+  font-family: "Pretendard";
+  font-weight: 800;
+  src: url("../assets/fonts/Pretendard-ExtraBold.woff2") format("woff2");
+  font-display: swap;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    Pretendard,
+    system-ui,
+    -apple-system,
+    sans-serif;
+  background: #e7e4df;
+  background-image: radial-gradient(rgba(0, 0, 0, 0.045) 1px, transparent 1px);
+  background-size: 22px 22px;
+  color: #1c1917;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100vh;
+}
+::selection {
+  background: rgba(79, 70, 229, 0.18);
+}
+
+@keyframes vlPulse {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+@keyframes vlSheet {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes vlBlink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+@keyframes vlRise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.vl-vid-details > summary {
+  list-style: none;
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.vl-vid-details > summary::-webkit-details-marker {
+  display: none;
+}
+.vl-vid-details > summary::marker {
+  display: none;
+}
+.vl-vid-chevron {
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+.vl-vid-details[open] .vl-vid-chevron {
+  transform: rotate(90deg);
+}
+
+/* scrollbar inside popup */
+.vl-pop ::-webkit-scrollbar {
+  width: 8px;
+}
+.vl-pop ::-webkit-scrollbar-thumb {
+  background: var(--vl-line-2);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.vl-pop ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.vl-vid-link {
+  transition: background 0.12s;
+}
+.vl-vid-link:hover {
+  background: color-mix(in oklab, var(--vl-accent) 10%, transparent) !important;
+}

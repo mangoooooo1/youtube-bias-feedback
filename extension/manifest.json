@@ -1,13 +1,25 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Bias Feedback",
+  "name": "ViewLens: YouTube Bias Feedback",
   "version": "0.1.0",
   "permissions": ["storage", "activeTab", "alarms"],
-  "action": {
-    "default_popup": "popup.html",
-    "default_title": "YouTube Bias Feedback"
+  "icons": {
+    "16": "assets/icons/icon16.png",
+    "32": "assets/icons/icon32.png",
+    "48": "assets/icons/icon48.png",
+    "128": "assets/icons/icon128.png"
   },
-  "host_permissions": ["*://*.youtube.com/*", "*://generativelanguage.googleapis.com/*"],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "ViewLens: YouTube Bias Feedback",
+    "default_icon": {
+      "16": "assets/icons/icon16.png",
+      "32": "assets/icons/icon32.png",
+      "48": "assets/icons/icon48.png",
+      "128": "assets/icons/icon128.png"
+    }
+  },
+  "host_permissions": ["*://*.youtube.com/*", "*://generativelanguage.googleapis.com/*", "http://217.142.128.179/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

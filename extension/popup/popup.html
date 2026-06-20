@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ViewLens</title>
+
+<!-- JetBrains Mono (CDN — not in local fonts) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet" />
+
+<!-- design tokens + local Pretendard -->
+<link rel="stylesheet" href="viewlens-tokens.css" />
+
+<style>
+  html, body {
+    width: 384px;
+    height: 600px;
+    overflow: hidden;
+  }
+  #vl-popup-root {
+    width: 384px;
+    height: 600px;
+    overflow: hidden;
+    position: relative;
+    font-family: Pretendard, system-ui, sans-serif;
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background:var(--vl-bg)">
+
+<div id="vl-popup-root" class="vl-pop"></div>
+
+<!-- data layer (VL global + mock data fallback) -->
+<script src="viewlens-data.js"></script>
+<!-- logo helpers -->
+<script src="viewlens-logo.js"></script>
+<!-- reusable UI components -->
+<script src="viewlens-ui.js"></script>
+<!-- screen content generators -->
+<script src="viewlens-screens.js"></script>
+<!-- app shell (ViewLensPopup class) -->
+<script src="viewlens-app.js"></script>
+<!-- chrome.storage bridge + popup boot -->
+<script src="viewlens-popup.js"></script>
+
+</body>
+</html>
