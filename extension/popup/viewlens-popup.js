@@ -366,9 +366,10 @@ async function boot() {
     await chrome.storage.local.set({ anonymousId: stored.anonymousId });
   }
 
-  // 온보딩은 됐지만 서버 등록이 확인되지 않은 경우 재시도(등록 누락 복구)
+  // 온보딩은 됐지만 서버 등록이 확인되지 않은 경우 재시도(등록 누락 복구).
+  // 팝업 렌더링을 막지 않도록 await 없이 백그라운드로 실행 — 실패 시 다음 boot에서 다시 재시도된다.
   if (stored.group && stored.anonymousId && stored.installDate && !stored.participantSynced) {
-    await syncParticipant(stored.serverUrl, {
+    syncParticipant(stored.serverUrl, {
       anonymousId: stored.anonymousId,
       group_code: stored.group,
       installDate: stored.installDate,
