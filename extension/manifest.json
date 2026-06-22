@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ViewLens: YouTube Bias Feedback",
-  "version": "0.1.0",
-  "permissions": ["storage", "activeTab", "alarms"],
+  "version": "1.0.0",
+  "permissions": ["storage", "alarms"],
   "icons": {
     "16": "assets/icons/icon16.png",
     "32": "assets/icons/icon32.png",
