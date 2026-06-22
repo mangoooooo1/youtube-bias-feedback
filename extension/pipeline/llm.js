@@ -4,7 +4,46 @@ const GEMINI_API_URL =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 const TIMEOUT_MS = 10000;
 
-export function buildPrompt({ categoryDistribution, entropy, videoCount, videoTitles = [] }) {
+// 다양성 변화로 인정할 최소 entropy 변화량(bits) — 노이즈 무시
+const ENTROPY_DELTA_EPS = 0.1;
+// 단일 카테고리 편중 경고 임계 비율
+const BIAS_WARN_RATIO = 0.7;
+// 변화 분석/편중 경고를 신뢰할 수 있는 최소 영상 수
+const MIN_VIDEOS_FOR_TREND = 5;
+
+// entropy는 소수점 둘째 자리로 반올림된 값(analysis.js)이므로, 부동소수점 오차로
+// 경계(예: 정확히 0.1) 판정이 빗나가지 않도록 차이값도 같은 정밀도로 반올림
+function roundedDelta(entropy, prevEntropy) {
+  return Math.round((entropy - prevEntropy) * 100) / 100;
+}
+
+// prevEntropy 및 편중 비율을 LLM에게 줄 자연어 지시로 번역
+function buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount }) {
+  if (videoCount < MIN_VIDEOS_FOR_TREND) {
+    return '- 이번 세션은 시청한 영상 수가 적어 패턴을 단정하기 어렵습니다. 단정적인 평가나 강한 권유는 피하고 가볍게 언급해 주세요.';
+  }
+
+  const lines = [];
+
+  if (Number.isFinite(prevEntropy)) {
+    const delta = roundedDelta(entropy, prevEntropy);
+    if (delta >= ENTROPY_DELTA_EPS) {
+      lines.push('- 직전 세션보다 시청 다양성이 늘었습니다. 긍정적으로 격려하는 톤으로 작성해 주세요.');
+    } else if (delta <= -ENTROPY_DELTA_EPS) {
+      lines.push('- 직전 세션보다 시청 다양성이 줄었습니다. 다양한 카테고리를 탐색해 보도록 부드럽게 권장해 주세요.');
+    } else {
+      lines.push('- 직전 세션과 비슷한 다양성을 유지하고 있습니다. 중립적인 톤으로 현재 패턴을 언급해 주세요.');
+    }
+  }
+
+  if (topRatio >= BIAS_WARN_RATIO) {
+    lines.push('- 한 카테고리에 시청이 크게 쏠려 있습니다. 다양한 카테고리를 탐색해 보도록 권장하는 문구를 반드시 포함해 주세요.');
+  }
+
+  return lines.join('\n');
+}
+
+export function buildPrompt({ categoryDistribution, entropy, prevEntropy = null, videoCount, videoTitles = [] }) {
   const sorted = Object.entries(categoryDistribution).sort(([, a], [, b]) => b - a);
 
   const categoryLines = sorted
@@ -22,13 +61,17 @@ export function buildPrompt({ categoryDistribution, entropy, videoCount, videoTi
     ? `\n- 시청한 영상 제목:\n${videoTitles.slice(0, 10).map(t => `  · ${t}`).join('\n')}`
     : '';
 
+  const topRatio = sorted.length > 0 ? sorted[0][1] : 0;
+  const trendGuidance = buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount });
+  const trendSection = trendGuidance ? `\n\n[피드백 작성 지침]\n${trendGuidance}` : '';
+
   return `당신은 YouTube 시청 패턴을 분석하는 친근한 조언자입니다.
 
 [세션 정보]
 - 시청 영상 수: ${videoCount}개
 - 카테고리 분포:
 ${categoryLines}
-${entropyLine}${titleLines}
+${entropyLine}${titleLines}${trendSection}
 
 위 데이터를 바탕으로 아래 JSON 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요.
 
@@ -72,7 +115,7 @@ export async function generateReview(prompt) {
   }
 }
 
-export function generateFallbackReview({ categoryDistribution, videoCount }) {
+export function generateFallbackReview({ categoryDistribution, entropy, prevEntropy = null, videoCount }) {
   const sorted = Object.entries(categoryDistribution).sort(([, a], [, b]) => b - a);
 
   if (sorted.length === 0) {
@@ -80,26 +123,44 @@ export function generateFallbackReview({ categoryDistribution, videoCount }) {
   }
 
   const [topName, topRatio] = sorted[0];
-
-  if (sorted.length === 1) {
-    return {
-      topic: topName,
-      feedback: `이번 세션에서는 ${topName} 영상을 집중적으로 시청하셨네요. ${videoCount}개의 영상을 보셨습니다. 다음에는 다른 카테고리의 콘텐츠도 탐색해 보세요!`,
-    };
-  }
-
-  const [secondName] = sorted[1];
-
-  if (topRatio > 0.5) {
-    return {
-      topic: topName,
-      feedback: `이번 세션에서는 주로 ${topName} 콘텐츠를 즐기셨고, ${secondName} 영상도 함께 시청하셨네요. 총 ${videoCount}개의 영상을 보셨습니다. 더 다양한 카테고리를 탐색해 보시는 건 어떨까요?`,
-    };
-  }
-
   const topNames = sorted.slice(0, 3).map(([name]) => name).join(', ');
-  return {
-    topic: topNames,
-    feedback: `이번 세션에서는 ${topNames} 등 다양한 카테고리의 영상을 고루 시청하셨네요. 총 ${videoCount}개의 영상을 보셨습니다. 균형 잡힌 시청 패턴을 잘 유지하고 계세요!`,
-  };
+
+  // [무엇을 봤는지]
+  let summary;
+  let topic;
+  if (sorted.length === 1) {
+    topic = topName;
+    summary = `이번 세션에서는 ${topName} 영상을 ${videoCount}개 집중적으로 시청하셨네요.`;
+  } else if (topRatio > 0.5) {
+    topic = topName;
+    summary = `이번 세션에서는 주로 ${topName} 콘텐츠를 즐기셨고, ${sorted[1][0]} 영상도 함께 총 ${videoCount}개를 시청하셨네요.`;
+  } else {
+    topic = topNames;
+    summary = `이번 세션에서는 ${topNames} 등 다양한 카테고리의 영상을 총 ${videoCount}개 고루 시청하셨네요.`;
+  }
+
+  // [변화 추세] + [권장/격려] — 프롬프트 경로와 동일한 상수/임계값 사용
+  let trend = '';
+  let recommendation = '';
+  if (videoCount >= MIN_VIDEOS_FOR_TREND) {
+    const hasPrev = Number.isFinite(prevEntropy);
+    const delta = hasPrev ? roundedDelta(entropy, prevEntropy) : 0;
+
+    if (hasPrev) {
+      if (delta >= ENTROPY_DELTA_EPS) trend = '직전 세션보다 시청 다양성이 늘었어요.';
+      else if (delta <= -ENTROPY_DELTA_EPS) trend = '직전 세션보다 시청 다양성이 다소 줄었어요.';
+      else trend = '직전 세션과 비슷한 다양성을 유지하고 있어요.';
+    }
+
+    if (topRatio >= BIAS_WARN_RATIO) {
+      recommendation = '한 가지 주제에 시청이 크게 쏠려 있으니, 다양한 카테고리를 탐색해 보시는 건 어떨까요?';
+    } else if (hasPrev && delta <= -ENTROPY_DELTA_EPS) {
+      recommendation = '다른 주제의 콘텐츠도 곁들여 보시는 걸 추천해요.';
+    } else if (hasPrev && delta >= ENTROPY_DELTA_EPS) {
+      recommendation = '균형 잡힌 시청 패턴을 잘 유지하고 계세요!';
+    }
+  }
+
+  const feedback = [summary, trend, recommendation].filter(Boolean).join(' ');
+  return { topic, feedback };
 }

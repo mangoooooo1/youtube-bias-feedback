@@ -62,6 +62,16 @@ async function checkSessionTimeout() {
   await analyzeSession(session);
 }
 
+// 현재 세션을 제외하고, 분석이 완료된(entropy가 유한 숫자인) 가장 최근 세션의 entropy를 반환
+function findPrevEntropy(sessions, currentSessionId) {
+  for (let i = sessions.length - 1; i >= 0; i--) {
+    const s = sessions[i];
+    if (s.sessionId === currentSessionId) continue;
+    if (Number.isFinite(s.entropy)) return s.entropy;
+  }
+  return null;
+}
+
 async function analyzeSession(session) {
   const videoIds = session.videos.map((v) => v.videoId);
   const categoryMap = await fetchVideoCategories(videoIds);
@@ -72,16 +82,21 @@ async function analyzeSession(session) {
   const videoCount = session.videos.length;
   const videoTitles = session.videos.map((v) => v.title).filter(Boolean);
 
+  // saveAnalysis로 현재 세션에 entropy를 저장하기 전에 직전 세션 entropy를 조회
+  const allSessions = await getAllSessions();
+  const prevEntropy = findPrevEntropy(allSessions, session.sessionId);
+
   await saveAnalysis(session.sessionId, {
     categoryDistribution,
     entropy,
     videoCount,
   });
-  console.log("[background] 분석 완료:", { entropy, categoryDistribution });
+  console.log("[background] 분석 완료:", { entropy, prevEntropy, categoryDistribution });
 
   const analysisData = {
     categoryDistribution,
     entropy,
+    prevEntropy,
     videoCount,
     videoTitles,
   };
