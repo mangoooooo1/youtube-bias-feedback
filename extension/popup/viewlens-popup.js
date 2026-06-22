@@ -323,6 +323,26 @@ class RealPopup extends ViewLensPopup {
   }
 }
 
+// participants 서버 등록 — 성공(200) 시에만 participantSynced 플래그를 저장한다.
+// 실패하면 플래그를 세우지 않으므로 다음 팝업 boot에서 재시도된다(서버는 anonymousId UNIQUE로 멱등 처리).
+async function syncParticipant(serverUrl, { anonymousId, group_code, installDate }) {
+  if (!serverUrl || serverUrl.startsWith("YOUR_")) return;
+  try {
+    const res = await fetch(`${serverUrl.replace(/\/$/, "")}/api/participants`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ anonymousId, group_code, installDate }),
+    });
+    if (!res.ok) {
+      console.warn("[popup] participants 등록 실패:", res.status);
+      return;
+    }
+    await chrome.storage.local.set({ participantSynced: true });
+  } catch (error) {
+    console.warn("[popup] participants 등록 오류:", error.message);
+  }
+}
+
 // ── Main boot ─────────────────────────────────────────────────────────────────
 
 async function boot() {
@@ -337,23 +357,23 @@ async function boot() {
     "lastWatchedAt",
     "anonymousId",
     "serverUrl",
+    "participantSynced",
   ]);
 
   // 이미 온보딩된 사용자 중 anonymousId가 없는 경우 생성
   if (stored.group && !stored.anonymousId) {
     stored.anonymousId = crypto.randomUUID();
     await chrome.storage.local.set({ anonymousId: stored.anonymousId });
-    if (stored.serverUrl && !stored.serverUrl.startsWith("YOUR_")) {
-      fetch(`${stored.serverUrl.replace(/\/$/, "")}/api/participants`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          anonymousId: stored.anonymousId,
-          group_code: stored.group,
-          installDate: stored.installDate,
-        }),
-      }).catch(() => {});
-    }
+  }
+
+  // 온보딩은 됐지만 서버 등록이 확인되지 않은 경우 재시도(등록 누락 복구).
+  // 팝업 렌더링을 막지 않도록 await 없이 백그라운드로 실행 — 실패 시 다음 boot에서 다시 재시도된다.
+  if (stored.group && stored.anonymousId && stored.installDate && !stored.participantSynced) {
+    syncParticipant(stored.serverUrl, {
+      anonymousId: stored.anonymousId,
+      group_code: stored.group,
+      installDate: stored.installDate,
+    });
   }
 
   const sessions = stored.sessions || [];
@@ -399,18 +419,13 @@ async function boot() {
           group: g,
           installDate,
           surveyStatus: { week1: false, week2: false, week3: false },
+          participantSynced: false,
         });
 
-        if (serverUrl && !serverUrl.startsWith("YOUR_")) {
-          fetch(`${serverUrl.replace(/\/$/, "")}/api/participants`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ anonymousId, group_code: g, installDate }),
-          }).catch(() => {});
-        }
+        await syncParticipant(serverUrl, { anonymousId, group_code: g, installDate });
       } else if (!ob) {
         // 연구자 모드 — 온보딩 초기화 (세션 데이터는 유지)
-        await chrome.storage.local.remove(['group', 'installDate', 'surveyStatus']);
+        await chrome.storage.local.remove(['group', 'installDate', 'surveyStatus', 'participantSynced']);
         window.location.reload();
       }
     },
