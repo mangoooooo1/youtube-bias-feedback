@@ -11,6 +11,12 @@ const BIAS_WARN_RATIO = 0.7;
 // 변화 분석/편중 경고를 신뢰할 수 있는 최소 영상 수
 const MIN_VIDEOS_FOR_TREND = 5;
 
+// entropy는 소수점 둘째 자리로 반올림된 값(analysis.js)이므로, 부동소수점 오차로
+// 경계(예: 정확히 0.1) 판정이 빗나가지 않도록 차이값도 같은 정밀도로 반올림
+function roundedDelta(entropy, prevEntropy) {
+  return Math.round((entropy - prevEntropy) * 100) / 100;
+}
+
 // prevEntropy 및 편중 비율을 LLM에게 줄 자연어 지시로 번역
 function buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount }) {
   if (videoCount < MIN_VIDEOS_FOR_TREND) {
@@ -20,7 +26,7 @@ function buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount }) {
   const lines = [];
 
   if (Number.isFinite(prevEntropy)) {
-    const delta = entropy - prevEntropy;
+    const delta = roundedDelta(entropy, prevEntropy);
     if (delta >= ENTROPY_DELTA_EPS) {
       lines.push('- 직전 세션보다 시청 다양성이 늘었습니다. 긍정적으로 격려하는 톤으로 작성해 주세요.');
     } else if (delta <= -ENTROPY_DELTA_EPS) {
@@ -138,7 +144,7 @@ export function generateFallbackReview({ categoryDistribution, entropy, prevEntr
   let recommendation = '';
   if (videoCount >= MIN_VIDEOS_FOR_TREND) {
     const hasPrev = Number.isFinite(prevEntropy);
-    const delta = hasPrev ? entropy - prevEntropy : 0;
+    const delta = hasPrev ? roundedDelta(entropy, prevEntropy) : 0;
 
     if (hasPrev) {
       if (delta >= ENTROPY_DELTA_EPS) trend = '직전 세션보다 시청 다양성이 늘었어요.';
