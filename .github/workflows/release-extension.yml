@@ -50,7 +50,8 @@ jobs:
           cd extension
           zip -r ../youtube-bias-feedback.zip . \
             --exclude "*.md" \
-            --exclude "config.example.js"
+            --exclude "config.example.js" \
+            --exclude "studio/*"
 
       - name: Upload to Draft Release
         if: steps.check.outputs.changed == 'true'
