@@ -14,8 +14,8 @@ function screenOnboarding() {
       <div style="margin-top:18px;font-size:25px;font-weight:800;letter-spacing:-0.03em;color:var(--vl-ink)">
         View<span style="color:var(--vl-accent)">Lens</span>
       </div>
-      <p style="margin:10px 0 0;font-size:13.5px;line-height:1.6;color:var(--vl-ink-2);max-width:260px;text-wrap:pretty">
-        추천 알고리즘을 너머 당신의 시청 습관을 돌아봅니다. 연구자에게 받은 참여 코드를 입력하여 시작해 주세요.
+      <p style="margin:10px 0 0;font-size:13.5px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;word-break:keep-all">
+        추천 알고리즘을 넘어 당신의 시청 습관을 돌아봅니다.<br />연구자에게 받은 참여 코드를 입력하여 시작해 주세요.
       </p>
     </div>
 
