@@ -10,6 +10,13 @@ function _collectingTimerText() {
   return `피드백까지 ${mins}분 ${String(secs).padStart(2, "0")}초`;
 }
 
+// 설치일(installDate) 기준 실제 경과일(1일째부터). installDate가 없으면 목업 day로 폴백.
+function _elapsedDay(fallback) {
+  if (!VL._installDate) return fallback;
+  const d = Math.floor((Date.now() - new Date(VL._installDate).getTime()) / 86400000) + 1;
+  return Math.max(1, d);
+}
+
 function _popupHeader(groupCfg, day) {
   const isTest = groupCfg.code.startsWith("TEST");
   const badge = isTest
@@ -26,7 +33,7 @@ function _popupHeader(groupCfg, day) {
       ${markSVG({ size: 26, accent: "var(--vl-accent)" })}
       <div style="display:flex;flex-direction:column;line-height:1.1">
         <span style="font-size:15px;font-weight:800;letter-spacing:-0.02em;color:var(--vl-ink)">View<span style="color:var(--vl-accent)">Lens</span></span>
-        <span style="font-size:10.5px;color:var(--vl-ink-3);font-family:'JetBrains Mono',monospace;margin-top:2px">설치 ${day}일째 · 종료 D-${VL.TOTAL_DAYS - day}</span>
+        <span style="font-size:10.5px;color:var(--vl-ink-3);font-family:'JetBrains Mono',monospace;margin-top:2px">설치 ${day}일째 · 종료 D-${Math.max(0, VL.TOTAL_DAYS - day)}</span>
       </div>
     </div>
     ${rightArea}
@@ -108,6 +115,7 @@ class ViewLensPopup {
       return;
     }
     const tl = VL.TIMELINE[this._timelineKey] || VL.TIMELINE.w1_mid;
+    const day = _elapsedDay(tl.day);
     const groupCfg = VL.GROUPS[this._group] || VL.GROUPS.EXP;
     const selWeek = Math.min(this._selWeek, tl.currentWeek);
     const surveyWeek = tl.surveyWeek;
@@ -130,11 +138,11 @@ class ViewLensPopup {
           ? screenToday()
           : screenFeedback(tl.currentWeek, selWeek);
     } else {
-      bodyHTML = screenControlHome(tl.day);
+      bodyHTML = screenControlHome(day);
     }
 
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
-      ${_popupHeader(groupCfg, tl.day)}
+      ${_popupHeader(groupCfg, day)}
       ${surveyPending && this._snoozed ? _surveyBanner(surveyWeek) : ""}
       ${groupCfg.feedback ? _tabs(this._tab) : ""}
       <div style="flex:1;overflow-y:auto;overflow-x:hidden">${bodyHTML}</div>
