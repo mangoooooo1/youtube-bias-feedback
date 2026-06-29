@@ -304,10 +304,10 @@ function screenFeedback(currentWeek, selWeek) {
 
 // ── Control group home ────────────────────────────────────────────────────────
 
-function screenControlHome(day) {
+function screenControlHome(day, stats = {}) {
   const cells = [
     { v: `${VL.con.todayCount}개`, l: "오늘 시청한 영상" },
-    { v: `${VL.con.totalCount}개`, l: "총 누적 시청" },
+    { v: `${stats.totalCount ?? VL.con.totalCount}개`, l: "총 누적 시청" },
     { v: `${day}일째`, l: "설치 후" },
     { v: `D-${Math.max(0, VL.TOTAL_DAYS - day)}`, l: "실험 종료까지" },
   ];

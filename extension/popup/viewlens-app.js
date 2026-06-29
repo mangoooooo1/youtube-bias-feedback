@@ -10,6 +10,16 @@ function _collectingTimerText() {
   return `피드백까지 ${mins}분 ${String(secs).padStart(2, "0")}초`;
 }
 
+// 대조군 홈 — 실제 세션 데이터 기반 총 누적 시청 영상 수 (진행 중 세션 포함).
+function _controlTotalCount() {
+  const sessions = VL._allSessions || [];
+  const ended = sessions.reduce(
+    (sum, s) => sum + (s.videoCount ?? s.videos?.length ?? 0),
+    0,
+  );
+  return ended + (VL.today?.collectingCount ?? 0);
+}
+
 // 설치일(installDate) 기준 실제 경과일(1일째부터). installDate가 없으면 목업 day로 폴백.
 function _elapsedDay(fallback) {
   if (!VL._installDate) return fallback;
@@ -138,7 +148,7 @@ class ViewLensPopup {
           ? screenToday()
           : screenFeedback(tl.currentWeek, selWeek);
     } else {
-      bodyHTML = screenControlHome(day);
+      bodyHTML = screenControlHome(day, { totalCount: _controlTotalCount() });
     }
 
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
