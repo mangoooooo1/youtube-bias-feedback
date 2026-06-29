@@ -88,66 +88,6 @@ function vlDonut({ data = [], size = 128, thickness = 18 } = {}) {
   </div>`;
 }
 
-function vlDiversityMeter({
-  value = 0,
-  max = 3.17,
-  lowAt = 1.9,
-  highAt = 2.5,
-} = {}) {
-  const zones = [
-    {
-      key: "편중",
-      lo: 0,
-      hi: lowAt,
-      col: "var(--vl-warn)",
-      desc: `0–${lowAt}`,
-    },
-    {
-      key: "보통",
-      lo: lowAt,
-      hi: highAt,
-      col: "var(--vl-ink-2)",
-      desc: `${lowAt}–${highAt}`,
-    },
-    {
-      key: "다양",
-      lo: highAt,
-      hi: max,
-      col: "var(--vl-good)",
-      desc: `${highAt}+`,
-    },
-  ];
-  const ai = value < lowAt ? 0 : value < highAt ? 1 : 2;
-  const z = zones[ai];
-  const local = Math.max(0, Math.min(1, (value - z.lo) / (z.hi - z.lo)));
-  const markP = ((ai + local) / 3) * 100;
-  const zoneBars = zones
-    .map(
-      (zn, i) =>
-        `<div style="flex:1;border-right:${i < 2 ? "2px solid var(--vl-card)" : "none"};background:${i === ai ? zn.col : `color-mix(in oklab,${zn.col} 24%,var(--vl-line))`}"></div>`,
-    )
-    .join("");
-  const zoneLabels = zones
-    .map(
-      (zn, i) =>
-        `<div style="flex:1;text-align:center">
-      <div style="font-size:12px;font-weight:${i === ai ? 800 : 600};color:${i === ai ? zn.col : "var(--vl-ink-3)"}">${zn.key}</div>
-      <div style="font-size:9.5px;font-family:'JetBrains Mono',monospace;color:var(--vl-ink-3);margin-top:2px">${zn.desc}</div>
-    </div>`,
-    )
-    .join("");
-  return `<div style="width:100%">
-    <div style="position:relative;height:24px">
-      <div style="position:absolute;left:${markP}%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center">
-        <span style="background:var(--vl-ink);color:var(--vl-card);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;padding:2px 7px;border-radius:7px;white-space:nowrap;line-height:1.3">오늘 ${value.toFixed(2)}</span>
-        <span style="width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid var(--vl-ink)"></span>
-      </div>
-    </div>
-    <div style="display:flex;height:13px;border-radius:999px;overflow:hidden">${zoneBars}</div>
-    <div style="display:flex;margin-top:7px">${zoneLabels}</div>
-  </div>`;
-}
-
 function vlMiniLine({ data = [], baseline = null, height = 64 } = {}) {
   const W = 300,
     H = height,
@@ -247,6 +187,5 @@ window.vlBadge = vlBadge;
 window.vlDeltaChip = vlDeltaChip;
 window.vlBarChart = vlBarChart;
 window.vlDonut = vlDonut;
-window.vlDiversityMeter = vlDiversityMeter;
 window.vlMiniLine = vlMiniLine;
 window.vlReview = vlReview;

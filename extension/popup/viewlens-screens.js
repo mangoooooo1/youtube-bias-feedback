@@ -101,7 +101,7 @@ function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
       <div style="font-size:13px;font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : dateLabel}</div>
       <button id="vl-date-next" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:${isToday ? "var(--vl-ink-3)" : "var(--vl-ink-2)"};cursor:${isToday ? "default" : "pointer"};font-size:15px;display:grid;place-items:center;opacity:${isToday ? 0.35 : 1}" ${isToday ? "disabled" : ""}>›</button>
     </div>
-    <div style="flex:1;padding:24px 24px 40px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:20px">
+    <div style="flex:1;padding:24px 24px 40px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px">
       <div style="position:relative;width:80px;height:80px">
         <span style="position:absolute;inset:0;border-radius:50%;background:var(--vl-accent-soft);animation:vlPulse 2.4s ease-out infinite"></span>
         <span style="position:absolute;inset:0;border-radius:50%;border:2px solid var(--vl-accent);opacity:0.4;animation:vlPulse 2.4s ease-out infinite 0.6s"></span>
@@ -119,7 +119,7 @@ function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
             : ""
         }
       </div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--vl-ink-3)">${dateLabel}</div>
+      <div style="font-size:11px;color:var(--vl-ink-3)">${dateLabel}</div>
     </div>
   </div>`;
 }
@@ -213,10 +213,7 @@ function screenToday() {
 
 function screenFeedback(currentWeek, selWeek) {
   const w = VL.weeks[selWeek - 1];
-  const b = VL.band(w.entropy);
   const vsBase = w.entropy - VL.baselineH;
-  const badgeTone =
-    b.tone === "good" ? "good" : b.tone === "warn" ? "warn" : "accent";
 
   const weekBtns = VL.weeks
     .map((wk) => {
@@ -268,7 +265,6 @@ function screenFeedback(currentWeek, selWeek) {
         </div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--vl-ink-3);margin-top:2px">${w.range}</div>
       </div>
-      ${vlBadge({ text: b.label, tone: badgeTone })}
     </div>
 
     ${vlCard({
@@ -315,7 +311,7 @@ function screenControlHome(day, stats = {}) {
     .map(
       (cell, i) => `
     <div style="padding:16px 18px;border-right:${i % 2 === 0 ? "1px solid var(--vl-line)" : "none"};border-bottom:${i < 2 ? "1px solid var(--vl-line)" : "none"}">
-      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:24px;color:var(--vl-ink);letter-spacing:-0.02em;line-height:1">${cell.v}</div>
+      <div style="font-weight:700;font-size:24px;color:var(--vl-ink);letter-spacing:-0.02em;line-height:1">${cell.v}</div>
       <div style="font-size:11.5px;color:var(--vl-ink-3);margin-top:6px;font-weight:500">${cell.l}</div>
     </div>
   `,
