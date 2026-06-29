@@ -271,9 +271,9 @@ function screenFeedback(currentWeek, selWeek) {
       pad: 16,
       children: `
       <div style="display:flex;align-items:center;gap:14px">
-        <div style="text-align:center;flex-shrink:0">
+        <div style="text-align:center;flex-shrink:0;cursor:help" title="시청한 영상이 여러 카테고리에 고르게 퍼져 있을수록 높아지는 점수예요. 한 가지 주제만 보면 낮고, 다양하게 볼수록 올라가요.">
           <div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:30px;color:var(--vl-ink);line-height:1;letter-spacing:-0.02em">${w.entropy.toFixed(2)}</div>
-          <div style="font-size:10.5px;color:var(--vl-ink-3);margin-top:4px;font-weight:600">다양성 점수 (bits)</div>
+          <div style="font-size:10.5px;color:var(--vl-ink-3);margin-top:4px;font-weight:600">다양성 점수 ⓘ</div>
         </div>
         <div style="width:1px;align-self:stretch;background:var(--vl-line)"></div>
         <div style="flex:1">${vsBaseContent}</div>
