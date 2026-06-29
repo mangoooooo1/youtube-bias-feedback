@@ -139,7 +139,7 @@ function screenToday() {
     <div style="display:flex;align-items:center;gap:8px">
       <span style="width:8px;height:8px;border-radius:3px;background:${c.color};flex-shrink:0"></span>
       <span style="font-size:12px;color:var(--vl-ink);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name}</span>
-      <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--vl-ink-2)">${Math.round(c.p * 100)}%</span>
+      <span style="font-size:12px;color:var(--vl-ink-2)">${Math.round(c.p * 100)}%</span>
     </div>
   `,
     )
@@ -177,12 +177,12 @@ function screenToday() {
       <div style="font-size:11.5px;color:var(--vl-ink-3);font-weight:600;margin-bottom:11px">직전 시청일 대비 다양성</div>
       <div style="display:flex;align-items:center;gap:13px">
         <div style="text-align:center">
-          <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--vl-ink-3);line-height:1">${d.prevEntropy.toFixed(2)}</div>
+          <div style=";font-size:18px;font-weight:700;color:var(--vl-ink-3);line-height:1">${d.prevEntropy.toFixed(2)}</div>
           <div style="font-size:10.5px;color:var(--vl-ink-3);margin-top:4px">${d.prevDateLabel}</div>
         </div>
         <span style="font-size:15px;color:var(--vl-ink-3)">→</span>
         <div style="text-align:center">
-          <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:var(--vl-ink);line-height:1">${h.toFixed(2)}</div>
+          <div style=";font-size:22px;font-weight:700;color:var(--vl-ink);line-height:1">${h.toFixed(2)}</div>
           <div style="font-size:10.5px;color:var(--vl-accent);margin-top:4px;font-weight:700">오늘</div>
         </div>
         <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px">
@@ -232,7 +232,7 @@ function screenFeedback(currentWeek, selWeek) {
       <span style="display:flex;align-items:center;gap:4px">
         ${locked ? _lockIcon(10) : ""}${wk.label}
       </span>
-      <span style="font-size:9.5px;font-weight:500;color:inherit;opacity:0.8;font-family:'JetBrains Mono',monospace">
+      <span style="font-size:9.5px;font-weight:500;color:inherit;opacity:0.8;">
         ${locked ? `${wk.week}주차 공개` : wk.isBaseline ? "첫 주" : ""}
       </span>
     </button>`;
@@ -275,9 +275,9 @@ function screenFeedback(currentWeek, selWeek) {
       <div>
         <div style="font-size:16px;font-weight:800;color:var(--vl-ink)">
           ${w.label} 리포트
-          ${w.isBaseline ? '<span style="font-size:11px;color:var(--vl-ink-3);font-weight:600"> · 첫 주</span>' : ""}
+          ${w.isBaseline ? '<span style="font-size:11px;color:var(--vl-ink-3);font-weight:600"> · ViewLens와 함께한 첫 주</span>' : ""}
         </div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--vl-ink-3);margin-top:2px">${w.range}</div>
+        <div style=";font-size:11.5px;color:var(--vl-ink-3);margin-top:2px">${w.range}</div>
       </div>
     </div>
 
@@ -285,8 +285,8 @@ function screenFeedback(currentWeek, selWeek) {
       pad: 16,
       children: `
       <div style="display:flex;align-items:center;gap:14px">
-        <div style="text-align:center;flex-shrink:0;cursor:help" title="시청한 영상이 여러 카테고리에 고르게 퍼져 있을수록 높아지는 점수예요. 한 가지 주제만 보면 낮고, 다양하게 볼수록 올라가요.">
-          <div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:30px;color:var(--vl-ink);line-height:1;letter-spacing:-0.02em">${w.entropy.toFixed(2)}</div>
+        <div class="vl-tip" data-tip="시청한 영상이 여러 카테고리에 고르게 퍼져 있을수록 높아지는 점수예요. 한 주제만 보면 낮고, 다양하게 볼수록 올라가요." style="text-align:center;flex-shrink:0">
+          <div style=";font-weight:700;font-size:30px;color:var(--vl-ink);line-height:1;letter-spacing:-0.02em">${w.entropy.toFixed(2)}</div>
           <div style="font-size:10.5px;color:var(--vl-ink-3);margin-top:4px;font-weight:600">다양성 점수 ⓘ</div>
         </div>
         <div style="width:1px;align-self:stretch;background:var(--vl-line)"></div>

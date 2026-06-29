@@ -38,7 +38,9 @@ function _controlTodayCount() {
 // 설치일(installDate) 기준 실제 경과일(1일째부터). installDate가 없으면 목업 day로 폴백.
 function _elapsedDay(fallback) {
   if (!VL._installDate) return fallback;
-  const d = Math.floor((Date.now() - new Date(VL._installDate).getTime()) / 86400000) + 1;
+  const d =
+    Math.floor((Date.now() - new Date(VL._installDate).getTime()) / 86400000) +
+    1;
   return Math.max(1, d);
 }
 
@@ -58,7 +60,7 @@ function _popupHeader(groupCfg, day) {
       ${markSVG({ size: 26, accent: "var(--vl-accent)" })}
       <div style="display:flex;flex-direction:column;line-height:1.1">
         <span style="font-size:15px;font-weight:800;letter-spacing:-0.02em;color:var(--vl-ink)">View<span style="color:var(--vl-accent)">Lens</span></span>
-        <span style="font-size:10.5px;color:var(--vl-ink-3);font-family:'JetBrains Mono',monospace;margin-top:2px">설치 ${day}일째 · 종료 D-${Math.max(0, VL.TOTAL_DAYS - day)}</span>
+        <span style="font-size:10.5px;color:var(--vl-ink-3);margin-top:2px">설치 ${day}일째 · 종료 D-${Math.max(0, VL.TOTAL_DAYS - day)}</span>
       </div>
     </div>
     ${rightArea}
@@ -258,7 +260,9 @@ class ViewLensPopup {
       });
     }
     // 연구자 모드 전용 — 온보딩 화면으로 돌아가기
-    const researcherReset = this.container.querySelector("#vl-researcher-reset");
+    const researcherReset = this.container.querySelector(
+      "#vl-researcher-reset",
+    );
     if (researcherReset) {
       researcherReset.addEventListener("click", () => {
         this._onboarded = false;
@@ -344,7 +348,7 @@ class Studio {
             <span style="color:#9aa0a6;font-size:14px;opacity:.7;margin-left:2px">⟳</span>
             <div style="flex:1;height:30px;border-radius:16px;background:#202124;display:flex;align-items:center;gap:8px;padding:0 14px;margin:0 8px">
               <span style="width:11px;height:11px;border-radius:50%;border:1.5px solid #9aa0a6;opacity:.6"></span>
-              <span style="color:#c9ccd1;font-size:12.5px;font-family:'JetBrains Mono',monospace">youtube.com<span style="color:#9aa0a6">/watch?v=dQw4w9WgXcQ</span></span>
+              <span style="color:#c9ccd1;font-size:12.5px;">youtube.com<span style="color:#9aa0a6">/watch?v=dQw4w9WgXcQ</span></span>
             </div>
             <!-- extension icon -->
             <div style="width:28px;height:28px;border-radius:8px;display:grid;place-items:center">
@@ -389,7 +393,7 @@ class Studio {
           </div>
         </div>
 
-        <div style="font-size:12px;color:#9a938c;font-family:'JetBrains Mono',monospace;letter-spacing:.04em">
+        <div style="font-size:12px;color:#9a938c;;letter-spacing:.04em">
           오른쪽 아래 <b id="vl-tweaks-hint" style="cursor:pointer">Tweaks ▲</b> 패널에서 톤 · 그룹 · 실험 시점을 바꿔 보세요
         </div>
       </div>
