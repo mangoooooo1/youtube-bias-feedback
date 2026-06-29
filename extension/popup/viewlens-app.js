@@ -38,9 +38,9 @@ function _controlTodayCount() {
 // 설치일(installDate) 기준 실제 경과일(1일째부터). installDate가 없으면 목업 day로 폴백.
 function _elapsedDay(fallback) {
   if (!VL._installDate) return fallback;
-  const d =
-    Math.floor((Date.now() - new Date(VL._installDate).getTime()) / 86400000) +
-    1;
+  const t = new Date(VL._installDate).getTime();
+  if (!Number.isFinite(t)) return fallback; // 손상된 installDate → NaN 방지
+  const d = Math.floor((Date.now() - t) / 86400000) + 1;
   return Math.max(1, d);
 }
 
