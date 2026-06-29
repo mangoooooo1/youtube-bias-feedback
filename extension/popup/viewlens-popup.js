@@ -409,10 +409,11 @@ async function boot() {
     timelineKey: calcTimelineKey(installDate),
     onChange: async ({ onboarded: ob, group: g }) => {
       if (ob && g) {
+        const installDate = new Date().toISOString();
+        VL._installDate = installDate; // 온보딩 직후 첫 렌더부터 실제 경과일(1일째) 반영
         const { anonymousId: existing, serverUrl } =
           await chrome.storage.local.get(["anonymousId", "serverUrl"]);
         const anonymousId = existing || crypto.randomUUID();
-        const installDate = new Date().toISOString();
 
         await chrome.storage.local.set({
           anonymousId,

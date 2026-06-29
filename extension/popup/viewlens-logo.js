@@ -59,7 +59,7 @@ function wordmarkHTML({
 } = {}) {
   const markSize = Math.round(size * 1.55);
   const subLine = sub
-    ? `<span style="margin-top:5px;font-family:'JetBrains Mono',monospace;font-weight:500;font-size:${size * 0.42}px;letter-spacing:0.14em;text-transform:uppercase;color:var(--vl-ink-3)">${sub}</span>`
+    ? `<span style="margin-top:5px;;font-weight:500;font-size:${size * 0.42}px;letter-spacing:0.14em;text-transform:uppercase;color:var(--vl-ink-3)">${sub}</span>`
     : "";
   return `<div style="display:flex;align-items:center;gap:${gap}px">
     ${markSVG({ size: markSize, filled, accent })}

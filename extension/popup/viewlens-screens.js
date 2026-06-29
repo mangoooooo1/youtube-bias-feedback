@@ -14,12 +14,12 @@ function screenOnboarding() {
       <div style="margin-top:18px;font-size:25px;font-weight:800;letter-spacing:-0.03em;color:var(--vl-ink)">
         View<span style="color:var(--vl-accent)">Lens</span>
       </div>
-      <p style="margin:10px 0 0;font-size:13.5px;line-height:1.6;color:var(--vl-ink-2);max-width:260px;text-wrap:pretty">
-        추천 알고리즘을 너머 당신의 시청 습관을 돌아봅니다. 연구자에게 받은 참여 코드를 입력하여 시작해 주세요.
+      <p style="margin:10px 0 0;font-size:13.5px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;word-break:keep-all">
+        추천 알고리즘을 넘어 당신의 시청 습관을 돌아봅니다.<br />연구자에게 받은 참여 코드를 입력하여 시작해 주세요.
       </p>
     </div>
 
-    <div style="margin-top:30px">
+    <div style="margin-top:40px">
       <label style="font-size:12px; font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--vl-ink-3)">참여 코드</label>
       <input id="vl-onboard-input" value="" placeholder="연구자에게 받은 참여 코드" spellcheck="false" autocomplete="off"
         style="display:block;margin-top:9px;width:100%;box-sizing:border-box;padding:13px 15px;
@@ -35,8 +35,8 @@ function screenOnboarding() {
 
     <div style="margin-top:auto;padding-top:22px">
       <div style="display:flex;align-items:flex-start;gap:9px;padding:12px 13px;background:var(--vl-card-2);border:1px solid var(--vl-line);border-radius:12px">
-        <div style="width:16px;height:16px;border-radius:5px;background:var(--vl-accent-soft);color:var(--vl-accent);display:grid;place-items:center;flex-shrink:0;margin-top:1px">
-          ${_lockIcon(9)}
+        <div style="width:25px;height:25px;border-radius:7px;background:var(--vl-accent-soft);color:var(--vl-accent);display:grid;place-items:center;flex-shrink:0;margin-top:1px">
+          ${_lockIcon(15)}
         </div>
         <p style="margin:0;font-size:11.5px;line-height:1.55;color:var(--vl-ink-2);text-wrap:pretty">
           시청 기록은 익명으로 저장됩니다. 누가 어떤 영상을 봤는지는 특정되지 않으며, 수집된 데이터는 오직 연구 목적으로만 사용됩니다.
@@ -101,7 +101,7 @@ function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
       <div style="font-size:13px;font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : dateLabel}</div>
       <button id="vl-date-next" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:${isToday ? "var(--vl-ink-3)" : "var(--vl-ink-2)"};cursor:${isToday ? "default" : "pointer"};font-size:15px;display:grid;place-items:center;opacity:${isToday ? 0.35 : 1}" ${isToday ? "disabled" : ""}>›</button>
     </div>
-    <div style="flex:1;padding:24px 24px 40px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:20px">
+    <div style="flex:1;padding:24px 24px 40px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px">
       <div style="position:relative;width:80px;height:80px">
         <span style="position:absolute;inset:0;border-radius:50%;background:var(--vl-accent-soft);animation:vlPulse 2.4s ease-out infinite"></span>
         <span style="position:absolute;inset:0;border-radius:50%;border:2px solid var(--vl-accent);opacity:0.4;animation:vlPulse 2.4s ease-out infinite 0.6s"></span>
@@ -119,7 +119,7 @@ function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
             : ""
         }
       </div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--vl-ink-3)">${dateLabel}</div>
+      <div style="font-size:11px;color:var(--vl-ink-3)">${dateLabel}</div>
     </div>
   </div>`;
 }
@@ -139,7 +139,7 @@ function screenToday() {
     <div style="display:flex;align-items:center;gap:8px">
       <span style="width:8px;height:8px;border-radius:3px;background:${c.color};flex-shrink:0"></span>
       <span style="font-size:12px;color:var(--vl-ink);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name}</span>
-      <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--vl-ink-2)">${Math.round(c.p * 100)}%</span>
+      <span style="font-size:12px;color:var(--vl-ink-2)">${Math.round(c.p * 100)}%</span>
     </div>
   `,
     )
@@ -177,12 +177,12 @@ function screenToday() {
       <div style="font-size:11.5px;color:var(--vl-ink-3);font-weight:600;margin-bottom:11px">직전 시청일 대비 다양성</div>
       <div style="display:flex;align-items:center;gap:13px">
         <div style="text-align:center">
-          <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--vl-ink-3);line-height:1">${d.prevEntropy.toFixed(2)}</div>
+          <div style=";font-size:18px;font-weight:700;color:var(--vl-ink-3);line-height:1">${d.prevEntropy.toFixed(2)}</div>
           <div style="font-size:10.5px;color:var(--vl-ink-3);margin-top:4px">${d.prevDateLabel}</div>
         </div>
         <span style="font-size:15px;color:var(--vl-ink-3)">→</span>
         <div style="text-align:center">
-          <div style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:var(--vl-ink);line-height:1">${h.toFixed(2)}</div>
+          <div style=";font-size:22px;font-weight:700;color:var(--vl-ink);line-height:1">${h.toFixed(2)}</div>
           <div style="font-size:10.5px;color:var(--vl-accent);margin-top:4px;font-weight:700">오늘</div>
         </div>
         <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px">
@@ -213,10 +213,10 @@ function screenToday() {
 
 function screenFeedback(currentWeek, selWeek) {
   const w = VL.weeks[selWeek - 1];
-  const b = VL.band(w.entropy);
   const vsBase = w.entropy - VL.baselineH;
-  const badgeTone =
-    b.tone === "good" ? "good" : b.tone === "warn" ? "warn" : "accent";
+  const prevW = selWeek >= 2 ? VL.weeks[selWeek - 2] : null;
+  const vsPrev = prevW ? w.entropy - prevW.entropy : 0;
+  const showPrev = selWeek >= 3; // 직전 주가 첫 주와 다를 때만 별도 표시
 
   const weekBtns = VL.weeks
     .map((wk) => {
@@ -232,28 +232,39 @@ function screenFeedback(currentWeek, selWeek) {
       <span style="display:flex;align-items:center;gap:4px">
         ${locked ? _lockIcon(10) : ""}${wk.label}
       </span>
-      <span style="font-size:9.5px;font-weight:500;color:inherit;opacity:0.8;font-family:'JetBrains Mono',monospace">
-        ${locked ? `${wk.week}주차 공개` : wk.isBaseline ? "기준선" : ""}
+      <span style="font-size:9.5px;font-weight:500;color:inherit;opacity:0.8;">
+        ${locked ? `${wk.week}주차 공개` : wk.isBaseline ? "첫 주" : ""}
       </span>
     </button>`;
     })
     .join("");
 
   const vsBaseContent = w.isBaseline
-    ? `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">이 주의 점수가 이후 주차를 비교하는 <b style="color:var(--vl-ink)">기준선</b>이 돼요.</p>`
+    ? `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">첫 주라 아직 비교할 이전 주가 없어요.</p>`
     : `<div>
-        <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">기준선(1주차) 대비</div>
+        <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">첫 주 대비</div>
         <div style="display:flex;align-items:center;gap:7px">
           ${vlDeltaChip({ value: vsBase })}
           <span style="font-size:12px;color:var(--vl-ink-2)">${vsBase >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
         </div>
+        ${
+          showPrev
+            ? `<div style="margin-top:8px">
+          <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">직전 주(${prevW.label}) 대비</div>
+          <div style="display:flex;align-items:center;gap:7px">
+            ${vlDeltaChip({ value: vsPrev })}
+            <span style="font-size:12px;color:var(--vl-ink-2)">${vsPrev >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
+          </div>
+        </div>`
+            : ""
+        }
       </div>`;
 
   const baselineLegend = !w.isBaseline
     ? `
     <div style="display:flex;align-items:center;gap:5px;margin-top:7px">
       <span style="width:14px;height:0;border-top:1px dashed var(--vl-ink-3)"></span>
-      <span style="font-size:10.5px;color:var(--vl-ink-3)">점선 = 기준선 ${VL.baselineH.toFixed(2)}</span>
+      <span style="font-size:10.5px;color:var(--vl-ink-3)">점선 = 첫 주 ${VL.baselineH.toFixed(2)}</span>
     </div>`
     : "";
 
@@ -264,20 +275,19 @@ function screenFeedback(currentWeek, selWeek) {
       <div>
         <div style="font-size:16px;font-weight:800;color:var(--vl-ink)">
           ${w.label} 리포트
-          ${w.isBaseline ? '<span style="font-size:11px;color:var(--vl-ink-3);font-weight:600"> · 베이스라인</span>' : ""}
+          ${w.isBaseline ? '<span style="font-size:11px;color:var(--vl-ink-3);font-weight:600"> · ViewLens와 함께한 첫 주</span>' : ""}
         </div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--vl-ink-3);margin-top:2px">${w.range}</div>
+        <div style=";font-size:11.5px;color:var(--vl-ink-3);margin-top:2px">${w.range}</div>
       </div>
-      ${vlBadge({ text: b.label, tone: badgeTone })}
     </div>
 
     ${vlCard({
       pad: 16,
       children: `
       <div style="display:flex;align-items:center;gap:14px">
-        <div style="text-align:center;flex-shrink:0">
-          <div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:30px;color:var(--vl-ink);line-height:1;letter-spacing:-0.02em">${w.entropy.toFixed(2)}</div>
-          <div style="font-size:10.5px;color:var(--vl-ink-3);margin-top:4px;font-weight:600">다양성 점수 (bits)</div>
+        <div class="vl-tip" data-tip="시청한 영상이 여러 카테고리에 고르게 퍼져 있을수록 높아지는 점수예요.&#10;한 주제만 보면 낮고, 다양하게 볼수록 올라가요." style="text-align:center;flex-shrink:0">
+          <div style="font-weight:700;font-size:30px;color:var(--vl-ink);line-height:1;letter-spacing:-0.02em">${w.entropy.toFixed(2)}</div>
+          <div style="font-size:10.5px;color:var(--vl-ink-3);margin-top:4px;font-weight:600">다양성 점수 ⓘ</div>
         </div>
         <div style="width:1px;align-self:stretch;background:var(--vl-line)"></div>
         <div style="flex:1">${vsBaseContent}</div>
@@ -304,18 +314,18 @@ function screenFeedback(currentWeek, selWeek) {
 
 // ── Control group home ────────────────────────────────────────────────────────
 
-function screenControlHome(day) {
+function screenControlHome(day, stats = {}) {
   const cells = [
-    { v: `${VL.con.todayCount}개`, l: "오늘 시청한 영상" },
-    { v: `${VL.con.totalCount}개`, l: "총 누적 시청" },
-    { v: `${day}일째`, l: "설치 후" },
-    { v: `D-${VL.TOTAL_DAYS - day}`, l: "실험 종료까지" },
+    { v: `${stats.todayCount ?? VL.con.todayCount}개`, l: "오늘 시청한 영상" },
+    { v: `${stats.totalCount ?? VL.con.totalCount}개`, l: "지금까지 시청한 영상" },
+    { v: `${day}일째`, l: "ViewLens와 함께한 지" },
+    { v: `D-${Math.max(0, VL.TOTAL_DAYS - day)}`, l: "실험 종료까지" },
   ];
   const gridCells = cells
     .map(
       (cell, i) => `
     <div style="padding:16px 18px;border-right:${i % 2 === 0 ? "1px solid var(--vl-line)" : "none"};border-bottom:${i < 2 ? "1px solid var(--vl-line)" : "none"}">
-      <div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:24px;color:var(--vl-ink);letter-spacing:-0.02em;line-height:1">${cell.v}</div>
+      <div style="font-weight:700;font-size:24px;color:var(--vl-ink);letter-spacing:-0.02em;line-height:1">${cell.v}</div>
       <div style="font-size:11.5px;color:var(--vl-ink-3);margin-top:6px;font-weight:500">${cell.l}</div>
     </div>
   `,
@@ -344,8 +354,8 @@ function screenControlHome(day) {
     ${vlCard({ pad: 0, children: `<div style="display:grid;grid-template-columns:1fr 1fr">${gridCells}</div>` })}
 
     <div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card-2);border:1px solid var(--vl-line);border-radius:13px">
-      <div style="width:18px;height:18px;border-radius:6px;background:var(--vl-accent-soft);color:var(--vl-accent);display:grid;place-items:center;flex-shrink:0;margin-top:1px">
-        ${_lockIcon(10)}
+      <div style="width:25px;height:25px;border-radius:7px;background:var(--vl-accent-soft);color:var(--vl-accent);display:grid;place-items:center;flex-shrink:0;margin-top:1px">
+        ${_lockIcon(15)}
       </div>
       <p style="margin:0;font-size:11.5px;line-height:1.55;color:var(--vl-ink-2);text-wrap:pretty">
         실험 기간 중 피드백 제공 시점은 참여자마다 다를 수 있으며, 실험 종료 후 모든 참여자에게 결과를 공유합니다.

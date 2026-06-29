@@ -27,14 +27,6 @@ function entropy(arr) {
   return arr.reduce((h, d) => (d.p > 0 ? h - d.p * Math.log2(d.p) : h), 0);
 }
 
-function band(h) {
-  if (h < 1.2) return { label: '매우 편중', tone: 'warn' };
-  if (h < 1.9) return { label: '편중',      tone: 'warn' };
-  if (h < 2.5) return { label: '보통',      tone: 'mid'  };
-  if (h < 3.0) return { label: '다양',      tone: 'good' };
-  return           { label: '매우 다양',    tone: 'good' };
-}
-
 const H_MAX = 3.17;
 
 const today = {
@@ -122,7 +114,7 @@ const TONES = {
 };
 
 window.VL = {
-  CATS: VL_CATS, dist, entropy, band, H_MAX,
+  CATS: VL_CATS, dist, entropy, H_MAX,
   today, weeks, baselineH, TIMELINE, TOTAL_DAYS, GROUPS, TONES,
   con: { todayCount: 12, totalCount: 47 },
 };

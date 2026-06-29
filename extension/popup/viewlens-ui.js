@@ -4,7 +4,7 @@ function vlCard({ children = "", pad = 16, soft = false, style = "" } = {}) {
 
 function vlSectionLabel({ text = "", right = "" } = {}) {
   return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-    <span style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--vl-ink-3);white-space:nowrap">${text}</span>
+    <span style=";font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--vl-ink-3);white-space:nowrap">${text}</span>
     ${right}
   </div>`;
 }
@@ -31,7 +31,7 @@ function vlDeltaChip({ value = 0, unit = "", invertColor = false } = {}) {
         ? "var(--vl-good)"
         : "var(--vl-warn)";
   const arrow = value === 0 ? "·" : up ? "▲" : "▼";
-  return `<span style="display:inline-flex;align-items:center;gap:4px;color:${col};font-family:'JetBrains Mono',monospace;font-weight:600;font-size:12px">
+  return `<span style="display:inline-flex;align-items:center;gap:4px;color:${col};;font-weight:600;font-size:12px">
     <span style="font-size:9px">${arrow}</span>${up ? "+" : ""}${value.toFixed(2)}${unit}
   </span>`;
 }
@@ -48,7 +48,7 @@ function vlBarChart({ data = [], maxVal, animate = true } = {}) {
         <div style="flex:1;height:8px;background:var(--vl-line);border-radius:999px;overflow:hidden">
           <div style="width:${(d.p / top) * 100}%;height:100%;background:${d.color};border-radius:999px;${animate ? "transition:width .7s cubic-bezier(.2,.8,.2,1)" : ""}"></div>
         </div>
-        <span style="width:34px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--vl-ink-2);flex-shrink:0">${Math.round(d.p * 100)}%</span>
+        <span style="width:34px;text-align:right;;font-size:12px;color:var(--vl-ink-2);flex-shrink:0">${Math.round(d.p * 100)}%</span>
       </div>
     `,
       )
@@ -82,69 +82,9 @@ function vlDonut({ data = [], size = 128, thickness = 18 } = {}) {
       <g transform="rotate(-90 ${cx} ${cy})">${segments}</g>
     </svg>
     <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
-      <span style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:22px;color:var(--vl-ink);line-height:1">${Math.round(top.p * 100)}%</span>
+      <span style=";font-weight:700;font-size:22px;color:var(--vl-ink);line-height:1">${Math.round(top.p * 100)}%</span>
       <span style="font-size:10.5px;color:var(--vl-ink-3);margin-top:3px;font-weight:600">${top.name}</span>
     </div>
-  </div>`;
-}
-
-function vlDiversityMeter({
-  value = 0,
-  max = 3.17,
-  lowAt = 1.9,
-  highAt = 2.5,
-} = {}) {
-  const zones = [
-    {
-      key: "편중",
-      lo: 0,
-      hi: lowAt,
-      col: "var(--vl-warn)",
-      desc: `0–${lowAt}`,
-    },
-    {
-      key: "보통",
-      lo: lowAt,
-      hi: highAt,
-      col: "var(--vl-ink-2)",
-      desc: `${lowAt}–${highAt}`,
-    },
-    {
-      key: "다양",
-      lo: highAt,
-      hi: max,
-      col: "var(--vl-good)",
-      desc: `${highAt}+`,
-    },
-  ];
-  const ai = value < lowAt ? 0 : value < highAt ? 1 : 2;
-  const z = zones[ai];
-  const local = Math.max(0, Math.min(1, (value - z.lo) / (z.hi - z.lo)));
-  const markP = ((ai + local) / 3) * 100;
-  const zoneBars = zones
-    .map(
-      (zn, i) =>
-        `<div style="flex:1;border-right:${i < 2 ? "2px solid var(--vl-card)" : "none"};background:${i === ai ? zn.col : `color-mix(in oklab,${zn.col} 24%,var(--vl-line))`}"></div>`,
-    )
-    .join("");
-  const zoneLabels = zones
-    .map(
-      (zn, i) =>
-        `<div style="flex:1;text-align:center">
-      <div style="font-size:12px;font-weight:${i === ai ? 800 : 600};color:${i === ai ? zn.col : "var(--vl-ink-3)"}">${zn.key}</div>
-      <div style="font-size:9.5px;font-family:'JetBrains Mono',monospace;color:var(--vl-ink-3);margin-top:2px">${zn.desc}</div>
-    </div>`,
-    )
-    .join("");
-  return `<div style="width:100%">
-    <div style="position:relative;height:24px">
-      <div style="position:absolute;left:${markP}%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center">
-        <span style="background:var(--vl-ink);color:var(--vl-card);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;padding:2px 7px;border-radius:7px;white-space:nowrap;line-height:1.3">오늘 ${value.toFixed(2)}</span>
-        <span style="width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid var(--vl-ink)"></span>
-      </div>
-    </div>
-    <div style="display:flex;height:13px;border-radius:999px;overflow:hidden">${zoneBars}</div>
-    <div style="display:flex;margin-top:7px">${zoneLabels}</div>
   </div>`;
 }
 
@@ -206,7 +146,7 @@ function vlReview({
           <span class="vl-vid-chevron" style="font-size:9px;line-height:1">▸</span>
           분석한 영상
         </span>
-        <span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--vl-ink-3)">${videos.length}개</span>
+        <span style="font-size:11px;;color:var(--vl-ink-3)">${videos.length}개</span>
       </summary>
       <div style="margin-top:9px;display:flex;flex-direction:column;gap:6px">
         ${videos
@@ -247,6 +187,5 @@ window.vlBadge = vlBadge;
 window.vlDeltaChip = vlDeltaChip;
 window.vlBarChart = vlBarChart;
 window.vlDonut = vlDonut;
-window.vlDiversityMeter = vlDiversityMeter;
 window.vlMiniLine = vlMiniLine;
 window.vlReview = vlReview;
