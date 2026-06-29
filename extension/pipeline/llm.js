@@ -20,7 +20,7 @@ function roundedDelta(entropy, prevEntropy) {
 // prevEntropy 및 편중 비율을 LLM에게 줄 자연어 지시로 번역
 function buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount }) {
   if (videoCount < MIN_VIDEOS_FOR_TREND) {
-    return '- 이번 세션은 시청한 영상 수가 적어 패턴을 단정하기 어렵습니다. 단정적인 평가나 강한 권유는 피하고 가볍게 언급해 주세요.';
+    return '- 이번 세션은 시청한 영상 수가 적어 패턴을 단정하기 어렵습니다. 무엇을 봤는지 가볍게 비추는 정도로만 언급해 주세요.';
   }
 
   const lines = [];
@@ -28,16 +28,16 @@ function buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount }) {
   if (Number.isFinite(prevEntropy)) {
     const delta = roundedDelta(entropy, prevEntropy);
     if (delta >= ENTROPY_DELTA_EPS) {
-      lines.push('- 직전 세션보다 시청 다양성이 늘었습니다. 긍정적으로 격려하는 톤으로 작성해 주세요.');
+      lines.push('- 직전 세션보다 시청이 여러 주제로 다양해졌습니다. 이 변화를 담담한 사실로 비춰 주세요.');
     } else if (delta <= -ENTROPY_DELTA_EPS) {
-      lines.push('- 직전 세션보다 시청 다양성이 줄었습니다. 다양한 카테고리를 탐색해 보도록 부드럽게 권장해 주세요.');
+      lines.push('- 직전 세션보다 시청이 더 적은 수의 주제에 모였습니다. 이 변화를 부드럽고 또렷하게 사실로 비춰 주세요.');
     } else {
-      lines.push('- 직전 세션과 비슷한 다양성을 유지하고 있습니다. 중립적인 톤으로 현재 패턴을 언급해 주세요.');
+      lines.push('- 직전 세션과 비슷한 다양성을 유지하고 있습니다. 이 사실을 중립적으로 비춰 주세요.');
     }
   }
 
   if (topRatio >= BIAS_WARN_RATIO) {
-    lines.push('- 한 카테고리에 시청이 크게 쏠려 있습니다. 다양한 카테고리를 탐색해 보도록 권장하는 문구를 반드시 포함해 주세요.');
+    lines.push('- 시청이 한 주제에 크게 모여 있습니다. 그 쏠림을 부드럽고 또렷하게 사실로 비춰 주세요. 다양하게 보라는 권유나 지시는 하지 마세요.');
   }
 
   return lines.join('\n');
@@ -65,7 +65,7 @@ export function buildPrompt({ categoryDistribution, entropy, prevEntropy = null,
   const trendGuidance = buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount });
   const trendSection = trendGuidance ? `\n\n[피드백 작성 지침]\n${trendGuidance}` : '';
 
-  return `당신은 YouTube 시청 패턴을 분석하는 친근한 조언자입니다.
+  return `당신은 사용자가 자신의 YouTube 콘텐츠 소비 패턴을 스스로 돌아볼 수 있도록 있는 그대로 비춰 주는 거울 같은 조력자입니다.
 
 [세션 정보]
 - 시청 영상 수: ${videoCount}개
@@ -73,11 +73,17 @@ export function buildPrompt({ categoryDistribution, entropy, prevEntropy = null,
 ${categoryLines}
 ${entropyLine}${titleLines}${trendSection}
 
-위 데이터를 바탕으로 아래 JSON 형식으로만 응답해주세요. 다른 텍스트는 포함하지 마세요.
+[피드백 원칙]
+- 위에 제시된 카테고리 분포와 다양성 변화에만 근거하세요. 정치 성향·이념·성격 등 데이터로 알 수 없는 내용은 추론하거나 단정하지 마세요.
+- 평가하거나 가르치려 들지 말고, 친근하고 중립적인 톤으로 사용자가 자신의 시청 패턴을 스스로 알아차리도록 돕는 데 집중하세요.
+- 한 주제에 시청이 모여 있으면, 그 사실을 부드럽고 또렷하게 비춰 주세요. 단, "이렇게 하라"는 식의 행동 지시나 특정 카테고리 시청 권유는 하지 마세요. 무엇을 볼지는 전적으로 사용자가 결정합니다.
+- entropy·통계·퍼센트 같은 수치나 전문 용어는 직접 노출하지 마세요.
+
+아래 JSON 형식으로만 응답하세요. 다른 텍스트는 포함하지 마세요.
 
 {
-  "topic": "영상 제목과 카테고리를 보고 이 사용자의 주요 관심사를 5단어 이내 명사구로 (예: 과학과 기술, 음악과 일상)",
-  "feedback": "시청 패턴에 대한 피드백 2~3문장. 한국어로, 친근하고 중립적인 톤으로, 수치나 통계 용어를 직접 사용하지 말고 자연스럽게 표현"
+  "topic": "시청 카테고리 기반 주요 관심사를 5단어 이내 명사구로 (예: 과학과 기술)",
+  "feedback": "위 원칙에 따른 2~3문장. 무엇을 봤는지 비추기 → (쏠림이 있으면) 그 쏠림을 알아차리게 하기. 행동을 처방하지 말고 관찰에서 멈출 것"
 }`;
 }
 
@@ -133,34 +139,30 @@ export function generateFallbackReview({ categoryDistribution, entropy, prevEntr
     summary = `이번 세션에서는 ${topName} 영상을 ${videoCount}개 집중적으로 시청하셨네요.`;
   } else if (topRatio > 0.5) {
     topic = topName;
-    summary = `이번 세션에서는 주로 ${topName} 콘텐츠를 즐기셨고, ${sorted[1][0]} 영상도 함께 총 ${videoCount}개를 시청하셨네요.`;
+    summary = `이번 세션에서는 주로 ${topName} 영상을 보셨고, ${sorted[1][0]} 영상도 함께 총 ${videoCount}개를 시청하셨어요.`;
   } else {
     topic = topNames;
     summary = `이번 세션에서는 ${topNames} 등 다양한 카테고리의 영상을 총 ${videoCount}개 고루 시청하셨네요.`;
   }
 
-  // [변화 추세] + [권장/격려] — 프롬프트 경로와 동일한 상수/임계값 사용
+  // [변화 추세] + [쏠림] — 거울형: 사실만 비추고 권유·처방은 하지 않음
   let trend = '';
-  let recommendation = '';
+  let skewNote = '';
   if (videoCount >= MIN_VIDEOS_FOR_TREND) {
     const hasPrev = Number.isFinite(prevEntropy);
     const delta = hasPrev ? roundedDelta(entropy, prevEntropy) : 0;
 
     if (hasPrev) {
-      if (delta >= ENTROPY_DELTA_EPS) trend = '직전 세션보다 시청 다양성이 늘었어요.';
-      else if (delta <= -ENTROPY_DELTA_EPS) trend = '직전 세션보다 시청 다양성이 다소 줄었어요.';
-      else trend = '직전 세션과 비슷한 다양성을 유지하고 있어요.';
+      if (delta >= ENTROPY_DELTA_EPS) trend = '직전 세션보다 여러 주제를 두루 보셨어요.';
+      else if (delta <= -ENTROPY_DELTA_EPS) trend = '직전 세션보다 더 적은 수의 주제에 모여 있었어요.';
+      else trend = '직전 세션과 비슷한 다양성이었어요.';
     }
 
     if (topRatio >= BIAS_WARN_RATIO) {
-      recommendation = '한 가지 주제에 시청이 크게 쏠려 있으니, 다양한 카테고리를 탐색해 보시는 건 어떨까요?';
-    } else if (hasPrev && delta <= -ENTROPY_DELTA_EPS) {
-      recommendation = '다른 주제의 콘텐츠도 곁들여 보시는 걸 추천해요.';
-    } else if (hasPrev && delta >= ENTROPY_DELTA_EPS) {
-      recommendation = '균형 잡힌 시청 패턴을 잘 유지하고 계세요!';
+      skewNote = '특히 시청이 한 주제에 크게 모여 있었어요.';
     }
   }
 
-  const feedback = [summary, trend, recommendation].filter(Boolean).join(' ');
+  const feedback = [summary, trend, skewNote].filter(Boolean).join(' ');
   return { topic, feedback };
 }
