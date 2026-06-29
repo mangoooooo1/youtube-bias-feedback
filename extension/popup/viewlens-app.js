@@ -20,6 +20,21 @@ function _controlTotalCount() {
   return ended + (VL.today?.collectingCount ?? 0);
 }
 
+// 대조군 홈 — 오늘 시청한 영상 수 (오늘 종료된 세션 + 진행 중 세션).
+function _controlTodayCount() {
+  const sessions = VL._allSessions || [];
+  const todayStr = new Date().toDateString();
+  const ended = sessions.reduce(
+    (sum, s) =>
+      sum +
+      (s.endTime && new Date(s.endTime).toDateString() === todayStr
+        ? (s.videoCount ?? s.videos?.length ?? 0)
+        : 0),
+    0,
+  );
+  return ended + (VL.today?.collectingCount ?? 0);
+}
+
 // 설치일(installDate) 기준 실제 경과일(1일째부터). installDate가 없으면 목업 day로 폴백.
 function _elapsedDay(fallback) {
   if (!VL._installDate) return fallback;
@@ -148,7 +163,10 @@ class ViewLensPopup {
           ? screenToday()
           : screenFeedback(tl.currentWeek, selWeek);
     } else {
-      bodyHTML = screenControlHome(day, { totalCount: _controlTotalCount() });
+      bodyHTML = screenControlHome(day, {
+        todayCount: _controlTodayCount(),
+        totalCount: _controlTotalCount(),
+      });
     }
 
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
