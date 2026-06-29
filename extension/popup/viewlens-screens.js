@@ -317,8 +317,8 @@ function screenFeedback(currentWeek, selWeek) {
 function screenControlHome(day, stats = {}) {
   const cells = [
     { v: `${stats.todayCount ?? VL.con.todayCount}개`, l: "오늘 시청한 영상" },
-    { v: `${stats.totalCount ?? VL.con.totalCount}개`, l: "총 누적 시청" },
-    { v: `${day}일째`, l: "설치 후" },
+    { v: `${stats.totalCount ?? VL.con.totalCount}개`, l: "지금까지 시청한 영상" },
+    { v: `${day}일째`, l: "ViewLens와 함께한 지" },
     { v: `D-${Math.max(0, VL.TOTAL_DAYS - day)}`, l: "실험 종료까지" },
   ];
   const gridCells = cells
