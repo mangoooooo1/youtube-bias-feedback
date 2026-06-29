@@ -142,7 +142,6 @@ body {
 /* 호버 툴팁 (data-tip 속성 사용) */
 .vl-tip {
   position: relative;
-  cursor: help;
 }
 .vl-tip::after {
   content: attr(data-tip);
