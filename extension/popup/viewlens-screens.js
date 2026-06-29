@@ -214,6 +214,9 @@ function screenToday() {
 function screenFeedback(currentWeek, selWeek) {
   const w = VL.weeks[selWeek - 1];
   const vsBase = w.entropy - VL.baselineH;
+  const prevW = selWeek >= 2 ? VL.weeks[selWeek - 2] : null;
+  const vsPrev = prevW ? w.entropy - prevW.entropy : 0;
+  const showPrev = selWeek >= 3; // 직전 주가 첫 주와 다를 때만 별도 표시
 
   const weekBtns = VL.weeks
     .map((wk) => {
@@ -230,27 +233,38 @@ function screenFeedback(currentWeek, selWeek) {
         ${locked ? _lockIcon(10) : ""}${wk.label}
       </span>
       <span style="font-size:9.5px;font-weight:500;color:inherit;opacity:0.8;font-family:'JetBrains Mono',monospace">
-        ${locked ? `${wk.week}주차 공개` : wk.isBaseline ? "기준선" : ""}
+        ${locked ? `${wk.week}주차 공개` : wk.isBaseline ? "첫 주" : ""}
       </span>
     </button>`;
     })
     .join("");
 
   const vsBaseContent = w.isBaseline
-    ? `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">이 주의 점수가 이후 주차를 비교하는 <b style="color:var(--vl-ink)">기준선</b>이 돼요.</p>`
+    ? `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">첫 주라 아직 비교할 이전 주가 없어요.</p>`
     : `<div>
-        <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">기준선(1주차) 대비</div>
+        <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">첫 주 대비</div>
         <div style="display:flex;align-items:center;gap:7px">
           ${vlDeltaChip({ value: vsBase })}
           <span style="font-size:12px;color:var(--vl-ink-2)">${vsBase >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
         </div>
+        ${
+          showPrev
+            ? `<div style="margin-top:8px">
+          <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">직전 주(${prevW.label}) 대비</div>
+          <div style="display:flex;align-items:center;gap:7px">
+            ${vlDeltaChip({ value: vsPrev })}
+            <span style="font-size:12px;color:var(--vl-ink-2)">${vsPrev >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
+          </div>
+        </div>`
+            : ""
+        }
       </div>`;
 
   const baselineLegend = !w.isBaseline
     ? `
     <div style="display:flex;align-items:center;gap:5px;margin-top:7px">
       <span style="width:14px;height:0;border-top:1px dashed var(--vl-ink-3)"></span>
-      <span style="font-size:10.5px;color:var(--vl-ink-3)">점선 = 기준선 ${VL.baselineH.toFixed(2)}</span>
+      <span style="font-size:10.5px;color:var(--vl-ink-3)">점선 = 첫 주 ${VL.baselineH.toFixed(2)}</span>
     </div>`
     : "";
 
@@ -261,7 +275,7 @@ function screenFeedback(currentWeek, selWeek) {
       <div>
         <div style="font-size:16px;font-weight:800;color:var(--vl-ink)">
           ${w.label} 리포트
-          ${w.isBaseline ? '<span style="font-size:11px;color:var(--vl-ink-3);font-weight:600"> · 베이스라인</span>' : ""}
+          ${w.isBaseline ? '<span style="font-size:11px;color:var(--vl-ink-3);font-weight:600"> · 첫 주</span>' : ""}
         </div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--vl-ink-3);margin-top:2px">${w.range}</div>
       </div>
