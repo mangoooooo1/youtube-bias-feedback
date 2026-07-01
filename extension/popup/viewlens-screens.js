@@ -46,22 +46,52 @@ function screenOnboarding() {
   </div>`;
 }
 
+// 참여 코드 파싱 → { group, code } 또는 null(형식 오류)
+// - 실전 코드: 난독 접두사(QWE=실험군, ASD=대조군) + 랜덤 4자, 예 "QWE-K7M2"
+// - 테스트 코드: "TEST-EXP" / "TEST-CON" (그룹으로 그대로 사용)
+// 접두사는 참여자에게 그룹(실험군/대조군)을 노출하지 않도록 난독화한 값이다.
+function parseParticipantCode(raw) {
+  const code = (raw || "").trim().toUpperCase();
+  if (code === "TEST-EXP" || code === "TEST-CON") return { group: code, code };
+  const m = code.match(/^(QWE|ASD)-[A-Z2-9]{4}$/);
+  if (!m) return null;
+  return { group: m[1] === "QWE" ? "EXP" : "CON", code };
+}
+
 function bindOnboarding(root, onSubmit) {
   const input = root.querySelector("#vl-onboard-input");
   const errEl = root.querySelector("#vl-onboard-err");
   const btn = root.querySelector("#vl-onboard-btn");
 
-  function submit() {
-    const c = input.value.trim().toUpperCase();
-    if (!c) {
+  const btnLabel = btn.textContent;
+
+  async function submit() {
+    const raw = input.value.trim();
+    if (!raw) {
       showErr("코드를 입력해 주세요.");
       return;
     }
-    if (!VL.GROUPS[c]) {
+    const parsed = parseParticipantCode(raw);
+    if (!parsed) {
       showErr("유효하지 않은 코드예요. 연구자에게 받은 코드를 확인해 주세요.");
       return;
     }
-    onSubmit(c);
+
+    // 서버 발급 명단 검증 — 오프라인/서버 미설정 시엔 통과(폴백)
+    btn.disabled = true;
+    btn.textContent = "확인 중…";
+    const check = window.validateParticipantCode
+      ? await window.validateParticipantCode(parsed.code)
+      : { ok: true };
+    btn.disabled = false;
+    btn.textContent = btnLabel;
+
+    if (!check.ok) {
+      showErr("발급되지 않은 코드예요. 연구자에게 받은 코드를 확인해 주세요.");
+      return;
+    }
+    // 서버가 그룹을 확정해 주면 그 값을 사용(권위), 아니면 코드 접두사 기준
+    onSubmit({ group: check.group || parsed.group, code: parsed.code });
   }
   function showErr(msg) {
     errEl.textContent = msg;
