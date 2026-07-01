@@ -325,14 +325,25 @@ class RealPopup extends ViewLensPopup {
 
 // participants 서버 등록 — 성공(200) 시에만 participantSynced 플래그를 저장한다.
 // 실패하면 플래그를 세우지 않으므로 다음 팝업 boot에서 재시도된다(서버는 anonymousId UNIQUE로 멱등 처리).
-async function syncParticipant(serverUrl, { anonymousId, participantCode, group_code, installDate }) {
+async function syncParticipant(
+  serverUrl,
+  { anonymousId, participantCode, group_code, installDate },
+) {
   if (!serverUrl || serverUrl.startsWith("YOUR_")) return;
   try {
-    const res = await fetch(`${serverUrl.replace(/\/$/, "")}/api/participants`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ anonymousId, participantCode, group_code, installDate }),
-    });
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/participants`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          anonymousId,
+          participantCode,
+          group_code,
+          installDate,
+        }),
+      },
+    );
     if (!res.ok) {
       console.warn("[popup] participants 등록 실패:", res.status);
       return;
@@ -363,6 +374,86 @@ async function validateParticipantCode(code) {
 }
 window.validateParticipantCode = validateParticipantCode;
 
+// ── 팝업 상호작용 마이크로 로그 ────────────────────────────────────────
+// 수집: openedAt, dwellMs, tabTodayClicks, tabWeekClicks, feedbackViewed.
+// 전송: 팝업 close 시점의 storage 쓰기는 teardown에 잘릴 수 있어 신뢰하지 않는다.
+//   대신 세션 중 livePopupEvent 슬롯을 상호작용·1초 간격으로 계속 갱신해 최신 스냅샷을 남기고,
+//   다음 팝업 open(boot) 때 이전 스냅샷을 확정 큐로 승격해 서버로 전송(실패분은 큐에 남겨 재시도).
+//   팝업은 싱글턴이라 boot 시점의 잔여 livePopupEvent는 곧 "닫힌 이전 팝업"의 확정 이벤트다.
+//   sendBeacon을 쓰지 않으므로 중복 전송이 없다(전송은 항상 다음 open의 flush 한 경로).
+
+// 실제 LLM 리뷰인지(플레이스홀더·빈 값 제외) — feedbackViewed 판정용
+const POPUP_PLACEHOLDER_REVIEWS = new Set([
+  "시청 패턴을 분석하고 있어요. 잠시 후 시청 분석이 업데이트돼요.",
+]);
+function isRealReview(text) {
+  return (
+    typeof text === "string" &&
+    text.trim() !== "" &&
+    !POPUP_PLACEHOLDER_REVIEWS.has(text.trim())
+  );
+}
+
+function buildPopupEventPayload(m) {
+  return {
+    anonymousId: m.anonymousId,
+    dwellMs: Math.max(0, Date.now() - m.startTs),
+    tabTodayClicks: m.tabTodayClicks,
+    tabWeekClicks: m.tabWeekClicks,
+    feedbackViewed: m.feedbackViewed,
+    openedAt: m.openedAt,
+  };
+}
+
+// teardown 대비 — 현재 세션 스냅샷을 live 슬롯에 기록(fire-and-forget)
+function persistLivePopupEvent(m) {
+  chrome.storage.local.set({ livePopupEvent: buildPopupEventPayload(m) });
+}
+
+async function postPopupEvent(serverUrl, event) {
+  if (!serverUrl || serverUrl.startsWith("YOUR_")) return false;
+  try {
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/popup-events`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(event),
+      },
+    );
+    return res.ok;
+  } catch (error) {
+    return false;
+  }
+}
+
+// 이전 팝업의 잔여 이벤트를 확정 큐로 승격하고 live 슬롯을 비운다.
+// 현재 세션이 live 슬롯을 새로 쓰기 전에 완료해야 하므로 반드시 await 한다.
+async function drainPreviousPopupEvents() {
+  const { pendingPopupEvents = [], livePopupEvent = null } =
+    await chrome.storage.local.get(["pendingPopupEvents", "livePopupEvent"]);
+  const queue = [...pendingPopupEvents];
+  if (livePopupEvent) queue.push(livePopupEvent);
+  await chrome.storage.local.set({
+    pendingPopupEvents: queue,
+    livePopupEvent: null,
+  });
+}
+
+// 확정 큐를 서버로 전송 — 실패분만 큐에 남겨 다음 open에서 재시도(렌더 블로킹 없이 백그라운드).
+async function flushPendingPopupEvents(serverUrl) {
+  const { pendingPopupEvents = [] } = await chrome.storage.local.get([
+    "pendingPopupEvents",
+  ]);
+  if (pendingPopupEvents.length === 0) return;
+  const stillPending = [];
+  for (const ev of pendingPopupEvents) {
+    const ok = await postPopupEvent(serverUrl, ev);
+    if (!ok) stillPending.push(ev);
+  }
+  await chrome.storage.local.set({ pendingPopupEvents: stillPending });
+}
+
 // ── Main boot ─────────────────────────────────────────────────────────────────
 
 async function boot() {
@@ -389,7 +480,12 @@ async function boot() {
 
   // 온보딩은 됐지만 서버 등록이 확인되지 않은 경우 재시도(등록 누락 복구).
   // 팝업 렌더링을 막지 않도록 await 없이 백그라운드로 실행 — 실패 시 다음 boot에서 다시 재시도된다.
-  if (stored.group && stored.anonymousId && stored.installDate && !stored.participantSynced) {
+  if (
+    stored.group &&
+    stored.anonymousId &&
+    stored.installDate &&
+    !stored.participantSynced
+  ) {
     syncParticipant(stored.serverUrl, {
       anonymousId: stored.anonymousId,
       participantCode: stored.participantCode,
@@ -446,14 +542,67 @@ async function boot() {
           participantSynced: false,
         });
 
-        await syncParticipant(serverUrl, { anonymousId, participantCode, group_code: g, installDate });
+        await syncParticipant(serverUrl, {
+          anonymousId,
+          participantCode,
+          group_code: g,
+          installDate,
+        });
       } else if (!ob) {
         // 연구자 모드 — 온보딩 초기화 (세션 데이터는 유지)
-        await chrome.storage.local.remove(['group', 'participantCode', 'installDate', 'surveyStatus', 'participantSynced']);
+        await chrome.storage.local.remove([
+          "group",
+          "participantCode",
+          "installDate",
+          "surveyStatus",
+          "participantSynced",
+        ]);
         window.location.reload();
       }
     },
   });
+
+  // ── 팝업 상호작용 로그 — 온보딩 완료 사용자만 ─────────────────────────
+  let popupMetrics = null;
+  if (stored.group && stored.anonymousId) {
+    // 이전 팝업의 잔여 이벤트를 확정 큐로 승격(현재 세션이 live 슬롯을 새로 쓰기 전에 완료).
+    await drainPreviousPopupEvents();
+    // 큐 전송은 백그라운드 — 렌더/상호작용을 막지 않음. 실패분은 큐에 남아 다음 open에서 재시도.
+    flushPendingPopupEvents(stored.serverUrl);
+
+    const isExp = !!VL.GROUPS[stored.group]?.feedback;
+    popupMetrics = {
+      anonymousId: stored.anonymousId,
+      openedAt: new Date().toISOString(),
+      startTs: Date.now(),
+      tabTodayClicks: 0,
+      tabWeekClicks: 0,
+      // EXP 사용자가 열자마자 실제 리뷰(today 탭)를 보고 있으면 개입 전달로 간주
+      feedbackViewed: isExp && isRealReview(realToday.review) ? 1 : 0,
+    };
+    persistLivePopupEvent(popupMetrics);
+
+    // 탭 클릭 계측 — popEl은 re-render(innerHTML 교체) 후에도 유지되므로 위임 리스너로 한 번만 바인딩
+    popEl.addEventListener("click", (e) => {
+      const tabBtn = e.target.closest && e.target.closest("[data-tab]");
+      if (!tabBtn) return;
+      if (tabBtn.dataset.tab === "today") {
+        popupMetrics.tabTodayClicks++;
+      } else if (tabBtn.dataset.tab === "feedback") {
+        popupMetrics.tabWeekClicks++;
+        popupMetrics.feedbackViewed = 1; // 주차별 피드백 탭 열람 = 개입 전달
+      }
+      persistLivePopupEvent(popupMetrics);
+    });
+
+    // 팝업 종료 감지 — dwellMs 최종 반영(단일 set, teardown에 상대적으로 안전).
+    // 최종 쓰기가 잘려도 세션 중 스냅샷이 남아 다음 boot에서 승격된다.
+    const finalizePopupMetrics = () => persistLivePopupEvent(popupMetrics);
+    window.addEventListener("pagehide", finalizePopupMetrics);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) finalizePopupMetrics();
+    });
+  }
 
   // 로컬 캐시 — storage.onChanged로 갱신, setInterval에서는 캐시만 읽음
   let localCurrentSession = stored.currentSession || null;
@@ -462,8 +611,10 @@ async function boot() {
   // sessions가 바뀌면(분석 완료, 리뷰 저장 등) 즉시 today 데이터를 갱신하고 re-render
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
-    if (changes.currentSession) localCurrentSession = changes.currentSession.newValue || null;
-    if (changes.lastWatchedAt) localLastWatchedAt = changes.lastWatchedAt.newValue || null;
+    if (changes.currentSession)
+      localCurrentSession = changes.currentSession.newValue || null;
+    if (changes.lastWatchedAt)
+      localLastWatchedAt = changes.lastWatchedAt.newValue || null;
     if (!changes.sessions) return;
     const updatedSessions = changes.sessions.newValue || [];
     VL._allSessions = updatedSessions;
@@ -483,6 +634,9 @@ async function boot() {
 
   setInterval(() => {
     VL._lastWatchedAt = localLastWatchedAt;
+
+    // dwellMs 스냅샷 갱신 — close write가 잘려도 최근값(±1초)이 보존됨
+    if (popupMetrics) persistLivePopupEvent(popupMetrics);
 
     const count = localCurrentSession?.videos?.length ?? 0;
     const timerText = _computeTimerText(localLastWatchedAt);

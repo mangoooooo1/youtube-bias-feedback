@@ -62,7 +62,7 @@ function initializeDB() {
       createdAt  TEXT DEFAULT (datetime('now'))
     );
 
-    -- 팝업 상호작용 마이크로 로그 (10-5) — 세션과 무관해 별도 테이블
+    -- 팝업 상호작용 마이크로 로그 — 세션과 무관해 별도 테이블
     CREATE TABLE IF NOT EXISTS popup_events (
       id             INTEGER PRIMARY KEY AUTOINCREMENT,
       anonymousId    TEXT    NOT NULL,
