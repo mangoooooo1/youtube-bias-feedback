@@ -63,7 +63,9 @@ function bindOnboarding(root, onSubmit) {
   const errEl = root.querySelector("#vl-onboard-err");
   const btn = root.querySelector("#vl-onboard-btn");
 
-  function submit() {
+  const btnLabel = btn.textContent;
+
+  async function submit() {
     const raw = input.value.trim();
     if (!raw) {
       showErr("코드를 입력해 주세요.");
@@ -74,7 +76,22 @@ function bindOnboarding(root, onSubmit) {
       showErr("유효하지 않은 코드예요. 연구자에게 받은 코드를 확인해 주세요.");
       return;
     }
-    onSubmit(parsed); // { group, code }
+
+    // 서버 발급 명단 검증 — 오프라인/서버 미설정 시엔 통과(폴백)
+    btn.disabled = true;
+    btn.textContent = "확인 중…";
+    const check = window.validateParticipantCode
+      ? await window.validateParticipantCode(parsed.code)
+      : { ok: true };
+    btn.disabled = false;
+    btn.textContent = btnLabel;
+
+    if (!check.ok) {
+      showErr("발급되지 않은 코드예요. 연구자에게 받은 코드를 확인해 주세요.");
+      return;
+    }
+    // 서버가 그룹을 확정해 주면 그 값을 사용(권위), 아니면 코드 접두사 기준
+    onSubmit({ group: check.group || parsed.group, code: parsed.code });
   }
   function showErr(msg) {
     errEl.textContent = msg;

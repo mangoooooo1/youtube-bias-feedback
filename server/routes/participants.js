@@ -52,4 +52,17 @@ router.post("/", (req, res, next) => {
   return success(res);
 });
 
+// 온보딩 코드 검증 — 발급 명단(issued_codes)과 대조 (등록 없이 확인만)
+// 응답 data: { valid: boolean, group_code?: string }
+router.get("/validate", (req, res) => {
+  const code = (req.query.code || "").toString().trim().toUpperCase();
+  if (!code) {
+    return fail(res, 400, ERROR_CODES.MISSING_REQUIRED_FIELD, "code 파라미터가 필요합니다.", "code");
+  }
+  if (TEST_CODES.has(code)) return success(res, { valid: true, group_code: code });
+  if (countIssuedCodes.get().c === 0) return success(res, { valid: true, group_code: null }); // 시드 전 permissive
+  const issued = findIssuedCode.get(code);
+  return success(res, issued ? { valid: true, group_code: issued.group_code } : { valid: false });
+});
+
 module.exports = router;
