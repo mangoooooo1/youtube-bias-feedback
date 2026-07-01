@@ -81,7 +81,11 @@ function initializeDB() {
     try {
       db.exec(sql);
     } catch (e) {
-      // "duplicate column name" → 이미 존재, 무시
+      // "duplicate column name" → 이미 존재하는 컬럼이므로 무시.
+      // 그 외(SQL 오류·DB 잠금·테이블 부재 등)는 마이그레이션 실패이므로 재던져
+      // 조용한 실패 후 런타임 컬럼 누락 크래시를 막는다.
+      if (e.message && e.message.includes("duplicate column name")) return;
+      throw e;
     }
   };
 

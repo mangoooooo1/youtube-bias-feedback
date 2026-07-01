@@ -55,9 +55,14 @@ async function main() {
   for (const name of fs.readdirSync(BACKUP_DIR)) {
     if (!/^youtube_bias-\d{8}-\d{6}\.db$/.test(name)) continue;
     const full = path.join(BACKUP_DIR, name);
-    if (fs.statSync(full).mtimeMs < cutoff) {
-      fs.unlinkSync(full);
-      removed++;
+    // 개별 파일 정리 실패(권한·레이스 등)가 성공한 백업 전체를 실패로 만들지 않도록 방어
+    try {
+      if (fs.statSync(full).mtimeMs < cutoff) {
+        fs.unlinkSync(full);
+        removed++;
+      }
+    } catch (err) {
+      console.warn(`[backup] 로테이션 건너뜀 (${name}):`, err.message);
     }
   }
   if (removed) console.log(`[backup] 로테이션: 오래된 백업 ${removed}개 삭제 (>${RETENTION_DAYS}일)`);
