@@ -446,12 +446,14 @@ async function flushPendingPopupEvents(serverUrl) {
     "pendingPopupEvents",
   ]);
   if (pendingPopupEvents.length === 0) return;
-  const stillPending = [];
-  for (const ev of pendingPopupEvents) {
-    const ok = await postPopupEvent(serverUrl, ev);
-    if (!ok) stillPending.push(ev);
+  // 전송 성공분은 즉시 큐에서 제거 — flush 도중 팝업이 닫혀도 재전송(중복)을 막는다.
+  const queue = [...pendingPopupEvents];
+  while (queue.length > 0) {
+    const ok = await postPopupEvent(serverUrl, queue[0]);
+    if (!ok) break;
+    queue.shift();
+    await chrome.storage.local.set({ pendingPopupEvents: queue });
   }
-  await chrome.storage.local.set({ pendingPopupEvents: stillPending });
 }
 
 // ── Main boot ─────────────────────────────────────────────────────────────────
