@@ -396,6 +396,7 @@ function isRealReview(text) {
 
 function buildPopupEventPayload(m) {
   return {
+    eventId: m.eventId,
     anonymousId: m.anonymousId,
     dwellMs: Math.max(0, Date.now() - m.startTs),
     tabTodayClicks: m.tabTodayClicks,
@@ -575,6 +576,8 @@ async function boot() {
     const isExp = !!VL.GROUPS[stored.group]?.feedback;
     popupMetrics = {
       anonymousId: stored.anonymousId,
+      // 팝업 오픈당 1회 발급 — 재전송돼도 서버가 이 id로 중복을 무시(멱등)
+      eventId: crypto.randomUUID(),
       openedAt: new Date().toISOString(),
       startTs: Date.now(),
       tabTodayClicks: 0,
