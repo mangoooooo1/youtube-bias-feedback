@@ -54,7 +54,11 @@ function validateSession(body) {
   }
   for (const field of LATENCY_FIELDS) {
     const value = body[field];
-    if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
+    if (
+      value !== undefined &&
+      value !== null &&
+      (!Number.isInteger(value) || value < 0)
+    ) {
       return { code: ERROR_CODES.INVALID_FIELD_VALUE, field };
     }
   }
