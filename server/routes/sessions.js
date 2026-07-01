@@ -56,7 +56,7 @@ router.post("/", (req, res, next) => {
     });
   } catch (err) {
     if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
-      return fail(res, 400, ERROR_CODES.DUPLICATE_SESSION, "이미 존재하는 세션입니다.", sessionId);
+      return fail(res, 409, ERROR_CODES.DUPLICATE_SESSION, "이미 존재하는 세션입니다.", sessionId);
     }
     return next(err);
   }
