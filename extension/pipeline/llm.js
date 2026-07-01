@@ -87,37 +87,64 @@ ${entropyLine}${titleLines}${trendSection}
 }`;
 }
 
+// 실패 사유를 sessions.failureReason 분류값으로 태깅한 에러.
+// background.js가 이 필드(failureReason/httpStatus/timedOut)를 읽어 서버로 전송한다(10-4).
+// 분류값은 server/db.js 스키마 주석과 1:1 대응: timeout | http_error | empty_response | parse_error | network_error
+function llmError(failureReason, message, extra = {}) {
+  const err = new Error(message);
+  err.failureReason = failureReason;
+  return Object.assign(err, extra);
+}
+
 export async function generateReview(prompt) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, TIMEOUT_MS);
 
+  let response;
   try {
-    const response = await fetch(GEMINI_API_URL, {
+    response = await fetch(GEMINI_API_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
       signal: controller.signal,
     });
-
+  } catch (error) {
+    // abort는 타임아웃으로만 발생 → 실제 네트워크 장애(TypeError 등)와 구분
+    if (timedOut) throw llmError('timeout', `Gemini API 타임아웃 (${TIMEOUT_MS}ms)`, { timedOut: true });
+    throw llmError('network_error', error.message);
+  } finally {
+    // 헤더 수신 후에는 타임아웃 해제 — 본문 읽기가 abort로 끊기지 않도록
     clearTimeout(timeoutId);
+  }
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error('[llm] API error body:', errorBody);
-      throw new Error(`Gemini API error: ${response.status}`);
-    }
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.error('[llm] API error body:', errorBody);
+    // httpStatus 병기 — 429 쿼터 vs 5xx 장애 구분 (10-4 분석용)
+    throw llmError('http_error', `Gemini API error: ${response.status}`, { httpStatus: response.status });
+  }
 
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error('Gemini API: 응답에 텍스트가 없습니다');
+  let data;
+  try {
+    data = await response.json();
+  } catch (error) {
+    throw llmError('parse_error', `응답 본문 JSON 파싱 실패: ${error.message}`);
+  }
 
-    const cleaned = text.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw llmError('empty_response', 'Gemini API: 응답에 텍스트가 없습니다');
+
+  const cleaned = text.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+  try {
     const parsed = JSON.parse(cleaned);
     const isObj = parsed && typeof parsed === 'object';
     return { topic: (isObj && parsed.topic) || '', feedback: (isObj && parsed.feedback) || cleaned };
   } catch (error) {
-    clearTimeout(timeoutId);
-    throw error;
+    throw llmError('parse_error', `피드백 JSON 파싱 실패: ${error.message}`);
   }
 }
 

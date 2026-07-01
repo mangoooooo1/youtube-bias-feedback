@@ -119,13 +119,27 @@ async function analyzeSession(session) {
   const prompt = buildPrompt(analysisData);
 
   let result;
+  // LLM 성공/폴백 로깅 (10-4). generateReview가 실패 사유를 태깅해 던지므로 분류해 기록한다.
+  let llmStatus = "success";
+  let failureReason = null;
+  let httpStatus = null;
+  let timedOut = 0; // SQLite INTEGER — 1/0
   // 성공/폴백 무관하게 Gemini 호출(및 타임아웃까지의 대기) 소요를 기록한다.
   const geminiStart = Date.now();
   try {
     result = await generateReview(prompt);
     console.log("[background] 리뷰 생성 완료");
   } catch (error) {
-    console.warn("[background] 리뷰 생성 실패, 폴백 사용:", error.message);
+    llmStatus = "fallback";
+    // 태깅 안 된 예상 밖 에러는 network_error로 수렴(죽은 카테고리 방지)
+    failureReason = error.failureReason || "network_error";
+    httpStatus = error.httpStatus ?? null;
+    timedOut = error.timedOut === true ? 1 : 0;
+    console.warn(
+      "[background] 리뷰 생성 실패, 폴백 사용:",
+      failureReason,
+      error.message,
+    );
     result = generateFallbackReview(analysisData);
   }
   const geminiMs = Date.now() - geminiStart;
@@ -146,6 +160,10 @@ async function analyzeSession(session) {
       totalMs,
       youtubeMs,
       geminiMs,
+      llmStatus,
+      failureReason,
+      httpStatus,
+      timedOut,
     },
   );
 }
@@ -190,6 +208,10 @@ async function postSessionToServer(
         totalMs: metrics.totalMs,
         youtubeMs: metrics.youtubeMs,
         geminiMs: metrics.geminiMs,
+        llmStatus: metrics.llmStatus,
+        failureReason: metrics.failureReason,
+        httpStatus: metrics.httpStatus,
+        timedOut: metrics.timedOut,
       }),
     });
 
