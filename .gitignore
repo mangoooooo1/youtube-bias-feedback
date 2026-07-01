@@ -123,6 +123,8 @@ dist
 
 #Database files
 *.db
+*.db-wal
+*.db-shm
 
 # 참여 코드 발급 명단(접두사↔그룹 대응표) — 절대 커밋 금지
 codes.csv

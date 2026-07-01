@@ -5,6 +5,16 @@ const DB_PATH = path.join(__dirname, "youtube_bias.db");
 
 const db = new Database(DB_PATH);
 
+// 동시성·내구성 하드닝 (80명 확대 실험 대비)
+// - WAL: 쓰기 중에도 읽기 허용, 크래시 내구성 향상
+// - busy_timeout: 순간적 쓰기 락 경합을 에러 대신 최대 5초 대기로 흡수
+// - synchronous=NORMAL: WAL과 함께 무결성 유지 + fsync 부담 완화
+// - foreign_keys: 외래키 제약 강제
+db.pragma("journal_mode = WAL");
+db.pragma("busy_timeout = 5000");
+db.pragma("synchronous = NORMAL");
+db.pragma("foreign_keys = ON");
+
 function initializeDB() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
