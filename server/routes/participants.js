@@ -24,7 +24,7 @@ router.post("/", (req, res, next) => {
   }
 
   try {
-    insertParticipant.run({ anonymousId, group_code, installDate });
+    insertParticipant.run({ anonymousId, participantCode: participantCode ?? null, group_code, installDate });
   } catch (err) {
     if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
       return success(res); // 이미 등록된 참여자면 무시
