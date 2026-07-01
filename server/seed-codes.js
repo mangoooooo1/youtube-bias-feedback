@@ -26,7 +26,7 @@ const lines = fs.readFileSync(file, "utf8").trim().split(/\r?\n/);
 const rows = lines
   .slice(1) // 헤더 제거
   .map((l) => l.split(",").map((s) => s.trim()))
-  .filter((r) => r.length >= 2 && r[0]);
+  .filter((r) => r.length >= 2 && r[0] && r[1]);
 
 const stmt = db.prepare("INSERT OR IGNORE INTO issued_codes (code, group_code) VALUES (?, ?)");
 const insertMany = db.transaction((rows) => {

@@ -10,6 +10,7 @@ const insertParticipant = db.prepare(`
 `);
 const findIssuedCode = db.prepare("SELECT group_code FROM issued_codes WHERE code = ?");
 const countIssuedCodes = db.prepare("SELECT COUNT(*) AS c FROM issued_codes");
+const findParticipant = db.prepare("SELECT 1 AS x FROM participants WHERE anonymousId = ?");
 
 const TEST_CODES = new Set(["TEST-EXP", "TEST-CON"]);
 
@@ -28,10 +29,19 @@ router.post("/", (req, res, next) => {
     return fail(res, 400, ERROR_CODES.INVALID_FIELD_VALUE, "installDate 필드가 올바르지 않습니다.", "installDate");
   }
 
-  // 발급 코드 검증: TEST 코드는 예외. issued_codes 명단이 등록돼 있으면(시드 후) 명단에 있는 코드만 허용하고,
-  // 그룹은 명단(issued_codes)을 권위로 사용한다. 명단이 비어 있으면(시드 전) 검증을 건너뛴다.
-  if (participantCode && !TEST_CODES.has(participantCode)) {
-    if (countIssuedCodes.get().c > 0) {
+  // 이미 등록된 참여자면 재동기화로 간주하고 그대로 성공 처리 (멱등성 보장)
+  if (findParticipant.get(anonymousId)) {
+    return success(res);
+  }
+
+  // 발급 코드 검증: issued_codes 명단이 등록돼 있으면(시드 후) 신규 등록 시 참여 코드가 필수이며,
+  // 명단에 있는 코드만 허용하고 그룹은 명단(issued_codes)을 권위로 사용한다. TEST 코드는 예외.
+  // 명단이 비어 있으면(시드 전) 검증을 건너뛴다.
+  if (countIssuedCodes.get().c > 0) {
+    if (!participantCode) {
+      return fail(res, 400, ERROR_CODES.MISSING_REQUIRED_FIELD, "참여 코드가 필요합니다.", "participantCode");
+    }
+    if (!TEST_CODES.has(participantCode)) {
       const issued = findIssuedCode.get(participantCode);
       if (!issued) {
         return fail(res, 400, ERROR_CODES.INVALID_FIELD_VALUE, "발급되지 않은 참여 코드입니다.", "participantCode");
