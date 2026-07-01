@@ -5,12 +5,12 @@ const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const router = express.Router();
 
 const insertParticipant = db.prepare(`
-  INSERT INTO participants (anonymousId, group_code, installDate)
-  VALUES (@anonymousId, @group_code, @installDate)
+  INSERT INTO participants (anonymousId, participantCode, group_code, installDate)
+  VALUES (@anonymousId, @participantCode, @group_code, @installDate)
 `);
 
 router.post("/", (req, res, next) => {
-  const { anonymousId, group_code, installDate } = req.body;
+  const { anonymousId, participantCode, group_code, installDate } = req.body;
 
   for (const field of ["anonymousId", "group_code", "installDate"]) {
     const value = req.body[field];

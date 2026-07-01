@@ -325,13 +325,13 @@ class RealPopup extends ViewLensPopup {
 
 // participants 서버 등록 — 성공(200) 시에만 participantSynced 플래그를 저장한다.
 // 실패하면 플래그를 세우지 않으므로 다음 팝업 boot에서 재시도된다(서버는 anonymousId UNIQUE로 멱등 처리).
-async function syncParticipant(serverUrl, { anonymousId, group_code, installDate }) {
+async function syncParticipant(serverUrl, { anonymousId, participantCode, group_code, installDate }) {
   if (!serverUrl || serverUrl.startsWith("YOUR_")) return;
   try {
     const res = await fetch(`${serverUrl.replace(/\/$/, "")}/api/participants`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ anonymousId, group_code, installDate }),
+      body: JSON.stringify({ anonymousId, participantCode, group_code, installDate }),
     });
     if (!res.ok) {
       console.warn("[popup] participants 등록 실패:", res.status);
@@ -358,6 +358,7 @@ async function boot() {
     "anonymousId",
     "serverUrl",
     "participantSynced",
+    "participantCode",
   ]);
 
   // 이미 온보딩된 사용자 중 anonymousId가 없는 경우 생성
@@ -371,6 +372,7 @@ async function boot() {
   if (stored.group && stored.anonymousId && stored.installDate && !stored.participantSynced) {
     syncParticipant(stored.serverUrl, {
       anonymousId: stored.anonymousId,
+      participantCode: stored.participantCode,
       group_code: stored.group,
       installDate: stored.installDate,
     });
@@ -407,7 +409,7 @@ async function boot() {
     onboarded: !!stored.group,
     group: stored.group || null,
     timelineKey: calcTimelineKey(installDate),
-    onChange: async ({ onboarded: ob, group: g }) => {
+    onChange: async ({ onboarded: ob, group: g, participantCode }) => {
       if (ob && g) {
         const installDate = new Date().toISOString();
         VL._installDate = installDate; // 온보딩 직후 첫 렌더부터 실제 경과일(1일째) 반영
@@ -417,16 +419,17 @@ async function boot() {
 
         await chrome.storage.local.set({
           anonymousId,
+          participantCode,
           group: g,
           installDate,
           surveyStatus: { week1: false, week2: false, week3: false },
           participantSynced: false,
         });
 
-        await syncParticipant(serverUrl, { anonymousId, group_code: g, installDate });
+        await syncParticipant(serverUrl, { anonymousId, participantCode, group_code: g, installDate });
       } else if (!ob) {
         // 연구자 모드 — 온보딩 초기화 (세션 데이터는 유지)
-        await chrome.storage.local.remove(['group', 'installDate', 'surveyStatus', 'participantSynced']);
+        await chrome.storage.local.remove(['group', 'participantCode', 'installDate', 'surveyStatus', 'participantSynced']);
         window.location.reload();
       }
     },

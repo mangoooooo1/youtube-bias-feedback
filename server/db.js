@@ -20,11 +20,12 @@ function initializeDB() {
     );
 
     CREATE TABLE IF NOT EXISTS participants (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      anonymousId TEXT    NOT NULL UNIQUE,
-      group_code  TEXT    NOT NULL,
-      installDate TEXT    NOT NULL,
-      createdAt   TEXT    DEFAULT (datetime('now'))
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      anonymousId     TEXT    NOT NULL UNIQUE,
+      participantCode TEXT,
+      group_code      TEXT    NOT NULL,
+      installDate     TEXT    NOT NULL,
+      createdAt       TEXT    DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS video_events (
@@ -36,6 +37,13 @@ function initializeDB() {
       createdAt   TEXT    DEFAULT (datetime('now'))
     );
   `);
+
+  // 기존 DB 마이그레이션 — participantCode 컬럼이 없으면 추가 (이미 있으면 무시)
+  try {
+    db.exec("ALTER TABLE participants ADD COLUMN participantCode TEXT");
+  } catch (e) {
+    // "duplicate column name" → 이미 존재, 무시
+  }
 }
 
 module.exports = { db, initializeDB };
