@@ -107,18 +107,23 @@ function offsitePush(dest) {
   // BatchMode=yes: 프롬프트 없이 즉시 실패(자동화용). known_hosts는 최초 수동 접속 시 등록됨.
   const sshOpts = ["-i", key, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"];
 
+  // 네트워크 장애·원격 지연으로 무한 대기하면 후속 크론 작업까지 막히므로 타임아웃을 건다.
+  const execOpts = { stdio: "pipe", timeout: 30000 };
+
   try {
-    execFileSync("ssh", [...sshOpts, target, `mkdir -p ${remoteDir}`], { stdio: "pipe" });
-    execFileSync("scp", [...sshOpts, dest, `${target}:${remoteDir}/`], { stdio: "pipe" });
+    execFileSync("ssh", [...sshOpts, target, `mkdir -p ${remoteDir}`], execOpts);
+    execFileSync("scp", [...sshOpts, dest, `${target}:${remoteDir}/`], execOpts);
     // 원격 로테이션 — remoteRetention일 지난 백업 삭제
     execFileSync(
       "ssh",
       [...sshOpts, target, `find ${remoteDir} -maxdepth 1 -name 'youtube_bias-*.db' -mtime +${remoteRetention} -delete`],
-      { stdio: "pipe" },
+      execOpts,
     );
     console.log(`[backup] 오프사이트 전송 완료: ${target}:${remoteDir}/ (보관 ${remoteRetention}일)`);
   } catch (err) {
-    console.warn("[backup] 오프사이트 전송 실패(로컬 백업은 정상):", err.message);
+    // err.message에는 SSH 실패 원인이 안 담기는 경우가 많아, stderr가 있으면 함께 남긴다.
+    const detail = err.stderr ? err.stderr.toString().trim() : err.message;
+    console.warn("[backup] 오프사이트 전송 실패(로컬 백업은 정상):", detail);
   }
 }
 

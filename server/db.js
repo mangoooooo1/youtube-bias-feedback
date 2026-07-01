@@ -26,11 +26,11 @@ function initializeDB() {
       videoCount           INTEGER,
       categoryDistribution TEXT,
       entropy              REAL,
-      -- 세션 처리 지연시간 (10-3) — 확장이 측정해 전송, ms 단위
+      -- 세션 처리 지연시간 () — 확장이 측정해 전송, ms 단위
       totalMs              INTEGER,
       youtubeMs            INTEGER,
       geminiMs             INTEGER,
-      -- LLM 성공/폴백 로깅 (10-4) — 확장의 폴백 분기(background.js/llm.js)와 대응
+      -- LLM 성공/폴백 로깅 () — 확장의 폴백 분기(background.js/llm.js)와 대응
       llmStatus            TEXT,     -- 'success' | 'fallback'
       failureReason        TEXT,     -- timeout | http_error | empty_response | parse_error | network_error (성공 시 NULL)
       httpStatus           INTEGER,  -- failureReason='http_error'일 때만 (429 쿼터 vs 5xx 장애 구분)
@@ -62,9 +62,10 @@ function initializeDB() {
       createdAt  TEXT DEFAULT (datetime('now'))
     );
 
-    -- 팝업 상호작용 마이크로 로그 (10-5) — 세션과 무관해 별도 테이블
+    -- 팝업 상호작용 마이크로 로그 — 세션과 무관해 별도 테이블
     CREATE TABLE IF NOT EXISTS popup_events (
       id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      eventId        TEXT,     -- 확장이 오픈당 1회 발급하는 멱등 키 (재전송 중복 방지)
       anonymousId    TEXT    NOT NULL,
       dwellMs        INTEGER,  -- 팝업 체류 시간(ms)
       tabTodayClicks INTEGER DEFAULT 0,  -- '오늘' 탭 클릭 횟수
@@ -90,7 +91,7 @@ function initializeDB() {
   };
 
   addColumn("ALTER TABLE participants ADD COLUMN participantCode TEXT");
-  // 10-3 latency / 10-4 폴백 로깅 컬럼
+  //  latency /  폴백 로깅 컬럼
   addColumn("ALTER TABLE sessions ADD COLUMN totalMs INTEGER");
   addColumn("ALTER TABLE sessions ADD COLUMN youtubeMs INTEGER");
   addColumn("ALTER TABLE sessions ADD COLUMN geminiMs INTEGER");
@@ -98,6 +99,14 @@ function initializeDB() {
   addColumn("ALTER TABLE sessions ADD COLUMN failureReason TEXT");
   addColumn("ALTER TABLE sessions ADD COLUMN httpStatus INTEGER");
   addColumn("ALTER TABLE sessions ADD COLUMN timedOut INTEGER");
+
+  // 팝업 이벤트 멱등 키 — SQLite는 ALTER TABLE로 UNIQUE 컬럼을 못 만들므로
+  // 컬럼 추가 후 UNIQUE 인덱스를 별도로 생성. 기존 행(eventId=NULL)은 NULL끼리
+  // distinct 취급되어 충돌하지 않는다.
+  addColumn("ALTER TABLE popup_events ADD COLUMN eventId TEXT");
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_popup_events_eventId ON popup_events(eventId)",
+  );
 }
 
 module.exports = { db, initializeDB };

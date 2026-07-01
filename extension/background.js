@@ -8,8 +8,15 @@ import {
   getOnboarding,
 } from "./storage.js";
 import { fetchVideoCategories } from "./pipeline/youtube.js";
-import { calculateDistribution, calculateEntropy } from "./pipeline/analysis.js";
-import { buildPrompt, generateReview, generateFallbackReview } from "./pipeline/llm.js";
+import {
+  calculateDistribution,
+  calculateEntropy,
+} from "./pipeline/analysis.js";
+import {
+  buildPrompt,
+  generateReview,
+  generateFallbackReview,
+} from "./pipeline/llm.js";
 import { SERVER_URL } from "./config.js";
 
 const ALARM_NAME = "SESSION_TIMEOUT_CHECK";
@@ -73,8 +80,13 @@ function findPrevEntropy(sessions, currentSessionId) {
 }
 
 async function analyzeSession(session) {
+  // 지연시간 측정 — 세션 종료 후 처리 파이프라인 전체를 t0로 감싼다.
+  const t0 = Date.now();
   const videoIds = session.videos.map((v) => v.videoId);
+
+  const ytStart = Date.now();
   const categoryMap = await fetchVideoCategories(videoIds);
+  const youtubeMs = Date.now() - ytStart;
   const categoryIds = videoIds.map((id) => categoryMap[id]);
 
   const categoryDistribution = calculateDistribution(categoryIds);
@@ -91,7 +103,11 @@ async function analyzeSession(session) {
     entropy,
     videoCount,
   });
-  console.log("[background] 분석 완료:", { entropy, prevEntropy, categoryDistribution });
+  console.log("[background] 분석 완료:", {
+    entropy,
+    prevEntropy,
+    categoryDistribution,
+  });
 
   const analysisData = {
     categoryDistribution,
@@ -103,13 +119,30 @@ async function analyzeSession(session) {
   const prompt = buildPrompt(analysisData);
 
   let result;
+  // LLM 성공/폴백 로깅 (). generateReview가 실패 사유를 태깅해 던지므로 분류해 기록한다.
+  let llmStatus = "success";
+  let failureReason = null;
+  let httpStatus = null;
+  let timedOut = 0; // SQLite INTEGER — 1/0
+  // 성공/폴백 무관하게 Gemini 호출(및 타임아웃까지의 대기) 소요를 기록한다.
+  const geminiStart = Date.now();
   try {
     result = await generateReview(prompt);
     console.log("[background] 리뷰 생성 완료");
   } catch (error) {
-    console.warn("[background] 리뷰 생성 실패, 폴백 사용:", error.message);
+    llmStatus = "fallback";
+    // 태깅 안 된 예상 밖 에러는 network_error로 수렴(죽은 카테고리 방지)
+    failureReason = error.failureReason || "network_error";
+    httpStatus = error.httpStatus ?? null;
+    timedOut = error.timedOut === true ? 1 : 0;
+    console.warn(
+      "[background] 리뷰 생성 실패, 폴백 사용:",
+      failureReason,
+      error.message,
+    );
     result = generateFallbackReview(analysisData);
   }
+  const geminiMs = Date.now() - geminiStart;
 
   await saveAnalysis(session.sessionId, {
     review: result.feedback,
@@ -117,7 +150,22 @@ async function analyzeSession(session) {
   });
   console.log("[background] 리뷰 저장 완료:", result);
 
-  await postSessionToServer(session, categoryDistribution, entropy, videoCount);
+  const totalMs = Date.now() - t0;
+  await postSessionToServer(
+    session,
+    categoryDistribution,
+    entropy,
+    videoCount,
+    {
+      totalMs,
+      youtubeMs,
+      geminiMs,
+      llmStatus,
+      failureReason,
+      httpStatus,
+      timedOut,
+    },
+  );
 }
 
 async function postSessionToServer(
@@ -125,6 +173,7 @@ async function postSessionToServer(
   categoryDistribution,
   entropy,
   videoCount,
+  metrics = {},
 ) {
   if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) {
     console.warn(
@@ -156,6 +205,13 @@ async function postSessionToServer(
           typeof entropy === "number" && Number.isFinite(entropy)
             ? entropy
             : undefined,
+        totalMs: metrics.totalMs,
+        youtubeMs: metrics.youtubeMs,
+        geminiMs: metrics.geminiMs,
+        llmStatus: metrics.llmStatus,
+        failureReason: metrics.failureReason,
+        httpStatus: metrics.httpStatus,
+        timedOut: metrics.timedOut,
       }),
     });
 
