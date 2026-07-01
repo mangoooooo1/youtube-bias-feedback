@@ -91,6 +91,18 @@ function offsitePush(dest) {
   const key = process.env.E1_BACKUP_KEY || path.join(os.homedir(), ".ssh", "e1_backup");
   const remoteDir = process.env.E1_BACKUP_DIR || "db-backups";
   const remoteRetention = Number(process.env.E1_RETENTION_DAYS || 14);
+
+  // remoteDir/remoteRetention은 원격 쉘 명령(mkdir/find)에 삽입되므로 검증한다.
+  // 쉘 메타문자·공백 유입 시 원격에서 의도치 않은 실행/구문 오류 방지. (실패해도 로컬 백업은 유효)
+  if (!/^[a-zA-Z0-9_/-]+$/.test(remoteDir)) {
+    console.warn("[backup] 오프사이트 건너뜀: E1_BACKUP_DIR에 허용되지 않는 문자가 있습니다.");
+    return;
+  }
+  if (!Number.isInteger(remoteRetention) || remoteRetention < 0) {
+    console.warn("[backup] 오프사이트 건너뜀: E1_RETENTION_DAYS가 0 이상의 정수가 아닙니다.");
+    return;
+  }
+
   const target = `${user}@${host}`;
   // BatchMode=yes: 프롬프트 없이 즉시 실패(자동화용). known_hosts는 최초 수동 접속 시 등록됨.
   const sshOpts = ["-i", key, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"];
