@@ -8,9 +8,14 @@ const insertParticipant = db.prepare(`
   INSERT INTO participants (anonymousId, participantCode, group_code, installDate)
   VALUES (@anonymousId, @participantCode, @group_code, @installDate)
 `);
+const findIssuedCode = db.prepare("SELECT group_code FROM issued_codes WHERE code = ?");
+const countIssuedCodes = db.prepare("SELECT COUNT(*) AS c FROM issued_codes");
+
+const TEST_CODES = new Set(["TEST-EXP", "TEST-CON"]);
 
 router.post("/", (req, res, next) => {
-  const { anonymousId, participantCode, group_code, installDate } = req.body;
+  const { anonymousId, participantCode, installDate } = req.body;
+  let { group_code } = req.body;
 
   for (const field of ["anonymousId", "group_code", "installDate"]) {
     const value = req.body[field];
@@ -21,6 +26,18 @@ router.post("/", (req, res, next) => {
 
   if (isNaN(Date.parse(installDate))) {
     return fail(res, 400, ERROR_CODES.INVALID_FIELD_VALUE, "installDate 필드가 올바르지 않습니다.", "installDate");
+  }
+
+  // 발급 코드 검증: TEST 코드는 예외. issued_codes 명단이 등록돼 있으면(시드 후) 명단에 있는 코드만 허용하고,
+  // 그룹은 명단(issued_codes)을 권위로 사용한다. 명단이 비어 있으면(시드 전) 검증을 건너뛴다.
+  if (participantCode && !TEST_CODES.has(participantCode)) {
+    if (countIssuedCodes.get().c > 0) {
+      const issued = findIssuedCode.get(participantCode);
+      if (!issued) {
+        return fail(res, 400, ERROR_CODES.INVALID_FIELD_VALUE, "발급되지 않은 참여 코드입니다.", "participantCode");
+      }
+      group_code = issued.group_code;
+    }
   }
 
   try {

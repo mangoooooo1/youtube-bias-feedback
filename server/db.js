@@ -36,6 +36,12 @@ function initializeDB() {
       watchedAt   TEXT    NOT NULL,
       createdAt   TEXT    DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS issued_codes (
+      code       TEXT PRIMARY KEY,
+      group_code TEXT NOT NULL,
+      createdAt  TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // 기존 DB 마이그레이션 — participantCode 컬럼이 없으면 추가 (이미 있으면 무시)
