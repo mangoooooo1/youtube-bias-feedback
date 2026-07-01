@@ -26,11 +26,11 @@ function initializeDB() {
       videoCount           INTEGER,
       categoryDistribution TEXT,
       entropy              REAL,
-      -- 세션 처리 지연시간 (10-3) — 확장이 측정해 전송, ms 단위
+      -- 세션 처리 지연시간 () — 확장이 측정해 전송, ms 단위
       totalMs              INTEGER,
       youtubeMs            INTEGER,
       geminiMs             INTEGER,
-      -- LLM 성공/폴백 로깅 (10-4) — 확장의 폴백 분기(background.js/llm.js)와 대응
+      -- LLM 성공/폴백 로깅 () — 확장의 폴백 분기(background.js/llm.js)와 대응
       llmStatus            TEXT,     -- 'success' | 'fallback'
       failureReason        TEXT,     -- timeout | http_error | empty_response | parse_error | network_error (성공 시 NULL)
       httpStatus           INTEGER,  -- failureReason='http_error'일 때만 (429 쿼터 vs 5xx 장애 구분)
@@ -90,7 +90,7 @@ function initializeDB() {
   };
 
   addColumn("ALTER TABLE participants ADD COLUMN participantCode TEXT");
-  // 10-3 latency / 10-4 폴백 로깅 컬럼
+  //  latency /  폴백 로깅 컬럼
   addColumn("ALTER TABLE sessions ADD COLUMN totalMs INTEGER");
   addColumn("ALTER TABLE sessions ADD COLUMN youtubeMs INTEGER");
   addColumn("ALTER TABLE sessions ADD COLUMN geminiMs INTEGER");

@@ -1,7 +1,7 @@
-import { GEMINI_API_KEY } from '../config.js';
+import { GEMINI_API_KEY } from "../config.js";
 
 const GEMINI_API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 const TIMEOUT_MS = 10000;
 
 // 다양성 변화로 인정할 최소 entropy 변화량(bits) — 노이즈 무시
@@ -20,7 +20,7 @@ function roundedDelta(entropy, prevEntropy) {
 // prevEntropy 및 편중 비율을 LLM에게 줄 자연어 지시로 번역
 function buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount }) {
   if (videoCount < MIN_VIDEOS_FOR_TREND) {
-    return '- 이번 세션은 시청한 영상 수가 적어 패턴을 단정하기 어렵습니다. 무엇을 봤는지 가볍게 비추는 정도로만 언급해 주세요.';
+    return "- 이번 세션은 시청한 영상 수가 적어 패턴을 단정하기 어렵습니다. 무엇을 봤는지 가볍게 비추는 정도로만 언급해 주세요.";
   }
 
   const lines = [];
@@ -28,42 +28,70 @@ function buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount }) {
   if (Number.isFinite(prevEntropy)) {
     const delta = roundedDelta(entropy, prevEntropy);
     if (delta >= ENTROPY_DELTA_EPS) {
-      lines.push('- 직전 세션보다 시청이 여러 주제로 다양해졌습니다. 이 변화를 담담한 사실로 비춰 주세요.');
+      lines.push(
+        "- 직전 세션보다 시청이 여러 주제로 다양해졌습니다. 이 변화를 담담한 사실로 비춰 주세요.",
+      );
     } else if (delta <= -ENTROPY_DELTA_EPS) {
-      lines.push('- 직전 세션보다 시청이 더 적은 수의 주제에 모였습니다. 이 변화를 부드럽고 또렷하게 사실로 비춰 주세요.');
+      lines.push(
+        "- 직전 세션보다 시청이 더 적은 수의 주제에 모였습니다. 이 변화를 부드럽고 또렷하게 사실로 비춰 주세요.",
+      );
     } else {
-      lines.push('- 직전 세션과 비슷한 다양성을 유지하고 있습니다. 이 사실을 중립적으로 비춰 주세요.');
+      lines.push(
+        "- 직전 세션과 비슷한 다양성을 유지하고 있습니다. 이 사실을 중립적으로 비춰 주세요.",
+      );
     }
   }
 
   if (topRatio >= BIAS_WARN_RATIO) {
-    lines.push('- 시청이 한 주제에 크게 모여 있습니다. 그 쏠림을 부드럽고 또렷하게 사실로 비춰 주세요. 다양하게 보라는 권유나 지시는 하지 마세요.');
+    lines.push(
+      "- 시청이 한 주제에 크게 모여 있습니다. 그 쏠림을 부드럽고 또렷하게 사실로 비춰 주세요. 다양하게 보라는 권유나 지시는 하지 마세요.",
+    );
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
-export function buildPrompt({ categoryDistribution, entropy, prevEntropy = null, videoCount, videoTitles = [] }) {
-  const sorted = Object.entries(categoryDistribution).sort(([, a], [, b]) => b - a);
+export function buildPrompt({
+  categoryDistribution,
+  entropy,
+  prevEntropy = null,
+  videoCount,
+  videoTitles = [],
+}) {
+  const sorted = Object.entries(categoryDistribution).sort(
+    ([, a], [, b]) => b - a,
+  );
 
   const categoryLines = sorted
     .map(([name, ratio]) => `  · ${name}: ${Math.round(ratio * 100)}%`)
-    .join('\n');
+    .join("\n");
 
   const categoryCount = sorted.length;
-  const maxEntropy = categoryCount > 1 ? Math.log2(categoryCount).toFixed(2) : null;
+  const maxEntropy =
+    categoryCount > 1 ? Math.log2(categoryCount).toFixed(2) : null;
   const entropyLine =
     maxEntropy !== null
       ? `- 다양성 지수: ${entropy} (최대 ${maxEntropy})`
       : `- 다양성 지수: ${entropy}`;
 
-  const titleLines = videoTitles.length > 0
-    ? `\n- 시청한 영상 제목:\n${videoTitles.slice(0, 10).map(t => `  · ${t}`).join('\n')}`
-    : '';
+  const titleLines =
+    videoTitles.length > 0
+      ? `\n- 시청한 영상 제목:\n${videoTitles
+          .slice(0, 10)
+          .map((t) => `  · ${t}`)
+          .join("\n")}`
+      : "";
 
   const topRatio = sorted.length > 0 ? sorted[0][1] : 0;
-  const trendGuidance = buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount });
-  const trendSection = trendGuidance ? `\n\n[피드백 작성 지침]\n${trendGuidance}` : '';
+  const trendGuidance = buildTrendGuidance({
+    entropy,
+    prevEntropy,
+    topRatio,
+    videoCount,
+  });
+  const trendSection = trendGuidance
+    ? `\n\n[피드백 작성 지침]\n${trendGuidance}`
+    : "";
 
   return `당신은 사용자가 자신의 YouTube 콘텐츠 소비 패턴을 스스로 돌아볼 수 있도록 있는 그대로 비춰 주는 거울 같은 조력자입니다.
 
@@ -88,7 +116,7 @@ ${entropyLine}${titleLines}${trendSection}
 }
 
 // 실패 사유를 sessions.failureReason 분류값으로 태깅한 에러.
-// background.js가 이 필드(failureReason/httpStatus/timedOut)를 읽어 서버로 전송한다(10-4).
+// background.js가 이 필드(failureReason/httpStatus/timedOut)를 읽어 서버로 전송한다().
 // 분류값은 server/db.js 스키마 주석과 1:1 대응: timeout | http_error | empty_response | parse_error | network_error
 function llmError(failureReason, message, extra = {}) {
   const err = new Error(message);
@@ -107,15 +135,21 @@ export async function generateReview(prompt) {
   let response;
   try {
     response = await fetch(GEMINI_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY,
+      },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
       signal: controller.signal,
     });
   } catch (error) {
     // abort는 타임아웃으로만 발생 → 실제 네트워크 장애(TypeError 등)와 구분
-    if (timedOut) throw llmError('timeout', `Gemini API 타임아웃 (${TIMEOUT_MS}ms)`, { timedOut: true });
-    throw llmError('network_error', error.message);
+    if (timedOut)
+      throw llmError("timeout", `Gemini API 타임아웃 (${TIMEOUT_MS}ms)`, {
+        timedOut: true,
+      });
+    throw llmError("network_error", error.message);
   } finally {
     // 헤더 수신 후에는 타임아웃 해제 — 본문 읽기가 abort로 끊기지 않도록
     clearTimeout(timeoutId);
@@ -123,40 +157,63 @@ export async function generateReview(prompt) {
 
   if (!response.ok) {
     const errorBody = await response.text();
-    console.error('[llm] API error body:', errorBody);
-    // httpStatus 병기 — 429 쿼터 vs 5xx 장애 구분 (10-4 분석용)
-    throw llmError('http_error', `Gemini API error: ${response.status}`, { httpStatus: response.status });
+    console.error("[llm] API error body:", errorBody);
+    // httpStatus 병기 — 429 쿼터 vs 5xx 장애 구분 ( 분석용)
+    throw llmError("http_error", `Gemini API error: ${response.status}`, {
+      httpStatus: response.status,
+    });
   }
 
   let data;
   try {
     data = await response.json();
   } catch (error) {
-    throw llmError('parse_error', `응답 본문 JSON 파싱 실패: ${error.message}`);
+    throw llmError("parse_error", `응답 본문 JSON 파싱 실패: ${error.message}`);
   }
 
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw llmError('empty_response', 'Gemini API: 응답에 텍스트가 없습니다');
+  if (!text)
+    throw llmError("empty_response", "Gemini API: 응답에 텍스트가 없습니다");
 
-  const cleaned = text.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?\n?/, "")
+    .replace(/\n?```$/, "");
   try {
     const parsed = JSON.parse(cleaned);
-    const isObj = parsed && typeof parsed === 'object';
-    return { topic: (isObj && parsed.topic) || '', feedback: (isObj && parsed.feedback) || cleaned };
+    const isObj = parsed && typeof parsed === "object";
+    return {
+      topic: (isObj && parsed.topic) || "",
+      feedback: (isObj && parsed.feedback) || cleaned,
+    };
   } catch (error) {
-    throw llmError('parse_error', `피드백 JSON 파싱 실패: ${error.message}`);
+    throw llmError("parse_error", `피드백 JSON 파싱 실패: ${error.message}`);
   }
 }
 
-export function generateFallbackReview({ categoryDistribution, entropy, prevEntropy = null, videoCount }) {
-  const sorted = Object.entries(categoryDistribution).sort(([, a], [, b]) => b - a);
+export function generateFallbackReview({
+  categoryDistribution,
+  entropy,
+  prevEntropy = null,
+  videoCount,
+}) {
+  const sorted = Object.entries(categoryDistribution).sort(
+    ([, a], [, b]) => b - a,
+  );
 
   if (sorted.length === 0) {
-    return { topic: '', feedback: '이번 세션의 시청 데이터를 분석하지 못했습니다. 다음 세션을 기대해 주세요!' };
+    return {
+      topic: "",
+      feedback:
+        "이번 세션의 시청 데이터를 분석하지 못했습니다. 다음 세션을 기대해 주세요!",
+    };
   }
 
   const [topName, topRatio] = sorted[0];
-  const topNames = sorted.slice(0, 3).map(([name]) => name).join(', ');
+  const topNames = sorted
+    .slice(0, 3)
+    .map(([name]) => name)
+    .join(", ");
 
   // [무엇을 봤는지]
   let summary;
@@ -173,23 +230,25 @@ export function generateFallbackReview({ categoryDistribution, entropy, prevEntr
   }
 
   // [변화 추세] + [쏠림] — 거울형: 사실만 비추고 권유·처방은 하지 않음
-  let trend = '';
-  let skewNote = '';
+  let trend = "";
+  let skewNote = "";
   if (videoCount >= MIN_VIDEOS_FOR_TREND) {
     const hasPrev = Number.isFinite(prevEntropy);
     const delta = hasPrev ? roundedDelta(entropy, prevEntropy) : 0;
 
     if (hasPrev) {
-      if (delta >= ENTROPY_DELTA_EPS) trend = '직전 세션보다 여러 주제를 두루 보셨어요.';
-      else if (delta <= -ENTROPY_DELTA_EPS) trend = '직전 세션보다 더 적은 수의 주제에 모여 있었어요.';
-      else trend = '직전 세션과 비슷한 다양성이었어요.';
+      if (delta >= ENTROPY_DELTA_EPS)
+        trend = "직전 세션보다 여러 주제를 두루 보셨어요.";
+      else if (delta <= -ENTROPY_DELTA_EPS)
+        trend = "직전 세션보다 더 적은 수의 주제에 모여 있었어요.";
+      else trend = "직전 세션과 비슷한 다양성이었어요.";
     }
 
     if (topRatio >= BIAS_WARN_RATIO) {
-      skewNote = '특히 시청이 한 주제에 크게 모여 있었어요.';
+      skewNote = "특히 시청이 한 주제에 크게 모여 있었어요.";
     }
   }
 
-  const feedback = [summary, trend, skewNote].filter(Boolean).join(' ');
+  const feedback = [summary, trend, skewNote].filter(Boolean).join(" ");
   return { topic, feedback };
 }

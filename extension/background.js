@@ -119,7 +119,7 @@ async function analyzeSession(session) {
   const prompt = buildPrompt(analysisData);
 
   let result;
-  // LLM 성공/폴백 로깅 (10-4). generateReview가 실패 사유를 태깅해 던지므로 분류해 기록한다.
+  // LLM 성공/폴백 로깅 (). generateReview가 실패 사유를 태깅해 던지므로 분류해 기록한다.
   let llmStatus = "success";
   let failureReason = null;
   let httpStatus = null;
