@@ -65,7 +65,7 @@ function initializeDB() {
     -- 팝업 상호작용 마이크로 로그 — 세션과 무관해 별도 테이블
     CREATE TABLE IF NOT EXISTS popup_events (
       id             INTEGER PRIMARY KEY AUTOINCREMENT,
-      eventId        TEXT,     -- 확장이 오픈당 1회 발급하는 멱등 키 (재전송 중복 방지)
+      eventId        TEXT    UNIQUE,  -- 오픈당 1회 발급하는 멱등 키. UNIQUE로 재전송 중복을 막는다(NULL끼리는 distinct라 구버전 요청은 허용)
       anonymousId    TEXT    NOT NULL,
       dwellMs        INTEGER,  -- 팝업 체류 시간(ms)
       tabTodayClicks INTEGER DEFAULT 0,  -- '오늘' 탭 클릭 횟수
@@ -76,37 +76,13 @@ function initializeDB() {
     );
   `);
 
-  // 기존 DB 마이그레이션 — 컬럼이 없으면 추가 (이미 있으면 무시).
-  // 실운영 중인 DB를 깨지 않고 컬럼을 점진 추가하기 위한 패턴.
-  const addColumn = (sql) => {
-    try {
-      db.exec(sql);
-    } catch (e) {
-      // "duplicate column name" → 이미 존재하는 컬럼이므로 무시.
-      // 그 외(SQL 오류·DB 잠금·테이블 부재 등)는 마이그레이션 실패이므로 재던져
-      // 조용한 실패 후 런타임 컬럼 누락 크래시를 막는다.
-      if (e.message && e.message.includes("duplicate column name")) return;
-      throw e;
-    }
-  };
-
-  addColumn("ALTER TABLE participants ADD COLUMN participantCode TEXT");
-  //  latency /  폴백 로깅 컬럼
-  addColumn("ALTER TABLE sessions ADD COLUMN totalMs INTEGER");
-  addColumn("ALTER TABLE sessions ADD COLUMN youtubeMs INTEGER");
-  addColumn("ALTER TABLE sessions ADD COLUMN geminiMs INTEGER");
-  addColumn("ALTER TABLE sessions ADD COLUMN llmStatus TEXT");
-  addColumn("ALTER TABLE sessions ADD COLUMN failureReason TEXT");
-  addColumn("ALTER TABLE sessions ADD COLUMN httpStatus INTEGER");
-  addColumn("ALTER TABLE sessions ADD COLUMN timedOut INTEGER");
-
-  // 팝업 이벤트 멱등 키 — SQLite는 ALTER TABLE로 UNIQUE 컬럼을 못 만들므로
-  // 컬럼 추가 후 UNIQUE 인덱스를 별도로 생성. 기존 행(eventId=NULL)은 NULL끼리
-  // distinct 취급되어 충돌하지 않는다.
-  addColumn("ALTER TABLE popup_events ADD COLUMN eventId TEXT");
-  db.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_popup_events_eventId ON popup_events(eventId)",
-  );
+  // 스키마의 단일 진실 원천(single source of truth)은 위 CREATE TABLE 하나다.
+  // 런칭 전이라 세상에 마이그레이션할 '옛 스키마 DB'가 없으므로, ALTER 기반
+  // 점진 마이그레이션은 두지 않는다(넣어봤자 새 DB에선 전부 no-op인 죽은 코드).
+  // 운영 중 스키마를 바꿔야 하는 첫 순간이 오면, 그때 duplicate column name만
+  // 무시하고 나머지는 재던지는 addColumn 패턴을 도입한다.
+  // (eventId의 UNIQUE도 위 CREATE TABLE에 인라인으로 선언 — 별도 인덱스로 분리하던
+  //  이유였던 'ALTER는 UNIQUE 컬럼을 못 만든다' 제약이 ALTER를 걷어내며 사라졌다.)
 }
 
 module.exports = { db, initializeDB };
