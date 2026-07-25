@@ -9,7 +9,10 @@ if (!DB_ENCRYPTION_KEY) {
 }
 
 const db = new Database(DB_PATH);
-db.pragma(`key='${DB_ENCRYPTION_KEY}'`); // 다른 pragma·쿼리보다 먼저 적용해야 함
+// cipher를 명시하지 않으면 기본값(sqleet, ChaCha20 계열)이 적용된다 — IRB 문서에 서약한
+// "AES-256"과 다른 알고리즘이므로 SQLCipher 호환 cipher(AES-256-CBC)를 명시적으로 지정한다.
+db.pragma("cipher = 'sqlcipher'");
+db.pragma(`key='${DB_ENCRYPTION_KEY}'`); // cipher 다음, 다른 pragma·쿼리보다 먼저 적용해야 함
 
 // 동시성·내구성 하드닝 (80명 확대 실험 대비)
 // - WAL: 쓰기 중에도 읽기 허용, 크래시 내구성 향상
