@@ -2,8 +2,10 @@
 /**
  * SQLite 핫 백업 스크립트 (cron 실행용)
  *
- * 실행 중인 DB를 안전하게 복사한다(better-sqlite3의 db.backup() = online backup API).
- * 단순 파일 복사(cp)와 달리 WAL 체크포인트 정합성을 보장하므로 서버 가동 중에도 안전하다.
+ * 실행 중인 DB를 안전하게 복사한다: WAL 체크포인트(TRUNCATE)로 WAL 내용을 메인 .db 파일에
+ * 전부 반영한 뒤 파일을 복사한다. 암호화된 DB는 online backup API(db.backup())를 못 쓴다 —
+ * 독립적으로 생성된 두 암호화 파일은 salt가 달라 "incompatible source and target databases"로
+ * 실패한다. 체크포인트 후 파일 복사는 암호화된 바이트를 그대로 복제하므로 이 문제가 없다.
  *
  * - 백업 대상 : server/youtube_bias.db
  * - 저장 위치 : BACKUP_DIR (기본 ~/db-backups) — repo 밖에 둬 git pull/배포와 분리
@@ -28,11 +30,15 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const { execFileSync } = require("child_process");
-const Database = require("better-sqlite3");
+const Database = require("better-sqlite3-multiple-ciphers");
+
+// cron으로 실행될 때는 server/.env가 자동으로 로드되지 않으므로 명시적으로 불러온다.
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const DB_PATH = path.join(__dirname, "..", "youtube_bias.db");
 const BACKUP_DIR = process.env.BACKUP_DIR || path.join(os.homedir(), "db-backups");
 const RETENTION_DAYS = Number(process.env.RETENTION_DAYS || 30);
+const DB_ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY;
 
 function timestamp() {
   const d = new Date();
@@ -48,17 +54,24 @@ async function main() {
     console.error(`[backup] DB 파일 없음: ${DB_PATH}`);
     process.exit(1);
   }
+  if (!DB_ENCRYPTION_KEY) {
+    console.error("[backup] DB_ENCRYPTION_KEY 환경변수가 필요합니다.");
+    process.exit(1);
+  }
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
 
   const dest = path.join(BACKUP_DIR, `youtube_bias-${timestamp()}.db`);
-  const db = new Database(DB_PATH, { readonly: true });
+  const db = new Database(DB_PATH);
+  db.pragma("cipher = 'sqlcipher'"); // db.js와 동일 cipher(AES-256)로 맞춰야 키가 들어맞는다
+  db.pragma(`key='${DB_ENCRYPTION_KEY}'`);
   try {
-    await db.backup(dest);
-    const sizeKb = Math.round(fs.statSync(dest).size / 1024);
-    console.log(`[backup] 완료: ${dest} (${sizeKb} KB)`);
+    db.pragma("wal_checkpoint(TRUNCATE)"); // WAL 내용을 메인 파일에 전부 반영
   } finally {
     db.close();
   }
+  fs.copyFileSync(DB_PATH, dest); // 암호화된 바이트를 그대로 복사 — 대상 파일도 자동으로 동일하게 암호화됨
+  const sizeKb = Math.round(fs.statSync(dest).size / 1024);
+  console.log(`[backup] 완료: ${dest} (${sizeKb} KB)`);
 
   // 로테이션 — RETENTION_DAYS 지난 백업 삭제
   const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;

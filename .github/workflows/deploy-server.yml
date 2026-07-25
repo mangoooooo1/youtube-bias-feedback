@@ -26,4 +26,5 @@ jobs:
             pnpm install --prod
             echo "PORT=3000" > server/.env
             echo "NODE_ENV=production" >> server/.env
+            echo "DB_ENCRYPTION_KEY=${{ secrets.DB_ENCRYPTION_KEY }}" >> server/.env
             pm2 restart youtube-bias-server

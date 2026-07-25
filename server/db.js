@@ -1,9 +1,18 @@
-const Database = require("better-sqlite3");
+const Database = require("better-sqlite3-multiple-ciphers");
 const path = require("path");
 
 const DB_PATH = path.join(__dirname, "youtube_bias.db");
 
+const DB_ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY;
+if (!DB_ENCRYPTION_KEY) {
+  throw new Error("DB_ENCRYPTION_KEY 환경변수가 필요합니다.");
+}
+
 const db = new Database(DB_PATH);
+// cipher를 명시하지 않으면 기본값(sqleet, ChaCha20 계열)이 적용된다 — IRB 문서에 서약한
+// "AES-256"과 다른 알고리즘이므로 SQLCipher 호환 cipher(AES-256-CBC)를 명시적으로 지정한다.
+db.pragma("cipher = 'sqlcipher'");
+db.pragma(`key='${DB_ENCRYPTION_KEY}'`); // cipher 다음, 다른 pragma·쿼리보다 먼저 적용해야 함
 
 // 동시성·내구성 하드닝 (80명 확대 실험 대비)
 // - WAL: 쓰기 중에도 읽기 허용, 크래시 내구성 향상
