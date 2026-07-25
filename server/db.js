@@ -1,9 +1,15 @@
-const Database = require("better-sqlite3");
+const Database = require("better-sqlite3-multiple-ciphers");
 const path = require("path");
 
 const DB_PATH = path.join(__dirname, "youtube_bias.db");
 
+const DB_ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY;
+if (!DB_ENCRYPTION_KEY) {
+  throw new Error("DB_ENCRYPTION_KEY 환경변수가 필요합니다.");
+}
+
 const db = new Database(DB_PATH);
+db.pragma(`key='${DB_ENCRYPTION_KEY}'`); // 다른 pragma·쿼리보다 먼저 적용해야 함
 
 // 동시성·내구성 하드닝 (80명 확대 실험 대비)
 // - WAL: 쓰기 중에도 읽기 허용, 크래시 내구성 향상
