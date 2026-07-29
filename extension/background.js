@@ -53,6 +53,42 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   checkSessionTimeout();
 });
 
+// 알림 본문/버튼 클릭 모두 같은 동작 — notificationId가 곧 sessionId이므로 별도 매핑 없이 역추적한다.
+chrome.notifications.onButtonClicked.addListener(handleNotificationOpen);
+chrome.notifications.onClicked.addListener(handleNotificationOpen);
+
+async function handleNotificationOpen(sessionId) {
+  chrome.notifications.clear(sessionId);
+  chrome.action.setBadgeText({ text: "" });
+  chrome.tabs.create({ url: chrome.runtime.getURL("popup/popup.html") });
+  await markFeedbackViewed(sessionId);
+}
+
+// 알림 클릭을 "실제 열람 시작"으로 서버에 기록 (). 팝업 표시 기반 feedbackViewed(10-5)보다
+// 엄격한 신호 — 알림을 거치지 않고 그냥 팝업을 연 경우는 여기서 기록하지 않는다.
+async function markFeedbackViewed(sessionId) {
+  if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) return;
+  const onboarding = await getOnboarding();
+  if (!onboarding?.anonymousId) return;
+
+  const cleanUrl = SERVER_URL.replace(/\/$/, "");
+  try {
+    const response = await fetch(
+      `${cleanUrl}/api/sessions/${encodeURIComponent(sessionId)}/feedback-viewed`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anonymousId: onboarding.anonymousId }),
+      },
+    );
+    if (!response.ok) {
+      console.warn("[background] 피드백 열람 기록 실패:", response.status);
+    }
+  } catch (error) {
+    console.warn("[background] 피드백 열람 기록 오류:", error);
+  }
+}
+
 async function handleVideoDetected(message) {
   const { videoId, title } = message;
   await addVideo(videoId, title);
