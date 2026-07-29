@@ -175,48 +175,54 @@ router.post("/", (req, res, next) => {
   return success(res);
 });
 
-// 피드백 열람 시각 갱신 () — 알림 클릭 등으로 실제 열람이 확인된 시점에
-// background.js가 아닌 popup.js가 나중에(세션 생성 POST와 별도 시점에) 호출한다.
-// anonymousId로 소유권을 확인해 다른 참여자의 세션을 갱신하지 못하도록 막는다.
-const updateFeedbackViewedAt = db.prepare(`
-  UPDATE sessions SET feedbackViewedAt = @feedbackViewedAt
-  WHERE sessionId = @sessionId AND anonymousId = @anonymousId
-`);
+// 피드백 열람/확인 시각 갱신 () — 세션 생성 POST와 별도 시점에(알림 클릭, 확인 버튼 클릭 등)
+// 호출된다. anonymousId로 소유권을 확인해 다른 참여자의 세션을 갱신하지 못하도록 막는다.
+// column은 요청 값이 아니라 아래 두 router.patch 호출부에서만 하드코딩으로 주어지므로
+// SQL 인젝션 경로가 없다(server/db.js의 addColumn(table, name, type) 패턴과 동일한 근거).
+function makeFeedbackTimestampHandler(column) {
+  const update = db.prepare(
+    `UPDATE sessions SET ${column} = @value WHERE sessionId = @sessionId AND anonymousId = @anonymousId`,
+  );
+  return (req, res, next) => {
+    const { sessionId } = req.params;
+    const { anonymousId } = req.body;
 
-router.patch("/:sessionId/feedback-viewed", (req, res, next) => {
-  const { sessionId } = req.params;
-  const { anonymousId } = req.body;
-
-  if (typeof anonymousId !== "string" || !anonymousId.trim()) {
-    return fail(
-      res,
-      400,
-      ERROR_CODES.MISSING_REQUIRED_FIELD,
-      "anonymousId 필드가 올바르지 않습니다.",
-      "anonymousId",
-    );
-  }
-
-  try {
-    const result = updateFeedbackViewedAt.run({
-      sessionId,
-      anonymousId,
-      feedbackViewedAt: new Date().toISOString(),
-    });
-    if (result.changes === 0) {
+    if (typeof anonymousId !== "string" || !anonymousId.trim()) {
       return fail(
         res,
-        404,
-        ERROR_CODES.NOT_FOUND,
-        "세션을 찾을 수 없습니다.",
-        sessionId,
+        400,
+        ERROR_CODES.MISSING_REQUIRED_FIELD,
+        "anonymousId 필드가 올바르지 않습니다.",
+        "anonymousId",
       );
     }
-  } catch (err) {
-    return next(err);
-  }
 
-  return success(res);
-});
+    try {
+      const result = update.run({
+        sessionId,
+        anonymousId,
+        value: new Date().toISOString(),
+      });
+      if (result.changes === 0) {
+        return fail(
+          res,
+          404,
+          ERROR_CODES.NOT_FOUND,
+          "세션을 찾을 수 없습니다.",
+          sessionId,
+        );
+      }
+    } catch (err) {
+      return next(err);
+    }
+
+    return success(res);
+  };
+}
+
+// 알림 클릭 기준 — background.js가 호출 (느슨한 신호)
+router.patch("/:sessionId/feedback-viewed", makeFeedbackTimestampHandler("feedbackViewedAt"));
+// "피드백 확인하기" 블러 해제 버튼 클릭 기준 — popup.js가 호출 (가장 엄격한 신호)
+router.patch("/:sessionId/feedback-confirmed", makeFeedbackTimestampHandler("feedbackConfirmedAt"));
 
 module.exports = router;
