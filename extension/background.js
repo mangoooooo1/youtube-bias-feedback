@@ -238,6 +238,8 @@ function notifyFeedbackReady(session, onboarding) {
     buttons: [{ title: "피드백 보러 가기" }],
   });
   // 개수 대신 있음/없음만 표시 — 정확한 미열람 개수는 연구 지표가 아니다.
+  // 배경색을 지정하지 않으면 Chrome 기본값(테마별 회색 등)이 쓰여 눈에 잘 안 띄므로 명시한다.
+  chrome.action.setBadgeBackgroundColor({ color: "#E11D2E" });
   chrome.action.setBadgeText({ text: "•" });
   return true;
 }
