@@ -128,6 +128,8 @@ function vlReview({
   topic = "",
   title = "오늘 돌아보기",
   videos = [],
+  locked = false,
+  sessionId = null,
 } = {}) {
   const cats = VL.CATS;
 
@@ -170,14 +172,28 @@ function vlReview({
   `
       : "";
 
-  return `<div style="background:var(--vl-accent-soft);border:1px solid color-mix(in oklab,var(--vl-accent) 22%,transparent);border-radius:16px;padding:15px">
-    <div style="display:flex;align-items:center;gap:7px;margin-bottom:9px">
-      ${markSVG({ size: 18, filled: false, accent: "var(--vl-accent)" })}
-      <span style="font-size:12.5px;font-weight:700;color:var(--vl-accent)">${title}</span>
+  // "피드백 확인하기"로 블러를 해제하기 전까지는 내용을 실제로 읽을 수 없게 만든다
+  //  backdrop-filter 미지원 환경에서도 filter:blur만으로 판독 불가능하도록 이중 처리).
+  const revealOverlay = locked
+    ? `<div style="position:absolute;inset:0;border-radius:16px;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);background:color-mix(in oklab,var(--vl-accent-soft) 60%,transparent)">
+        <button id="vl-feedback-confirm-btn" data-session-id="${sessionId ?? ""}" style="display:flex;align-items:center;gap:7px;padding:11px 20px;border:1px solid color-mix(in oklab,var(--vl-accent) 35%,transparent);border-radius:999px;background:var(--vl-card);color:var(--vl-accent);font-size:13px;font-weight:700;cursor:pointer;animation:vlGlow 2.4s ease-in-out infinite">
+          ${markSVG({ size: 15, filled: false, accent: "var(--vl-accent)" })}
+          피드백 확인하기
+        </button>
+      </div>`
+    : "";
+
+  return `<div id="vl-review-card" style="position:relative;overflow:hidden;background:var(--vl-accent-soft);border:1px solid color-mix(in oklab,var(--vl-accent) 22%,transparent);border-radius:16px;padding:15px">
+    <div style="${locked ? "filter:blur(6px);user-select:none;pointer-events:none" : ""}">
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:9px">
+        ${markSVG({ size: 18, filled: false, accent: "var(--vl-accent)" })}
+        <span style="font-size:12.5px;font-weight:700;color:var(--vl-accent)">${title}</span>
+      </div>
+      ${topicBlock}
+      <p style="margin:0;font-size:13.5px;line-height:1.65;color:var(--vl-ink);text-wrap:pretty">${text}</p>
+      ${videoList}
     </div>
-    ${topicBlock}
-    <p style="margin:0;font-size:13.5px;line-height:1.65;color:var(--vl-ink);text-wrap:pretty">${text}</p>
-    ${videoList}
+    ${revealOverlay}
   </div>`;
 }
 

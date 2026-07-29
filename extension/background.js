@@ -22,6 +22,71 @@ import { SERVER_URL } from "./config.js";
 const ALARM_NAME = "SESSION_TIMEOUT_CHECK";
 const TIMEOUT_MS = 10 * 60 * 1000;
 
+// 분석 완료 알림 대상 판정 (). 현재는 EXP 여부만 본다 — 10-8(2주 베이스라인 게이트)이
+// 끝나면 이 함수 안에 installDate 기준 베이스라인 종료 조건만 추가하면 되고, 알림·배지·
+// 서버 코드는 건드릴 필요가 없도록 판정 로직을 이 한 곳에 모아둔다.
+// extension/popup/viewlens-data.js의 GROUPS 중 feedback:true인 그룹(EXP/TEST-EXP)과
+// 반드시 동일하게 유지해야 한다 — background.js는 popup 쪽 데이터 파일을 import할 수 없어(모듈 경계) 중복 정의한다.
+const FEEDBACK_ELIGIBLE_GROUPS = new Set(["EXP", "TEST-EXP"]);
+
+function isFeedbackNotificationEligible(group, _installDate) {
+  return FEEDBACK_ELIGIBLE_GROUPS.has(group);
+}
+
+const BASE_ICON_PATHS = {
+  16: "assets/icons/icon16.png",
+  32: "assets/icons/icon32.png",
+  48: "assets/icons/icon48.png",
+  128: "assets/icons/icon128.png",
+};
+
+// 미열람 표시를 배지 텍스트("•") 대신 아이콘 자체에 그려 넣는다 — 배지 글리프는
+// OS·Chrome 버전마다 렌더링이 달라질 수 있지만, 이렇게 그리면 픽셀이 고정되어 항상 동일하게 보인다.
+async function setUnviewedIconDot() {
+  try {
+    const imageData = {};
+    for (const size of Object.keys(BASE_ICON_PATHS).map(Number)) {
+      imageData[size] = await drawIconWithDot(size);
+    }
+    chrome.action.setIcon({ imageData });
+  } catch (error) {
+    // 아이콘 그리기가 실패해도(예: OffscreenCanvas 미지원) 알림 자체는 이미 떴으므로 무시.
+    console.warn("[background] 미열람 아이콘 표시 실패:", error.message);
+  }
+}
+
+function clearUnviewedIconDot() {
+  // setIcon의 상대 경로는 "확장 루트"가 아니라 "호출한 스크립트의 위치" 기준으로 풀린다.
+  // background.js는 루트에 있어 상대 경로가 우연히 맞았을 뿐이므로, getURL로 명시적인
+  // 절대 경로를 만들어 어디서 호출되든(팝업 등) 항상 정확하게 만든다.
+  const path = Object.fromEntries(
+    Object.entries(BASE_ICON_PATHS).map(([size, p]) => [
+      size,
+      chrome.runtime.getURL(p),
+    ]),
+  );
+  chrome.action.setIcon({ path });
+}
+
+async function drawIconWithDot(size) {
+  const response = await fetch(chrome.runtime.getURL(BASE_ICON_PATHS[size]));
+  const bitmap = await createImageBitmap(await response.blob());
+
+  const canvas = new OffscreenCanvas(size, size);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0, size, size);
+
+  const radius = Math.max(2, Math.round(size * 0.22));
+  const cx = size - radius - 1;
+  const cy = radius + 1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fillStyle = "#E11D2E";
+  ctx.fill();
+
+  return ctx.getImageData(0, 0, size, size);
+}
+
 // service worker가 깨어날 때마다 실행 — 같은 이름의 alarm은 자동으로 교체됨
 chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
 
@@ -41,6 +106,42 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== ALARM_NAME) return;
   checkSessionTimeout();
 });
+
+// 알림 본문/버튼 클릭 모두 같은 동작 — notificationId가 곧 sessionId이므로 별도 매핑 없이 역추적한다.
+chrome.notifications.onButtonClicked.addListener(handleNotificationOpen);
+chrome.notifications.onClicked.addListener(handleNotificationOpen);
+
+async function handleNotificationOpen(sessionId) {
+  chrome.notifications.clear(sessionId);
+  clearUnviewedIconDot();
+  chrome.tabs.create({ url: chrome.runtime.getURL("popup/popup.html") });
+  await markFeedbackViewed(sessionId);
+}
+
+// 알림 클릭을 "실제 열람 시작"으로 서버에 기록 (). 팝업 표시 기반 feedbackViewed(10-5)보다
+// 엄격한 신호 — 알림을 거치지 않고 그냥 팝업을 연 경우는 여기서 기록하지 않는다.
+async function markFeedbackViewed(sessionId) {
+  if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) return;
+  const onboarding = await getOnboarding();
+  if (!onboarding?.anonymousId) return;
+
+  const cleanUrl = SERVER_URL.replace(/\/$/, "");
+  try {
+    const response = await fetch(
+      `${cleanUrl}/api/sessions/${encodeURIComponent(sessionId)}/feedback-viewed`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anonymousId: onboarding.anonymousId }),
+      },
+    );
+    if (!response.ok) {
+      console.warn("[background] 피드백 열람 기록 실패:", response.status);
+    }
+  } catch (error) {
+    console.warn("[background] 피드백 열람 기록 오류:", error);
+  }
+}
 
 async function handleVideoDetected(message) {
   const { videoId, title } = message;
@@ -150,12 +251,20 @@ async function analyzeSession(session) {
   });
   console.log("[background] 리뷰 저장 완료:", result);
 
+  // 알림·전송 모두 온보딩 정보(그룹·anonymousId)가 필요해 한 번만 조회해 공유한다.
+  const onboarding = await getOnboarding();
+
+  const feedbackNotifiedAt = notifyFeedbackReady(session, onboarding)
+    ? new Date().toISOString()
+    : null;
+
   const totalMs = Date.now() - t0;
   await postSessionToServer(
     session,
     categoryDistribution,
     entropy,
     videoCount,
+    onboarding,
     {
       totalMs,
       youtubeMs,
@@ -164,8 +273,27 @@ async function analyzeSession(session) {
       failureReason,
       httpStatus,
       timedOut,
+      feedbackNotifiedAt,
     },
   );
+}
+
+// 분석 완료 알림 + 배지 표시 (). 대상이면 true를 반환해 호출부가 feedbackNotifiedAt을 기록하게 한다.
+// notificationId로 session.sessionId를 그대로 사용 — 버튼 클릭 시 별도 매핑 없이 세션을 역추적한다.
+function notifyFeedbackReady(session, onboarding) {
+  if (!isFeedbackNotificationEligible(onboarding?.group, onboarding?.installDate)) {
+    return false;
+  }
+  chrome.notifications.create(session.sessionId, {
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("assets/icons/icon128.png"),
+    title: "ViewLens",
+    message: "이번 세션 분석이 준비됐어요.",
+    buttons: [{ title: "피드백 보러 가기" }],
+  });
+  // 개수 대신 있음/없음만 표시 — 정확한 미열람 개수는 연구 지표가 아니다.
+  setUnviewedIconDot();
+  return true;
 }
 
 async function postSessionToServer(
@@ -173,6 +301,7 @@ async function postSessionToServer(
   categoryDistribution,
   entropy,
   videoCount,
+  onboarding,
   metrics = {},
 ) {
   if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) {
@@ -182,7 +311,6 @@ async function postSessionToServer(
     return;
   }
 
-  const onboarding = await getOnboarding();
   if (!onboarding?.anonymousId) {
     console.warn("[background] anonymousId 없음, 서버 전송 건너뜀");
     return;
@@ -212,6 +340,7 @@ async function postSessionToServer(
         failureReason: metrics.failureReason,
         httpStatus: metrics.httpStatus,
         timedOut: metrics.timedOut,
+        feedbackNotifiedAt: metrics.feedbackNotifiedAt,
       }),
     });
 

@@ -176,6 +176,8 @@ function screenToday() {
     .join("");
 
   const isToday = d.dateLabel === koreanDateLabel(new Date());
+  // 오늘의 실제 리뷰인데 아직 "확인하기"를 안 눌렀으면 블러 처리 — 지난 날짜는 대상 아님.
+  const reviewLocked = isToday && !d.confirmed && isRealReview(d.review);
   const isCollecting = d.collectingCount > 0 || !!d.collectingTimer;
   const collectingRow = isCollecting
     ? `
@@ -185,6 +187,14 @@ function screenToday() {
         <span id="vl-collecting-count" style="font-size:11.5px;font-weight:600;color:var(--vl-accent)">${d.collectingCount > 0 ? `영상 ${d.collectingCount}개 수집 중` : "분석 중..."}</span>
         <span id="vl-collecting-timer" style="font-size:10.5px;color:var(--vl-accent);opacity:0.8">${d.collectingTimer || ""}</span>
       </div>
+    </div>`
+    : "";
+  // 오늘 탭 안에 들어와 있어도 스크롤 안 하면 확인 카드가 안 보이니, 스크롤하지 않아도
+  // 보이는 상단 영역에 내려가 보라는 안내를 띄운다(수집 중 표시와 자리를 공유).
+  const scrollNudgeRow = reviewLocked
+    ? `<div style="display:flex;align-items:center;gap:6px">
+      <span style="display:inline-block;font-size:13px;line-height:1;color:var(--vl-accent);animation:vlBounceDown 1.2s ease-in-out infinite">↓</span>
+      <span style="font-size:11.5px;font-weight:600;color:var(--vl-accent)">아래로 스크롤해서 피드백 확인하세요!</span>
     </div>`
     : "";
   return `<div style="display:flex;flex-direction:column">
@@ -197,7 +207,7 @@ function screenToday() {
       <button id="vl-date-next" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:${isToday ? "var(--vl-ink-3)" : "var(--vl-ink-2)"};cursor:${isToday ? "default" : "pointer"};font-size:15px;display:grid;place-items:center;opacity:${isToday ? 0.35 : 1}" ${isToday ? "disabled" : ""}>›</button>
     </div>
     <div style="display:flex;align-items:center;justify-content:space-between">
-      <div>${collectingRow}</div>
+      <div>${isCollecting ? collectingRow : scrollNudgeRow}</div>
       ${vlBadge({ text: `${d.videoCount}개 영상 · ${d.dist.length}개 분야`, tone: "neutral" })}
     </div>
 
@@ -234,7 +244,7 @@ function screenToday() {
     `,
     })}
 
-    ${vlReview({ text: d.review, topic: d.reviewTopic, videos: d.videos })}
+    ${vlReview({ text: d.review, topic: d.reviewTopic, videos: d.videos, locked: reviewLocked, sessionId: d.sessionId })}
   </div>
   </div>`;
 }

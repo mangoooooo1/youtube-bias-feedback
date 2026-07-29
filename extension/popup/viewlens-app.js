@@ -67,7 +67,7 @@ function _popupHeader(groupCfg, day) {
   </div>`;
 }
 
-function _tabs(activeTab) {
+function _tabs(activeTab, needsConfirmNudge = false) {
   const list = [
     { id: "today", label: "오늘" },
     { id: "feedback", label: "주차별 피드백" },
@@ -76,7 +76,12 @@ function _tabs(activeTab) {
     ${list
       .map((t) => {
         const on = t.id === activeTab;
-        return `<button data-tab="${t.id}" style="flex:1;padding:9px 6px 11px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;color:${on ? "var(--vl-accent)" : "var(--vl-ink-3)"};border-bottom:2px solid ${on ? "var(--vl-accent)" : "transparent"};transition:color .15s">${t.label}</button>`;
+        // 오늘 탭에 미확인 피드백이 있는데 지금 다른 탭을 보고 있으면 살짝 깜빡이는 점으로 알린다.
+        const nudge =
+          t.id === "today" && !on && needsConfirmNudge
+            ? `<span style="display:inline-block;width:6px;height:6px;margin-left:5px;border-radius:50%;background:var(--vl-accent);vertical-align:middle;animation:vlBlink 1.4s ease-in-out infinite"></span>`
+            : "";
+        return `<button data-tab="${t.id}" style="flex:1;padding:9px 6px 11px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;color:${on ? "var(--vl-accent)" : "var(--vl-ink-3)"};border-bottom:2px solid ${on ? "var(--vl-accent)" : "transparent"};transition:color .15s">${t.label}${nudge}</button>`;
       })
       .join("")}
   </div>`;
@@ -155,6 +160,10 @@ class ViewLensPopup {
         this._selectedDate.toDateString() === new Date().toDateString();
       d.collectingCount = isToday ? (VL.today?.collectingCount ?? 0) : 0;
       d.collectingTimer = isToday ? _collectingTimerText() : "";
+      // 지난 날짜 조회 시엔 블러 대상이 아니므로 항상 확인된 것으로 취급한다.
+      // VL.today가 아니라 VL._todayConfirmed(날짜 이동에 영향받지 않는 별도 키)에서 읽는다 —
+      // VL.today에 두면 어제를 봤다가 오늘로 돌아올 때 "확인됨"으로 잘못 남는 버그가 있었다.
+      d.confirmed = isToday ? !!VL._todayConfirmed : true;
       VL.today = d;
     }
 
@@ -174,7 +183,7 @@ class ViewLensPopup {
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
       ${_popupHeader(groupCfg, day)}
       ${surveyPending && this._snoozed ? _surveyBanner(surveyWeek) : ""}
-      ${groupCfg.feedback ? _tabs(this._tab) : ""}
+      ${groupCfg.feedback ? _tabs(this._tab, !VL._todayConfirmed) : ""}
       <div style="flex:1;overflow-y:auto;overflow-x:hidden">${bodyHTML}</div>
       ${showModal ? screenSurveyModal(surveyWeek) : ""}
     </div>`;

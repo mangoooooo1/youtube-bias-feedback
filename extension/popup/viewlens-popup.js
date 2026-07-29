@@ -125,6 +125,8 @@ function buildDataForDate(allSessions, targetDate) {
     sourceSessions.at(-1)?.review ||
     "시청 패턴을 분석하고 있어요. 잠시 후 시청 분석이 업데이트돼요.";
   const reviewTopic = sourceSessions.at(-1)?.reviewTopic || "";
+  // "피드백 확인하기" 블러 해제 버튼이 어느 세션을 확인 처리할지 알아야 해서 함께 넘긴다.
+  const sessionId = sourceSessions.at(-1)?.sessionId ?? null;
 
   const videos = sourceSessions
     .flatMap((sess) => {
@@ -172,6 +174,7 @@ function buildDataForDate(allSessions, targetDate) {
     videos,
     review,
     reviewTopic,
+    sessionId,
   };
 }
 
@@ -394,6 +397,64 @@ function isRealReview(text) {
   );
 }
 
+// "피드백 확인하기" 블러 해제 여부 () — 한 번 확인한 세션은 로컬에 기억해 다음에
+// 다시 팝업을 열어도 또 가리지 않는다. feedbackViewedAt(알림 클릭)보다 엄격한 별도 신호.
+async function isFeedbackConfirmed(sessionId) {
+  if (!sessionId) return false;
+  const { confirmedFeedbackSessionIds = [] } = await chrome.storage.local.get(
+    "confirmedFeedbackSessionIds",
+  );
+  return confirmedFeedbackSessionIds.includes(sessionId);
+}
+
+async function markFeedbackConfirmedLocally(sessionId) {
+  const { confirmedFeedbackSessionIds = [] } = await chrome.storage.local.get(
+    "confirmedFeedbackSessionIds",
+  );
+  if (confirmedFeedbackSessionIds.includes(sessionId)) return;
+  await chrome.storage.local.set({
+    confirmedFeedbackSessionIds: [...confirmedFeedbackSessionIds, sessionId],
+  });
+}
+
+// 서버에 feedbackConfirmedAt 기록 — 실패해도 로컬 확인 상태(위)는 이미 반영돼 있어
+// 사용자 경험에는 영향 없고, 연구 데이터 쪽만 유실될 수 있다(다른 서버 전송들과 동일한 정책).
+async function postFeedbackConfirmed(sessionId) {
+  const { serverUrl, anonymousId } = await chrome.storage.local.get([
+    "serverUrl",
+    "anonymousId",
+  ]);
+  if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId) return;
+  try {
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/sessions/${encodeURIComponent(sessionId)}/feedback-confirmed`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anonymousId }),
+      },
+    );
+    if (!res.ok) console.warn("[popup] 피드백 확인 기록 실패:", res.status);
+  } catch (error) {
+    console.warn("[popup] 피드백 확인 기록 오류:", error.message);
+  }
+}
+
+// "피드백 확인하기" 버튼 클릭 처리 — 로컬 확인 상태 저장, 블러 해제 재렌더링,
+// 아이콘 점 제거, 서버 기록을 한 번에 묶는다.
+async function handleFeedbackConfirmClick(popup, sessionId) {
+  if (!sessionId) return;
+  await markFeedbackConfirmedLocally(sessionId);
+  VL._todayConfirmed = true;
+  clearUnviewedIconDot();
+  popup.render();
+  // render()가 innerHTML을 통째로 교체하면서 스크롤이 맨 위로 리셋되므로 즉시 복원한다.
+  requestAnimationFrame(() => {
+    document.getElementById("vl-review-card")?.scrollIntoView({ block: "start" });
+  });
+  postFeedbackConfirmed(sessionId);
+}
+
 function buildPopupEventPayload(m) {
   return {
     eventId: m.eventId,
@@ -457,6 +518,22 @@ async function flushPendingPopupEvents(serverUrl) {
   }
 }
 
+// 미열람 아이콘 표시 해제 — background.js의 setUnviewedIconDot()과 짝을 이룬다.
+// 배경 스크립트(ESM)와 팝업 스크립트(클래식) 경계 때문에 경로 상수를 공유할 수 없어 중복 정의한다.
+// setIcon의 상대 경로는 "확장 루트"가 아니라 "호출한 스크립트의 위치"(여기선 popup/) 기준으로
+// 풀리므로, 반드시 chrome.runtime.getURL로 절대 경로를 만들어 넘겨야 한다(상대 경로로 두면
+// popup/assets/icons/...로 잘못 풀려 "Could not load action icon" 에러가 난다 — 실제 재현됨).
+function clearUnviewedIconDot() {
+  chrome.action.setIcon({
+    path: {
+      16: chrome.runtime.getURL("assets/icons/icon16.png"),
+      32: chrome.runtime.getURL("assets/icons/icon32.png"),
+      48: chrome.runtime.getURL("assets/icons/icon48.png"),
+      128: chrome.runtime.getURL("assets/icons/icon128.png"),
+    },
+  });
+}
+
 // ── Main boot ─────────────────────────────────────────────────────────────────
 
 async function boot() {
@@ -513,6 +590,19 @@ async function boot() {
   realToday.collectingTimer = _computeTimerText(stored.lastWatchedAt);
   VL.today = realToday;
 
+  const isExp = !!VL.GROUPS[stored.group]?.feedback;
+  const needsConfirm = isExp && isRealReview(realToday.review);
+  // "피드백 확인하기" 블러 해제 버튼을 눌러야만 확인된 것으로 친다(단순히 팝업을 연 것만으로는 아님).
+  // 날짜 이동(어제/그제 보기)에 영향받지 않도록 VL.today가 아니라 별도 키에 둔다 — VL.today는
+  // 날짜를 옮길 때마다 통째로 재생성돼서, 여기 두면 어제를 봤다 오늘로 돌아올 때 상태가 오염된다.
+  VL._todayConfirmed = needsConfirm
+    ? await isFeedbackConfirmed(realToday.sessionId)
+    : true;
+  // 미열람 아이콘 표시도 "열기"가 아니라 "확인" 기준으로 지운다 — feedbackConfirmedAt과 의미를 맞춘다.
+  if (needsConfirm && VL._todayConfirmed) {
+    clearUnviewedIconDot();
+  }
+
   if (installDate) {
     VL.weeks = buildWeeksData(sessions, installDate);
     VL.baselineH = VL.weeks[0]?.entropy ?? 0;
@@ -565,6 +655,15 @@ async function boot() {
     },
   });
 
+  // 확인 안 된 리뷰가 있으면 열자마자 그 카드로 부드럽게 스크롤해 놓치지 않게 한다.
+  if (needsConfirm && !VL._todayConfirmed) {
+    requestAnimationFrame(() => {
+      document
+        .getElementById("vl-review-card")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
   // ── 팝업 상호작용 로그 — 온보딩 완료 사용자만 ─────────────────────────
   let popupMetrics = null;
   if (stored.group && stored.anonymousId) {
@@ -573,7 +672,6 @@ async function boot() {
     // 큐 전송은 백그라운드 — 렌더/상호작용을 막지 않음. 실패분은 큐에 남아 다음 open에서 재시도.
     flushPendingPopupEvents(stored.serverUrl);
 
-    const isExp = !!VL.GROUPS[stored.group]?.feedback;
     popupMetrics = {
       anonymousId: stored.anonymousId,
       // 팝업 오픈당 1회 발급 — 재전송돼도 서버가 이 id로 중복을 무시(멱등)
@@ -587,17 +685,26 @@ async function boot() {
     };
     persistLivePopupEvent(popupMetrics);
 
-    // 탭 클릭 계측 — popEl은 re-render(innerHTML 교체) 후에도 유지되므로 위임 리스너로 한 번만 바인딩
+    // 탭 클릭 계측 + 피드백 확인 버튼 — popEl은 re-render(innerHTML 교체) 후에도 유지되므로
+    // 위임 리스너로 한 번만 바인딩
     popEl.addEventListener("click", (e) => {
       const tabBtn = e.target.closest && e.target.closest("[data-tab]");
-      if (!tabBtn) return;
-      if (tabBtn.dataset.tab === "today") {
-        popupMetrics.tabTodayClicks++;
-      } else if (tabBtn.dataset.tab === "feedback") {
-        popupMetrics.tabWeekClicks++;
-        popupMetrics.feedbackViewed = 1; // 주차별 피드백 탭 열람 = 개입 전달
+      if (tabBtn) {
+        if (tabBtn.dataset.tab === "today") {
+          popupMetrics.tabTodayClicks++;
+        } else if (tabBtn.dataset.tab === "feedback") {
+          popupMetrics.tabWeekClicks++;
+          popupMetrics.feedbackViewed = 1; // 주차별 피드백 탭 열람 = 개입 전달
+        }
+        persistLivePopupEvent(popupMetrics);
+        return;
       }
-      persistLivePopupEvent(popupMetrics);
+
+      const confirmBtn =
+        e.target.closest && e.target.closest("#vl-feedback-confirm-btn");
+      if (confirmBtn) {
+        handleFeedbackConfirmClick(popup, confirmBtn.dataset.sessionId);
+      }
     });
 
     // 팝업 종료 감지 — dwellMs 최종 반영(단일 set, teardown에 상대적으로 안전).
@@ -614,7 +721,7 @@ async function boot() {
   let localLastWatchedAt = stored.lastWatchedAt || null;
 
   // sessions가 바뀌면(분석 완료, 리뷰 저장 등) 즉시 today 데이터를 갱신하고 re-render
-  chrome.storage.onChanged.addListener((changes, area) => {
+  chrome.storage.onChanged.addListener(async (changes, area) => {
     if (area !== "local") return;
     if (changes.currentSession)
       localCurrentSession = changes.currentSession.newValue || null;
@@ -626,7 +733,16 @@ async function boot() {
     const freshToday = buildDataForDate(updatedSessions, new Date());
     freshToday.collectingCount = localCurrentSession?.videos?.length ?? 0;
     freshToday.collectingTimer = _computeTimerText(localLastWatchedAt);
+    const freshNeedsConfirm = isExp && isRealReview(freshToday.review);
+    // 새로 완료된 세션은 아직 로컬에 확인 기록이 없을 테니 다시 블러 처리된다(의도된 동작).
+    // 날짜 이동에 오염되지 않도록 VL.today가 아니라 VL._todayConfirmed에 둔다(위 boot()와 동일 이유).
+    VL._todayConfirmed = freshNeedsConfirm
+      ? await isFeedbackConfirmed(freshToday.sessionId)
+      : true;
     VL.today = freshToday;
+    if (freshNeedsConfirm && VL._todayConfirmed) {
+      clearUnviewedIconDot();
+    }
     if (installDate) {
       VL.weeks = buildWeeksData(updatedSessions, installDate);
       VL.baselineH = VL.weeks[0]?.entropy ?? 0;
