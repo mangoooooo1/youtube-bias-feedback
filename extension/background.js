@@ -33,6 +33,51 @@ function isFeedbackNotificationEligible(group, _installDate) {
   return FEEDBACK_ELIGIBLE_GROUPS.has(group);
 }
 
+const BASE_ICON_PATHS = {
+  16: "assets/icons/icon16.png",
+  32: "assets/icons/icon32.png",
+  48: "assets/icons/icon48.png",
+  128: "assets/icons/icon128.png",
+};
+
+// 미열람 표시를 배지 텍스트("•") 대신 아이콘 자체에 그려 넣는다 — 배지 글리프는
+// OS·Chrome 버전마다 렌더링이 달라질 수 있지만, 이렇게 그리면 픽셀이 고정되어 항상 동일하게 보인다.
+async function setUnviewedIconDot() {
+  try {
+    const imageData = {};
+    for (const size of Object.keys(BASE_ICON_PATHS).map(Number)) {
+      imageData[size] = await drawIconWithDot(size);
+    }
+    chrome.action.setIcon({ imageData });
+  } catch (error) {
+    // 아이콘 그리기가 실패해도(예: OffscreenCanvas 미지원) 알림 자체는 이미 떴으므로 무시.
+    console.warn("[background] 미열람 아이콘 표시 실패:", error.message);
+  }
+}
+
+function clearUnviewedIconDot() {
+  chrome.action.setIcon({ path: BASE_ICON_PATHS });
+}
+
+async function drawIconWithDot(size) {
+  const response = await fetch(chrome.runtime.getURL(BASE_ICON_PATHS[size]));
+  const bitmap = await createImageBitmap(await response.blob());
+
+  const canvas = new OffscreenCanvas(size, size);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0, size, size);
+
+  const radius = Math.max(2, Math.round(size * 0.22));
+  const cx = size - radius - 1;
+  const cy = radius + 1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fillStyle = "#E11D2E";
+  ctx.fill();
+
+  return ctx.getImageData(0, 0, size, size);
+}
+
 // service worker가 깨어날 때마다 실행 — 같은 이름의 alarm은 자동으로 교체됨
 chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
 
@@ -59,7 +104,7 @@ chrome.notifications.onClicked.addListener(handleNotificationOpen);
 
 async function handleNotificationOpen(sessionId) {
   chrome.notifications.clear(sessionId);
-  chrome.action.setBadgeText({ text: "" });
+  clearUnviewedIconDot();
   chrome.tabs.create({ url: chrome.runtime.getURL("popup/popup.html") });
   await markFeedbackViewed(sessionId);
 }
@@ -238,9 +283,7 @@ function notifyFeedbackReady(session, onboarding) {
     buttons: [{ title: "피드백 보러 가기" }],
   });
   // 개수 대신 있음/없음만 표시 — 정확한 미열람 개수는 연구 지표가 아니다.
-  // 배경색을 지정하지 않으면 Chrome 기본값(테마별 회색 등)이 쓰여 눈에 잘 안 띄므로 명시한다.
-  chrome.action.setBadgeBackgroundColor({ color: "#E11D2E" });
-  chrome.action.setBadgeText({ text: "•" });
+  setUnviewedIconDot();
   return true;
 }
 
