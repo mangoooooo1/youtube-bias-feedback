@@ -176,14 +176,10 @@ function vlReview({
   //  backdrop-filter 미지원 환경에서도 filter:blur만으로 판독 불가능하도록 이중 처리).
   const revealOverlay = locked
     ? `<div style="position:absolute;inset:0;border-radius:16px;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);background:color-mix(in oklab,var(--vl-accent-soft) 60%,transparent)">
-        <div style="position:relative;display:inline-flex">
-          <span style="position:absolute;inset:-6px;border-radius:999px;border:2px solid var(--vl-accent);opacity:0.5;pointer-events:none;animation:vlPulse 2.2s ease-out infinite"></span>
-          <span style="position:absolute;inset:-6px;border-radius:999px;border:2px solid var(--vl-accent);opacity:0.5;pointer-events:none;animation:vlPulse 2.2s ease-out infinite 0.7s"></span>
-          <button id="vl-feedback-confirm-btn" data-session-id="${sessionId ?? ""}" style="position:relative;display:flex;align-items:center;gap:7px;padding:11px 20px;border:1px solid color-mix(in oklab,var(--vl-accent) 35%,transparent);border-radius:999px;background:var(--vl-card);color:var(--vl-accent);font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 2px 10px color-mix(in oklab,var(--vl-ink) 14%,transparent)">
-            ${markSVG({ size: 15, filled: false, accent: "var(--vl-accent)" })}
-            피드백 확인하기
-          </button>
-        </div>
+        <button id="vl-feedback-confirm-btn" data-session-id="${sessionId ?? ""}" style="display:flex;align-items:center;gap:7px;padding:11px 20px;border:1px solid color-mix(in oklab,var(--vl-accent) 35%,transparent);border-radius:999px;background:var(--vl-card);color:var(--vl-accent);font-size:13px;font-weight:700;cursor:pointer;animation:vlGlow 2.4s ease-in-out infinite">
+          ${markSVG({ size: 15, filled: false, accent: "var(--vl-accent)" })}
+          피드백 확인하기
+        </button>
       </div>`
     : "";
 
