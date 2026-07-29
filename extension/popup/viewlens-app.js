@@ -155,6 +155,8 @@ class ViewLensPopup {
         this._selectedDate.toDateString() === new Date().toDateString();
       d.collectingCount = isToday ? (VL.today?.collectingCount ?? 0) : 0;
       d.collectingTimer = isToday ? _collectingTimerText() : "";
+      // 지난 날짜 조회 시엔 블러 대상이 아니므로 항상 확인된 것으로 취급한다.
+      d.confirmed = isToday ? !!VL.today?.confirmed : true;
       VL.today = d;
     }
 

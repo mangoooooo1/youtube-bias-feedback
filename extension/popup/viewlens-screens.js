@@ -176,6 +176,8 @@ function screenToday() {
     .join("");
 
   const isToday = d.dateLabel === koreanDateLabel(new Date());
+  // 오늘의 실제 리뷰인데 아직 "확인하기"를 안 눌렀으면 블러 처리 — 지난 날짜는 대상 아님.
+  const reviewLocked = isToday && !d.confirmed && isRealReview(d.review);
   const isCollecting = d.collectingCount > 0 || !!d.collectingTimer;
   const collectingRow = isCollecting
     ? `
@@ -234,7 +236,7 @@ function screenToday() {
     `,
     })}
 
-    ${vlReview({ text: d.review, topic: d.reviewTopic, videos: d.videos })}
+    ${vlReview({ text: d.review, topic: d.reviewTopic, videos: d.videos, locked: reviewLocked, sessionId: d.sessionId })}
   </div>
   </div>`;
 }
