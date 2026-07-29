@@ -56,7 +56,16 @@ async function setUnviewedIconDot() {
 }
 
 function clearUnviewedIconDot() {
-  chrome.action.setIcon({ path: BASE_ICON_PATHS });
+  // setIcon의 상대 경로는 "확장 루트"가 아니라 "호출한 스크립트의 위치" 기준으로 풀린다.
+  // background.js는 루트에 있어 상대 경로가 우연히 맞았을 뿐이므로, getURL로 명시적인
+  // 절대 경로를 만들어 어디서 호출되든(팝업 등) 항상 정확하게 만든다.
+  const path = Object.fromEntries(
+    Object.entries(BASE_ICON_PATHS).map(([size, p]) => [
+      size,
+      chrome.runtime.getURL(p),
+    ]),
+  );
+  chrome.action.setIcon({ path });
 }
 
 async function drawIconWithDot(size) {

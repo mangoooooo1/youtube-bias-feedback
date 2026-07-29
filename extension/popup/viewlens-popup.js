@@ -520,13 +520,16 @@ async function flushPendingPopupEvents(serverUrl) {
 
 // 미열람 아이콘 표시 해제 — background.js의 setUnviewedIconDot()과 짝을 이룬다.
 // 배경 스크립트(ESM)와 팝업 스크립트(클래식) 경계 때문에 경로 상수를 공유할 수 없어 중복 정의한다.
+// setIcon의 상대 경로는 "확장 루트"가 아니라 "호출한 스크립트의 위치"(여기선 popup/) 기준으로
+// 풀리므로, 반드시 chrome.runtime.getURL로 절대 경로를 만들어 넘겨야 한다(상대 경로로 두면
+// popup/assets/icons/...로 잘못 풀려 "Could not load action icon" 에러가 난다 — 실제 재현됨).
 function clearUnviewedIconDot() {
   chrome.action.setIcon({
     path: {
-      16: "assets/icons/icon16.png",
-      32: "assets/icons/icon32.png",
-      48: "assets/icons/icon48.png",
-      128: "assets/icons/icon128.png",
+      16: chrome.runtime.getURL("assets/icons/icon16.png"),
+      32: chrome.runtime.getURL("assets/icons/icon32.png"),
+      48: chrome.runtime.getURL("assets/icons/icon48.png"),
+      128: chrome.runtime.getURL("assets/icons/icon128.png"),
     },
   });
 }
