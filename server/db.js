@@ -44,9 +44,11 @@ function initializeDB() {
       failureReason        TEXT,     -- timeout | http_error | empty_response | parse_error | network_error (성공 시 NULL)
       httpStatus           INTEGER,  -- failureReason='http_error'일 때만 (429 쿼터 vs 5xx 장애 구분)
       timedOut             INTEGER,  -- 타임아웃으로 실패한 경우 1
-      -- 피드백 알림·열람 시점 (Story 10-6) — 측정 퍼널: 생성 → 알림(feedbackNotifiedAt) → 열람(feedbackViewedAt)
+      -- 피드백 알림·열람·확인 시점 (Story 10-6) — 측정 퍼널: 생성 → 알림(feedbackNotifiedAt)
+      -- → 클릭(feedbackViewedAt, 알림 클릭 기준) → 확인(feedbackConfirmedAt, 블러 해제 버튼 클릭 기준 — 가장 엄격한 신호)
       feedbackNotifiedAt   TEXT,     -- 분석 완료 알림을 표시한 시각 (미대상/미전달이면 NULL)
       feedbackViewedAt     TEXT,     -- 알림 클릭 등으로 피드백을 실제로 연 시각 (NULL이면 아직 미열람)
+      feedbackConfirmedAt  TEXT,     -- "피드백 확인하기" 버튼으로 블러를 해제한 시각 (NULL이면 아직 미확인)
       createdAt            TEXT    DEFAULT (datetime('now'))
     );
 
@@ -97,6 +99,7 @@ function initializeDB() {
   // 서버 기동 시 "no column named feedbackNotifiedAt" 에러 재현 확인) addColumn 패턴을 도입한다.
   addColumn("sessions", "feedbackNotifiedAt", "TEXT");
   addColumn("sessions", "feedbackViewedAt", "TEXT");
+  addColumn("sessions", "feedbackConfirmedAt", "TEXT");
 }
 
 // 이미 컬럼이 있으면(신규 DB) 조용히 넘어가고, 없으면(기존 DB) 추가한다.
