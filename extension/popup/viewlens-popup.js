@@ -513,6 +513,13 @@ async function boot() {
   realToday.collectingTimer = _computeTimerText(stored.lastWatchedAt);
   VL.today = realToday;
 
+  // EXP가 실제 리뷰를 보고 있으면(알림 클릭 여부와 무관) 미열람 배지를 지운다.
+  // sessions.feedbackViewedAt(알림 클릭 기준)과 별개로, 배지는 UX용이라 더 느슨한 기준을 쓴다.
+  const isExp = !!VL.GROUPS[stored.group]?.feedback;
+  if (isExp && isRealReview(realToday.review)) {
+    chrome.action.setBadgeText({ text: "" });
+  }
+
   if (installDate) {
     VL.weeks = buildWeeksData(sessions, installDate);
     VL.baselineH = VL.weeks[0]?.entropy ?? 0;
@@ -573,7 +580,6 @@ async function boot() {
     // 큐 전송은 백그라운드 — 렌더/상호작용을 막지 않음. 실패분은 큐에 남아 다음 open에서 재시도.
     flushPendingPopupEvents(stored.serverUrl);
 
-    const isExp = !!VL.GROUPS[stored.group]?.feedback;
     popupMetrics = {
       anonymousId: stored.anonymousId,
       // 팝업 오픈당 1회 발급 — 재전송돼도 서버가 이 id로 중복을 무시(멱등)
@@ -627,6 +633,9 @@ async function boot() {
     freshToday.collectingCount = localCurrentSession?.videos?.length ?? 0;
     freshToday.collectingTimer = _computeTimerText(localLastWatchedAt);
     VL.today = freshToday;
+    if (isExp && isRealReview(freshToday.review)) {
+      chrome.action.setBadgeText({ text: "" });
+    }
     if (installDate) {
       VL.weeks = buildWeeksData(updatedSessions, installDate);
       VL.baselineH = VL.weeks[0]?.entropy ?? 0;
