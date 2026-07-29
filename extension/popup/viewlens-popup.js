@@ -445,9 +445,7 @@ async function postFeedbackConfirmed(sessionId) {
 async function handleFeedbackConfirmClick(popup, sessionId) {
   if (!sessionId) return;
   await markFeedbackConfirmedLocally(sessionId);
-  if (VL.today?.sessionId === sessionId) {
-    VL.today = { ...VL.today, confirmed: true };
-  }
+  VL._todayConfirmed = true;
   clearUnviewedIconDot();
   popup.render();
   // render()가 innerHTML을 통째로 교체하면서 스크롤이 맨 위로 리셋되므로 즉시 복원한다.
@@ -592,11 +590,13 @@ async function boot() {
   const isExp = !!VL.GROUPS[stored.group]?.feedback;
   const needsConfirm = isExp && isRealReview(realToday.review);
   // "피드백 확인하기" 블러 해제 버튼을 눌러야만 확인된 것으로 친다(단순히 팝업을 연 것만으로는 아님).
-  realToday.confirmed = needsConfirm
+  // 날짜 이동(어제/그제 보기)에 영향받지 않도록 VL.today가 아니라 별도 키에 둔다 — VL.today는
+  // 날짜를 옮길 때마다 통째로 재생성돼서, 여기 두면 어제를 봤다 오늘로 돌아올 때 상태가 오염된다.
+  VL._todayConfirmed = needsConfirm
     ? await isFeedbackConfirmed(realToday.sessionId)
     : true;
   // 미열람 아이콘 표시도 "열기"가 아니라 "확인" 기준으로 지운다 — feedbackConfirmedAt과 의미를 맞춘다.
-  if (needsConfirm && realToday.confirmed) {
+  if (needsConfirm && VL._todayConfirmed) {
     clearUnviewedIconDot();
   }
 
@@ -653,7 +653,7 @@ async function boot() {
   });
 
   // 확인 안 된 리뷰가 있으면 열자마자 그 카드로 부드럽게 스크롤해 놓치지 않게 한다.
-  if (needsConfirm && !realToday.confirmed) {
+  if (needsConfirm && !VL._todayConfirmed) {
     requestAnimationFrame(() => {
       document
         .getElementById("vl-review-card")
@@ -732,11 +732,12 @@ async function boot() {
     freshToday.collectingTimer = _computeTimerText(localLastWatchedAt);
     const freshNeedsConfirm = isExp && isRealReview(freshToday.review);
     // 새로 완료된 세션은 아직 로컬에 확인 기록이 없을 테니 다시 블러 처리된다(의도된 동작).
-    freshToday.confirmed = freshNeedsConfirm
+    // 날짜 이동에 오염되지 않도록 VL.today가 아니라 VL._todayConfirmed에 둔다(위 boot()와 동일 이유).
+    VL._todayConfirmed = freshNeedsConfirm
       ? await isFeedbackConfirmed(freshToday.sessionId)
       : true;
     VL.today = freshToday;
-    if (freshNeedsConfirm && freshToday.confirmed) {
+    if (freshNeedsConfirm && VL._todayConfirmed) {
       clearUnviewedIconDot();
     }
     if (installDate) {
