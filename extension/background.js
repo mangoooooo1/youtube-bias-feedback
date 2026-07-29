@@ -22,6 +22,17 @@ import { SERVER_URL } from "./config.js";
 const ALARM_NAME = "SESSION_TIMEOUT_CHECK";
 const TIMEOUT_MS = 10 * 60 * 1000;
 
+// 분석 완료 알림 대상 판정 (). 현재는 EXP 여부만 본다 — 10-8(2주 베이스라인 게이트)이
+// 끝나면 이 함수 안에 installDate 기준 베이스라인 종료 조건만 추가하면 되고, 알림·배지·
+// 서버 코드는 건드릴 필요가 없도록 판정 로직을 이 한 곳에 모아둔다.
+// extension/popup/viewlens-data.js의 GROUPS 중 feedback:true인 그룹(EXP/TEST-EXP)과
+// 반드시 동일하게 유지해야 한다 — background.js는 popup 쪽 데이터 파일을 import할 수 없어(모듈 경계) 중복 정의한다.
+const FEEDBACK_ELIGIBLE_GROUPS = new Set(["EXP", "TEST-EXP"]);
+
+function isFeedbackNotificationEligible(group, _installDate) {
+  return FEEDBACK_ELIGIBLE_GROUPS.has(group);
+}
+
 // service worker가 깨어날 때마다 실행 — 같은 이름의 alarm은 자동으로 교체됨
 chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
 
@@ -150,12 +161,20 @@ async function analyzeSession(session) {
   });
   console.log("[background] 리뷰 저장 완료:", result);
 
+  // 알림·전송 모두 온보딩 정보(그룹·anonymousId)가 필요해 한 번만 조회해 공유한다.
+  const onboarding = await getOnboarding();
+
+  const feedbackNotifiedAt = notifyFeedbackReady(session, onboarding)
+    ? new Date().toISOString()
+    : null;
+
   const totalMs = Date.now() - t0;
   await postSessionToServer(
     session,
     categoryDistribution,
     entropy,
     videoCount,
+    onboarding,
     {
       totalMs,
       youtubeMs,
@@ -164,8 +183,27 @@ async function analyzeSession(session) {
       failureReason,
       httpStatus,
       timedOut,
+      feedbackNotifiedAt,
     },
   );
+}
+
+// 분석 완료 알림 + 배지 표시 (). 대상이면 true를 반환해 호출부가 feedbackNotifiedAt을 기록하게 한다.
+// notificationId로 session.sessionId를 그대로 사용 — 버튼 클릭 시 별도 매핑 없이 세션을 역추적한다.
+function notifyFeedbackReady(session, onboarding) {
+  if (!isFeedbackNotificationEligible(onboarding?.group, onboarding?.installDate)) {
+    return false;
+  }
+  chrome.notifications.create(session.sessionId, {
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("assets/icons/icon128.png"),
+    title: "ViewLens",
+    message: "이번 세션 분석이 준비됐어요.",
+    buttons: [{ title: "피드백 보러 가기" }],
+  });
+  // 개수 대신 있음/없음만 표시 — 정확한 미열람 개수는 연구 지표가 아니다.
+  chrome.action.setBadgeText({ text: "•" });
+  return true;
 }
 
 async function postSessionToServer(
@@ -173,6 +211,7 @@ async function postSessionToServer(
   categoryDistribution,
   entropy,
   videoCount,
+  onboarding,
   metrics = {},
 ) {
   if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) {
@@ -182,7 +221,6 @@ async function postSessionToServer(
     return;
   }
 
-  const onboarding = await getOnboarding();
   if (!onboarding?.anonymousId) {
     console.warn("[background] anonymousId 없음, 서버 전송 건너뜀");
     return;
@@ -212,6 +250,7 @@ async function postSessionToServer(
         failureReason: metrics.failureReason,
         httpStatus: metrics.httpStatus,
         timedOut: metrics.timedOut,
+        feedbackNotifiedAt: metrics.feedbackNotifiedAt,
       }),
     });
 
