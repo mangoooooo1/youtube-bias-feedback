@@ -89,12 +89,23 @@ function initializeDB() {
   `);
 
   // 스키마의 단일 진실 원천(single source of truth)은 위 CREATE TABLE 하나다.
-  // 런칭 전이라 세상에 마이그레이션할 '옛 스키마 DB'가 없으므로, ALTER 기반
-  // 점진 마이그레이션은 두지 않는다(넣어봤자 새 DB에선 전부 no-op인 죽은 코드).
-  // 운영 중 스키마를 바꿔야 하는 첫 순간이 오면, 그때 duplicate column name만
-  // 무시하고 나머지는 재던지는 addColumn 패턴을 도입한다.
   // (eventId의 UNIQUE도 위 CREATE TABLE에 인라인으로 선언 — 별도 인덱스로 분리하던
   //  이유였던 'ALTER는 UNIQUE 컬럼을 못 만든다' 제약이 ALTER를 걷어내며 사라졌다.)
+  //
+  // 다만 이미 만들어진 DB 파일(로컬 개발용·이미 배포된 서버)에는 CREATE TABLE IF NOT EXISTS가
+  // no-op이라 새 컬럼이 반영되지 않는다 — Story 10-6에서 처음 이 문제가 실제로 발생해(로컬
+  // 서버 기동 시 "no column named feedbackNotifiedAt" 에러 재현 확인) addColumn 패턴을 도입한다.
+  addColumn("sessions", "feedbackNotifiedAt", "TEXT");
+  addColumn("sessions", "feedbackViewedAt", "TEXT");
+}
+
+// 이미 컬럼이 있으면(신규 DB) 조용히 넘어가고, 없으면(기존 DB) 추가한다.
+function addColumn(table, name, type) {
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+  } catch (err) {
+    if (!/duplicate column name/i.test(err.message)) throw err;
+  }
 }
 
 module.exports = { db, initializeDB };
