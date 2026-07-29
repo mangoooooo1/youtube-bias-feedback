@@ -5,8 +5,8 @@ const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const router = express.Router();
 
 const insertSession = db.prepare(`
-  INSERT INTO sessions (anonymousId, sessionId, startTime, endTime, videoCount, categoryDistribution, entropy, totalMs, youtubeMs, geminiMs, llmStatus, failureReason, httpStatus, timedOut)
-  VALUES (@anonymousId, @sessionId, @startTime, @endTime, @videoCount, @categoryDistribution, @entropy, @totalMs, @youtubeMs, @geminiMs, @llmStatus, @failureReason, @httpStatus, @timedOut)
+  INSERT INTO sessions (anonymousId, sessionId, startTime, endTime, videoCount, categoryDistribution, entropy, totalMs, youtubeMs, geminiMs, llmStatus, failureReason, httpStatus, timedOut, feedbackNotifiedAt)
+  VALUES (@anonymousId, @sessionId, @startTime, @endTime, @videoCount, @categoryDistribution, @entropy, @totalMs, @youtubeMs, @geminiMs, @llmStatus, @failureReason, @httpStatus, @timedOut, @feedbackNotifiedAt)
 `);
 
 //  지연시간 필드 — 확장이 측정해 전송. 선택 항목이며, 있으면 음수 아닌 정수여야 한다.
@@ -95,6 +95,16 @@ function validateSession(body) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "timedOut" };
   }
 
+  // 피드백 알림 시각 () — 분석 완료 알림을 표시한 경우에만 확장이 함께 전송
+  const { feedbackNotifiedAt } = body;
+  if (
+    feedbackNotifiedAt !== undefined &&
+    feedbackNotifiedAt !== null &&
+    isNaN(Date.parse(feedbackNotifiedAt))
+  ) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "feedbackNotifiedAt" };
+  }
+
   return null;
 }
 
@@ -125,6 +135,7 @@ router.post("/", (req, res, next) => {
     failureReason,
     httpStatus,
     timedOut,
+    feedbackNotifiedAt,
   } = req.body;
 
   try {
@@ -146,6 +157,7 @@ router.post("/", (req, res, next) => {
       failureReason: failureReason ?? null,
       httpStatus: httpStatus ?? null,
       timedOut: timedOut ?? null,
+      feedbackNotifiedAt: feedbackNotifiedAt ?? null,
     });
   } catch (err) {
     if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
@@ -157,6 +169,50 @@ router.post("/", (req, res, next) => {
         sessionId,
       );
     }
+    return next(err);
+  }
+
+  return success(res);
+});
+
+// 피드백 열람 시각 갱신 () — 알림 클릭 등으로 실제 열람이 확인된 시점에
+// background.js가 아닌 popup.js가 나중에(세션 생성 POST와 별도 시점에) 호출한다.
+// anonymousId로 소유권을 확인해 다른 참여자의 세션을 갱신하지 못하도록 막는다.
+const updateFeedbackViewedAt = db.prepare(`
+  UPDATE sessions SET feedbackViewedAt = @feedbackViewedAt
+  WHERE sessionId = @sessionId AND anonymousId = @anonymousId
+`);
+
+router.patch("/:sessionId/feedback-viewed", (req, res, next) => {
+  const { sessionId } = req.params;
+  const { anonymousId } = req.body;
+
+  if (typeof anonymousId !== "string" || !anonymousId.trim()) {
+    return fail(
+      res,
+      400,
+      ERROR_CODES.MISSING_REQUIRED_FIELD,
+      "anonymousId 필드가 올바르지 않습니다.",
+      "anonymousId",
+    );
+  }
+
+  try {
+    const result = updateFeedbackViewedAt.run({
+      sessionId,
+      anonymousId,
+      feedbackViewedAt: new Date().toISOString(),
+    });
+    if (result.changes === 0) {
+      return fail(
+        res,
+        404,
+        ERROR_CODES.NOT_FOUND,
+        "세션을 찾을 수 없습니다.",
+        sessionId,
+      );
+    }
+  } catch (err) {
     return next(err);
   }
 
