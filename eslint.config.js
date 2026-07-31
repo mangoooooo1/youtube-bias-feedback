@@ -66,6 +66,17 @@ module.exports = [
     },
   },
   {
+    // 테스트 코드 — Vitest 실행 환경은 Node이므로 global 등 Node 전역이 필요하다.
+    // describe/it/expect/vi는 매번 "vitest"에서 명시적으로 import하는 컨벤션이라
+    // 별도 테스트 전역(globals.vitest)은 등록하지 않는다.
+    files: ["extension/test/**/*.js", "server/test/**/*.js"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: globals.node,
+    },
+  },
+  {
     rules: {
       "no-console": "off",
       "no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
