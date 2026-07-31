@@ -1,4 +1,3 @@
-const EXPERIMENT_DAYS = 21;
 
 window.buildDataForDate = buildDataForDate;
 window.koreanDateLabel = koreanDateLabel;
@@ -371,7 +370,7 @@ async function validateParticipantCode(code) {
     const data = json.data ?? json;
     if (data.valid === false) return { ok: false };
     return { ok: true, group: data.group_code || null };
-  } catch (error) {
+  } catch {
     return { ok: true }; // 네트워크 오류 → 폴백 통과
   }
 }
@@ -484,7 +483,7 @@ async function postPopupEvent(serverUrl, event) {
       },
     );
     return res.ok;
-  } catch (error) {
+  } catch {
     return false;
   }
 }
