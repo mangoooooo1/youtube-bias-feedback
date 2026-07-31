@@ -8,9 +8,8 @@
     "server:dev": "pnpm --filter server dev",
     "lint": "eslint . extension/**/*.js server/**/*.js",
     "format": "prettier --write . extension/**/*.js server/**/*.js",
-    "pretest": "node -e \"const fs=require('fs');if(!fs.existsSync('extension/config.js'))fs.copyFileSync('extension/config.example.js','extension/config.js')\"",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "node scripts/ensure-config.js && vitest run",
+    "test:watch": "node scripts/ensure-config.js && vitest"
   },
   "keywords": [],
   "author": "",

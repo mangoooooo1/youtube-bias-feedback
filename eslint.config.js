@@ -57,8 +57,8 @@ module.exports = [
     },
   },
   {
-    // server/**, 루트 설정 파일 — Node CommonJS
-    files: ["server/**/*.js", "*.js"],
+    // server/**, 루트 설정 파일, 루트 scripts/** — Node CommonJS
+    files: ["server/**/*.js", "scripts/**/*.js", "*.js"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "commonjs",
