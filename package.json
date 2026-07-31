@@ -8,7 +8,9 @@
     "server:dev": "pnpm --filter server dev",
     "lint": "eslint . extension/**/*.js server/**/*.js",
     "format": "prettier --write . extension/**/*.js server/**/*.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "pretest": "node -e \"const fs=require('fs');if(!fs.existsSync('extension/config.js'))fs.copyFileSync('extension/config.example.js','extension/config.js')\"",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [],
   "author": "",
@@ -19,6 +21,7 @@
     "eslint": "^10.2.1",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^15.14.0",
-    "prettier": "^3.8.3"
+    "prettier": "^3.8.3",
+    "vitest": "^4.1.10"
   }
 }
