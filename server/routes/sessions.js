@@ -23,8 +23,7 @@ const FAILURE_REASONS = [
 ];
 
 function validateSession(body) {
-  const { anonymousId, sessionId, startTime, endTime, videoCount, entropy } =
-    body;
+  const { startTime, endTime, videoCount, entropy } = body;
 
   const requiredFields = ["anonymousId", "sessionId", "startTime", "endTime"];
   for (const field of requiredFields) {
