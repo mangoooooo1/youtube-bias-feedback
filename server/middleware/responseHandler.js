@@ -26,7 +26,9 @@ function fail(
   });
 }
 
-function errorHandler(err, req, res, next) {
+// next는 사용하지 않지만 Express가 4개 인자 함수를 error-handling 미들웨어로
+// 인식하는 기준(arity)이라 시그니처에서 제거할 수 없다.
+function errorHandler(err, req, res, _next) {
   console.error(`[Error] ${req.method} ${req.path} : ${err.message}`);
 
   const status = err.status || 500;
