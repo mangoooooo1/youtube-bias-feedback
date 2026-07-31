@@ -67,7 +67,7 @@ class TweaksPanel {
     thumb.className = "twk-seg-thumb";
     seg.appendChild(thumb);
 
-    opts.forEach((o, i) => {
+    opts.forEach((o) => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = o.label;
