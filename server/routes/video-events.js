@@ -15,12 +15,24 @@ router.post("/", (req, res, next) => {
   for (const field of ["anonymousId", "videoId", "watchedAt"]) {
     const value = req.body[field];
     if (typeof value !== "string" || !value.trim()) {
-      return fail(res, 400, ERROR_CODES.MISSING_REQUIRED_FIELD, `${field} 필드가 올바르지 않습니다.`, field);
+      return fail(
+        res,
+        400,
+        ERROR_CODES.MISSING_REQUIRED_FIELD,
+        `${field} 필드가 올바르지 않습니다.`,
+        field,
+      );
     }
   }
 
   if (isNaN(Date.parse(watchedAt))) {
-    return fail(res, 400, ERROR_CODES.INVALID_FIELD_VALUE, "watchedAt 필드가 올바르지 않습니다.", "watchedAt");
+    return fail(
+      res,
+      400,
+      ERROR_CODES.INVALID_FIELD_VALUE,
+      "watchedAt 필드가 올바르지 않습니다.",
+      "watchedAt",
+    );
   }
 
   try {

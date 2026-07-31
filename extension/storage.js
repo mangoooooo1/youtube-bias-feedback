@@ -7,7 +7,7 @@ export function addVideo(videoId, title) {
 
 async function _addVideo(videoId, title) {
   const now = new Date().toISOString();
-  const { currentSession } = await chrome.storage.local.get('currentSession');
+  const { currentSession } = await chrome.storage.local.get("currentSession");
 
   const session = currentSession ?? {
     sessionId: String(Date.now()),
@@ -27,21 +27,25 @@ async function _addVideo(videoId, title) {
 }
 
 export async function getCurrentSession() {
-  const { currentSession } = await chrome.storage.local.get('currentSession');
+  const { currentSession } = await chrome.storage.local.get("currentSession");
   return currentSession ?? null;
 }
 
 export async function getAllSessions() {
-  const { sessions } = await chrome.storage.local.get('sessions');
+  const { sessions } = await chrome.storage.local.get("sessions");
   return sessions ?? [];
 }
 
 export async function getRecentSessions(days = 7) {
   const sessions = await getAllSessions();
   const now = new Date();
-  const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - (days - 1)).getTime();
+  const cutoff = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() - (days - 1),
+  ).getTime();
   return sessions.filter(
-    (s) => s.endTime && new Date(s.endTime).getTime() >= cutoff
+    (s) => s.endTime && new Date(s.endTime).getTime() >= cutoff,
   );
 }
 
@@ -56,8 +60,8 @@ export function endSession() {
 
 async function _endSession() {
   const { currentSession, sessions } = await chrome.storage.local.get([
-    'currentSession',
-    'sessions',
+    "currentSession",
+    "sessions",
   ]);
 
   if (!currentSession || currentSession.videos.length === 0) return;
@@ -76,21 +80,22 @@ async function _endSession() {
 }
 
 export async function getLastWatchedAt() {
-  const { lastWatchedAt } = await chrome.storage.local.get('lastWatchedAt');
+  const { lastWatchedAt } = await chrome.storage.local.get("lastWatchedAt");
   return lastWatchedAt ?? null;
 }
 
 // --- 온보딩 ---
 
-export const VALID_GROUPS = ['EXP', 'CON', 'TEST-EXP', 'TEST-CON'];
+export const VALID_GROUPS = ["EXP", "CON", "TEST-EXP", "TEST-CON"];
 
 export async function getOnboarding() {
-  const { anonymousId, group, installDate, surveyStatus } = await chrome.storage.local.get([
-    'anonymousId',
-    'group',
-    'installDate',
-    'surveyStatus',
-  ]);
+  const { anonymousId, group, installDate, surveyStatus } =
+    await chrome.storage.local.get([
+      "anonymousId",
+      "group",
+      "installDate",
+      "surveyStatus",
+    ]);
   if (!group) return null;
   return {
     anonymousId,
@@ -115,8 +120,11 @@ export function markSurveyComplete(week) {
 }
 
 async function _markSurveyComplete(week) {
-  const { surveyStatus } = await chrome.storage.local.get('surveyStatus');
-  const updated = { ...(surveyStatus ?? { week1: false, week2: false, week3: false }), [week]: true };
+  const { surveyStatus } = await chrome.storage.local.get("surveyStatus");
+  const updated = {
+    ...(surveyStatus ?? { week1: false, week2: false, week3: false }),
+    [week]: true,
+  };
   await chrome.storage.local.set({ surveyStatus: updated });
 }
 
@@ -126,13 +134,13 @@ export function saveAnalysis(sessionId, analysisResult) {
 }
 
 async function _saveAnalysis(sessionId, analysisResult) {
-  const { sessions } = await chrome.storage.local.get('sessions');
+  const { sessions } = await chrome.storage.local.get("sessions");
   if (!sessions) return;
 
   const updatedSessions = sessions.map((session) =>
     session.sessionId === sessionId
       ? { ...session, ...analysisResult }
-      : session
+      : session,
   );
 
   await chrome.storage.local.set({ sessions: updatedSessions });

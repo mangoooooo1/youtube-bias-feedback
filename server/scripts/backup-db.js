@@ -36,7 +36,8 @@ const Database = require("better-sqlite3-multiple-ciphers");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const DB_PATH = path.join(__dirname, "..", "youtube_bias.db");
-const BACKUP_DIR = process.env.BACKUP_DIR || path.join(os.homedir(), "db-backups");
+const BACKUP_DIR =
+  process.env.BACKUP_DIR || path.join(os.homedir(), "db-backups");
 const RETENTION_DAYS = Number(process.env.RETENTION_DAYS || 30);
 const DB_ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY;
 
@@ -89,7 +90,10 @@ async function main() {
       console.warn(`[backup] 로테이션 건너뜀 (${name}):`, err.message);
     }
   }
-  if (removed) console.log(`[backup] 로테이션: 오래된 백업 ${removed}개 삭제 (>${RETENTION_DAYS}일)`);
+  if (removed)
+    console.log(
+      `[backup] 로테이션: 오래된 백업 ${removed}개 삭제 (>${RETENTION_DAYS}일)`,
+    );
 
   offsitePush(dest);
 }
@@ -101,18 +105,23 @@ function offsitePush(dest) {
   if (!host) return; // 미설정 → 오프사이트 비활성화
 
   const user = process.env.E1_BACKUP_USER || "ubuntu";
-  const key = process.env.E1_BACKUP_KEY || path.join(os.homedir(), ".ssh", "e1_backup");
+  const key =
+    process.env.E1_BACKUP_KEY || path.join(os.homedir(), ".ssh", "e1_backup");
   const remoteDir = process.env.E1_BACKUP_DIR || "db-backups";
   const remoteRetention = Number(process.env.E1_RETENTION_DAYS || 14);
 
   // remoteDir/remoteRetention은 원격 쉘 명령(mkdir/find)에 삽입되므로 검증한다.
   // 쉘 메타문자·공백 유입 시 원격에서 의도치 않은 실행/구문 오류 방지. (실패해도 로컬 백업은 유효)
   if (!/^[a-zA-Z0-9_/-]+$/.test(remoteDir)) {
-    console.warn("[backup] 오프사이트 건너뜀: E1_BACKUP_DIR에 허용되지 않는 문자가 있습니다.");
+    console.warn(
+      "[backup] 오프사이트 건너뜀: E1_BACKUP_DIR에 허용되지 않는 문자가 있습니다.",
+    );
     return;
   }
   if (!Number.isInteger(remoteRetention) || remoteRetention < 0) {
-    console.warn("[backup] 오프사이트 건너뜀: E1_RETENTION_DAYS가 0 이상의 정수가 아닙니다.");
+    console.warn(
+      "[backup] 오프사이트 건너뜀: E1_RETENTION_DAYS가 0 이상의 정수가 아닙니다.",
+    );
     return;
   }
 
@@ -124,15 +133,29 @@ function offsitePush(dest) {
   const execOpts = { stdio: "pipe", timeout: 30000 };
 
   try {
-    execFileSync("ssh", [...sshOpts, target, `mkdir -p ${remoteDir}`], execOpts);
-    execFileSync("scp", [...sshOpts, dest, `${target}:${remoteDir}/`], execOpts);
+    execFileSync(
+      "ssh",
+      [...sshOpts, target, `mkdir -p ${remoteDir}`],
+      execOpts,
+    );
+    execFileSync(
+      "scp",
+      [...sshOpts, dest, `${target}:${remoteDir}/`],
+      execOpts,
+    );
     // 원격 로테이션 — remoteRetention일 지난 백업 삭제
     execFileSync(
       "ssh",
-      [...sshOpts, target, `find ${remoteDir} -maxdepth 1 -name 'youtube_bias-*.db' -mtime +${remoteRetention} -delete`],
+      [
+        ...sshOpts,
+        target,
+        `find ${remoteDir} -maxdepth 1 -name 'youtube_bias-*.db' -mtime +${remoteRetention} -delete`,
+      ],
       execOpts,
     );
-    console.log(`[backup] 오프사이트 전송 완료: ${target}:${remoteDir}/ (보관 ${remoteRetention}일)`);
+    console.log(
+      `[backup] 오프사이트 전송 완료: ${target}:${remoteDir}/ (보관 ${remoteRetention}일)`,
+    );
   } catch (err) {
     // err.message에는 SSH 실패 원인이 안 담기는 경우가 많아, stderr가 있으면 함께 남긴다.
     const detail = err.stderr ? err.stderr.toString().trim() : err.message;

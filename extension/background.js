@@ -281,7 +281,9 @@ async function analyzeSession(session) {
 // 분석 완료 알림 + 배지 표시 (). 대상이면 true를 반환해 호출부가 feedbackNotifiedAt을 기록하게 한다.
 // notificationId로 session.sessionId를 그대로 사용 — 버튼 클릭 시 별도 매핑 없이 세션을 역추적한다.
 function notifyFeedbackReady(session, onboarding) {
-  if (!isFeedbackNotificationEligible(onboarding?.group, onboarding?.installDate)) {
+  if (
+    !isFeedbackNotificationEligible(onboarding?.group, onboarding?.installDate)
+  ) {
     return false;
   }
   chrome.notifications.create(session.sessionId, {
