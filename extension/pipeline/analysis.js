@@ -1,4 +1,4 @@
-import { getCategoryName } from './categories.js';
+import { getCategoryName } from "./categories.js";
 
 export function calculateDistribution(categoryIds) {
   const validIds = categoryIds.filter((id) => id !== null && id !== undefined);
@@ -33,12 +33,15 @@ export function calculateEntropy(distribution) {
 
 export function aggregateDailyData(sessions) {
   const analyzed = sessions.filter(
-    (s) => s.endTime && s.categoryDistribution && Object.keys(s.categoryDistribution).length > 0
+    (s) =>
+      s.endTime &&
+      s.categoryDistribution &&
+      Object.keys(s.categoryDistribution).length > 0,
   );
 
   const byDate = {};
   for (const session of analyzed) {
-    const date = new Date(session.endTime).toLocaleDateString('sv'); // 로컬 시간대 기준 YYYY-MM-DD
+    const date = new Date(session.endTime).toLocaleDateString("sv"); // 로컬 시간대 기준 YYYY-MM-DD
     if (!byDate[date]) byDate[date] = [];
     byDate[date].push(session);
   }
@@ -49,7 +52,7 @@ export function aggregateDailyData(sessions) {
   for (let i = 6; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
-    dates.push(d.toLocaleDateString('sv'));
+    dates.push(d.toLocaleDateString("sv"));
   }
 
   const distributions = [];
@@ -63,7 +66,10 @@ export function aggregateDailyData(sessions) {
       continue;
     }
 
-    const totalVideos = daySessions.reduce((sum, s) => sum + (s.videoCount ?? 1), 0);
+    const totalVideos = daySessions.reduce(
+      (sum, s) => sum + (s.videoCount ?? 1),
+      0,
+    );
     const merged = {};
     for (const session of daySessions) {
       const weight = (session.videoCount ?? 1) / totalVideos;

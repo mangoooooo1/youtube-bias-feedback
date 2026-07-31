@@ -20,7 +20,11 @@ module.exports = [
   {
     // extension/background.js, extension/storage.js, extension/pipeline/**
     // manifest.json이 background를 "type": "module"로 선언 — import/export 사용
-    files: ["extension/background.js", "extension/storage.js", "extension/pipeline/**/*.js"],
+    files: [
+      "extension/background.js",
+      "extension/storage.js",
+      "extension/pipeline/**/*.js",
+    ],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",

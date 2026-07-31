@@ -62,11 +62,12 @@ function recordVideo(videoId, title) {
 
     try {
       const now = new Date().toISOString();
-      const { currentSession, anonymousId, serverUrl } = await chrome.storage.local.get([
-        "currentSession",
-        "anonymousId",
-        "serverUrl",
-      ]);
+      const { currentSession, anonymousId, serverUrl } =
+        await chrome.storage.local.get([
+          "currentSession",
+          "anonymousId",
+          "serverUrl",
+        ]);
 
       const session = currentSession ?? {
         sessionId: String(Date.now()),
@@ -88,7 +89,12 @@ function recordVideo(videoId, title) {
         fetch(`${serverUrl.replace(/\/$/, "")}/api/video-events`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ anonymousId, videoId, title: title ?? null, watchedAt: now }),
+          body: JSON.stringify({
+            anonymousId,
+            videoId,
+            title: title ?? null,
+            watchedAt: now,
+          }),
         }).catch(() => {});
       }
     } catch (error) {

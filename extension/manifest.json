@@ -19,7 +19,11 @@
       "128": "assets/icons/icon128.png"
     }
   },
-  "host_permissions": ["*://*.youtube.com/*", "*://generativelanguage.googleapis.com/*", "https://viewlens.site/*"],
+  "host_permissions": [
+    "*://*.youtube.com/*",
+    "*://generativelanguage.googleapis.com/*",
+    "https://viewlens.site/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"

@@ -101,7 +101,10 @@ function validateSession(body) {
     feedbackNotifiedAt !== null &&
     isNaN(Date.parse(feedbackNotifiedAt))
   ) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "feedbackNotifiedAt" };
+    return {
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "feedbackNotifiedAt",
+    };
   }
 
   return null;
@@ -220,8 +223,14 @@ function makeFeedbackTimestampHandler(column) {
 }
 
 // 알림 클릭 기준 — background.js가 호출 (느슨한 신호)
-router.patch("/:sessionId/feedback-viewed", makeFeedbackTimestampHandler("feedbackViewedAt"));
+router.patch(
+  "/:sessionId/feedback-viewed",
+  makeFeedbackTimestampHandler("feedbackViewedAt"),
+);
 // "피드백 확인하기" 블러 해제 버튼 클릭 기준 — popup.js가 호출 (가장 엄격한 신호)
-router.patch("/:sessionId/feedback-confirmed", makeFeedbackTimestampHandler("feedbackConfirmedAt"));
+router.patch(
+  "/:sessionId/feedback-confirmed",
+  makeFeedbackTimestampHandler("feedbackConfirmedAt"),
+);
 
 module.exports = router;

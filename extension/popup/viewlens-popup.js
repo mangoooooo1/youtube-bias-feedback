@@ -1,4 +1,3 @@
-
 window.buildDataForDate = buildDataForDate;
 window.koreanDateLabel = koreanDateLabel;
 const DEFAULT_TONE = "indigo";
@@ -449,7 +448,9 @@ async function handleFeedbackConfirmClick(popup, sessionId) {
   popup.render();
   // render()가 innerHTML을 통째로 교체하면서 스크롤이 맨 위로 리셋되므로 즉시 복원한다.
   requestAnimationFrame(() => {
-    document.getElementById("vl-review-card")?.scrollIntoView({ block: "start" });
+    document
+      .getElementById("vl-review-card")
+      ?.scrollIntoView({ block: "start" });
   });
   postFeedbackConfirmed(sessionId);
 }
