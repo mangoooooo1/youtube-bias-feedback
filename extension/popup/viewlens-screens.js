@@ -256,7 +256,9 @@ function screenFeedback(currentWeek, selWeek) {
   const vsBase = w.entropy - VL.baselineH;
   const prevW = selWeek >= 2 ? VL.weeks[selWeek - 2] : null;
   const vsPrev = prevW ? w.entropy - prevW.entropy : 0;
-  const showPrev = selWeek >= 3; // 직전 주가 첫 주와 다를 때만 별도 표시
+  // 직전 주가 베이스라인 기간(1·2주차)과 다를 때만 별도 표시 — 개입 첫 주(3주차)의
+  // "직전 주"는 베이스라인 2주차라 "베이스라인 대비"와 중복이라 4주차부터 보여준다.
+  const showPrev = selWeek >= 4;
 
   const weekBtns = VL.weeks
     .map((wk) => {
@@ -273,16 +275,16 @@ function screenFeedback(currentWeek, selWeek) {
         ${locked ? _lockIcon(10) : ""}${wk.label}
       </span>
       <span style="font-size:9.5px;font-weight:500;color:inherit;opacity:0.8;">
-        ${locked ? `${wk.week}주차 공개` : wk.isBaseline ? "첫 주" : ""}
+        ${locked ? `${wk.week}주차 공개` : wk.isBaseline ? "베이스라인" : ""}
       </span>
     </button>`;
     })
     .join("");
 
   const vsBaseContent = w.isBaseline
-    ? `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">첫 주라 아직 비교할 이전 주가 없어요.</p>`
+    ? `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">베이스라인 기간이라 아직 비교할 데이터가 없어요.</p>`
     : `<div>
-        <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">첫 주 대비</div>
+        <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">베이스라인 대비</div>
         <div style="display:flex;align-items:center;gap:7px">
           ${vlDeltaChip({ value: vsBase })}
           <span style="font-size:12px;color:var(--vl-ink-2)">${vsBase >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
@@ -304,7 +306,7 @@ function screenFeedback(currentWeek, selWeek) {
     ? `
     <div style="display:flex;align-items:center;gap:5px;margin-top:7px">
       <span style="width:14px;height:0;border-top:1px dashed var(--vl-ink-3)"></span>
-      <span style="font-size:10.5px;color:var(--vl-ink-3)">점선 = 첫 주 ${VL.baselineH.toFixed(2)}</span>
+      <span style="font-size:10.5px;color:var(--vl-ink-3)">점선 = 베이스라인 ${VL.baselineH.toFixed(2)}</span>
     </div>`
     : "";
 
@@ -315,7 +317,7 @@ function screenFeedback(currentWeek, selWeek) {
       <div>
         <div style="font-size:16px;font-weight:800;color:var(--vl-ink)">
           ${w.label} 리포트
-          ${w.isBaseline ? '<span style="font-size:11px;color:var(--vl-ink-3);font-weight:600"> · ViewLens와 함께한 첫 주</span>' : ""}
+          ${w.isBaseline ? '<span style="font-size:11px;color:var(--vl-ink-3);font-weight:600"> · 베이스라인 기간</span>' : ""}
         </div>
         <div style=";font-size:11.5px;color:var(--vl-ink-3);margin-top:2px">${w.range}</div>
       </div>

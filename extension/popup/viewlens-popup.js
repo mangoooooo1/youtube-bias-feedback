@@ -188,9 +188,10 @@ function buildWeeksData(allSessions, installDate) {
 
   const weeks = [];
 
-  for (let w = 1; w <= 3; w++) {
+  for (let w = 1; w <= 6; w++) {
     const startOffset = (w - 1) * 7; // day offset from install
     const endOffset = w * 7 - 1;
+    const isBaseline = startOffset < VL.BASELINE_DAYS; // 14일(2주) 미만이면 베이스라인 — 1·2주차
 
     const weekStart = dayFromInstall(installDate, startOffset);
     const weekEnd = dayFromInstall(installDate, endOffset);
@@ -230,8 +231,8 @@ function buildWeeksData(allSessions, installDate) {
     // Review: latest session's review in this week
     const review =
       weekSessions.at(-1)?.review ||
-      (w === 1
-        ? "첫 주 동안의 시청 습관을 기준선으로 담아 두었어요. 이건 평가가 아니라 출발점이에요."
+      (isBaseline
+        ? "베이스라인 기간 동안의 시청 습관을 기준선으로 담아 두었어요. 이건 평가가 아니라 출발점이에요."
         : "이번 주 데이터를 분석 중이에요. 세션이 쌓이면 더 자세한 리포트를 볼 수 있어요.");
 
     const totalVids = weekSessions.reduce(
@@ -242,7 +243,7 @@ function buildWeeksData(allSessions, installDate) {
     weeks.push({
       week: w,
       label: `${w}주차`,
-      isBaseline: w === 1,
+      isBaseline,
       range,
       videoCount: totalVids,
       sessionCount: weekSessions.length,
@@ -258,6 +259,25 @@ function buildWeeksData(allSessions, installDate) {
   return weeks;
 }
 
+// 베이스라인 기준 엔트로피(VL.baselineH) — 이후 주차들과 비교하는 기준값이다.
+// 1주차 단독이 아니라 베이스라인 전체(설치 후 VL.BASELINE_DAYS일, 1·2주차)의 세션을 하나의
+// 분포로 합쳐 계산한다 — 10-8 설계 의도("2주로 확장해 기준을 안정화")에 따라 표본을 넓혀
+// 첫 주 하루이틀의 우연한 쏠림에 기준값이 휘둘리지 않게 한다.
+function calculateBaselineEntropy(allSessions, installDate) {
+  const baselineStart = dayFromInstall(installDate, 0);
+  const baselineEnd = dayFromInstall(installDate, VL.BASELINE_DAYS - 1);
+  const baselineSessions = allSessions.filter(
+    (s) =>
+      s.endTime &&
+      s.categoryDistribution &&
+      Object.keys(s.categoryDistribution).length > 0 &&
+      dateStr(new Date(s.endTime)) >= baselineStart &&
+      dateStr(new Date(s.endTime)) <= baselineEnd,
+  );
+  const dist = mergeDist(baselineSessions);
+  return Object.keys(dist).length > 0 ? VL.entropy(VL.dist(dist)) : 0;
+}
+
 // ── Token application ─────────────────────────────────────────────────────────
 
 function applyTokens(el, toneName, dark) {
@@ -269,18 +289,19 @@ function applyTokens(el, toneName, dark) {
 
 // ── Timeline key from install date ────────────────────────────────────────────
 
+// VL.TIMELINE 항목 중 day가 경과일 이하인 것 중 가장 늦은(day가 가장 큰) 체크포인트를 고른다.
+// 6주(12개 체크포인트)로 늘어난 뒤로는 임계값을 나열하는 if 사슬 대신 VL.TIMELINE 자체를 순회해,
+// 이후 체크포인트가 더 늘어나도(예: 로드맵 변경) 이 함수를 다시 손볼 필요가 없게 한다.
 function calcTimelineKey(installDate) {
   if (!installDate) return "w1_mid";
   const days = Math.max(
     1,
     Math.floor((Date.now() - new Date(installDate).getTime()) / 86400000) + 1,
   );
-  if (days >= 21) return "w3_end";
-  if (days >= 18) return "w3_mid";
-  if (days >= 14) return "w2_end";
-  if (days >= 11) return "w2_mid";
-  if (days >= 7) return "w1_end";
-  return "w1_mid";
+  const reached = Object.entries(VL.TIMELINE)
+    .filter(([, tl]) => days >= tl.day)
+    .sort((a, b) => b[1].day - a[1].day)[0];
+  return reached ? reached[0] : "w1_mid";
 }
 
 // ── Survey status helpers ─────────────────────────────────────────────────────
@@ -613,7 +634,7 @@ async function boot() {
 
   if (installDate) {
     VL.weeks = buildWeeksData(sessions, installDate);
-    VL.baselineH = VL.weeks[0]?.entropy ?? 0;
+    VL.baselineH = calculateBaselineEntropy(sessions, installDate);
   }
 
   // Apply theme tokens
@@ -754,7 +775,7 @@ async function boot() {
     }
     if (installDate) {
       VL.weeks = buildWeeksData(updatedSessions, installDate);
-      VL.baselineH = VL.weeks[0]?.entropy ?? 0;
+      VL.baselineH = calculateBaselineEntropy(updatedSessions, installDate);
     }
     popup.render();
   });
