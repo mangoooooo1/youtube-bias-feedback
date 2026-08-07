@@ -203,8 +203,11 @@ class ViewLensPopup {
       // 10-8: groupCfg.feedback이 true인데 feedbackActive가 false라는 건 "EXP인데 베이스라인
       // 게이트에 걸렸다"는 뜻이다(CON은 애초에 groupCfg.feedback이 false). 이 경우에만
       // "베이스라인 이후부터 분석을 받는다"는 안내를 추가한다 — CON에게는 해당 없는 개념.
+      // day는 1일째부터 세는 이산값이라, 베이스라인 마지막 날(day=BASELINE_DAYS)에도 아직
+      // 하루가 남은 것(내일인 BASELINE_DAYS+1일째부터 게이트가 풀림) — +1을 더해야
+      // isBaselinePeriod의 실제 전환 시점과 표시되는 D-N이 어긋나지 않는다.
       const baselineDaysLeft = groupCfg.feedback
-        ? Math.max(0, VL.BASELINE_DAYS - day)
+        ? Math.max(0, VL.BASELINE_DAYS - day + 1)
         : null;
       bodyHTML = screenControlHome(day, {
         todayCount: _controlTodayCount(),
