@@ -17,20 +17,28 @@ import {
   generateReview,
   generateFallbackReview,
 } from "./pipeline/llm.js";
+import { isBaselinePeriod } from "./pipeline/baseline.js";
 import { SERVER_URL } from "./config.js";
 
 const ALARM_NAME = "SESSION_TIMEOUT_CHECK";
 const TIMEOUT_MS = 10 * 60 * 1000;
 
-// 분석 완료 알림 대상 판정 (). 현재는 EXP 여부만 본다 — 10-8(2주 베이스라인 게이트)이
-// 끝나면 이 함수 안에 installDate 기준 베이스라인 종료 조건만 추가하면 되고, 알림·배지·
-// 서버 코드는 건드릴 필요가 없도록 판정 로직을 이 한 곳에 모아둔다.
+// 분석 완료 알림 대상 판정 (10-8). EXP 그룹이면서 베이스라인 기간(설치 후 14일)이
+// 끝난 경우에만 알림·배지를 노출한다 — 판정 로직을 이 한 곳에 모아둬 알림·배지·서버
+// 코드는 건드릴 필요가 없게 한다.
 // extension/popup/viewlens-data.js의 GROUPS 중 feedback:true인 그룹(EXP/TEST-EXP)과
 // 반드시 동일하게 유지해야 한다 — background.js는 popup 쪽 데이터 파일을 import할 수 없어(모듈 경계) 중복 정의한다.
 const FEEDBACK_ELIGIBLE_GROUPS = new Set(["EXP", "TEST-EXP"]);
 
-function isFeedbackNotificationEligible(group, _installDate) {
-  return FEEDBACK_ELIGIBLE_GROUPS.has(group);
+// TEST-EXP(연구자 모드)는 "모든 화면을 미리 볼 수 있다"는 설계 의도(GROUPS 주석 참고)가 있어,
+// 실제 참여자 온보딩과 무관하게 베이스라인 게이트를 적용하면 안 된다.
+function isTestGroup(group) {
+  return typeof group === "string" && group.startsWith("TEST");
+}
+
+function isFeedbackNotificationEligible(group, installDate) {
+  if (!FEEDBACK_ELIGIBLE_GROUPS.has(group)) return false;
+  return isTestGroup(group) || !isBaselinePeriod(installDate);
 }
 
 const BASE_ICON_PATHS = {

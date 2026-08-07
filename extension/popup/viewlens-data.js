@@ -27,6 +27,24 @@ function entropy(arr) {
   return arr.reduce((h, d) => (d.p > 0 ? h - d.p * Math.log2(d.p) : h), 0);
 }
 
+// 베이스라인 기간(설치 후 14일 미만) 판정 — extension/pipeline/baseline.js와 규칙이 동일해야 한다.
+// 팝업/Studio는 classic script라 ESM import를 쓸 수 없어(background.js는 type=module) 로직을 중복 정의한다.
+const BASELINE_DAYS = 14;
+function isBaselinePeriod(installDate, now = new Date()) {
+  if (!installDate) return true;
+  return (
+    (now.getTime() - new Date(installDate).getTime()) / 86400000 <
+    BASELINE_DAYS
+  );
+}
+
+// TEST-EXP/TEST-CON(연구자 모드)는 "모든 화면을 미리 볼 수 있다"는 설계 의도(GROUPS 주석 참고)가
+// 있어, 실제 참여자 온보딩과 무관하게 베이스라인 게이트를 적용하면 안 된다.
+// background.js의 isTestGroup()과 동일 규칙 — 모듈 경계 때문에 중복 정의한다.
+function isTestGroup(group) {
+  return typeof group === "string" && group.startsWith("TEST");
+}
+
 const H_MAX = 3.17;
 
 const today = {
@@ -81,7 +99,7 @@ const weeks = [
   {
     week: 2,
     label: "2주차",
-    isBaseline: false,
+    isBaseline: true,
     range: "6/8 – 6/14",
     videoCount: 71,
     sessionCount: 10,
@@ -95,7 +113,7 @@ const weeks = [
     }),
     daily: [1.98, 2.21, 2.34, 2.18, 2.46, 2.4, 2.55],
     review:
-      "지난주보다 카테고리가 한층 다양해졌어요. 특히 교육과 과학·기술 영상이 새로 늘어난 점이 인상적이에요. 큰 결심이 아니라 작은 선택들이 쌓이고 있다는 신호예요. 잘하고 계세요.",
+      "베이스라인 기간의 두 번째 주예요. 교육과 과학·기술 영상이 조금 늘었지만, 이 시기는 평가가 아니라 계속 기준선을 담아 두는 과정이에요.",
   },
   {
     week: 3,
@@ -120,7 +138,14 @@ const weeks = [
 weeks.forEach((w) => {
   w.entropy = entropy(w.dist);
 });
-const baselineH = weeks[0].entropy;
+// 베이스라인 기준 엔트로피 — 베이스라인 주차(1·2주차)의 "주간 엔트로피"를 단순 평균한다.
+// viewlens-popup.js의 calculateBaselineEntropy와 같은 규칙을 목업 데이터에도 적용해,
+// Studio 프리뷰가 실제 계산과 동일한 값을 보여주게 한다. (분포를 합쳐서 계산하면 서로
+// 다른 카테고리 위주인 두 주가 합쳐질 때 카테고리 수 자체가 늘어 개별 주차보다 높은
+// 값이 나와, 이후 "1주치" 값과 비교하기엔 기준이 불공정해진다 — 그래서 평균을 쓴다.)
+const baselineWeeks = weeks.filter((w) => w.isBaseline);
+const baselineH =
+  baselineWeeks.reduce((s, w) => s + w.entropy, 0) / baselineWeeks.length;
 
 const TIMELINE = {
   w1_mid: {
@@ -165,8 +190,53 @@ const TIMELINE = {
     surveyWeek: 3,
     todayWeek: 3,
   },
+  w4_mid: {
+    label: "4주차 진행 중",
+    day: 25,
+    currentWeek: 4,
+    surveyWeek: null,
+    todayWeek: 4,
+  },
+  // 4~6주차는 surveyWeek을 비워둔다 — 주차별 설문 배너(week1~3)는 10-10에서
+  // "6주 종료 시점 1회 회고형" 설문으로 전면 재설계될 예정이라, 여기서 미리
+  // week4~6 배너를 잇는 건 곧 버려질 코드를 늘리는 셈이다(storageToCompleted도 week1~3만 처리).
+  w4_end: {
+    label: "4주차 종료",
+    day: 28,
+    currentWeek: 4,
+    surveyWeek: null,
+    todayWeek: 4,
+  },
+  w5_mid: {
+    label: "5주차 진행 중",
+    day: 32,
+    currentWeek: 5,
+    surveyWeek: null,
+    todayWeek: 5,
+  },
+  w5_end: {
+    label: "5주차 종료",
+    day: 35,
+    currentWeek: 5,
+    surveyWeek: null,
+    todayWeek: 5,
+  },
+  w6_mid: {
+    label: "6주차 진행 중",
+    day: 39,
+    currentWeek: 6,
+    surveyWeek: null,
+    todayWeek: 6,
+  },
+  w6_end: {
+    label: "6주차 종료 · 연구 종료",
+    day: 42,
+    currentWeek: 6,
+    surveyWeek: null,
+    todayWeek: 6,
+  },
 };
-const TOTAL_DAYS = 21;
+const TOTAL_DAYS = 42;
 
 const GROUPS = {
   EXP: {
@@ -245,6 +315,9 @@ window.VL = {
   TOTAL_DAYS,
   GROUPS,
   TONES,
+  BASELINE_DAYS,
+  isBaselinePeriod,
+  isTestGroup,
   con: { todayCount: 12, totalCount: 47 },
 };
 

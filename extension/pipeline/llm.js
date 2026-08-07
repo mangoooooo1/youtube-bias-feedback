@@ -140,7 +140,14 @@ export async function generateReview(prompt) {
         "Content-Type": "application/json",
         "x-goog-api-key": GEMINI_API_KEY,
       },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        // "생각" 토큰 상한을 안 두면 프롬프트가 복잡할수록 thinking에 쓰는 시간이 늘어나
+        // TIMEOUT_MS(10초)를 넘겨 timeout으로 폴백되는 사례를 실측으로 확인했다
+        // trend 판단은 이미 buildTrendGuidance가 JS로 계산해 지시문으로 넘기므로, 모델은 문장으로 옮기는
+        // 정도만 하면 돼 깊은 추론이 필요 없다 — 512로 캡핑해 지연시간을 예측 가능하게 만든다.
+        generationConfig: { thinkingConfig: { thinkingBudget: 512 } },
+      }),
       signal: controller.signal,
     });
   } catch (error) {

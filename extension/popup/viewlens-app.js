@@ -44,6 +44,13 @@ function _elapsedDay(fallback) {
   return Math.max(1, d);
 }
 
+// Studio 전용 — "설치 N일째"를 오늘 기준 installDate로 역산한다(_elapsedDay의 역함수).
+// 이렇게 만든 installDate를 mount/update에 넘기면 _isFeedbackActive의 베이스라인 게이트가
+// Studio에서 고른 타임라인 시점을 실제 사용자처럼 그대로 반영한다.
+function _installDateForDay(day) {
+  return new Date(Date.now() - (day - 1) * 86400000).toISOString();
+}
+
 function _popupHeader(groupCfg, day) {
   const isTest = groupCfg.code.startsWith("TEST");
   const badge = isTest
@@ -112,6 +119,7 @@ class ViewLensPopup {
     this._onboarded = false;
     this._group = null;
     this._timelineKey = "w1_mid";
+    this._installDate = null;
     this._onChange = () => {};
   }
 
@@ -121,24 +129,38 @@ class ViewLensPopup {
    * @param {boolean}  opts.onboarded
    * @param {string}   opts.group
    * @param {string}   opts.timelineKey
+   * @param {string}   [opts.installDate] - ISO 문자열. RealPopup의 베이스라인 게이트가 참조한다.
    * @param {Function} opts.onChange - called with { onboarded, group } on onboard submit
    */
-  mount({ onboarded, group, timelineKey, onChange }) {
+  mount({ onboarded, group, timelineKey, installDate, onChange }) {
     this._onboarded = onboarded;
     this._group = group;
     this._timelineKey = timelineKey;
+    this._installDate = installDate ?? null;
     this._onChange = onChange;
     this.render();
   }
 
   /** Called by Studio when tweaks change */
-  update({ onboarded, group, timelineKey }) {
+  update({ onboarded, group, timelineKey, installDate }) {
     const tlChanged = timelineKey !== this._timelineKey;
     this._onboarded = onboarded;
     this._group = group;
     this._timelineKey = timelineKey;
+    this._installDate = installDate ?? null;
     if (tlChanged) this._snoozed = false;
     this.render();
+  }
+
+  // 10-8: 그룹이 EXP여도 베이스라인 기간(설치 후 14일 미만)에는 피드백을 노출하지 않는다.
+  // TEST-EXP(연구자 모드)는 예외(VL.isTestGroup). 실제 팝업(RealPopup)과 Studio 프리뷰가
+  // 이 하나의 구현을 공유한다 — Studio는 선택한 타임라인 시점에 맞는 installDate를 계산해
+  // mount/update에 넘겨줘서(_installDateForDay), 실제 사용자가 그 시점에 보는 화면을 그대로 재현한다.
+  _isFeedbackActive(groupCfg) {
+    return (
+      groupCfg.feedback &&
+      (VL.isTestGroup(groupCfg.code) || !VL.isBaselinePeriod(this._installDate))
+    );
   }
 
   render() {
@@ -149,7 +171,9 @@ class ViewLensPopup {
     const tl = VL.TIMELINE[this._timelineKey] || VL.TIMELINE.w1_mid;
     const day = _elapsedDay(tl.day);
     const groupCfg = VL.GROUPS[this._group] || VL.GROUPS.EXP;
-    const selWeek = Math.min(this._selWeek, tl.currentWeek);
+    const totalWeeks = Math.ceil(VL.TOTAL_DAYS / 7);
+    const currentWeek = Math.min(totalWeeks, Math.max(1, Math.ceil(day / 7)));
+    const selWeek = Math.min(this._selWeek, currentWeek);
     const surveyWeek = tl.surveyWeek;
     const surveyPending = surveyWeek != null && !this._completed[surveyWeek];
     const showModal = surveyPending && !this._snoozed;
@@ -167,28 +191,40 @@ class ViewLensPopup {
       VL.today = d;
     }
 
+    const feedbackActive = this._isFeedbackActive(groupCfg);
+
     let bodyHTML;
-    if (groupCfg.feedback) {
+    if (feedbackActive) {
       bodyHTML =
         this._tab === "today"
           ? screenToday()
-          : screenFeedback(tl.currentWeek, selWeek);
+          : screenFeedback(currentWeek, selWeek);
     } else {
+      // 10-8: groupCfg.feedback이 true인데 feedbackActive가 false라는 건 "EXP인데 베이스라인
+      // 게이트에 걸렸다"는 뜻이다(CON은 애초에 groupCfg.feedback이 false). 이 경우에만
+      // "베이스라인 이후부터 분석을 받는다"는 안내를 추가한다 — CON에게는 해당 없는 개념.
+      // day는 1일째부터 세는 이산값이라, 베이스라인 마지막 날(day=BASELINE_DAYS)에도 아직
+      // 하루가 남은 것(내일인 BASELINE_DAYS+1일째부터 게이트가 풀림) — +1을 더해야
+      // isBaselinePeriod의 실제 전환 시점과 표시되는 D-N이 어긋나지 않는다.
+      const baselineDaysLeft = groupCfg.feedback
+        ? Math.max(0, VL.BASELINE_DAYS - day + 1)
+        : null;
       bodyHTML = screenControlHome(day, {
         todayCount: _controlTodayCount(),
         totalCount: _controlTotalCount(),
+        baselineDaysLeft,
       });
     }
 
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
       ${_popupHeader(groupCfg, day)}
       ${surveyPending && this._snoozed ? _surveyBanner(surveyWeek) : ""}
-      ${groupCfg.feedback ? _tabs(this._tab, !VL._todayConfirmed) : ""}
+      ${feedbackActive ? _tabs(this._tab, !VL._todayConfirmed) : ""}
       <div style="flex:1;overflow-y:auto;overflow-x:hidden">${bodyHTML}</div>
       ${showModal ? screenSurveyModal(surveyWeek) : ""}
     </div>`;
 
-    this._bind(groupCfg, surveyWeek, surveyPending, tl.currentWeek);
+    this._bind(groupCfg, surveyWeek, surveyPending, currentWeek);
   }
 
   _renderOnboarding() {
@@ -203,7 +239,7 @@ class ViewLensPopup {
 
   _bind(groupCfg, surveyWeek, surveyPending, currentWeek) {
     // Tabs
-    if (groupCfg.feedback) {
+    if (this._isFeedbackActive(groupCfg)) {
       this.container.querySelectorAll("[data-tab]").forEach((btn) => {
         btn.addEventListener("click", () => {
           this._tab = btn.dataset.tab;
@@ -306,10 +342,12 @@ class Studio {
     Object.assign(this._state, updates);
     this._applyTokens();
     if (this._popup) {
+      const tl = VL.TIMELINE[this._state.timeline] || VL.TIMELINE.w1_mid;
       this._popup.update({
         onboarded: this._state.onboarded,
         group: this._state.group,
         timelineKey: this._state.timeline,
+        installDate: _installDateForDay(tl.day),
       });
     }
   }
@@ -418,10 +456,12 @@ class Studio {
     // mount popup
     const popEl = document.getElementById("vl-popup-root");
     this._popup = new ViewLensPopup(popEl);
+    const initialTl = VL.TIMELINE[this._state.timeline] || VL.TIMELINE.w1_mid;
     this._popup.mount({
       onboarded: this._state.onboarded,
       group: this._state.group,
       timelineKey: this._state.timeline,
+      installDate: _installDateForDay(initialTl.day),
       onChange: ({ onboarded, group }) => {
         this._state.onboarded = onboarded;
         this._state.group = group;

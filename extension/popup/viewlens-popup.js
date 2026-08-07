@@ -188,9 +188,10 @@ function buildWeeksData(allSessions, installDate) {
 
   const weeks = [];
 
-  for (let w = 1; w <= 3; w++) {
+  for (let w = 1; w <= 6; w++) {
     const startOffset = (w - 1) * 7; // day offset from install
     const endOffset = w * 7 - 1;
+    const isBaseline = startOffset < VL.BASELINE_DAYS; // 14일(2주) 미만이면 베이스라인 — 1·2주차
 
     const weekStart = dayFromInstall(installDate, startOffset);
     const weekEnd = dayFromInstall(installDate, endOffset);
@@ -230,8 +231,8 @@ function buildWeeksData(allSessions, installDate) {
     // Review: latest session's review in this week
     const review =
       weekSessions.at(-1)?.review ||
-      (w === 1
-        ? "첫 주 동안의 시청 습관을 기준선으로 담아 두었어요. 이건 평가가 아니라 출발점이에요."
+      (isBaseline
+        ? "베이스라인 기간 동안의 시청 습관을 기준선으로 담아 두었어요. 이건 평가가 아니라 출발점이에요."
         : "이번 주 데이터를 분석 중이에요. 세션이 쌓이면 더 자세한 리포트를 볼 수 있어요.");
 
     const totalVids = weekSessions.reduce(
@@ -242,7 +243,7 @@ function buildWeeksData(allSessions, installDate) {
     weeks.push({
       week: w,
       label: `${w}주차`,
-      isBaseline: w === 1,
+      isBaseline,
       range,
       videoCount: totalVids,
       sessionCount: weekSessions.length,
@@ -258,6 +259,20 @@ function buildWeeksData(allSessions, installDate) {
   return weeks;
 }
 
+// 베이스라인 기준 엔트로피(VL.baselineH) — 이후 주차들과 비교하는 기준값이다.
+// 베이스라인 주차(1·2주차, weeks[0]/weeks[1])의 "주간 엔트로피"를 단순 평균한다.
+// 처음엔 두 주의 세션을 하나의 분포로 합쳐서 계산했으나, 그러면 두 주가 서로 다른
+// 카테고리 위주였을 때(예: 1주차 게임·음악 / 2주차 교육·과학) 등장 카테고리 수 자체가
+// 늘어나 개별 주차 어느 쪽보다도 높은 엔트로피가 나와, 이후 "1주치" 값과 비교할 때
+// 기준이 구조적으로 불리하게(항상 더 높게) 잡히는 문제가 있었다. 평균은 이후 주차와
+// 똑같이 "1주치 엔트로피" 단위로 맞춰 비교가 공정하다.
+function calculateBaselineEntropy(weeks) {
+  const baselineWeeks = weeks.filter((w) => w.isBaseline);
+  if (baselineWeeks.length === 0) return 0;
+  const sum = baselineWeeks.reduce((s, w) => s + w.entropy, 0);
+  return sum / baselineWeeks.length;
+}
+
 // ── Token application ─────────────────────────────────────────────────────────
 
 function applyTokens(el, toneName, dark) {
@@ -269,18 +284,19 @@ function applyTokens(el, toneName, dark) {
 
 // ── Timeline key from install date ────────────────────────────────────────────
 
+// VL.TIMELINE 항목 중 day가 경과일 이하인 것 중 가장 늦은(day가 가장 큰) 체크포인트를 고른다.
+// 6주(12개 체크포인트)로 늘어난 뒤로는 임계값을 나열하는 if 사슬 대신 VL.TIMELINE 자체를 순회해,
+// 이후 체크포인트가 더 늘어나도(예: 로드맵 변경) 이 함수를 다시 손볼 필요가 없게 한다.
 function calcTimelineKey(installDate) {
   if (!installDate) return "w1_mid";
   const days = Math.max(
     1,
     Math.floor((Date.now() - new Date(installDate).getTime()) / 86400000) + 1,
   );
-  if (days >= 21) return "w3_end";
-  if (days >= 18) return "w3_mid";
-  if (days >= 14) return "w2_end";
-  if (days >= 11) return "w2_mid";
-  if (days >= 7) return "w1_end";
-  return "w1_mid";
+  const reached = Object.entries(VL.TIMELINE)
+    .filter(([, tl]) => days >= tl.day)
+    .sort((a, b) => b[1].day - a[1].day)[0];
+  return reached ? reached[0] : "w1_mid";
 }
 
 // ── Survey status helpers ─────────────────────────────────────────────────────
@@ -314,6 +330,9 @@ class RealPopup extends ViewLensPopup {
     super(container);
     this._completed = storageToCompleted(surveyStatus);
   }
+
+  // _isFeedbackActive는 오버라이드하지 않는다 — 베이스라인 게이트는 ViewLensPopup 기본 구현
+  // 하나로 통일해, Studio 프리뷰와 실제 팝업이 항상 같은 규칙을 따르게 한다(viewlens-app.js 참고).
 
   _bind(groupCfg, surveyWeek, surveyPending, currentWeek) {
     super._bind(groupCfg, surveyWeek, surveyPending, currentWeek);
@@ -590,8 +609,13 @@ async function boot() {
   realToday.collectingTimer = _computeTimerText(stored.lastWatchedAt);
   VL.today = realToday;
 
-  const isExp = !!VL.GROUPS[stored.group]?.feedback;
-  const needsConfirm = isExp && isRealReview(realToday.review);
+  // 그룹 설정(EXP)만이 아니라 베이스라인 기간(14일 미만) 여부도 함께 봐야
+  // "지금 실제로 피드백이 노출되는 상태"를 정확히 반영한다 — ViewLensPopup._isFeedbackActive와 동일 규칙
+  // (TEST-EXP 예외 포함).
+  const feedbackActive =
+    !!VL.GROUPS[stored.group]?.feedback &&
+    (VL.isTestGroup(stored.group) || !VL.isBaselinePeriod(installDate));
+  const needsConfirm = feedbackActive && isRealReview(realToday.review);
   // "피드백 확인하기" 블러 해제 버튼을 눌러야만 확인된 것으로 친다(단순히 팝업을 연 것만으로는 아님).
   // 날짜 이동(어제/그제 보기)에 영향받지 않도록 VL.today가 아니라 별도 키에 둔다 — VL.today는
   // 날짜를 옮길 때마다 통째로 재생성돼서, 여기 두면 어제를 봤다 오늘로 돌아올 때 상태가 오염된다.
@@ -605,7 +629,7 @@ async function boot() {
 
   if (installDate) {
     VL.weeks = buildWeeksData(sessions, installDate);
-    VL.baselineH = VL.weeks[0]?.entropy ?? 0;
+    VL.baselineH = calculateBaselineEntropy(VL.weeks);
   }
 
   // Apply theme tokens
@@ -618,6 +642,7 @@ async function boot() {
     onboarded: !!stored.group,
     group: stored.group || null,
     timelineKey: calcTimelineKey(installDate),
+    installDate,
     onChange: async ({ onboarded: ob, group: g, participantCode }) => {
       if (ob && g) {
         const installDate = new Date().toISOString();
@@ -681,7 +706,7 @@ async function boot() {
       tabTodayClicks: 0,
       tabWeekClicks: 0,
       // EXP 사용자가 열자마자 실제 리뷰(today 탭)를 보고 있으면 개입 전달로 간주
-      feedbackViewed: isExp && isRealReview(realToday.review) ? 1 : 0,
+      feedbackViewed: feedbackActive && isRealReview(realToday.review) ? 1 : 0,
     };
     persistLivePopupEvent(popupMetrics);
 
@@ -733,7 +758,7 @@ async function boot() {
     const freshToday = buildDataForDate(updatedSessions, new Date());
     freshToday.collectingCount = localCurrentSession?.videos?.length ?? 0;
     freshToday.collectingTimer = _computeTimerText(localLastWatchedAt);
-    const freshNeedsConfirm = isExp && isRealReview(freshToday.review);
+    const freshNeedsConfirm = feedbackActive && isRealReview(freshToday.review);
     // 새로 완료된 세션은 아직 로컬에 확인 기록이 없을 테니 다시 블러 처리된다(의도된 동작).
     // 날짜 이동에 오염되지 않도록 VL.today가 아니라 VL._todayConfirmed에 둔다(위 boot()와 동일 이유).
     VL._todayConfirmed = freshNeedsConfirm
@@ -745,7 +770,7 @@ async function boot() {
     }
     if (installDate) {
       VL.weeks = buildWeeksData(updatedSessions, installDate);
-      VL.baselineH = VL.weeks[0]?.entropy ?? 0;
+      VL.baselineH = calculateBaselineEntropy(VL.weeks);
     }
     popup.render();
   });
