@@ -393,6 +393,15 @@ function screenControlHome(day, stats = {}) {
       <p style="margin:9px auto 0;max-width:250px;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
         평소처럼 유튜브를 시청해 주세요. 연구 기간 동안 시청 데이터가 기기 안에 안전하게 기록돼요.
       </p>
+      ${
+        // 10-8: 베이스라인 중인 EXP에게만 보여주는 한 줄 — CON은 종료 후 일괄 제공(10-10)이라
+        // "언제부터 분석을 받는지"라는 개념 자체가 없어 stats.baselineDaysLeft가 null로 온다.
+        stats.baselineDaysLeft != null
+          ? `<p style="margin:8px auto 0;max-width:250px;font-size:12.5px;line-height:1.6;color:var(--vl-accent);font-weight:600;text-wrap:pretty">
+        베이스라인 이후(D-${stats.baselineDaysLeft})부터 나만의 시청 분석을 받아볼 수 있어요.
+      </p>`
+          : ""
+      }
     `,
     })}
 

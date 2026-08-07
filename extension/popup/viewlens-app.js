@@ -198,9 +198,16 @@ class ViewLensPopup {
           ? screenToday()
           : screenFeedback(tl.currentWeek, selWeek);
     } else {
+      // 10-8: groupCfg.feedback이 true인데 feedbackActive가 false라는 건 "EXP인데 베이스라인
+      // 게이트에 걸렸다"는 뜻이다(CON은 애초에 groupCfg.feedback이 false). 이 경우에만
+      // "베이스라인 이후부터 분석을 받는다"는 안내를 추가한다 — CON에게는 해당 없는 개념.
+      const baselineDaysLeft = groupCfg.feedback
+        ? Math.max(0, VL.BASELINE_DAYS - day)
+        : null;
       bodyHTML = screenControlHome(day, {
         todayCount: _controlTodayCount(),
         totalCount: _controlTotalCount(),
+        baselineDaysLeft,
       });
     }
 
