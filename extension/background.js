@@ -30,8 +30,15 @@ const TIMEOUT_MS = 10 * 60 * 1000;
 // 반드시 동일하게 유지해야 한다 — background.js는 popup 쪽 데이터 파일을 import할 수 없어(모듈 경계) 중복 정의한다.
 const FEEDBACK_ELIGIBLE_GROUPS = new Set(["EXP", "TEST-EXP"]);
 
+// TEST-EXP(연구자 모드)는 "모든 화면을 미리 볼 수 있다"는 설계 의도(GROUPS 주석 참고)가 있어,
+// 실제 참여자 온보딩과 무관하게 베이스라인 게이트를 적용하면 안 된다.
+function isTestGroup(group) {
+  return typeof group === "string" && group.startsWith("TEST");
+}
+
 function isFeedbackNotificationEligible(group, installDate) {
-  return FEEDBACK_ELIGIBLE_GROUPS.has(group) && !isBaselinePeriod(installDate);
+  if (!FEEDBACK_ELIGIBLE_GROUPS.has(group)) return false;
+  return isTestGroup(group) || !isBaselinePeriod(installDate);
 }
 
 const BASE_ICON_PATHS = {

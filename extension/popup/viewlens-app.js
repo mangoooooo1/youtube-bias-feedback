@@ -112,6 +112,7 @@ class ViewLensPopup {
     this._onboarded = false;
     this._group = null;
     this._timelineKey = "w1_mid";
+    this._installDate = null;
     this._onChange = () => {};
   }
 
@@ -121,24 +122,33 @@ class ViewLensPopup {
    * @param {boolean}  opts.onboarded
    * @param {string}   opts.group
    * @param {string}   opts.timelineKey
+   * @param {string}   [opts.installDate] - ISO 문자열. RealPopup의 베이스라인 게이트가 참조한다.
    * @param {Function} opts.onChange - called with { onboarded, group } on onboard submit
    */
-  mount({ onboarded, group, timelineKey, onChange }) {
+  mount({ onboarded, group, timelineKey, installDate, onChange }) {
     this._onboarded = onboarded;
     this._group = group;
     this._timelineKey = timelineKey;
+    this._installDate = installDate ?? null;
     this._onChange = onChange;
     this.render();
   }
 
   /** Called by Studio when tweaks change */
-  update({ onboarded, group, timelineKey }) {
+  update({ onboarded, group, timelineKey, installDate }) {
     const tlChanged = timelineKey !== this._timelineKey;
     this._onboarded = onboarded;
     this._group = group;
     this._timelineKey = timelineKey;
+    this._installDate = installDate ?? null;
     if (tlChanged) this._snoozed = false;
     this.render();
+  }
+
+  // 피드백 노출 여부 — 기본값은 그룹 설정 그대로. Studio 프리뷰는 이 기본 동작을 그대로 쓰고,
+  // RealPopup(viewlens-popup.js)만 베이스라인 게이트를 얹어 오버라이드한다.
+  _isFeedbackActive(groupCfg) {
+    return groupCfg.feedback;
   }
 
   render() {
@@ -167,8 +177,10 @@ class ViewLensPopup {
       VL.today = d;
     }
 
+    const feedbackActive = this._isFeedbackActive(groupCfg);
+
     let bodyHTML;
-    if (groupCfg.feedback) {
+    if (feedbackActive) {
       bodyHTML =
         this._tab === "today"
           ? screenToday()
@@ -183,7 +195,7 @@ class ViewLensPopup {
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
       ${_popupHeader(groupCfg, day)}
       ${surveyPending && this._snoozed ? _surveyBanner(surveyWeek) : ""}
-      ${groupCfg.feedback ? _tabs(this._tab, !VL._todayConfirmed) : ""}
+      ${feedbackActive ? _tabs(this._tab, !VL._todayConfirmed) : ""}
       <div style="flex:1;overflow-y:auto;overflow-x:hidden">${bodyHTML}</div>
       ${showModal ? screenSurveyModal(surveyWeek) : ""}
     </div>`;
@@ -203,7 +215,7 @@ class ViewLensPopup {
 
   _bind(groupCfg, surveyWeek, surveyPending, currentWeek) {
     // Tabs
-    if (groupCfg.feedback) {
+    if (this._isFeedbackActive(groupCfg)) {
       this.container.querySelectorAll("[data-tab]").forEach((btn) => {
         btn.addEventListener("click", () => {
           this._tab = btn.dataset.tab;

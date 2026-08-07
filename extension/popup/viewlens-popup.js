@@ -2,6 +2,23 @@ window.buildDataForDate = buildDataForDate;
 window.koreanDateLabel = koreanDateLabel;
 const DEFAULT_TONE = "indigo";
 
+// 베이스라인 기간(설치 후 14일 미만) 판정 — extension/pipeline/baseline.js와 규칙이 동일해야 한다.
+// 팝업은 classic script라 ESM import를 쓸 수 없어(background.js는 type=module) 로직을 중복 정의한다.
+const BASELINE_DAYS = 14;
+function isBaselinePeriod(installDate, now = new Date()) {
+  if (!installDate) return true;
+  return (
+    (now.getTime() - new Date(installDate).getTime()) / 86400000 < BASELINE_DAYS
+  );
+}
+
+// TEST-EXP/TEST-CON(연구자 모드)는 "모든 화면을 미리 볼 수 있다"는 설계 의도(VL.GROUPS 주석 참고)가
+// 있어, 실제 참여자 온보딩과 무관하게 베이스라인 게이트를 적용하면 안 된다. background.js의
+// isTestGroup()과 동일 규칙 — 모듈 경계 때문에 중복 정의한다.
+function isTestGroup(group) {
+  return typeof group === "string" && group.startsWith("TEST");
+}
+
 // ── Category name (Korean) → VL short key ─────────────────────────────────────
 const CAT_NAME_TO_KEY = {
   음악: "music",
@@ -315,6 +332,13 @@ class RealPopup extends ViewLensPopup {
     this._completed = storageToCompleted(surveyStatus);
   }
 
+  // 그룹이 EXP여도 베이스라인 기간(설치 후 14일 미만)에는 피드백을 노출하지 않는다.
+  // 단, TEST-EXP(연구자 모드)는 게이트 예외 — isTestGroup() 참고.
+  _isFeedbackActive(groupCfg) {
+    if (!groupCfg.feedback) return false;
+    return isTestGroup(groupCfg.code) || !isBaselinePeriod(this._installDate);
+  }
+
   _bind(groupCfg, surveyWeek, surveyPending, currentWeek) {
     super._bind(groupCfg, surveyWeek, surveyPending, currentWeek);
     const doneBtn = this.container.querySelector("#vl-survey-done");
@@ -590,8 +614,11 @@ async function boot() {
   realToday.collectingTimer = _computeTimerText(stored.lastWatchedAt);
   VL.today = realToday;
 
-  const isExp = !!VL.GROUPS[stored.group]?.feedback;
-  const needsConfirm = isExp && isRealReview(realToday.review);
+  // 그룹 설정(EXP)만이 아니라 베이스라인 기간(14일 미만) 여부도 함께 봐야
+  // "지금 실제로 피드백이 노출되는 상태"를 정확히 반영한다 — ViewLensPopup._isFeedbackActive와 동일 규칙.
+  const feedbackActive =
+    !!VL.GROUPS[stored.group]?.feedback && !isBaselinePeriod(installDate);
+  const needsConfirm = feedbackActive && isRealReview(realToday.review);
   // "피드백 확인하기" 블러 해제 버튼을 눌러야만 확인된 것으로 친다(단순히 팝업을 연 것만으로는 아님).
   // 날짜 이동(어제/그제 보기)에 영향받지 않도록 VL.today가 아니라 별도 키에 둔다 — VL.today는
   // 날짜를 옮길 때마다 통째로 재생성돼서, 여기 두면 어제를 봤다 오늘로 돌아올 때 상태가 오염된다.
@@ -618,6 +645,7 @@ async function boot() {
     onboarded: !!stored.group,
     group: stored.group || null,
     timelineKey: calcTimelineKey(installDate),
+    installDate,
     onChange: async ({ onboarded: ob, group: g, participantCode }) => {
       if (ob && g) {
         const installDate = new Date().toISOString();
@@ -681,7 +709,7 @@ async function boot() {
       tabTodayClicks: 0,
       tabWeekClicks: 0,
       // EXP 사용자가 열자마자 실제 리뷰(today 탭)를 보고 있으면 개입 전달로 간주
-      feedbackViewed: isExp && isRealReview(realToday.review) ? 1 : 0,
+      feedbackViewed: feedbackActive && isRealReview(realToday.review) ? 1 : 0,
     };
     persistLivePopupEvent(popupMetrics);
 
@@ -733,7 +761,7 @@ async function boot() {
     const freshToday = buildDataForDate(updatedSessions, new Date());
     freshToday.collectingCount = localCurrentSession?.videos?.length ?? 0;
     freshToday.collectingTimer = _computeTimerText(localLastWatchedAt);
-    const freshNeedsConfirm = isExp && isRealReview(freshToday.review);
+    const freshNeedsConfirm = feedbackActive && isRealReview(freshToday.review);
     // 새로 완료된 세션은 아직 로컬에 확인 기록이 없을 테니 다시 블러 처리된다(의도된 동작).
     // 날짜 이동에 오염되지 않도록 VL.today가 아니라 VL._todayConfirmed에 둔다(위 boot()와 동일 이유).
     VL._todayConfirmed = freshNeedsConfirm
