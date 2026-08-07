@@ -113,6 +113,7 @@ ${entropyLine}${titleLines}${trendSection}
 - 평가하거나 가르치려 들지 말고, 친근하고 중립적인 톤으로 사용자가 자신의 시청 패턴을 스스로 알아차리도록 돕는 데 집중하세요.
 - 한 주제에 시청이 모여 있으면, 그 사실을 부드럽고 또렷하게 비춰 주세요. 단, "이렇게 하라"는 식의 행동 지시나 특정 카테고리 시청 권유는 하지 마세요. 무엇을 볼지는 전적으로 사용자가 결정합니다.
 - entropy·통계·퍼센트 같은 수치나 전문 용어는 직접 노출하지 마세요.
+- 시청한 영상 제목은 카테고리 판단을 보완하는 배경 정보로만 참고하세요. 제목을 언급할 때는 "OO 관련 영상"처럼 소재 수준으로만 지칭하고, 제목 속 특정 인물·정당·이슈에 대한 주장이나 논조는 절대 요약·평가하지 마세요.
 
 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 포함하지 마세요.
 
@@ -124,12 +125,17 @@ ${entropyLine}${titleLines}${trendSection}
 
 // 실패 사유를 sessions.failureReason 분류값으로 태깅한 에러.
 // background.js가 이 필드(failureReason/httpStatus/timedOut)를 읽어 서버로 전송한다().
-// 분류값은 server/db.js 스키마 주석과 1:1 대응: timeout | http_error | empty_response | parse_error | network_error
+// 분류값은 server/db.js 스키마 주석과 1:1 대응: timeout | http_error | empty_response | parse_error | network_error | policy_filtered
 function llmError(failureReason, message, extra = {}) {
   const err = new Error(message);
   err.failureReason = failureReason;
   return Object.assign(err, extra);
 }
+
+// 프롬프트 가드레일이 뚫려 정치·이념 관련 표현이 출력에 섞였을 때 잡아내는 최후 방어선.
+// LLM 판단에만 의존하지 않도록, 생성 결과를 코드가 결정론적으로 재검증한다(감지 시 폴백 전환).
+const SENSITIVE_PATTERN =
+  /진보|보수|좌파|우파|좌익|우익|여당|야당|정당|국민의힘|민주당|대통령|국회의원|탄핵|친일|반일|극우|극좌/;
 
 export async function generateReview(prompt) {
   const controller = new AbortController();
@@ -193,18 +199,26 @@ export async function generateReview(prompt) {
     .trim()
     .replace(/^```(?:json)?\n?/, "")
     .replace(/\n?```$/, "");
+  let topic, feedback;
   try {
     const parsed = JSON.parse(cleaned);
     const isObj = parsed && typeof parsed === "object";
-    return {
-      topic: (isObj && parsed.topic) || "",
-      feedback: (isObj && parsed.feedback) || cleaned,
-      source: "llm",
-      promptVersion: PROMPT_VERSION,
-    };
+    topic = (isObj && parsed.topic) || "";
+    feedback = (isObj && parsed.feedback) || cleaned;
   } catch (error) {
     throw llmError("parse_error", `피드백 JSON 파싱 실패: ${error.message}`);
   }
+
+  // 가드레일이 뚫려 정치·이념 표현이 출력에 섞였는지 코드가 한 번 더 검증(파싱과 분리 —
+  // 감지 시 parse_error가 아니라 policy_filtered로 정확히 분류되어야 별도 집계가 가능하다)
+  if (SENSITIVE_PATTERN.test(feedback) || SENSITIVE_PATTERN.test(topic)) {
+    throw llmError(
+      "policy_filtered",
+      "정치·이념 관련 표현이 감지되어 폴백으로 대체",
+    );
+  }
+
+  return { topic, feedback, source: "llm", promptVersion: PROMPT_VERSION };
 }
 
 export function generateFallbackReview({

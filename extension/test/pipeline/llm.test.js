@@ -85,6 +85,12 @@ describe("buildPrompt — 트렌드 문구 경계값 (buildTrendGuidance)", () =
     expect(prompt).toContain("다양성 지수: 0");
     expect(prompt).not.toContain("최대");
   });
+
+  it("영상 제목을 소재 수준으로만 지칭하라는 가드레일 문구를 포함한다", () => {
+    const prompt = buildPrompt(baseArgs());
+    expect(prompt).toContain("소재 수준으로만 지칭");
+    expect(prompt).toContain("주장이나 논조는 절대 요약·평가하지 마세요");
+  });
 });
 
 describe("generateFallbackReview", () => {
@@ -190,6 +196,29 @@ describe("generateReview — 실패 사유 분류 (failureReason 태깅)", () =>
 
     await expect(generateReview("prompt")).rejects.toMatchObject({
       failureReason: "empty_response",
+    });
+  });
+
+  it("생성된 feedback/topic에 정치·이념 관련 표현이 감지되면 policy_filtered로 분류한다", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: '{"topic":"정치","feedback":"이번 세션은 보수 성향 콘텐츠를 많이 보셨어요."}',
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    await expect(generateReview("prompt")).rejects.toMatchObject({
+      failureReason: "policy_filtered",
     });
   });
 

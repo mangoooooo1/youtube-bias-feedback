@@ -41,7 +41,7 @@ function initializeDB() {
       geminiMs             INTEGER,
       -- LLM 성공/폴백 로깅 () — 확장의 폴백 분기(background.js/llm.js)와 대응
       llmStatus            TEXT,     -- 'success' | 'fallback'
-      failureReason        TEXT,     -- timeout | http_error | empty_response | parse_error | network_error (성공 시 NULL)
+      failureReason        TEXT,     -- timeout | http_error | empty_response | parse_error | network_error | policy_filtered (성공 시 NULL)
       httpStatus           INTEGER,  -- failureReason='http_error'일 때만 (429 쿼터 vs 5xx 장애 구분)
       timedOut             INTEGER,  -- 타임아웃으로 실패한 경우 1
       -- 실제 생성된 피드백 텍스트 (Story 10-11) — 면담·로그·설문 삼각검증 및 처치 충실도 판정에 필요

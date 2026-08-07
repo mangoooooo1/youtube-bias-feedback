@@ -20,6 +20,7 @@ const FAILURE_REASONS = [
   "empty_response",
   "parse_error",
   "network_error",
+  "policy_filtered",
 ];
 
 // 피드백 텍스트 출처 (Story 10-11) — llm.js generateReview/generateFallbackReview의 source와 1:1 대응.
