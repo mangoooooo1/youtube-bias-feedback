@@ -28,16 +28,19 @@ function buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount }) {
   }
 
   const lines = [];
+  // 다양성 증가/감소·편중 경고 모두 같은 강도로 지시 — 방향에 따라 강조가 달라지면
+  // "안 좋아 보이는" 변화에만 더 또렷하게 비추라는 암묵적 방향성 신호가 되어 거울형(중립) 원칙과 충돌한다.
+  const TONE = "부드럽고 또렷하게";
 
   if (Number.isFinite(prevEntropy)) {
     const delta = roundedDelta(entropy, prevEntropy);
     if (delta >= ENTROPY_DELTA_EPS) {
       lines.push(
-        "- 직전 세션보다 시청이 여러 주제로 다양해졌습니다. 이 변화를 담담한 사실로 비춰 주세요.",
+        `- 직전 세션보다 시청이 여러 주제로 다양해졌습니다. 이 변화를 ${TONE} 사실로 비춰 주세요.`,
       );
     } else if (delta <= -ENTROPY_DELTA_EPS) {
       lines.push(
-        "- 직전 세션보다 시청이 더 적은 수의 주제에 모였습니다. 이 변화를 부드럽고 또렷하게 사실로 비춰 주세요.",
+        `- 직전 세션보다 시청이 더 적은 수의 주제에 모였습니다. 이 변화를 ${TONE} 사실로 비춰 주세요.`,
       );
     } else {
       lines.push(
@@ -48,7 +51,7 @@ function buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount }) {
 
   if (topRatio >= BIAS_WARN_RATIO) {
     lines.push(
-      "- 시청이 한 주제에 크게 모여 있습니다. 그 쏠림을 부드럽고 또렷하게 사실로 비춰 주세요. 다양하게 보라는 권유나 지시는 하지 마세요.",
+      `- 시청이 한 주제에 크게 모여 있습니다. 그 쏠림을 ${TONE} 사실로 비춰 주세요. 다양하게 보라는 권유나 지시는 하지 마세요.`,
     );
   }
 

@@ -30,6 +30,17 @@ describe("buildPrompt — 트렌드 문구 경계값 (buildTrendGuidance)", () =
     expect(prompt).toContain("직전 세션보다 시청이 여러 주제로 다양해졌습니다");
   });
 
+  it("다양성 증가/감소 문구는 방향과 무관하게 같은 강도(부드럽고 또렷하게)를 쓴다", () => {
+    const increased = buildPrompt(
+      baseArgs({ videoCount: 5, entropy: 1.5, prevEntropy: 1.0 }),
+    );
+    const decreased = buildPrompt(
+      baseArgs({ videoCount: 5, entropy: 0.5, prevEntropy: 1.0 }),
+    );
+    expect(increased).toContain("다양해졌습니다. 이 변화를 부드럽고 또렷하게 사실로");
+    expect(decreased).toContain("모였습니다. 이 변화를 부드럽고 또렷하게 사실로");
+  });
+
   it("직전 대비 entropy delta가 -0.1 이하이면 '적은 주제에 모였다' 문구를 넣는다", () => {
     const prompt = buildPrompt(
       baseArgs({ videoCount: 5, entropy: 0.5, prevEntropy: 1.0 }),
