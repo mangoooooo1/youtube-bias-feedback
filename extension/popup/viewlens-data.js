@@ -27,6 +27,24 @@ function entropy(arr) {
   return arr.reduce((h, d) => (d.p > 0 ? h - d.p * Math.log2(d.p) : h), 0);
 }
 
+// 베이스라인 기간(설치 후 14일 미만) 판정 — extension/pipeline/baseline.js와 규칙이 동일해야 한다.
+// 팝업/Studio는 classic script라 ESM import를 쓸 수 없어(background.js는 type=module) 로직을 중복 정의한다.
+const BASELINE_DAYS = 14;
+function isBaselinePeriod(installDate, now = new Date()) {
+  if (!installDate) return true;
+  return (
+    (now.getTime() - new Date(installDate).getTime()) / 86400000 <
+    BASELINE_DAYS
+  );
+}
+
+// TEST-EXP/TEST-CON(연구자 모드)는 "모든 화면을 미리 볼 수 있다"는 설계 의도(GROUPS 주석 참고)가
+// 있어, 실제 참여자 온보딩과 무관하게 베이스라인 게이트를 적용하면 안 된다.
+// background.js의 isTestGroup()과 동일 규칙 — 모듈 경계 때문에 중복 정의한다.
+function isTestGroup(group) {
+  return typeof group === "string" && group.startsWith("TEST");
+}
+
 const H_MAX = 3.17;
 
 const today = {
@@ -245,6 +263,9 @@ window.VL = {
   TOTAL_DAYS,
   GROUPS,
   TONES,
+  BASELINE_DAYS,
+  isBaselinePeriod,
+  isTestGroup,
   con: { todayCount: 12, totalCount: 47 },
 };
 

@@ -2,23 +2,6 @@ window.buildDataForDate = buildDataForDate;
 window.koreanDateLabel = koreanDateLabel;
 const DEFAULT_TONE = "indigo";
 
-// 베이스라인 기간(설치 후 14일 미만) 판정 — extension/pipeline/baseline.js와 규칙이 동일해야 한다.
-// 팝업은 classic script라 ESM import를 쓸 수 없어(background.js는 type=module) 로직을 중복 정의한다.
-const BASELINE_DAYS = 14;
-function isBaselinePeriod(installDate, now = new Date()) {
-  if (!installDate) return true;
-  return (
-    (now.getTime() - new Date(installDate).getTime()) / 86400000 < BASELINE_DAYS
-  );
-}
-
-// TEST-EXP/TEST-CON(연구자 모드)는 "모든 화면을 미리 볼 수 있다"는 설계 의도(VL.GROUPS 주석 참고)가
-// 있어, 실제 참여자 온보딩과 무관하게 베이스라인 게이트를 적용하면 안 된다. background.js의
-// isTestGroup()과 동일 규칙 — 모듈 경계 때문에 중복 정의한다.
-function isTestGroup(group) {
-  return typeof group === "string" && group.startsWith("TEST");
-}
-
 // ── Category name (Korean) → VL short key ─────────────────────────────────────
 const CAT_NAME_TO_KEY = {
   음악: "music",
@@ -332,12 +315,8 @@ class RealPopup extends ViewLensPopup {
     this._completed = storageToCompleted(surveyStatus);
   }
 
-  // 그룹이 EXP여도 베이스라인 기간(설치 후 14일 미만)에는 피드백을 노출하지 않는다.
-  // 단, TEST-EXP(연구자 모드)는 게이트 예외 — isTestGroup() 참고.
-  _isFeedbackActive(groupCfg) {
-    if (!groupCfg.feedback) return false;
-    return isTestGroup(groupCfg.code) || !isBaselinePeriod(this._installDate);
-  }
+  // _isFeedbackActive는 오버라이드하지 않는다 — 베이스라인 게이트는 ViewLensPopup 기본 구현
+  // 하나로 통일해, Studio 프리뷰와 실제 팝업이 항상 같은 규칙을 따르게 한다(viewlens-app.js 참고).
 
   _bind(groupCfg, surveyWeek, surveyPending, currentWeek) {
     super._bind(groupCfg, surveyWeek, surveyPending, currentWeek);
@@ -615,9 +594,11 @@ async function boot() {
   VL.today = realToday;
 
   // 그룹 설정(EXP)만이 아니라 베이스라인 기간(14일 미만) 여부도 함께 봐야
-  // "지금 실제로 피드백이 노출되는 상태"를 정확히 반영한다 — ViewLensPopup._isFeedbackActive와 동일 규칙.
+  // "지금 실제로 피드백이 노출되는 상태"를 정확히 반영한다 — ViewLensPopup._isFeedbackActive와 동일 규칙
+  // (TEST-EXP 예외 포함).
   const feedbackActive =
-    !!VL.GROUPS[stored.group]?.feedback && !isBaselinePeriod(installDate);
+    !!VL.GROUPS[stored.group]?.feedback &&
+    (VL.isTestGroup(stored.group) || !VL.isBaselinePeriod(installDate));
   const needsConfirm = feedbackActive && isRealReview(realToday.review);
   // "피드백 확인하기" 블러 해제 버튼을 눌러야만 확인된 것으로 친다(단순히 팝업을 연 것만으로는 아님).
   // 날짜 이동(어제/그제 보기)에 영향받지 않도록 VL.today가 아니라 별도 키에 둔다 — VL.today는

@@ -44,6 +44,13 @@ function _elapsedDay(fallback) {
   return Math.max(1, d);
 }
 
+// Studio 전용 — "설치 N일째"를 오늘 기준 installDate로 역산한다(_elapsedDay의 역함수).
+// 이렇게 만든 installDate를 mount/update에 넘기면 _isFeedbackActive의 베이스라인 게이트가
+// Studio에서 고른 타임라인 시점을 실제 사용자처럼 그대로 반영한다.
+function _installDateForDay(day) {
+  return new Date(Date.now() - (day - 1) * 86400000).toISOString();
+}
+
 function _popupHeader(groupCfg, day) {
   const isTest = groupCfg.code.startsWith("TEST");
   const badge = isTest
@@ -145,10 +152,15 @@ class ViewLensPopup {
     this.render();
   }
 
-  // 피드백 노출 여부 — 기본값은 그룹 설정 그대로. Studio 프리뷰는 이 기본 동작을 그대로 쓰고,
-  // RealPopup(viewlens-popup.js)만 베이스라인 게이트를 얹어 오버라이드한다.
+  // 10-8: 그룹이 EXP여도 베이스라인 기간(설치 후 14일 미만)에는 피드백을 노출하지 않는다.
+  // TEST-EXP(연구자 모드)는 예외(VL.isTestGroup). 실제 팝업(RealPopup)과 Studio 프리뷰가
+  // 이 하나의 구현을 공유한다 — Studio는 선택한 타임라인 시점에 맞는 installDate를 계산해
+  // mount/update에 넘겨줘서(_installDateForDay), 실제 사용자가 그 시점에 보는 화면을 그대로 재현한다.
   _isFeedbackActive(groupCfg) {
-    return groupCfg.feedback;
+    return (
+      groupCfg.feedback &&
+      (VL.isTestGroup(groupCfg.code) || !VL.isBaselinePeriod(this._installDate))
+    );
   }
 
   render() {
@@ -318,10 +330,12 @@ class Studio {
     Object.assign(this._state, updates);
     this._applyTokens();
     if (this._popup) {
+      const tl = VL.TIMELINE[this._state.timeline] || VL.TIMELINE.w1_mid;
       this._popup.update({
         onboarded: this._state.onboarded,
         group: this._state.group,
         timelineKey: this._state.timeline,
+        installDate: _installDateForDay(tl.day),
       });
     }
   }
@@ -430,10 +444,13 @@ class Studio {
     // mount popup
     const popEl = document.getElementById("vl-popup-root");
     this._popup = new ViewLensPopup(popEl);
+    const initialTl =
+      VL.TIMELINE[this._state.timeline] || VL.TIMELINE.w1_mid;
     this._popup.mount({
       onboarded: this._state.onboarded,
       group: this._state.group,
       timelineKey: this._state.timeline,
+      installDate: _installDateForDay(initialTl.day),
       onChange: ({ onboarded, group }) => {
         this._state.onboarded = onboarded;
         this._state.group = group;
