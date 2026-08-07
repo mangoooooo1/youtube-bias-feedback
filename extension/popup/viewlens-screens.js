@@ -265,16 +265,16 @@ function screenFeedback(currentWeek, selWeek) {
       const locked = wk.week > currentWeek;
       const active = wk.week === selWeek && !locked;
       return `<button data-week="${wk.week}" ${locked ? "disabled" : ""}
-      style="flex:1;padding:10px 4px;border-radius:12px;cursor:${locked ? "default" : "pointer"};
+      style="flex:0 0 72px;padding:10px 4px;border-radius:12px;cursor:${locked ? "default" : "pointer"};
         border:1.5px solid ${active ? "var(--vl-accent)" : "var(--vl-line)"};
         background:${active ? "var(--vl-accent-soft)" : "var(--vl-card)"};
         color:${locked ? "var(--vl-ink-3)" : active ? "var(--vl-accent)" : "var(--vl-ink-2)"};
         font-family:inherit;font-weight:700;font-size:13px;opacity:${locked ? 0.65 : 1};
         display:flex;flex-direction:column;align-items:center;gap:3px">
-      <span style="display:flex;align-items:center;gap:4px">
+      <span style="display:flex;align-items:center;gap:4px;white-space:nowrap">
         ${locked ? _lockIcon(10) : ""}${wk.label}
       </span>
-      <span style="font-size:9.5px;font-weight:500;color:inherit;opacity:0.8;">
+      <span style="font-size:9.5px;font-weight:500;color:inherit;opacity:0.8;white-space:nowrap">
         ${locked ? `${wk.week}주차 공개` : wk.isBaseline ? "베이스라인" : ""}
       </span>
     </button>`;
@@ -311,7 +311,7 @@ function screenFeedback(currentWeek, selWeek) {
     : "";
 
   return `<div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
-    <div style="display:flex;gap:8px" id="vl-week-btns">${weekBtns}</div>
+    <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:2px" id="vl-week-btns">${weekBtns}</div>
 
     <div style="display:flex;align-items:center;justify-content:space-between">
       <div>
