@@ -171,7 +171,9 @@ class ViewLensPopup {
     const tl = VL.TIMELINE[this._timelineKey] || VL.TIMELINE.w1_mid;
     const day = _elapsedDay(tl.day);
     const groupCfg = VL.GROUPS[this._group] || VL.GROUPS.EXP;
-    const selWeek = Math.min(this._selWeek, tl.currentWeek);
+    const totalWeeks = Math.ceil(VL.TOTAL_DAYS / 7);
+    const currentWeek = Math.min(totalWeeks, Math.max(1, Math.ceil(day / 7)));
+    const selWeek = Math.min(this._selWeek, currentWeek);
     const surveyWeek = tl.surveyWeek;
     const surveyPending = surveyWeek != null && !this._completed[surveyWeek];
     const showModal = surveyPending && !this._snoozed;
@@ -196,7 +198,7 @@ class ViewLensPopup {
       bodyHTML =
         this._tab === "today"
           ? screenToday()
-          : screenFeedback(tl.currentWeek, selWeek);
+          : screenFeedback(currentWeek, selWeek);
     } else {
       // 10-8: groupCfg.feedback이 true인데 feedbackActive가 false라는 건 "EXP인데 베이스라인
       // 게이트에 걸렸다"는 뜻이다(CON은 애초에 groupCfg.feedback이 false). 이 경우에만
@@ -219,7 +221,7 @@ class ViewLensPopup {
       ${showModal ? screenSurveyModal(surveyWeek) : ""}
     </div>`;
 
-    this._bind(groupCfg, surveyWeek, surveyPending, tl.currentWeek);
+    this._bind(groupCfg, surveyWeek, surveyPending, currentWeek);
   }
 
   _renderOnboarding() {
@@ -451,8 +453,7 @@ class Studio {
     // mount popup
     const popEl = document.getElementById("vl-popup-root");
     this._popup = new ViewLensPopup(popEl);
-    const initialTl =
-      VL.TIMELINE[this._state.timeline] || VL.TIMELINE.w1_mid;
+    const initialTl = VL.TIMELINE[this._state.timeline] || VL.TIMELINE.w1_mid;
     this._popup.mount({
       onboarded: this._state.onboarded,
       group: this._state.group,
