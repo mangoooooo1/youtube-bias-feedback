@@ -3,6 +3,7 @@ import {
   buildPrompt,
   generateReview,
   generateFallbackReview,
+  PROMPT_VERSION,
 } from "../../pipeline/llm.js";
 
 function baseArgs(overrides = {}) {
@@ -82,6 +83,8 @@ describe("generateFallbackReview", () => {
     );
     expect(result.topic).toBe("음악");
     expect(result.feedback).toContain("음악 영상을 3개 집중적으로 시청");
+    expect(result.source).toBe("fallback");
+    expect(result.promptVersion).toBe(PROMPT_VERSION);
   });
 
   it("top 비율이 0.5 초과면 top 2개를 언급하는 문구를 만든다", () => {
@@ -147,7 +150,12 @@ describe("generateReview — 실패 사유 분류 (failureReason 태깅)", () =>
     });
 
     const result = await generateReview("prompt");
-    expect(result).toEqual({ topic: "과학과 기술", feedback: "관찰 문장" });
+    expect(result).toEqual({
+      topic: "과학과 기술",
+      feedback: "관찰 문장",
+      source: "llm",
+      promptVersion: PROMPT_VERSION,
+    });
   });
 
   it("HTTP 오류 응답이면 http_error + httpStatus를 태깅한다", async () => {

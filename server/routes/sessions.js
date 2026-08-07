@@ -5,8 +5,8 @@ const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const router = express.Router();
 
 const insertSession = db.prepare(`
-  INSERT INTO sessions (anonymousId, sessionId, startTime, endTime, videoCount, categoryDistribution, entropy, totalMs, youtubeMs, geminiMs, llmStatus, failureReason, httpStatus, timedOut, feedbackNotifiedAt)
-  VALUES (@anonymousId, @sessionId, @startTime, @endTime, @videoCount, @categoryDistribution, @entropy, @totalMs, @youtubeMs, @geminiMs, @llmStatus, @failureReason, @httpStatus, @timedOut, @feedbackNotifiedAt)
+  INSERT INTO sessions (anonymousId, sessionId, startTime, endTime, videoCount, categoryDistribution, entropy, totalMs, youtubeMs, geminiMs, llmStatus, failureReason, httpStatus, timedOut, feedbackNotifiedAt, review, reviewTopic, source, promptVersion)
+  VALUES (@anonymousId, @sessionId, @startTime, @endTime, @videoCount, @categoryDistribution, @entropy, @totalMs, @youtubeMs, @geminiMs, @llmStatus, @failureReason, @httpStatus, @timedOut, @feedbackNotifiedAt, @review, @reviewTopic, @source, @promptVersion)
 `);
 
 //  지연시간 필드 — 확장이 측정해 전송. 선택 항목이며, 있으면 음수 아닌 정수여야 한다.
@@ -21,6 +21,9 @@ const FAILURE_REASONS = [
   "parse_error",
   "network_error",
 ];
+
+// 피드백 텍스트 출처 (Story 10-11) — llm.js generateReview/generateFallbackReview의 source와 1:1 대응.
+const SOURCES = ["llm", "fallback"];
 
 function validateSession(body) {
   const { startTime, endTime, videoCount, entropy } = body;
@@ -107,6 +110,21 @@ function validateSession(body) {
     };
   }
 
+  // 생성된 피드백 텍스트 (Story 10-11) — review/reviewTopic은 자유 텍스트, source만 분류값 검증
+  const { review, reviewTopic, source, promptVersion } = body;
+  for (const [field, value] of [
+    ["review", review],
+    ["reviewTopic", reviewTopic],
+    ["promptVersion", promptVersion],
+  ]) {
+    if (value !== undefined && value !== null && typeof value !== "string") {
+      return { code: ERROR_CODES.INVALID_FIELD_VALUE, field };
+    }
+  }
+  if (source !== undefined && source !== null && !SOURCES.includes(source)) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "source" };
+  }
+
   return null;
 }
 
@@ -138,6 +156,10 @@ router.post("/", (req, res, next) => {
     httpStatus,
     timedOut,
     feedbackNotifiedAt,
+    review,
+    reviewTopic,
+    source,
+    promptVersion,
   } = req.body;
 
   try {
@@ -160,6 +182,10 @@ router.post("/", (req, res, next) => {
       httpStatus: httpStatus ?? null,
       timedOut: timedOut ?? null,
       feedbackNotifiedAt: feedbackNotifiedAt ?? null,
+      review: review ?? null,
+      reviewTopic: reviewTopic ?? null,
+      source: source ?? null,
+      promptVersion: promptVersion ?? null,
     });
   } catch (err) {
     if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {

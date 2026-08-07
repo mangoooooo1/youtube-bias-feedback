@@ -11,6 +11,10 @@ const BIAS_WARN_RATIO = 0.7;
 // 변화 분석/편중 경고를 신뢰할 수 있는 최소 영상 수
 const MIN_VIDEOS_FOR_TREND = 5;
 
+// 파일럿 완료 후 커밋 태그(pilot-freeze-v1.0)로 동결 — 본조사 중에는 buildPrompt 문구를
+// 바꾸지 않고, 부득이하게 바꿀 때만 이 값을 올려 세션에 함께 저장된 값으로 처치 시점을 구분한다.
+export const PROMPT_VERSION = "viewlens-mirror-v1.0";
+
 // entropy는 소수점 둘째 자리로 반올림된 값(analysis.js)이므로, 부동소수점 오차로
 // 경계(예: 정확히 0.1) 판정이 빗나가지 않도록 차이값도 같은 정밀도로 반올림
 function roundedDelta(entropy, prevEntropy) {
@@ -192,6 +196,8 @@ export async function generateReview(prompt) {
     return {
       topic: (isObj && parsed.topic) || "",
       feedback: (isObj && parsed.feedback) || cleaned,
+      source: "llm",
+      promptVersion: PROMPT_VERSION,
     };
   } catch (error) {
     throw llmError("parse_error", `피드백 JSON 파싱 실패: ${error.message}`);
@@ -213,6 +219,8 @@ export function generateFallbackReview({
       topic: "",
       feedback:
         "이번 세션의 시청 데이터를 분석하지 못했습니다. 다음 세션을 기대해 주세요!",
+      source: "fallback",
+      promptVersion: PROMPT_VERSION,
     };
   }
 
@@ -257,5 +265,5 @@ export function generateFallbackReview({
   }
 
   const feedback = [summary, trend, skewNote].filter(Boolean).join(" ");
-  return { topic, feedback };
+  return { topic, feedback, source: "fallback", promptVersion: PROMPT_VERSION };
 }

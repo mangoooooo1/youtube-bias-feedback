@@ -44,6 +44,11 @@ function initializeDB() {
       failureReason        TEXT,     -- timeout | http_error | empty_response | parse_error | network_error (성공 시 NULL)
       httpStatus           INTEGER,  -- failureReason='http_error'일 때만 (429 쿼터 vs 5xx 장애 구분)
       timedOut             INTEGER,  -- 타임아웃으로 실패한 경우 1
+      -- 실제 생성된 피드백 텍스트 (Story 10-11) — 면담·로그·설문 삼각검증 및 처치 충실도 판정에 필요
+      review               TEXT,     -- 사용자에게 노출된 피드백 문장 (llm 성공 또는 fallback 결과)
+      reviewTopic          TEXT,     -- 같은 응답의 topic
+      source               TEXT,     -- 'llm' | 'fallback' — 어느 경로로 생성됐는지
+      promptVersion        TEXT,     -- llm.js PROMPT_VERSION — 파일럿/본조사 처치 동일성 추적용
       -- 피드백 알림·열람·확인 시점 (Story 10-6) — 측정 퍼널: 생성 → 알림(feedbackNotifiedAt)
       -- → 클릭(feedbackViewedAt, 알림 클릭 기준) → 확인(feedbackConfirmedAt, 블러 해제 버튼 클릭 기준 — 가장 엄격한 신호)
       feedbackNotifiedAt   TEXT,     -- 분석 완료 알림을 표시한 시각 (미대상/미전달이면 NULL)
@@ -100,6 +105,10 @@ function initializeDB() {
   addColumn("sessions", "feedbackNotifiedAt", "TEXT");
   addColumn("sessions", "feedbackViewedAt", "TEXT");
   addColumn("sessions", "feedbackConfirmedAt", "TEXT");
+  addColumn("sessions", "review", "TEXT");
+  addColumn("sessions", "reviewTopic", "TEXT");
+  addColumn("sessions", "source", "TEXT");
+  addColumn("sessions", "promptVersion", "TEXT");
 }
 
 // 이미 컬럼이 있으면(신규 DB) 조용히 넘어가고, 없으면(기존 DB) 추가한다.
