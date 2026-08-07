@@ -260,22 +260,17 @@ function buildWeeksData(allSessions, installDate) {
 }
 
 // 베이스라인 기준 엔트로피(VL.baselineH) — 이후 주차들과 비교하는 기준값이다.
-// 1주차 단독이 아니라 베이스라인 전체(설치 후 VL.BASELINE_DAYS일, 1·2주차)의 세션을 하나의
-// 분포로 합쳐 계산한다 — 10-8 설계 의도("2주로 확장해 기준을 안정화")에 따라 표본을 넓혀
-// 첫 주 하루이틀의 우연한 쏠림에 기준값이 휘둘리지 않게 한다.
-function calculateBaselineEntropy(allSessions, installDate) {
-  const baselineStart = dayFromInstall(installDate, 0);
-  const baselineEnd = dayFromInstall(installDate, VL.BASELINE_DAYS - 1);
-  const baselineSessions = allSessions.filter(
-    (s) =>
-      s.endTime &&
-      s.categoryDistribution &&
-      Object.keys(s.categoryDistribution).length > 0 &&
-      dateStr(new Date(s.endTime)) >= baselineStart &&
-      dateStr(new Date(s.endTime)) <= baselineEnd,
-  );
-  const dist = mergeDist(baselineSessions);
-  return Object.keys(dist).length > 0 ? VL.entropy(VL.dist(dist)) : 0;
+// 베이스라인 주차(1·2주차, weeks[0]/weeks[1])의 "주간 엔트로피"를 단순 평균한다.
+// 처음엔 두 주의 세션을 하나의 분포로 합쳐서 계산했으나, 그러면 두 주가 서로 다른
+// 카테고리 위주였을 때(예: 1주차 게임·음악 / 2주차 교육·과학) 등장 카테고리 수 자체가
+// 늘어나 개별 주차 어느 쪽보다도 높은 엔트로피가 나와, 이후 "1주치" 값과 비교할 때
+// 기준이 구조적으로 불리하게(항상 더 높게) 잡히는 문제가 있었다. 평균은 이후 주차와
+// 똑같이 "1주치 엔트로피" 단위로 맞춰 비교가 공정하다.
+function calculateBaselineEntropy(weeks) {
+  const baselineWeeks = weeks.filter((w) => w.isBaseline);
+  if (baselineWeeks.length === 0) return 0;
+  const sum = baselineWeeks.reduce((s, w) => s + w.entropy, 0);
+  return sum / baselineWeeks.length;
 }
 
 // ── Token application ─────────────────────────────────────────────────────────
@@ -634,7 +629,7 @@ async function boot() {
 
   if (installDate) {
     VL.weeks = buildWeeksData(sessions, installDate);
-    VL.baselineH = calculateBaselineEntropy(sessions, installDate);
+    VL.baselineH = calculateBaselineEntropy(VL.weeks);
   }
 
   // Apply theme tokens
@@ -775,7 +770,7 @@ async function boot() {
     }
     if (installDate) {
       VL.weeks = buildWeeksData(updatedSessions, installDate);
-      VL.baselineH = calculateBaselineEntropy(updatedSessions, installDate);
+      VL.baselineH = calculateBaselineEntropy(VL.weeks);
     }
     popup.render();
   });

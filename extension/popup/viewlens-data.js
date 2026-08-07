@@ -138,19 +138,14 @@ const weeks = [
 weeks.forEach((w) => {
   w.entropy = entropy(w.dist);
 });
-// 베이스라인 기준 엔트로피 — 1주차 단독이 아니라 베이스라인 전체(1·2주차)를 영상 수 가중
-// 평균으로 합쳐 계산한다. viewlens-popup.js의 calculateBaselineEntropy와 같은 규칙을
-// 목업 데이터에도 적용해, Studio 프리뷰가 실제 계산과 동일한 값을 보여주게 한다.
+// 베이스라인 기준 엔트로피 — 베이스라인 주차(1·2주차)의 "주간 엔트로피"를 단순 평균한다.
+// viewlens-popup.js의 calculateBaselineEntropy와 같은 규칙을 목업 데이터에도 적용해,
+// Studio 프리뷰가 실제 계산과 동일한 값을 보여주게 한다. (분포를 합쳐서 계산하면 서로
+// 다른 카테고리 위주인 두 주가 합쳐질 때 카테고리 수 자체가 늘어 개별 주차보다 높은
+// 값이 나와, 이후 "1주치" 값과 비교하기엔 기준이 불공정해진다 — 그래서 평균을 쓴다.)
 const baselineWeeks = weeks.filter((w) => w.isBaseline);
-const baselineTotalVids = baselineWeeks.reduce((s, w) => s + w.videoCount, 0);
-const baselineDist = {};
-baselineWeeks.forEach((w) => {
-  const weight = w.videoCount / baselineTotalVids;
-  w.dist.forEach((d) => {
-    baselineDist[d.key] = (baselineDist[d.key] ?? 0) + d.p * weight;
-  });
-});
-const baselineH = entropy(dist(baselineDist));
+const baselineH =
+  baselineWeeks.reduce((s, w) => s + w.entropy, 0) / baselineWeeks.length;
 
 const TIMELINE = {
   w1_mid: {
