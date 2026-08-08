@@ -10,7 +10,6 @@ import {
 import { fetchVideoCategories } from "./pipeline/youtube.js";
 import {
   calculateDistribution,
-  calculateTopicDistribution,
   calculateEntropy,
 } from "./pipeline/analysis.js";
 import {
@@ -195,19 +194,12 @@ async function analyzeSession(session) {
   const videoIds = session.videos.map((v) => v.videoId);
 
   const ytStart = Date.now();
-  const videoMetadata = await fetchVideoCategories(videoIds);
+  const categoryMap = await fetchVideoCategories(videoIds);
   const youtubeMs = Date.now() - ytStart;
-  const categoryIds = videoIds.map((id) => videoMetadata[id]?.categoryId ?? null);
-  const topicCategoriesPerVideo = videoIds.map(
-    (id) => videoMetadata[id]?.topicCategories ?? [],
-  );
+  const categoryIds = videoIds.map((id) => categoryMap[id]);
 
   const categoryDistribution = calculateDistribution(categoryIds);
   const entropy = calculateEntropy(categoryDistribution);
-  // 세밀 다양성 신호(Story 10-7) — 연구 분석용으로 세션 단위 저장만 한다. 팝업 노출 여부는
-  // 별도 결정 사항이라 analysisData(buildPrompt 입력)에는 아직 포함하지 않는다.
-  const topicDistribution = calculateTopicDistribution(topicCategoriesPerVideo);
-  const topicEntropy = calculateEntropy(topicDistribution);
   const videoCount = session.videos.length;
   const videoTitles = session.videos.map((v) => v.title).filter(Boolean);
 
@@ -218,15 +210,12 @@ async function analyzeSession(session) {
   await saveAnalysis(session.sessionId, {
     categoryDistribution,
     entropy,
-    topicDistribution,
-    topicEntropy,
     videoCount,
   });
   console.log("[background] 분석 완료:", {
     entropy,
     prevEntropy,
     categoryDistribution,
-    topicEntropy,
   });
 
   const analysisData = {
@@ -297,8 +286,6 @@ async function analyzeSession(session) {
       reviewTopic: result.topic,
       source: result.source,
       promptVersion: result.promptVersion,
-      topicDistribution,
-      topicEntropy,
     },
   );
 }
@@ -372,8 +359,6 @@ async function postSessionToServer(
         reviewTopic: metrics.reviewTopic,
         source: metrics.source,
         promptVersion: metrics.promptVersion,
-        topicDistribution: metrics.topicDistribution,
-        topicEntropy: metrics.topicEntropy,
       }),
     });
 

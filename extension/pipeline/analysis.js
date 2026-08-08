@@ -1,41 +1,22 @@
 import { getCategoryName } from "./categories.js";
 
-// 카테고리/채널/토픽 분포가 공유하는 "라벨 개수 세기 → 비율 정규화" 로직.
-function distributionFromLabels(labels) {
-  if (labels.length === 0) return {};
+export function calculateDistribution(categoryIds) {
+  const validIds = categoryIds.filter((id) => id !== null && id !== undefined);
+  if (validIds.length === 0) return {};
 
   const counts = {};
-  for (const label of labels) {
-    counts[label] = (counts[label] ?? 0) + 1;
+  for (const id of validIds) {
+    const name = getCategoryName(id);
+    counts[name] = (counts[name] ?? 0) + 1;
   }
 
-  const total = labels.length;
+  const total = validIds.length;
   const distribution = {};
-  for (const [label, count] of Object.entries(counts)) {
-    distribution[label] = Math.round((count / total) * 1000) / 1000;
+  for (const [name, count] of Object.entries(counts)) {
+    distribution[name] = Math.round((count / total) * 1000) / 1000;
   }
 
   return distribution;
-}
-
-export function calculateDistribution(categoryIds) {
-  const validIds = categoryIds.filter((id) => id !== null && id !== undefined);
-  return distributionFromLabels(validIds.map(getCategoryName));
-}
-
-// topicCategoriesPerVideo: 영상당 Wikipedia URL 배열(영상 하나가 토픽 여러 개에
-// 속할 수 있음) → 평탄화해서 "토픽 등장 횟수"로 집계한다.
-export function calculateTopicDistribution(topicCategoriesPerVideo) {
-  const labels = topicCategoriesPerVideo
-    .flat()
-    .filter((url) => typeof url === "string" && url.length > 0)
-    .map(topicLabelFromUrl);
-  return distributionFromLabels(labels);
-}
-
-function topicLabelFromUrl(url) {
-  const segment = url.split("/").pop() || url;
-  return decodeURIComponent(segment).replace(/_/g, " ");
 }
 
 export function calculateEntropy(distribution) {

@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   calculateDistribution,
-  calculateTopicDistribution,
   calculateEntropy,
   aggregateDailyData,
 } from "../../pipeline/analysis.js";
@@ -26,39 +25,6 @@ describe("calculateDistribution", () => {
   it("알 수 없는 카테고리 id는 '기타'로 묶인다", () => {
     const result = calculateDistribution([9999]);
     expect(result).toEqual({ 기타: 1 });
-  });
-});
-
-describe("calculateTopicDistribution", () => {
-  it("빈 배열이면 빈 객체를 반환한다", () => {
-    expect(calculateTopicDistribution([])).toEqual({});
-  });
-
-  it("영상당 여러 토픽을 평탄화해서 등장 횟수로 집계한다", () => {
-    // v1: Politics+Music, v2: Music → Music 2회, Politics 1회
-    const result = calculateTopicDistribution([
-      [
-        "https://en.wikipedia.org/wiki/Politics",
-        "https://en.wikipedia.org/wiki/Music",
-      ],
-      ["https://en.wikipedia.org/wiki/Music"],
-    ]);
-    expect(result).toEqual({ Music: 0.667, Politics: 0.333 });
-  });
-
-  it("Wikipedia URL의 밑줄을 공백으로 바꿔 사람이 읽을 라벨로 변환한다", () => {
-    const result = calculateTopicDistribution([
-      ["https://en.wikipedia.org/wiki/Video_game_culture"],
-    ]);
-    expect(result).toEqual({ "Video game culture": 1 });
-  });
-
-  it("빈 토픽 배열(topicDetails 없음)이 섞여 있어도 무시하고 계산한다", () => {
-    const result = calculateTopicDistribution([
-      ["https://en.wikipedia.org/wiki/Music"],
-      [],
-    ]);
-    expect(result).toEqual({ Music: 1 });
   });
 });
 
