@@ -36,8 +36,6 @@ async function fetchChunk(videoIds) {
     for (const item of data.items ?? []) {
       partial[item.id] = {
         categoryId: item.snippet?.categoryId ?? null,
-        channelId: item.snippet?.channelId ?? null,
-        channelTitle: item.snippet?.channelTitle ?? null,
         topicCategories: item.topicDetails?.topicCategories ?? [],
       };
     }
@@ -51,10 +49,7 @@ async function fetchChunk(videoIds) {
 
 function nullMap(videoIds) {
   return Object.fromEntries(
-    videoIds.map((id) => [
-      id,
-      { categoryId: null, channelId: null, channelTitle: null, topicCategories: [] },
-    ]),
+    videoIds.map((id) => [id, { categoryId: null, topicCategories: [] }]),
   );
 }
 

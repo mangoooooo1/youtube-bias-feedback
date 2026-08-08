@@ -35,10 +35,8 @@ function initializeDB() {
       videoCount           INTEGER,
       categoryDistribution TEXT,
       entropy              REAL,
-      -- 세밀 다양성 신호 (Story 10-7) — 같은 세션에서 채널/토픽 집중도를 categoryDistribution과
+      -- 세밀 다양성 신호 (Story 10-7) — 같은 세션에서 토픽 집중도를 categoryDistribution과
       -- 같은 패턴(세션 단위 집계)으로 저장. 연구 분석용이며 사용자 피드백(거울) 반영 여부는 미정.
-      channelDistribution  TEXT,     -- { 채널명: 비율 } JSON
-      channelEntropy       REAL,
       topicDistribution    TEXT,     -- { 토픽 라벨: 비율 } JSON (topicDetails.topicCategories 기반)
       topicEntropy         REAL,
       -- 세션 처리 지연시간 () — 확장이 측정해 전송, ms 단위
@@ -115,8 +113,6 @@ function initializeDB() {
   addColumn("sessions", "reviewTopic", "TEXT");
   addColumn("sessions", "source", "TEXT");
   addColumn("sessions", "promptVersion", "TEXT");
-  addColumn("sessions", "channelDistribution", "TEXT");
-  addColumn("sessions", "channelEntropy", "REAL");
   addColumn("sessions", "topicDistribution", "TEXT");
   addColumn("sessions", "topicEntropy", "REAL");
 }

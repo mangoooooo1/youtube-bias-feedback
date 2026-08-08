@@ -23,15 +23,6 @@ export function calculateDistribution(categoryIds) {
   return distributionFromLabels(validIds.map(getCategoryName));
 }
 
-// channelTitles: 영상당 1개(세션의 videoIds와 같은 순서). 카테고리와 달리 이미
-// 사람이 읽을 수 있는 이름이라 categories.js 같은 id→이름 매핑이 필요 없다.
-export function calculateChannelDistribution(channelTitles) {
-  const validTitles = channelTitles.filter(
-    (title) => title !== null && title !== undefined && title !== "",
-  );
-  return distributionFromLabels(validTitles);
-}
-
 // topicCategoriesPerVideo: 영상당 Wikipedia URL 배열(영상 하나가 토픽 여러 개에
 // 속할 수 있음) → 평탄화해서 "토픽 등장 횟수"로 집계한다.
 export function calculateTopicDistribution(topicCategoriesPerVideo) {

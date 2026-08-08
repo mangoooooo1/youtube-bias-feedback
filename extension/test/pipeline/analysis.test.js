@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   calculateDistribution,
-  calculateChannelDistribution,
   calculateTopicDistribution,
   calculateEntropy,
   aggregateDailyData,
@@ -27,22 +26,6 @@ describe("calculateDistribution", () => {
   it("알 수 없는 카테고리 id는 '기타'로 묶인다", () => {
     const result = calculateDistribution([9999]);
     expect(result).toEqual({ 기타: 1 });
-  });
-});
-
-describe("calculateChannelDistribution", () => {
-  it("빈 배열이면 빈 객체를 반환한다", () => {
-    expect(calculateChannelDistribution([])).toEqual({});
-  });
-
-  it("null/undefined/빈 문자열 채널명을 제외하고 계산한다", () => {
-    const result = calculateChannelDistribution(["A채널", null, "A채널", undefined, ""]);
-    expect(result).toEqual({ A채널: 1 });
-  });
-
-  it("여러 채널의 비율을 소수점 3자리로 반올림한다", () => {
-    const result = calculateChannelDistribution(["A채널", "A채널", "B채널"]);
-    expect(result).toEqual({ A채널: 0.667, B채널: 0.333 });
   });
 });
 

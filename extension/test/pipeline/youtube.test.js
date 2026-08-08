@@ -21,18 +21,14 @@ describe("fetchVideoCategories", () => {
     expect(requestedUrl).toContain("part=snippet%2CtopicDetails");
   });
 
-  it("categoryId/channelId/channelTitle/topicCategories를 영상별로 반환한다", async () => {
+  it("categoryId/topicCategories를 영상별로 반환한다", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
         items: [
           {
             id: "v1",
-            snippet: {
-              categoryId: "10",
-              channelId: "UC123",
-              channelTitle: "테스트 채널",
-            },
+            snippet: { categoryId: "10" },
             topicDetails: {
               topicCategories: ["https://en.wikipedia.org/wiki/Music"],
             },
@@ -45,8 +41,6 @@ describe("fetchVideoCategories", () => {
     expect(result).toEqual({
       v1: {
         categoryId: "10",
-        channelId: "UC123",
-        channelTitle: "테스트 채널",
         topicCategories: ["https://en.wikipedia.org/wiki/Music"],
       },
     });
@@ -60,12 +54,7 @@ describe("fetchVideoCategories", () => {
 
     const result = await fetchVideoCategories(["missing"]);
     expect(result).toEqual({
-      missing: {
-        categoryId: null,
-        channelId: null,
-        channelTitle: null,
-        topicCategories: [],
-      },
+      missing: { categoryId: null, topicCategories: [] },
     });
   });
 
@@ -73,36 +62,21 @@ describe("fetchVideoCategories", () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 403 });
 
     const result = await fetchVideoCategories(["v1"]);
-    expect(result.v1).toEqual({
-      categoryId: null,
-      channelId: null,
-      channelTitle: null,
-      topicCategories: [],
-    });
+    expect(result.v1).toEqual({ categoryId: null, topicCategories: [] });
   });
 
   it("네트워크 오류면 기본값 맵을 반환한다", async () => {
     global.fetch = vi.fn().mockRejectedValue(new TypeError("network down"));
 
     const result = await fetchVideoCategories(["v1"]);
-    expect(result.v1).toEqual({
-      categoryId: null,
-      channelId: null,
-      channelTitle: null,
-      topicCategories: [],
-    });
+    expect(result.v1).toEqual({ categoryId: null, topicCategories: [] });
   });
 
   it("topicDetails가 없는 영상은 topicCategories를 빈 배열로 반환한다", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
-        items: [
-          {
-            id: "v1",
-            snippet: { categoryId: "20", channelId: "UC1", channelTitle: "채널" },
-          },
-        ],
+        items: [{ id: "v1", snippet: { categoryId: "20" } }],
       }),
     });
 

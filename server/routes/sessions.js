@@ -5,16 +5,16 @@ const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const router = express.Router();
 
 const insertSession = db.prepare(`
-  INSERT INTO sessions (anonymousId, sessionId, startTime, endTime, videoCount, categoryDistribution, entropy, totalMs, youtubeMs, geminiMs, llmStatus, failureReason, httpStatus, timedOut, feedbackNotifiedAt, review, reviewTopic, source, promptVersion, channelDistribution, channelEntropy, topicDistribution, topicEntropy)
-  VALUES (@anonymousId, @sessionId, @startTime, @endTime, @videoCount, @categoryDistribution, @entropy, @totalMs, @youtubeMs, @geminiMs, @llmStatus, @failureReason, @httpStatus, @timedOut, @feedbackNotifiedAt, @review, @reviewTopic, @source, @promptVersion, @channelDistribution, @channelEntropy, @topicDistribution, @topicEntropy)
+  INSERT INTO sessions (anonymousId, sessionId, startTime, endTime, videoCount, categoryDistribution, entropy, totalMs, youtubeMs, geminiMs, llmStatus, failureReason, httpStatus, timedOut, feedbackNotifiedAt, review, reviewTopic, source, promptVersion, topicDistribution, topicEntropy)
+  VALUES (@anonymousId, @sessionId, @startTime, @endTime, @videoCount, @categoryDistribution, @entropy, @totalMs, @youtubeMs, @geminiMs, @llmStatus, @failureReason, @httpStatus, @timedOut, @feedbackNotifiedAt, @review, @reviewTopic, @source, @promptVersion, @topicDistribution, @topicEntropy)
 `);
 
 //  지연시간 필드 — 확장이 측정해 전송. 선택 항목이며, 있으면 음수 아닌 정수여야 한다.
 const LATENCY_FIELDS = ["totalMs", "youtubeMs", "geminiMs"];
 
 // entropy 형태 필드 — 선택 항목이며, 있으면 음수 아닌 유한수여야 한다.
-// channelEntropy/topicEntropy는 세밀 다양성 신호(Story 10-7), entropy(카테고리)와 동일 검증.
-const ENTROPY_FIELDS = ["entropy", "channelEntropy", "topicEntropy"];
+// topicEntropy는 세밀 다양성 신호(Story 10-7), entropy(카테고리)와 동일 검증.
+const ENTROPY_FIELDS = ["entropy", "topicEntropy"];
 
 //  LLM 폴백 로깅 — 확장의 실패 분류값. server/db.js·llm.js와 1:1 대응.
 const LLM_STATUSES = ["success", "fallback"];
@@ -176,8 +176,6 @@ router.post("/", (req, res, next) => {
     reviewTopic,
     source,
     promptVersion,
-    channelDistribution,
-    channelEntropy,
     topicDistribution,
     topicEntropy,
   } = req.body;
@@ -206,9 +204,6 @@ router.post("/", (req, res, next) => {
       reviewTopic: reviewTopic ?? null,
       source: source ?? null,
       promptVersion: promptVersion ?? null,
-      channelDistribution:
-        channelDistribution != null ? JSON.stringify(channelDistribution) : null,
-      channelEntropy: channelEntropy ?? null,
       topicDistribution:
         topicDistribution != null ? JSON.stringify(topicDistribution) : null,
       topicEntropy: topicEntropy ?? null,
