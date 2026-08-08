@@ -3,6 +3,7 @@ import {
   buildPrompt,
   generateReview,
   generateFallbackReview,
+  PROMPT_VERSION,
 } from "../../pipeline/llm.js";
 
 function baseArgs(overrides = {}) {
@@ -27,6 +28,17 @@ describe("buildPrompt — 트렌드 문구 경계값 (buildTrendGuidance)", () =
       baseArgs({ videoCount: 5, entropy: 1.5, prevEntropy: 1.0 }),
     );
     expect(prompt).toContain("직전 세션보다 시청이 여러 주제로 다양해졌습니다");
+  });
+
+  it("다양성 증가/감소 문구는 방향과 무관하게 같은 강도(부드럽고 또렷하게)를 쓴다", () => {
+    const increased = buildPrompt(
+      baseArgs({ videoCount: 5, entropy: 1.5, prevEntropy: 1.0 }),
+    );
+    const decreased = buildPrompt(
+      baseArgs({ videoCount: 5, entropy: 0.5, prevEntropy: 1.0 }),
+    );
+    expect(increased).toContain("다양해졌습니다. 이 변화를 부드럽고 또렷하게 사실로");
+    expect(decreased).toContain("모였습니다. 이 변화를 부드럽고 또렷하게 사실로");
   });
 
   it("직전 대비 entropy delta가 -0.1 이하이면 '적은 주제에 모였다' 문구를 넣는다", () => {
@@ -73,15 +85,33 @@ describe("buildPrompt — 트렌드 문구 경계값 (buildTrendGuidance)", () =
     expect(prompt).toContain("다양성 지수: 0");
     expect(prompt).not.toContain("최대");
   });
+
+  it("영상 제목을 소재 수준으로만 지칭하라는 가드레일 문구를 포함한다", () => {
+    const prompt = buildPrompt(baseArgs());
+    expect(prompt).toContain("소재 수준으로만 지칭");
+    expect(prompt).toContain("주장이나 논조는 절대 요약·평가하지 마세요");
+  });
 });
 
 describe("generateFallbackReview", () => {
+  it("카테고리 데이터가 없으면 topic이 빈 문자열이 아닌 placeholder를 반환한다", () => {
+    const result = generateFallbackReview(
+      baseArgs({ categoryDistribution: {}, videoCount: 0 }),
+    );
+    expect(result.topic).toBe("분석 불가");
+    expect(result.topic).not.toBe("");
+    expect(result.source).toBe("fallback");
+    expect(result.promptVersion).toBe(PROMPT_VERSION);
+  });
+
   it("카테고리가 1개뿐이면 집중 시청 문구를 만든다", () => {
     const result = generateFallbackReview(
       baseArgs({ categoryDistribution: { 음악: 1 }, videoCount: 3 }),
     );
     expect(result.topic).toBe("음악");
     expect(result.feedback).toContain("음악 영상을 3개 집중적으로 시청");
+    expect(result.source).toBe("fallback");
+    expect(result.promptVersion).toBe(PROMPT_VERSION);
   });
 
   it("top 비율이 0.5 초과면 top 2개를 언급하는 문구를 만든다", () => {
@@ -147,7 +177,12 @@ describe("generateReview — 실패 사유 분류 (failureReason 태깅)", () =>
     });
 
     const result = await generateReview("prompt");
-    expect(result).toEqual({ topic: "과학과 기술", feedback: "관찰 문장" });
+    expect(result).toEqual({
+      topic: "과학과 기술",
+      feedback: "관찰 문장",
+      source: "llm",
+      promptVersion: PROMPT_VERSION,
+    });
   });
 
   it("HTTP 오류 응답이면 http_error + httpStatus를 태깅한다", async () => {
@@ -174,6 +209,51 @@ describe("generateReview — 실패 사유 분류 (failureReason 태깅)", () =>
     });
   });
 
+  it("생성된 feedback/topic에 정치·이념 관련 표현이 감지되면 policy_filtered로 분류한다", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: '{"topic":"정치","feedback":"이번 세션은 보수 성향 콘텐츠를 많이 보셨어요."}',
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    await expect(generateReview("prompt")).rejects.toMatchObject({
+      failureReason: "policy_filtered",
+    });
+  });
+
+  it("'진보'/'보수'가 정치와 무관한 의미로 쓰이면 필터링하지 않는다", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: '{"topic":"과학과 기술","feedback":"기술의 진보를 다루는 다큐멘터리와 보수 작업 관련 영상을 시청하셨어요."}',
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    const result = await generateReview("prompt");
+    expect(result.feedback).toContain("기술의 진보");
+  });
+
   it("응답 본문 JSON 파싱이 실패하면 parse_error로 분류한다", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -192,6 +272,44 @@ describe("generateReview — 실패 사유 분류 (failureReason 태깅)", () =>
       ok: true,
       json: async () => ({
         candidates: [{ content: { parts: [{ text: "이건 JSON이 아님" }] } }],
+      }),
+    });
+
+    await expect(generateReview("prompt")).rejects.toMatchObject({
+      failureReason: "parse_error",
+    });
+  });
+
+  it("feedback이 빈 문자열이면 parse_error로 분류한다(원문 그대로 노출되는 것을 방지)", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":""}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await expect(generateReview("prompt")).rejects.toMatchObject({
+      failureReason: "parse_error",
+    });
+  });
+
+  it("topic이 배열이면 parse_error로 분류한다", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":["음악","게임"],"feedback":"관찰 문장"}' }],
+            },
+          },
+        ],
       }),
     });
 

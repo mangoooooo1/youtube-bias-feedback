@@ -282,6 +282,10 @@ async function analyzeSession(session) {
       httpStatus,
       timedOut,
       feedbackNotifiedAt,
+      review: result.feedback,
+      reviewTopic: result.topic,
+      source: result.source,
+      promptVersion: result.promptVersion,
     },
   );
 }
@@ -351,6 +355,10 @@ async function postSessionToServer(
         httpStatus: metrics.httpStatus,
         timedOut: metrics.timedOut,
         feedbackNotifiedAt: metrics.feedbackNotifiedAt,
+        review: metrics.review,
+        reviewTopic: metrics.reviewTopic,
+        source: metrics.source,
+        promptVersion: metrics.promptVersion,
       }),
     });
 
