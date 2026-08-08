@@ -18,7 +18,7 @@ export async function fetchVideoCategories(videoIds) {
 async function fetchChunk(videoIds) {
   try {
     const params = new URLSearchParams({
-      part: "snippet",
+      part: "snippet,topicDetails",
       id: videoIds.join(","),
       key: YOUTUBE_API_KEY,
     });
@@ -31,10 +31,15 @@ async function fetchChunk(videoIds) {
 
     const data = await response.json();
 
-    // null을 기본값으로 초기화 → 삭제/비공개 영상은 null로 유지됨
+    // 기본값으로 초기화 → 삭제/비공개 영상은 null/빈 배열로 유지됨
     const partial = nullMap(videoIds);
     for (const item of data.items ?? []) {
-      partial[item.id] = item.snippet?.categoryId ?? null;
+      partial[item.id] = {
+        categoryId: item.snippet?.categoryId ?? null,
+        channelId: item.snippet?.channelId ?? null,
+        channelTitle: item.snippet?.channelTitle ?? null,
+        topicCategories: item.topicDetails?.topicCategories ?? [],
+      };
     }
 
     return partial;
@@ -45,7 +50,12 @@ async function fetchChunk(videoIds) {
 }
 
 function nullMap(videoIds) {
-  return Object.fromEntries(videoIds.map((id) => [id, null]));
+  return Object.fromEntries(
+    videoIds.map((id) => [
+      id,
+      { categoryId: null, channelId: null, channelTitle: null, topicCategories: [] },
+    ]),
+  );
 }
 
 function chunkArray(arr, size) {

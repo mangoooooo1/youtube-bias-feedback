@@ -196,7 +196,7 @@ async function analyzeSession(session) {
   const ytStart = Date.now();
   const categoryMap = await fetchVideoCategories(videoIds);
   const youtubeMs = Date.now() - ytStart;
-  const categoryIds = videoIds.map((id) => categoryMap[id]);
+  const categoryIds = videoIds.map((id) => categoryMap[id]?.categoryId ?? null);
 
   const categoryDistribution = calculateDistribution(categoryIds);
   const entropy = calculateEntropy(categoryDistribution);
