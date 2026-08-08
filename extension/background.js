@@ -10,6 +10,8 @@ import {
 import { fetchVideoCategories } from "./pipeline/youtube.js";
 import {
   calculateDistribution,
+  calculateChannelDistribution,
+  calculateTopicDistribution,
   calculateEntropy,
 } from "./pipeline/analysis.js";
 import {
@@ -194,12 +196,22 @@ async function analyzeSession(session) {
   const videoIds = session.videos.map((v) => v.videoId);
 
   const ytStart = Date.now();
-  const categoryMap = await fetchVideoCategories(videoIds);
+  const videoMetadata = await fetchVideoCategories(videoIds);
   const youtubeMs = Date.now() - ytStart;
-  const categoryIds = videoIds.map((id) => categoryMap[id]?.categoryId ?? null);
+  const categoryIds = videoIds.map((id) => videoMetadata[id]?.categoryId ?? null);
+  const channelTitles = videoIds.map((id) => videoMetadata[id]?.channelTitle ?? null);
+  const topicCategoriesPerVideo = videoIds.map(
+    (id) => videoMetadata[id]?.topicCategories ?? [],
+  );
 
   const categoryDistribution = calculateDistribution(categoryIds);
   const entropy = calculateEntropy(categoryDistribution);
+  // 세밀 다양성 신호(Story 10-7) — 연구 분석용으로 세션 단위 저장만 한다. 팝업 노출 여부는
+  // 별도 결정 사항이라 analysisData(buildPrompt 입력)에는 아직 포함하지 않는다.
+  const channelDistribution = calculateChannelDistribution(channelTitles);
+  const channelEntropy = calculateEntropy(channelDistribution);
+  const topicDistribution = calculateTopicDistribution(topicCategoriesPerVideo);
+  const topicEntropy = calculateEntropy(topicDistribution);
   const videoCount = session.videos.length;
   const videoTitles = session.videos.map((v) => v.title).filter(Boolean);
 
@@ -210,12 +222,18 @@ async function analyzeSession(session) {
   await saveAnalysis(session.sessionId, {
     categoryDistribution,
     entropy,
+    channelDistribution,
+    channelEntropy,
+    topicDistribution,
+    topicEntropy,
     videoCount,
   });
   console.log("[background] 분석 완료:", {
     entropy,
     prevEntropy,
     categoryDistribution,
+    channelEntropy,
+    topicEntropy,
   });
 
   const analysisData = {
@@ -286,6 +304,10 @@ async function analyzeSession(session) {
       reviewTopic: result.topic,
       source: result.source,
       promptVersion: result.promptVersion,
+      channelDistribution,
+      channelEntropy,
+      topicDistribution,
+      topicEntropy,
     },
   );
 }
@@ -359,6 +381,10 @@ async function postSessionToServer(
         reviewTopic: metrics.reviewTopic,
         source: metrics.source,
         promptVersion: metrics.promptVersion,
+        channelDistribution: metrics.channelDistribution,
+        channelEntropy: metrics.channelEntropy,
+        topicDistribution: metrics.topicDistribution,
+        topicEntropy: metrics.topicEntropy,
       }),
     });
 
