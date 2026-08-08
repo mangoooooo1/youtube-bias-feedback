@@ -222,6 +222,28 @@ describe("generateReview — 실패 사유 분류 (failureReason 태깅)", () =>
     });
   });
 
+  it("'진보'/'보수'가 정치와 무관한 의미로 쓰이면 필터링하지 않는다", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: '{"topic":"과학과 기술","feedback":"기술의 진보를 다루는 다큐멘터리와 보수 작업 관련 영상을 시청하셨어요."}',
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    const result = await generateReview("prompt");
+    expect(result.feedback).toContain("기술의 진보");
+  });
+
   it("응답 본문 JSON 파싱이 실패하면 parse_error로 분류한다", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
