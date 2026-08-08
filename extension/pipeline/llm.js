@@ -203,12 +203,24 @@ export async function generateReview(prompt) {
     .trim()
     .replace(/^```(?:json)?\n?/, "")
     .replace(/\n?```$/, "");
+  // topic/feedback은 세션 기록(연구 데이터)에 그대로 저장되므로, 배열·누락·빈 문자열 같은
+  // 형식 이상은 "성공"으로 취급하지 않고 여기서 걸러 결정론적 폴백으로 넘긴다.
   let topic, feedback;
   try {
     const parsed = JSON.parse(cleaned);
-    const isObj = parsed && typeof parsed === "object";
-    topic = (isObj && parsed.topic) || "";
-    feedback = (isObj && parsed.feedback) || cleaned;
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed) ||
+      typeof parsed.topic !== "string" ||
+      typeof parsed.feedback !== "string" ||
+      parsed.topic.trim() === "" ||
+      parsed.feedback.trim() === ""
+    ) {
+      throw new Error("topic/feedback 누락, 빈 값 또는 잘못된 타입");
+    }
+    topic = parsed.topic;
+    feedback = parsed.feedback;
   } catch (error) {
     throw llmError("parse_error", `피드백 JSON 파싱 실패: ${error.message}`);
   }
@@ -236,8 +248,10 @@ export function generateFallbackReview({
   );
 
   if (sorted.length === 0) {
+    // topic은 앱 전체에서 "항상 비어있지 않은 문자열"이 계약이다(서버 검증도 이를 전제로
+    // 한다) — 카테고리를 하나도 못 얻은 경우도 빈 문자열 대신 의미 있는 placeholder를 쓴다.
     return {
-      topic: "",
+      topic: "분석 불가",
       feedback:
         "이번 세션의 시청 데이터를 분석하지 못했습니다. 다음 세션을 기대해 주세요!",
       source: "fallback",

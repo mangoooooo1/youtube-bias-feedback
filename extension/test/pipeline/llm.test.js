@@ -94,6 +94,16 @@ describe("buildPrompt — 트렌드 문구 경계값 (buildTrendGuidance)", () =
 });
 
 describe("generateFallbackReview", () => {
+  it("카테고리 데이터가 없으면 topic이 빈 문자열이 아닌 placeholder를 반환한다", () => {
+    const result = generateFallbackReview(
+      baseArgs({ categoryDistribution: {}, videoCount: 0 }),
+    );
+    expect(result.topic).toBe("분석 불가");
+    expect(result.topic).not.toBe("");
+    expect(result.source).toBe("fallback");
+    expect(result.promptVersion).toBe(PROMPT_VERSION);
+  });
+
   it("카테고리가 1개뿐이면 집중 시청 문구를 만든다", () => {
     const result = generateFallbackReview(
       baseArgs({ categoryDistribution: { 음악: 1 }, videoCount: 3 }),
@@ -262,6 +272,44 @@ describe("generateReview — 실패 사유 분류 (failureReason 태깅)", () =>
       ok: true,
       json: async () => ({
         candidates: [{ content: { parts: [{ text: "이건 JSON이 아님" }] } }],
+      }),
+    });
+
+    await expect(generateReview("prompt")).rejects.toMatchObject({
+      failureReason: "parse_error",
+    });
+  });
+
+  it("feedback이 빈 문자열이면 parse_error로 분류한다(원문 그대로 노출되는 것을 방지)", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":""}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await expect(generateReview("prompt")).rejects.toMatchObject({
+      failureReason: "parse_error",
+    });
+  });
+
+  it("topic이 배열이면 parse_error로 분류한다", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":["음악","게임"],"feedback":"관찰 문장"}' }],
+            },
+          },
+        ],
       }),
     });
 
