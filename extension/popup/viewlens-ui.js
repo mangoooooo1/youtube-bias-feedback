@@ -1,3 +1,14 @@
+// innerHTML로 렌더되는 문자열에 외부 입력(영상 제목·LLM 생성 텍스트)을 넣기 전 이스케이프.
+// MV3 CSP가 인라인 스크립트 실행은 막지만, 마크업 주입으로 카드 위조·임의 링크 삽입은 가능하다.
+function vlEscapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function vlCard({ children = "", pad = 16, soft = false, style = "" } = {}) {
   return `<div style="background:${soft ? "var(--vl-card-2)" : "var(--vl-card)"};border:1px solid var(--vl-line);border-radius:16px;padding:${pad}px;${style}">${children}</div>`;
 }
@@ -135,7 +146,7 @@ function vlReview({
 
   const topicBlock = topic
     ? `<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:var(--vl-ink);line-height:1.4;letter-spacing:-0.02em;text-wrap:pretty">
-        당신은 '<span style="color:var(--vl-accent)">${topic}</span>'에 관심이 많습니다!
+        당신은 '<span style="color:var(--vl-accent)">${vlEscapeHtml(topic)}</span>'에 관심이 많습니다!
       </p>`
     : "";
 
@@ -158,7 +169,7 @@ function vlReview({
               ? `https://www.youtube.com/watch?v=${encodeURIComponent(v.videoId)}`
               : null;
             const dot = `<span style="width:7px;height:7px;border-radius:2.5px;background:${color};flex-shrink:0"></span>`;
-            const label = `<span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${v.title}</span>`;
+            const label = `<span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${vlEscapeHtml(v.title)}</span>`;
             const base = `display:flex;align-items:center;gap:8px;min-width:0`;
             return ytUrl
               ? `<a href="${ytUrl}" target="_blank" rel="noopener" class="vl-vid-link"
@@ -190,7 +201,7 @@ function vlReview({
         <span style="font-size:12.5px;font-weight:700;color:var(--vl-accent)">${title}</span>
       </div>
       ${topicBlock}
-      <p style="margin:0;font-size:13.5px;line-height:1.65;color:var(--vl-ink);text-wrap:pretty">${text}</p>
+      <p style="margin:0;font-size:13.5px;line-height:1.65;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(text)}</p>
       ${videoList}
     </div>
     ${revealOverlay}
