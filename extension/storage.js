@@ -89,20 +89,13 @@ export async function getLastWatchedAt() {
 export const VALID_GROUPS = ["EXP", "CON", "TEST-EXP", "TEST-CON"];
 
 export async function getOnboarding() {
-  const { anonymousId, group, installDate, surveyStatus } =
-    await chrome.storage.local.get([
-      "anonymousId",
-      "group",
-      "installDate",
-      "surveyStatus",
-    ]);
+  const { anonymousId, group, installDate } = await chrome.storage.local.get([
+    "anonymousId",
+    "group",
+    "installDate",
+  ]);
   if (!group) return null;
-  return {
-    anonymousId,
-    group,
-    installDate,
-    surveyStatus: surveyStatus ?? { week1: false, week2: false, week3: false },
-  };
+  return { anonymousId, group, installDate };
 }
 
 export async function saveOnboarding(group) {
@@ -110,22 +103,7 @@ export async function saveOnboarding(group) {
     anonymousId: crypto.randomUUID(),
     group,
     installDate: new Date().toISOString(),
-    surveyStatus: { week1: false, week2: false, week3: false },
   });
-}
-
-export function markSurveyComplete(week) {
-  queue = queue.then(() => _markSurveyComplete(week));
-  return queue;
-}
-
-async function _markSurveyComplete(week) {
-  const { surveyStatus } = await chrome.storage.local.get("surveyStatus");
-  const updated = {
-    ...(surveyStatus ?? { week1: false, week2: false, week3: false }),
-    [week]: true,
-  };
-  await chrome.storage.local.set({ surveyStatus: updated });
 }
 
 export function saveAnalysis(sessionId, analysisResult) {

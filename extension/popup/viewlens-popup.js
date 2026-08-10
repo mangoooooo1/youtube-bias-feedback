@@ -189,8 +189,8 @@ function buildWeeksData(allSessions, installDate) {
   const weeks = [];
 
   for (let w = 1; w <= VL.TOTAL_WEEKS; w++) {
-    const startOffset = (w - 1) * 7; // day offset from install
-    const endOffset = w * 7 - 1;
+    const startOffset = (w - 1) * VL.DAYS_PER_PERIOD; // day offset from install
+    const endOffset = w * VL.DAYS_PER_PERIOD - 1;
     const isBaseline = startOffset < VL.BASELINE_DAYS; // 14일(2주) 미만이면 베이스라인 — 1·2주차
 
     const weekStart = dayFromInstall(installDate, startOffset);
@@ -201,9 +201,9 @@ function buildWeeksData(allSessions, installDate) {
       return d >= weekStart && d <= weekEnd;
     });
 
-    // Daily entropy (7 values — 0 if no data that day)
+    // Daily entropy (기간 내 일수만큼 — 0 if no data that day)
     const daily = [];
-    for (let d = 0; d < 7; d++) {
+    for (let d = 0; d < VL.DAYS_PER_PERIOD; d++) {
       const dayKey = dayFromInstall(installDate, startOffset + d);
       const daySess = weekSessions.filter(
         (s) => dateStr(new Date(s.endTime)) === dayKey,
@@ -242,7 +242,7 @@ function buildWeeksData(allSessions, installDate) {
 
     weeks.push({
       week: w,
-      label: `${w}주차`,
+      label: VL.periodLabel(w),
       isBaseline,
       range,
       videoCount: totalVids,
@@ -297,50 +297,6 @@ function calcTimelineKey(installDate) {
     .filter(([, tl]) => days >= tl.day)
     .sort((a, b) => b[1].day - a[1].day)[0];
   return reached ? reached[0] : "w1_mid";
-}
-
-// ── Survey status helpers ─────────────────────────────────────────────────────
-
-function storageToCompleted(surveyStatus) {
-  if (!surveyStatus) return {};
-  return {
-    ...(surveyStatus.week1 ? { 1: true } : {}),
-    ...(surveyStatus.week2 ? { 2: true } : {}),
-    ...(surveyStatus.week3 ? { 3: true } : {}),
-  };
-}
-
-async function markWeekComplete(week) {
-  const key = `week${week}`;
-  const { surveyStatus } = await chrome.storage.local.get("surveyStatus");
-  const updated = {
-    week1: false,
-    week2: false,
-    week3: false,
-    ...(surveyStatus || {}),
-    [key]: true,
-  };
-  await chrome.storage.local.set({ surveyStatus: updated });
-}
-
-// ── RealPopup: persists survey to storage ─────────────────────────────────────
-
-class RealPopup extends ViewLensPopup {
-  constructor(container, surveyStatus) {
-    super(container);
-    this._completed = storageToCompleted(surveyStatus);
-  }
-
-  // _isFeedbackActive는 오버라이드하지 않는다 — 베이스라인 게이트는 ViewLensPopup 기본 구현
-  // 하나로 통일해, Studio 프리뷰와 실제 팝업이 항상 같은 규칙을 따르게 한다(viewlens-app.js 참고).
-
-  _bind(groupCfg, surveyWeek, surveyPending, currentWeek) {
-    super._bind(groupCfg, surveyWeek, surveyPending, currentWeek);
-    const doneBtn = this.container.querySelector("#vl-survey-done");
-    if (doneBtn && surveyWeek != null) {
-      doneBtn.addEventListener("click", () => markWeekComplete(surveyWeek));
-    }
-  }
 }
 
 // participants 서버 등록 — 성공(200) 시에만 participantSynced 플래그를 저장한다.
@@ -547,7 +503,6 @@ async function boot() {
   const stored = await chrome.storage.local.get([
     "group",
     "installDate",
-    "surveyStatus",
     "sessions",
     "tone",
     "dark",
@@ -625,7 +580,7 @@ async function boot() {
   applyTokens(popEl, toneName, darkMode);
 
   // Mount popup
-  const popup = new RealPopup(popEl, stored.surveyStatus);
+  const popup = new ViewLensPopup(popEl);
   popup.mount({
     onboarded: !!stored.group,
     group: stored.group || null,
@@ -644,7 +599,6 @@ async function boot() {
           participantCode,
           group: g,
           installDate,
-          surveyStatus: { week1: false, week2: false, week3: false },
           participantSynced: false,
         });
 
@@ -660,7 +614,6 @@ async function boot() {
           "group",
           "participantCode",
           "installDate",
-          "surveyStatus",
           "participantSynced",
         ]);
         window.location.reload();

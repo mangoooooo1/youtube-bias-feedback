@@ -148,97 +148,34 @@ const baselineH =
   baselineWeeks.reduce((s, w) => s + w.entropy, 0) / baselineWeeks.length;
 
 const TIMELINE = {
-  w1_mid: {
-    label: "1주차 진행 중",
-    day: 4,
-    currentWeek: 1,
-    surveyWeek: null,
-    todayWeek: 1,
-  },
-  w1_end: {
-    label: "1주차 종료 · 설문",
-    day: 7,
-    currentWeek: 1,
-    surveyWeek: 1,
-    todayWeek: 1,
-  },
-  w2_mid: {
-    label: "2주차 진행 중",
-    day: 11,
-    currentWeek: 2,
-    surveyWeek: null,
-    todayWeek: 2,
-  },
-  w2_end: {
-    label: "2주차 종료 · 설문",
-    day: 14,
-    currentWeek: 2,
-    surveyWeek: 2,
-    todayWeek: 2,
-  },
-  w3_mid: {
-    label: "3주차 진행 중",
-    day: 18,
-    currentWeek: 3,
-    surveyWeek: null,
-    todayWeek: 3,
-  },
-  w3_end: {
-    label: "3주차 종료 · 설문",
-    day: 21,
-    currentWeek: 3,
-    surveyWeek: 3,
-    todayWeek: 3,
-  },
-  w4_mid: {
-    label: "4주차 진행 중",
-    day: 25,
-    currentWeek: 4,
-    surveyWeek: null,
-    todayWeek: 4,
-  },
-  // 4~6주차는 surveyWeek을 비워둔다 — 주차별 설문 배너(week1~3)는 10-10에서
-  // "6주 종료 시점 1회 회고형" 설문으로 전면 재설계될 예정이라, 여기서 미리
-  // week4~6 배너를 잇는 건 곧 버려질 코드를 늘리는 셈이다(storageToCompleted도 week1~3만 처리).
-  w4_end: {
-    label: "4주차 종료",
-    day: 28,
-    currentWeek: 4,
-    surveyWeek: null,
-    todayWeek: 4,
-  },
-  w5_mid: {
-    label: "5주차 진행 중",
-    day: 32,
-    currentWeek: 5,
-    surveyWeek: null,
-    todayWeek: 5,
-  },
-  w5_end: {
-    label: "5주차 종료",
-    day: 35,
-    currentWeek: 5,
-    surveyWeek: null,
-    todayWeek: 5,
-  },
-  w6_mid: {
-    label: "6주차 진행 중",
-    day: 39,
-    currentWeek: 6,
-    surveyWeek: null,
-    todayWeek: 6,
-  },
+  w1_mid: { label: "1주차 진행 중", day: 4, currentWeek: 1, todayWeek: 1 },
+  w1_end: { label: "1주차 종료", day: 7, currentWeek: 1, todayWeek: 1 },
+  w2_mid: { label: "2주차 진행 중", day: 11, currentWeek: 2, todayWeek: 2 },
+  w2_end: { label: "2주차 종료", day: 14, currentWeek: 2, todayWeek: 2 },
+  w3_mid: { label: "3주차 진행 중", day: 18, currentWeek: 3, todayWeek: 3 },
+  w3_end: { label: "3주차 종료", day: 21, currentWeek: 3, todayWeek: 3 },
+  w4_mid: { label: "4주차 진행 중", day: 25, currentWeek: 4, todayWeek: 4 },
+  w4_end: { label: "4주차 종료", day: 28, currentWeek: 4, todayWeek: 4 },
+  w5_mid: { label: "5주차 진행 중", day: 32, currentWeek: 5, todayWeek: 5 },
+  w5_end: { label: "5주차 종료", day: 35, currentWeek: 5, todayWeek: 5 },
+  w6_mid: { label: "6주차 진행 중", day: 39, currentWeek: 6, todayWeek: 6 },
   w6_end: {
     label: "6주차 종료 · 연구 종료",
     day: 42,
     currentWeek: 6,
-    surveyWeek: null,
     todayWeek: 6,
   },
 };
 // 테스트 기간으로 7일로 단축
 const TOTAL_DAYS = 7;
-const TOTAL_WEEKS = Math.ceil(TOTAL_DAYS / 7);
+// 탭을 며칠 단위로 나눌지 — 평소 운영값은 7(주 단위), 테스트 기간엔 1(일 단위)로 촘촘히 확인
+const DAYS_PER_PERIOD = 1;
+const TOTAL_WEEKS = Math.ceil(TOTAL_DAYS / DAYS_PER_PERIOD);
+
+// DAYS_PER_PERIOD가 1이면 "N일차", 그 외(평소 7)엔 "N주차"로 표기
+function periodLabel(n) {
+  return DAYS_PER_PERIOD === 1 ? `${n}일차` : `${n}주차`;
+}
 
 const GROUPS = {
   EXP: {
@@ -315,7 +252,9 @@ window.VL = {
   baselineH,
   TIMELINE,
   TOTAL_DAYS,
+  DAYS_PER_PERIOD,
   TOTAL_WEEKS,
+  periodLabel,
   GROUPS,
   TONES,
   BASELINE_DAYS,

@@ -106,7 +106,7 @@ function vlMiniLine({ data = [], baseline = null, height = 64 } = {}) {
   const vals = baseline != null ? [...data, baseline] : data;
   const lo = Math.min(...vals) - 0.25;
   const hi = Math.max(...vals) + 0.25;
-  const x = (i) => pad + (i * (W - pad * 2)) / (data.length - 1);
+  const x = (i) => pad + (i * (W - pad * 2)) / (data.length - 1 || 1);
   const y = (v) => H - pad - ((v - lo) / (hi - lo)) * (H - pad * 2);
   const pts = data.map((v, i) => `${x(i)},${y(v)}`).join(" ");
   const area = `${pad},${H - pad} ${pts} ${W - pad},${H - pad}`;

@@ -77,7 +77,10 @@ function _popupHeader(groupCfg, day) {
 function _tabs(activeTab, needsConfirmNudge = false) {
   const list = [
     { id: "today", label: "오늘" },
-    { id: "feedback", label: "주차별 피드백" },
+    {
+      id: "feedback",
+      label: VL.DAYS_PER_PERIOD === 1 ? "일별 피드백" : "주차별 피드백",
+    },
   ];
   return `<div style="display:flex;gap:4px;padding:10px 16px 0;background:var(--vl-card)">
     ${list
@@ -94,14 +97,6 @@ function _tabs(activeTab, needsConfirmNudge = false) {
   </div>`;
 }
 
-function _surveyBanner(week) {
-  return `<button id="vl-banner" style="width:100%;box-sizing:border-box;display:flex;align-items:center;gap:9px;padding:10px 16px;border:none;border-bottom:1px solid var(--vl-line);cursor:pointer;background:var(--vl-accent-soft);font-family:inherit;text-align:left">
-    <span style="width:7px;height:7px;border-radius:50%;background:var(--vl-accent);flex-shrink:0;animation:vlBlink 1.6s ease-in-out infinite"></span>
-    <span style="flex:1;font-size:12.5px;font-weight:600;color:var(--vl-accent)">${week}주차 설문이 기다리고 있어요</span>
-    <span style="font-size:11.5px;font-weight:700;color:var(--vl-accent)">열기 ›</span>
-  </button>`;
-}
-
 // ── ViewLensPopup class ───────────────────────────────────────────────────────
 
 class ViewLensPopup {
@@ -111,8 +106,6 @@ class ViewLensPopup {
   constructor(container) {
     this.container = container;
     this._tab = "today";
-    this._completed = {}; // { [week]: true }
-    this._snoozed = false;
     this._selWeek = 1;
     this._selectedDate = new Date();
     // External app state (set via mount)
@@ -143,17 +136,15 @@ class ViewLensPopup {
 
   /** Called by Studio when tweaks change */
   update({ onboarded, group, timelineKey, installDate }) {
-    const tlChanged = timelineKey !== this._timelineKey;
     this._onboarded = onboarded;
     this._group = group;
     this._timelineKey = timelineKey;
     this._installDate = installDate ?? null;
-    if (tlChanged) this._snoozed = false;
     this.render();
   }
 
   // 10-8: 그룹이 EXP여도 베이스라인 기간(설치 후 14일 미만)에는 피드백을 노출하지 않는다.
-  // TEST-EXP(연구자 모드)는 예외(VL.isTestGroup). 실제 팝업(RealPopup)과 Studio 프리뷰가
+  // TEST-EXP(연구자 모드)는 예외(VL.isTestGroup). 실제 팝업과 Studio 프리뷰가
   // 이 하나의 구현을 공유한다 — Studio는 선택한 타임라인 시점에 맞는 installDate를 계산해
   // mount/update에 넘겨줘서(_installDateForDay), 실제 사용자가 그 시점에 보는 화면을 그대로 재현한다.
   _isFeedbackActive(groupCfg) {
@@ -172,11 +163,11 @@ class ViewLensPopup {
     const day = _elapsedDay(tl.day);
     const groupCfg = VL.GROUPS[this._group] || VL.GROUPS.EXP;
     const totalWeeks = VL.TOTAL_WEEKS;
-    const currentWeek = Math.min(totalWeeks, Math.max(1, Math.ceil(day / 7)));
+    const currentWeek = Math.min(
+      totalWeeks,
+      Math.max(1, Math.ceil(day / VL.DAYS_PER_PERIOD)),
+    );
     const selWeek = Math.min(this._selWeek, currentWeek);
-    const surveyWeek = tl.surveyWeek;
-    const surveyPending = surveyWeek != null && !this._completed[surveyWeek];
-    const showModal = surveyPending && !this._snoozed;
 
     if (this._tab === "today") {
       const d = buildDataForDate(VL._allSessions || [], this._selectedDate);
@@ -218,13 +209,11 @@ class ViewLensPopup {
 
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
       ${_popupHeader(groupCfg, day)}
-      ${surveyPending && this._snoozed ? _surveyBanner(surveyWeek) : ""}
       ${feedbackActive ? _tabs(this._tab, !VL._todayConfirmed) : ""}
       <div style="flex:1;overflow-y:auto;overflow-x:hidden">${bodyHTML}</div>
-      ${showModal ? screenSurveyModal(surveyWeek) : ""}
     </div>`;
 
-    this._bind(groupCfg, surveyWeek, surveyPending, currentWeek);
+    this._bind(groupCfg, currentWeek);
   }
 
   _renderOnboarding() {
@@ -237,7 +226,7 @@ class ViewLensPopup {
     });
   }
 
-  _bind(groupCfg, surveyWeek, surveyPending, currentWeek) {
+  _bind(groupCfg, currentWeek) {
     // Tabs
     if (this._isFeedbackActive(groupCfg)) {
       this.container.querySelectorAll("[data-tab]").forEach((btn) => {
@@ -247,26 +236,6 @@ class ViewLensPopup {
         });
       });
     }
-    // Survey banner → reopen modal
-    const banner = this.container.querySelector("#vl-banner");
-    if (banner)
-      banner.addEventListener("click", () => {
-        this._snoozed = false;
-        this.render();
-      });
-    // Survey modal buttons
-    const doneBtn = this.container.querySelector("#vl-survey-done");
-    const laterBtn = this.container.querySelector("#vl-survey-later");
-    if (doneBtn)
-      doneBtn.addEventListener("click", () => {
-        this._completed = { ...this._completed, [surveyWeek]: true };
-        this.render();
-      });
-    if (laterBtn)
-      laterBtn.addEventListener("click", () => {
-        this._snoozed = true;
-        this.render();
-      });
     // Week buttons
     this.container
       .querySelectorAll("#vl-week-btns [data-week]")
