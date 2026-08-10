@@ -188,7 +188,7 @@ function buildWeeksData(allSessions, installDate) {
 
   const weeks = [];
 
-  for (let w = 1; w <= 6; w++) {
+  for (let w = 1; w <= VL.TOTAL_WEEKS; w++) {
     const startOffset = (w - 1) * 7; // day offset from install
     const endOffset = w * 7 - 1;
     const isBaseline = startOffset < VL.BASELINE_DAYS; // 14일(2주) 미만이면 베이스라인 — 1·2주차
@@ -267,7 +267,7 @@ function buildWeeksData(allSessions, installDate) {
 // 기준이 구조적으로 불리하게(항상 더 높게) 잡히는 문제가 있었다. 평균은 이후 주차와
 // 똑같이 "1주치 엔트로피" 단위로 맞춰 비교가 공정하다.
 function calculateBaselineEntropy(weeks) {
-  const baselineWeeks = weeks.filter((w) => w.isBaseline);
+  const baselineWeeks = weeks.filter((w) => w.isBaseline && w.sessionCount > 0);
   if (baselineWeeks.length === 0) return 0;
   const sum = baselineWeeks.reduce((s, w) => s + w.entropy, 0);
   return sum / baselineWeeks.length;

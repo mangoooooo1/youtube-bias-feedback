@@ -237,6 +237,7 @@ const TIMELINE = {
   },
 };
 const TOTAL_DAYS = 42;
+const TOTAL_WEEKS = Math.ceil(TOTAL_DAYS / 7);
 
 const GROUPS = {
   EXP: {
@@ -313,6 +314,7 @@ window.VL = {
   baselineH,
   TIMELINE,
   TOTAL_DAYS,
+  TOTAL_WEEKS,
   GROUPS,
   TONES,
   BASELINE_DAYS,
