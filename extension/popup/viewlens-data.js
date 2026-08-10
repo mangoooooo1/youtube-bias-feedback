@@ -27,14 +27,14 @@ function entropy(arr) {
   return arr.reduce((h, d) => (d.p > 0 ? h - d.p * Math.log2(d.p) : h), 0);
 }
 
-// 베이스라인 기간(설치 후 14일 미만) 판정 — extension/pipeline/baseline.js와 규칙이 동일해야 한다.
+// 베이스라인 기간(설치 후 2일 미만) 판정 — extension/pipeline/baseline.js와 규칙이 동일해야 한다.
+// 테스트 기간으로 2일로 단축
 // 팝업/Studio는 classic script라 ESM import를 쓸 수 없어(background.js는 type=module) 로직을 중복 정의한다.
-const BASELINE_DAYS = 14;
+const BASELINE_DAYS = 2;
 function isBaselinePeriod(installDate, now = new Date()) {
   if (!installDate) return true;
   return (
-    (now.getTime() - new Date(installDate).getTime()) / 86400000 <
-    BASELINE_DAYS
+    (now.getTime() - new Date(installDate).getTime()) / 86400000 < BASELINE_DAYS
   );
 }
 
@@ -236,7 +236,8 @@ const TIMELINE = {
     todayWeek: 6,
   },
 };
-const TOTAL_DAYS = 42;
+// 테스트 기간으로 7일로 단축
+const TOTAL_DAYS = 7;
 const TOTAL_WEEKS = Math.ceil(TOTAL_DAYS / 7);
 
 const GROUPS = {
