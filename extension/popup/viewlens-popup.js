@@ -402,18 +402,6 @@ window.validateParticipantCode = validateParticipantCode;
 //   팝업은 싱글턴이라 boot 시점의 잔여 livePopupEvent는 곧 "닫힌 이전 팝업"의 확정 이벤트다.
 //   sendBeacon을 쓰지 않으므로 중복 전송이 없다(전송은 항상 다음 open의 flush 한 경로).
 
-// 실제 LLM 리뷰인지(플레이스홀더·빈 값 제외) — feedbackViewed 판정용
-const POPUP_PLACEHOLDER_REVIEWS = new Set([
-  "시청 패턴을 분석하고 있어요. 잠시 후 시청 분석이 업데이트돼요.",
-]);
-function isRealReview(text) {
-  return (
-    typeof text === "string" &&
-    text.trim() !== "" &&
-    !POPUP_PLACEHOLDER_REVIEWS.has(text.trim())
-  );
-}
-
 // "피드백 확인하기" 블러 해제 여부 () — 한 번 확인한 세션은 로컬에 기억해 다음에
 // 다시 팝업을 열어도 또 가리지 않는다. feedbackViewedAt(알림 클릭)보다 엄격한 별도 신호.
 async function isFeedbackConfirmed(sessionId) {
