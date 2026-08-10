@@ -24,6 +24,10 @@ jobs:
             git checkout main
             git pull origin main
             pnpm install --prod
+            if [ -z "${{ secrets.DB_ENCRYPTION_KEY }}" ]; then
+              echo "DB_ENCRYPTION_KEY secret이 비어 있어 배포를 중단합니다." >&2
+              exit 1
+            fi
             echo "PORT=3000" > server/.env
             echo "NODE_ENV=production" >> server/.env
             echo "DB_ENCRYPTION_KEY=${{ secrets.DB_ENCRYPTION_KEY }}" >> server/.env
