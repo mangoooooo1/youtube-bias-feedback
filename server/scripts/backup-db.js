@@ -64,7 +64,7 @@ async function main() {
   const dest = path.join(BACKUP_DIR, `youtube_bias-${timestamp()}.db`);
   const db = new Database(DB_PATH);
   db.pragma("cipher = 'sqlcipher'"); // db.js와 동일 cipher(AES-256)로 맞춰야 키가 들어맞는다
-  db.pragma(`key='${DB_ENCRYPTION_KEY}'`);
+  db.key(Buffer.from(DB_ENCRYPTION_KEY)); // 문자열 보간 대신 바인딩 API — db.js와 동일 이유
   try {
     db.pragma("wal_checkpoint(TRUNCATE)"); // WAL 내용을 메인 파일에 전부 반영
   } finally {
