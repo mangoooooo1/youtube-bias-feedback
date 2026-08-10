@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ['**']
+    branches: ["**"]
   pull_request:
     branches: [main]
 
@@ -12,15 +12,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          cache: 'npm'
-          cache-dependency-path: server/package-lock.json
+          node-version: "24"
+          cache: "pnpm"
 
       - name: Install server dependencies
-        run: npm ci --prefix server
+        run: pnpm install --prod --filter server
 
       - name: Validate server syntax
         run: |

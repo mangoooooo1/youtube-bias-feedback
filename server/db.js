@@ -1,9 +1,20 @@
-const Database = require("better-sqlite3");
+const Database = require("better-sqlite3-multiple-ciphers");
 const path = require("path");
 
 const DB_PATH = path.join(__dirname, "youtube_bias.db");
 
+const DB_ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY;
+if (!DB_ENCRYPTION_KEY) {
+  throw new Error("DB_ENCRYPTION_KEY 환경변수가 필요합니다.");
+}
+
 const db = new Database(DB_PATH);
+// cipher를 명시하지 않으면 기본값(sqleet, ChaCha20 계열)이 적용된다 — IRB 문서에 서약한
+// "AES-256"과 다른 알고리즘이므로 SQLCipher 호환 cipher(AES-256-CBC)를 명시적으로 지정한다.
+db.pragma("cipher = 'sqlcipher'");
+// SQL 문자열 보간이 아니라 바인딩 API로 전달 — 키에 작은따옴표가 섞여도 안전하다.
+// cipher 다음, 다른 pragma·쿼리보다 먼저 적용해야 함.
+db.key(Buffer.from(DB_ENCRYPTION_KEY));
 
 // 동시성·내구성 하드닝 (80명 확대 실험 대비)
 // - WAL: 쓰기 중에도 읽기 허용, 크래시 내구성 향상
@@ -26,15 +37,25 @@ function initializeDB() {
       videoCount           INTEGER,
       categoryDistribution TEXT,
       entropy              REAL,
-      -- 세션 처리 지연시간 (10-3) — 확장이 측정해 전송, ms 단위
+      -- 세션 처리 지연시간 () — 확장이 측정해 전송, ms 단위
       totalMs              INTEGER,
       youtubeMs            INTEGER,
       geminiMs             INTEGER,
-      -- LLM 성공/폴백 로깅 (10-4) — 확장의 폴백 분기(background.js/llm.js)와 대응
+      -- LLM 성공/폴백 로깅 () — 확장의 폴백 분기(background.js/llm.js)와 대응
       llmStatus            TEXT,     -- 'success' | 'fallback'
-      failureReason        TEXT,     -- timeout | http_error | empty_response | parse_error | network_error (성공 시 NULL)
+      failureReason        TEXT,     -- timeout | http_error | empty_response | parse_error | network_error | policy_filtered (성공 시 NULL)
       httpStatus           INTEGER,  -- failureReason='http_error'일 때만 (429 쿼터 vs 5xx 장애 구분)
       timedOut             INTEGER,  -- 타임아웃으로 실패한 경우 1
+      -- 실제 생성된 피드백 텍스트 (Story 10-11) — 면담·로그·설문 삼각검증 및 처치 충실도 판정에 필요
+      review               TEXT,     -- 사용자에게 노출된 피드백 문장 (llm 성공 또는 fallback 결과)
+      reviewTopic          TEXT,     -- 같은 응답의 topic
+      source               TEXT,     -- 'llm' | 'fallback' — 어느 경로로 생성됐는지
+      promptVersion        TEXT,     -- llm.js PROMPT_VERSION — 파일럿/본조사 처치 동일성 추적용
+      -- 피드백 알림·열람·확인 시점 (Story 10-6) — 측정 퍼널: 생성 → 알림(feedbackNotifiedAt)
+      -- → 클릭(feedbackViewedAt, 알림 클릭 기준) → 확인(feedbackConfirmedAt, 블러 해제 버튼 클릭 기준 — 가장 엄격한 신호)
+      feedbackNotifiedAt   TEXT,     -- 분석 완료 알림을 표시한 시각 (미대상/미전달이면 NULL)
+      feedbackViewedAt     TEXT,     -- 알림 클릭 등으로 피드백을 실제로 연 시각 (NULL이면 아직 미열람)
+      feedbackConfirmedAt  TEXT,     -- "피드백 확인하기" 버튼으로 블러를 해제한 시각 (NULL이면 아직 미확인)
       createdAt            TEXT    DEFAULT (datetime('now'))
     );
 
@@ -62,9 +83,10 @@ function initializeDB() {
       createdAt  TEXT DEFAULT (datetime('now'))
     );
 
-    -- 팝업 상호작용 마이크로 로그 (10-5) — 세션과 무관해 별도 테이블
+    -- 팝업 상호작용 마이크로 로그 — 세션과 무관해 별도 테이블
     CREATE TABLE IF NOT EXISTS popup_events (
       id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      eventId        TEXT,     -- 오픈당 1회 발급하는 멱등 키 (재전송 중복 방지). UNIQUE는 별도 인덱스로 아래에서 건다
       anonymousId    TEXT    NOT NULL,
       dwellMs        INTEGER,  -- 팝업 체류 시간(ms)
       tabTodayClicks INTEGER DEFAULT 0,  -- '오늘' 탭 클릭 횟수
@@ -75,29 +97,33 @@ function initializeDB() {
     );
   `);
 
-  // 기존 DB 마이그레이션 — 컬럼이 없으면 추가 (이미 있으면 무시).
-  // 실운영 중인 DB를 깨지 않고 컬럼을 점진 추가하기 위한 패턴.
-  const addColumn = (sql) => {
-    try {
-      db.exec(sql);
-    } catch (e) {
-      // "duplicate column name" → 이미 존재하는 컬럼이므로 무시.
-      // 그 외(SQL 오류·DB 잠금·테이블 부재 등)는 마이그레이션 실패이므로 재던져
-      // 조용한 실패 후 런타임 컬럼 누락 크래시를 막는다.
-      if (e.message && e.message.includes("duplicate column name")) return;
-      throw e;
-    }
-  };
+  // 이미 만들어진 DB 파일(로컬 개발용·이미 배포된 서버)에는 CREATE TABLE IF NOT EXISTS가
+  // no-op이라 새 컬럼이 반영되지 않는다 — Story 10-6에서 처음 이 문제가 실제로 발생해(로컬
+  // 서버 기동 시 "no column named feedbackNotifiedAt" 에러 재현 확인) addColumn 패턴을 도입
+  addColumn("sessions", "feedbackNotifiedAt", "TEXT");
+  addColumn("sessions", "feedbackViewedAt", "TEXT");
+  addColumn("sessions", "feedbackConfirmedAt", "TEXT");
+  addColumn("sessions", "review", "TEXT");
+  addColumn("sessions", "reviewTopic", "TEXT");
+  addColumn("sessions", "source", "TEXT");
+  addColumn("sessions", "promptVersion", "TEXT");
 
-  addColumn("ALTER TABLE participants ADD COLUMN participantCode TEXT");
-  // 10-3 latency / 10-4 폴백 로깅 컬럼
-  addColumn("ALTER TABLE sessions ADD COLUMN totalMs INTEGER");
-  addColumn("ALTER TABLE sessions ADD COLUMN youtubeMs INTEGER");
-  addColumn("ALTER TABLE sessions ADD COLUMN geminiMs INTEGER");
-  addColumn("ALTER TABLE sessions ADD COLUMN llmStatus TEXT");
-  addColumn("ALTER TABLE sessions ADD COLUMN failureReason TEXT");
-  addColumn("ALTER TABLE sessions ADD COLUMN httpStatus INTEGER");
-  addColumn("ALTER TABLE sessions ADD COLUMN timedOut INTEGER");
+  // popup_events.eventId도 같은 이유로 addColumn 필요. UNIQUE는 ALTER TABLE ADD COLUMN이
+  // 만들 수 없으므로(SQLite 제약) 컬럼 추가 후 별도 유니크 인덱스로 건다 — 신규/기존 DB 모두
+  // IF NOT EXISTS라 안전하게 반복 실행된다.
+  addColumn("popup_events", "eventId", "TEXT");
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_popup_events_eventId ON popup_events(eventId)",
+  );
+}
+
+// 이미 컬럼이 있으면(신규 DB) 조용히 넘어가고, 없으면(기존 DB) 추가한다.
+function addColumn(table, name, type) {
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+  } catch (err) {
+    if (!/duplicate column name/i.test(err.message)) throw err;
+  }
 }
 
 module.exports = { db, initializeDB };

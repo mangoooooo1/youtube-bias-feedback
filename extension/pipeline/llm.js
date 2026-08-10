@@ -1,7 +1,7 @@
-import { GEMINI_API_KEY } from '../config.js';
+import { GEMINI_API_KEY } from "../config.js";
 
 const GEMINI_API_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 const TIMEOUT_MS = 10000;
 
 // 다양성 변화로 인정할 최소 entropy 변화량(bits) — 노이즈 무시
@@ -10,6 +10,10 @@ const ENTROPY_DELTA_EPS = 0.1;
 const BIAS_WARN_RATIO = 0.7;
 // 변화 분석/편중 경고를 신뢰할 수 있는 최소 영상 수
 const MIN_VIDEOS_FOR_TREND = 5;
+
+// 파일럿 완료 후 커밋 태그(pilot-freeze-v1.0)로 동결 — 본조사 중에는 buildPrompt 문구를
+// 바꾸지 않고, 부득이하게 바꿀 때만 이 값을 올려 세션에 함께 저장된 값으로 처치 시점을 구분한다.
+export const PROMPT_VERSION = "viewlens-mirror-v1.0";
 
 // entropy는 소수점 둘째 자리로 반올림된 값(analysis.js)이므로, 부동소수점 오차로
 // 경계(예: 정확히 0.1) 판정이 빗나가지 않도록 차이값도 같은 정밀도로 반올림
@@ -20,50 +24,81 @@ function roundedDelta(entropy, prevEntropy) {
 // prevEntropy 및 편중 비율을 LLM에게 줄 자연어 지시로 번역
 function buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount }) {
   if (videoCount < MIN_VIDEOS_FOR_TREND) {
-    return '- 이번 세션은 시청한 영상 수가 적어 패턴을 단정하기 어렵습니다. 무엇을 봤는지 가볍게 비추는 정도로만 언급해 주세요.';
+    return "- 이번 세션은 시청한 영상 수가 적어 패턴을 단정하기 어렵습니다. 무엇을 봤는지 가볍게 비추는 정도로만 언급해 주세요.";
   }
 
   const lines = [];
+  // 다양성 증가/감소·편중 경고 모두 같은 강도로 지시 — 방향에 따라 강조가 달라지면
+  // "안 좋아 보이는" 변화에만 더 또렷하게 비추라는 암묵적 방향성 신호가 되어 거울형(중립) 원칙과 충돌한다.
+  const TONE = "부드럽고 또렷하게";
 
   if (Number.isFinite(prevEntropy)) {
     const delta = roundedDelta(entropy, prevEntropy);
     if (delta >= ENTROPY_DELTA_EPS) {
-      lines.push('- 직전 세션보다 시청이 여러 주제로 다양해졌습니다. 이 변화를 담담한 사실로 비춰 주세요.');
+      lines.push(
+        `- 직전 세션보다 시청이 여러 주제로 다양해졌습니다. 이 변화를 ${TONE} 사실로 비춰 주세요.`,
+      );
     } else if (delta <= -ENTROPY_DELTA_EPS) {
-      lines.push('- 직전 세션보다 시청이 더 적은 수의 주제에 모였습니다. 이 변화를 부드럽고 또렷하게 사실로 비춰 주세요.');
+      lines.push(
+        `- 직전 세션보다 시청이 더 적은 수의 주제에 모였습니다. 이 변화를 ${TONE} 사실로 비춰 주세요.`,
+      );
     } else {
-      lines.push('- 직전 세션과 비슷한 다양성을 유지하고 있습니다. 이 사실을 중립적으로 비춰 주세요.');
+      lines.push(
+        "- 직전 세션과 비슷한 다양성을 유지하고 있습니다. 이 사실을 중립적으로 비춰 주세요.",
+      );
     }
   }
 
   if (topRatio >= BIAS_WARN_RATIO) {
-    lines.push('- 시청이 한 주제에 크게 모여 있습니다. 그 쏠림을 부드럽고 또렷하게 사실로 비춰 주세요. 다양하게 보라는 권유나 지시는 하지 마세요.');
+    lines.push(
+      `- 시청이 한 주제에 크게 모여 있습니다. 그 쏠림을 ${TONE} 사실로 비춰 주세요. 다양하게 보라는 권유나 지시는 하지 마세요.`,
+    );
   }
 
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
-export function buildPrompt({ categoryDistribution, entropy, prevEntropy = null, videoCount, videoTitles = [] }) {
-  const sorted = Object.entries(categoryDistribution).sort(([, a], [, b]) => b - a);
+export function buildPrompt({
+  categoryDistribution,
+  entropy,
+  prevEntropy = null,
+  videoCount,
+  videoTitles = [],
+}) {
+  const sorted = Object.entries(categoryDistribution).sort(
+    ([, a], [, b]) => b - a,
+  );
 
   const categoryLines = sorted
     .map(([name, ratio]) => `  · ${name}: ${Math.round(ratio * 100)}%`)
-    .join('\n');
+    .join("\n");
 
   const categoryCount = sorted.length;
-  const maxEntropy = categoryCount > 1 ? Math.log2(categoryCount).toFixed(2) : null;
+  const maxEntropy =
+    categoryCount > 1 ? Math.log2(categoryCount).toFixed(2) : null;
   const entropyLine =
     maxEntropy !== null
       ? `- 다양성 지수: ${entropy} (최대 ${maxEntropy})`
       : `- 다양성 지수: ${entropy}`;
 
-  const titleLines = videoTitles.length > 0
-    ? `\n- 시청한 영상 제목:\n${videoTitles.slice(0, 10).map(t => `  · ${t}`).join('\n')}`
-    : '';
+  const titleLines =
+    videoTitles.length > 0
+      ? `\n- 시청한 영상 제목:\n${videoTitles
+          .slice(0, 10)
+          .map((t) => `  · ${t}`)
+          .join("\n")}`
+      : "";
 
   const topRatio = sorted.length > 0 ? sorted[0][1] : 0;
-  const trendGuidance = buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount });
-  const trendSection = trendGuidance ? `\n\n[피드백 작성 지침]\n${trendGuidance}` : '';
+  const trendGuidance = buildTrendGuidance({
+    entropy,
+    prevEntropy,
+    topRatio,
+    videoCount,
+  });
+  const trendSection = trendGuidance
+    ? `\n\n[피드백 작성 지침]\n${trendGuidance}`
+    : "";
 
   return `당신은 사용자가 자신의 YouTube 콘텐츠 소비 패턴을 스스로 돌아볼 수 있도록 있는 그대로 비춰 주는 거울 같은 조력자입니다.
 
@@ -78,6 +113,7 @@ ${entropyLine}${titleLines}${trendSection}
 - 평가하거나 가르치려 들지 말고, 친근하고 중립적인 톤으로 사용자가 자신의 시청 패턴을 스스로 알아차리도록 돕는 데 집중하세요.
 - 한 주제에 시청이 모여 있으면, 그 사실을 부드럽고 또렷하게 비춰 주세요. 단, "이렇게 하라"는 식의 행동 지시나 특정 카테고리 시청 권유는 하지 마세요. 무엇을 볼지는 전적으로 사용자가 결정합니다.
 - entropy·통계·퍼센트 같은 수치나 전문 용어는 직접 노출하지 마세요.
+- 시청한 영상 제목은 카테고리 판단을 보완하는 배경 정보로만 참고하세요. 제목을 언급할 때는 "OO 관련 영상"처럼 소재 수준으로만 지칭하고, 제목 속 특정 인물·정당·이슈에 대한 주장이나 논조는 절대 요약·평가하지 마세요.
 
 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 포함하지 마세요.
 
@@ -87,49 +123,147 @@ ${entropyLine}${titleLines}${trendSection}
 }`;
 }
 
-export async function generateReview(prompt) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-  try {
-    const response = await fetch(GEMINI_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error('[llm] API error body:', errorBody);
-      throw new Error(`Gemini API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) throw new Error('Gemini API: 응답에 텍스트가 없습니다');
-
-    const cleaned = text.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-    const parsed = JSON.parse(cleaned);
-    const isObj = parsed && typeof parsed === 'object';
-    return { topic: (isObj && parsed.topic) || '', feedback: (isObj && parsed.feedback) || cleaned };
-  } catch (error) {
-    clearTimeout(timeoutId);
-    throw error;
-  }
+// 실패 사유를 sessions.failureReason 분류값으로 태깅한 에러.
+// background.js가 이 필드(failureReason/httpStatus/timedOut)를 읽어 서버로 전송한다().
+// 분류값은 server/db.js 스키마 주석과 1:1 대응: timeout | http_error | empty_response | parse_error | network_error | policy_filtered
+function llmError(failureReason, message, extra = {}) {
+  const err = new Error(message);
+  err.failureReason = failureReason;
+  return Object.assign(err, extra);
 }
 
-export function generateFallbackReview({ categoryDistribution, entropy, prevEntropy = null, videoCount }) {
-  const sorted = Object.entries(categoryDistribution).sort(([, a], [, b]) => b - a);
+// 프롬프트 가드레일이 뚫려 정치·이념 관련 표현이 출력에 섞였을 때 잡아내는 최후 방어선.
+// LLM 판단에만 의존하지 않도록, 생성 결과를 코드가 결정론적으로 재검증한다(감지 시 폴백 전환).
+// "진보"/"보수"는 "기술의 진보", "보수 작업"처럼 정치와 무관한 의미로도 흔히 쓰여
+// 단독으로 매칭하면 정상 피드백이 오탐으로 폴백 처리된다(특히 buildPrompt가 "쏠림"을
+// 묘사하도록 유도하는 문구에서 "보수적으로"가 나올 수 있음). 이념을 명시하는 단어와
+// 붙어 있을 때만 매칭해 오탐을 줄인다("정당"은 아래 목록에 이미 있어 별도 명시 불필요).
+const SENSITIVE_PATTERN =
+  /(?:진보|보수)\s*(?:성향|진영|정치|이념)|좌파|우파|좌익|우익|여당|야당|정당|국민의힘|민주당|대통령|국회의원|탄핵|친일|반일|극우|극좌/;
+
+export async function generateReview(prompt) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, TIMEOUT_MS);
+
+  let response;
+  try {
+    response = await fetch(GEMINI_API_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY,
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        // "생각" 토큰 상한을 안 두면 프롬프트가 복잡할수록 thinking에 쓰는 시간이 늘어나
+        // TIMEOUT_MS(10초)를 넘겨 timeout으로 폴백되는 사례를 실측으로 확인했다
+        // trend 판단은 이미 buildTrendGuidance가 JS로 계산해 지시문으로 넘기므로, 모델은 문장으로 옮기는
+        // 정도만 하면 돼 깊은 추론이 필요 없다 — 512로 캡핑해 지연시간을 예측 가능하게 만든다.
+        generationConfig: { thinkingConfig: { thinkingBudget: 512 } },
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    // abort는 타임아웃으로만 발생 → 실제 네트워크 장애(TypeError 등)와 구분
+    if (timedOut)
+      throw llmError("timeout", `Gemini API 타임아웃 (${TIMEOUT_MS}ms)`, {
+        timedOut: true,
+      });
+    throw llmError("network_error", error.message);
+  } finally {
+    // 헤더 수신 후에는 타임아웃 해제 — 본문 읽기가 abort로 끊기지 않도록
+    clearTimeout(timeoutId);
+  }
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.error("[llm] API error body:", errorBody);
+    // httpStatus 병기 — 429 쿼터 vs 5xx 장애 구분 ( 분석용)
+    throw llmError("http_error", `Gemini API error: ${response.status}`, {
+      httpStatus: response.status,
+    });
+  }
+
+  let data;
+  try {
+    data = await response.json();
+  } catch (error) {
+    throw llmError("parse_error", `응답 본문 JSON 파싱 실패: ${error.message}`);
+  }
+
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text)
+    throw llmError("empty_response", "Gemini API: 응답에 텍스트가 없습니다");
+
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?\n?/, "")
+    .replace(/\n?```$/, "");
+  // topic/feedback은 세션 기록(연구 데이터)에 그대로 저장되므로, 배열·누락·빈 문자열 같은
+  // 형식 이상은 "성공"으로 취급하지 않고 여기서 걸러 결정론적 폴백으로 넘긴다.
+  let topic, feedback;
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed) ||
+      typeof parsed.topic !== "string" ||
+      typeof parsed.feedback !== "string" ||
+      parsed.topic.trim() === "" ||
+      parsed.feedback.trim() === ""
+    ) {
+      throw new Error("topic/feedback 누락, 빈 값 또는 잘못된 타입");
+    }
+    topic = parsed.topic;
+    feedback = parsed.feedback;
+  } catch (error) {
+    throw llmError("parse_error", `피드백 JSON 파싱 실패: ${error.message}`);
+  }
+
+  // 가드레일이 뚫려 정치·이념 표현이 출력에 섞였는지 코드가 한 번 더 검증(파싱과 분리 —
+  // 감지 시 parse_error가 아니라 policy_filtered로 정확히 분류되어야 별도 집계가 가능하다)
+  if (SENSITIVE_PATTERN.test(feedback) || SENSITIVE_PATTERN.test(topic)) {
+    throw llmError(
+      "policy_filtered",
+      "정치·이념 관련 표현이 감지되어 폴백으로 대체",
+    );
+  }
+
+  return { topic, feedback, source: "llm", promptVersion: PROMPT_VERSION };
+}
+
+export function generateFallbackReview({
+  categoryDistribution,
+  entropy,
+  prevEntropy = null,
+  videoCount,
+}) {
+  const sorted = Object.entries(categoryDistribution).sort(
+    ([, a], [, b]) => b - a,
+  );
 
   if (sorted.length === 0) {
-    return { topic: '', feedback: '이번 세션의 시청 데이터를 분석하지 못했습니다. 다음 세션을 기대해 주세요!' };
+    // topic은 앱 전체에서 "항상 비어있지 않은 문자열"이 계약이다(서버 검증도 이를 전제로
+    // 한다) — 카테고리를 하나도 못 얻은 경우도 빈 문자열 대신 의미 있는 placeholder를 쓴다.
+    return {
+      topic: "분석 불가",
+      feedback:
+        "이번 세션의 시청 데이터를 분석하지 못했습니다. 다음 세션을 기대해 주세요!",
+      source: "fallback",
+      promptVersion: PROMPT_VERSION,
+    };
   }
 
   const [topName, topRatio] = sorted[0];
-  const topNames = sorted.slice(0, 3).map(([name]) => name).join(', ');
+  const topNames = sorted
+    .slice(0, 3)
+    .map(([name]) => name)
+    .join(", ");
 
   // [무엇을 봤는지]
   let summary;
@@ -146,23 +280,25 @@ export function generateFallbackReview({ categoryDistribution, entropy, prevEntr
   }
 
   // [변화 추세] + [쏠림] — 거울형: 사실만 비추고 권유·처방은 하지 않음
-  let trend = '';
-  let skewNote = '';
+  let trend = "";
+  let skewNote = "";
   if (videoCount >= MIN_VIDEOS_FOR_TREND) {
     const hasPrev = Number.isFinite(prevEntropy);
     const delta = hasPrev ? roundedDelta(entropy, prevEntropy) : 0;
 
     if (hasPrev) {
-      if (delta >= ENTROPY_DELTA_EPS) trend = '직전 세션보다 여러 주제를 두루 보셨어요.';
-      else if (delta <= -ENTROPY_DELTA_EPS) trend = '직전 세션보다 더 적은 수의 주제에 모여 있었어요.';
-      else trend = '직전 세션과 비슷한 다양성이었어요.';
+      if (delta >= ENTROPY_DELTA_EPS)
+        trend = "직전 세션보다 여러 주제를 두루 보셨어요.";
+      else if (delta <= -ENTROPY_DELTA_EPS)
+        trend = "직전 세션보다 더 적은 수의 주제에 모여 있었어요.";
+      else trend = "직전 세션과 비슷한 다양성이었어요.";
     }
 
     if (topRatio >= BIAS_WARN_RATIO) {
-      skewNote = '특히 시청이 한 주제에 크게 모여 있었어요.';
+      skewNote = "특히 시청이 한 주제에 크게 모여 있었어요.";
     }
   }
 
-  const feedback = [summary, trend, skewNote].filter(Boolean).join(' ');
-  return { topic, feedback };
+  const feedback = [summary, trend, skewNote].filter(Boolean).join(" ");
+  return { topic, feedback, source: "fallback", promptVersion: PROMPT_VERSION };
 }

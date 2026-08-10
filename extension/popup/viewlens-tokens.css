@@ -98,6 +98,28 @@ body {
     transform: none;
   }
 }
+@keyframes vlGlow {
+  0%,
+  100% {
+    box-shadow:
+      0 2px 10px color-mix(in oklab, var(--vl-ink) 14%, transparent),
+      0 0 0 0 color-mix(in oklab, var(--vl-accent) 35%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 2px 10px color-mix(in oklab, var(--vl-ink) 14%, transparent),
+      0 0 12px 3px color-mix(in oklab, var(--vl-accent) 28%, transparent);
+  }
+}
+@keyframes vlBounceDown {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(3px);
+  }
+}
 
 .vl-vid-details > summary {
   list-style: none;
@@ -122,6 +144,7 @@ body {
 /* scrollbar inside popup */
 .vl-pop ::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 .vl-pop ::-webkit-scrollbar-thumb {
   background: var(--vl-line-2);

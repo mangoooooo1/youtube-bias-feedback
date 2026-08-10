@@ -1,39 +1,42 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ViewLens — 시청 편향 피드백 확장</title>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ViewLens — 시청 편향 피드백 확장</title>
 
-<!-- JetBrains Mono (not in local fonts folder) -->
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet" />
+    <!-- JetBrains Mono (not in local fonts folder) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
 
-<!-- design tokens + local Pretendard -->
-<link rel="stylesheet" href="../popup/viewlens-tokens.css" />
-<!-- tweaks panel styles -->
-<link rel="stylesheet" href="tweaks-panel.css" />
-</head>
-<body>
-<div id="root"></div>
+    <!-- design tokens + local Pretendard -->
+    <link rel="stylesheet" href="../popup/viewlens-tokens.css" />
+    <!-- tweaks panel styles -->
+    <link rel="stylesheet" href="tweaks-panel.css" />
+  </head>
+  <body>
+    <div id="root"></div>
 
-<!-- data layer (VL global) -->
-<script src="../popup/viewlens-data.js"></script>
-<!-- logo helpers (markSVG, wordmarkHTML) -->
-<script src="../popup/viewlens-logo.js"></script>
-<!-- reusable UI components -->
-<script src="../popup/viewlens-ui.js"></script>
-<!-- screen content generators -->
-<script src="../popup/viewlens-screens.js"></script>
-<!-- tweaks panel class -->
-<script src="tweaks-panel.js"></script>
-<!-- app shell + Studio -->
-<script src="../popup/viewlens-app.js"></script>
+    <!-- data layer (VL global) -->
+    <script src="../popup/viewlens-data.js"></script>
+    <!-- logo helpers (markSVG, wordmarkHTML) -->
+    <script src="../popup/viewlens-logo.js"></script>
+    <!-- reusable UI components -->
+    <script src="../popup/viewlens-ui.js"></script>
+    <!-- screen content generators -->
+    <script src="../popup/viewlens-screens.js"></script>
+    <!-- tweaks panel class -->
+    <script src="tweaks-panel.js"></script>
+    <!-- app shell + Studio -->
+    <script src="../popup/viewlens-app.js"></script>
 
-<script>
-  // Boot the Studio into #root
-  new Studio(document.getElementById('root'));
-</script>
-</body>
+    <script>
+      // Boot the Studio into #root
+      new Studio(document.getElementById("root"));
+    </script>
+  </body>
 </html>

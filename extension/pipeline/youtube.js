@@ -1,6 +1,6 @@
-import { YOUTUBE_API_KEY } from '../config.js';
+import { YOUTUBE_API_KEY } from "../config.js";
 
-const API_BASE = 'https://www.googleapis.com/youtube/v3/videos';
+const API_BASE = "https://www.googleapis.com/youtube/v3/videos";
 const BATCH_SIZE = 50;
 
 export async function fetchVideoCategories(videoIds) {
@@ -18,8 +18,8 @@ export async function fetchVideoCategories(videoIds) {
 async function fetchChunk(videoIds) {
   try {
     const params = new URLSearchParams({
-      part: 'snippet',
-      id: videoIds.join(','),
+      part: "snippet",
+      id: videoIds.join(","),
       key: YOUTUBE_API_KEY,
     });
     const response = await fetch(`${API_BASE}?${params}`);
@@ -39,7 +39,7 @@ async function fetchChunk(videoIds) {
 
     return partial;
   } catch (error) {
-    console.warn('[youtube] 네트워크 오류:', error.message);
+    console.warn("[youtube] 네트워크 오류:", error.message);
     return nullMap(videoIds);
   }
 }

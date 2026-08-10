@@ -50,35 +50,56 @@ let writeQueue = Promise.resolve();
 
 function recordVideo(videoId, title) {
   writeQueue = writeQueue.then(async () => {
-    const now = new Date().toISOString();
-    const { currentSession, anonymousId, serverUrl } = await chrome.storage.local.get([
-      "currentSession",
-      "anonymousId",
-      "serverUrl",
-    ]);
+    // 확장을 리로드/업데이트하면 이미 열려있던 유튜브 탭의 content script는 페이지를
+    // 새로고침하기 전까지 무효화된 컨텍스트로 남는다 — 이 상태에서 chrome.* 호출은 전부
+    // 예외를 던진다. 미리 감지해 조용히 실패하지 말고 콘솔에 남겨서 원인을 알 수 있게 한다.
+    if (!chrome.runtime?.id) {
+      console.warn(
+        "[content] 확장 컨텍스트 무효화됨(리로드/업데이트) — 이 탭을 새로고침해야 기록이 재개됩니다.",
+      );
+      return;
+    }
 
-    const session = currentSession ?? {
-      sessionId: String(Date.now()),
-      startTime: now,
-      videos: [],
-    };
+    try {
+      const now = new Date().toISOString();
+      const { currentSession, anonymousId, serverUrl } =
+        await chrome.storage.local.get([
+          "currentSession",
+          "anonymousId",
+          "serverUrl",
+        ]);
 
-    await chrome.storage.local.set({ lastWatchedAt: now });
+      const session = currentSession ?? {
+        sessionId: String(Date.now()),
+        startTime: now,
+        videos: [],
+      };
 
-    const lastSaved = session.videos.at(-1);
-    if (lastSaved?.videoId === videoId) return;
+      await chrome.storage.local.set({ lastWatchedAt: now });
 
-    session.videos.push({ videoId, title, watchedAt: now });
-    await chrome.storage.local.set({ currentSession: session });
-    console.log("[content] recorded:", { videoId, title });
+      const lastSaved = session.videos.at(-1);
+      if (lastSaved?.videoId === videoId) return;
 
-    // 서버에 즉시 전송
-    if (anonymousId && serverUrl && !serverUrl.startsWith("YOUR_")) {
-      fetch(`${serverUrl.replace(/\/$/, "")}/api/video-events`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ anonymousId, videoId, title: title ?? null, watchedAt: now }),
-      }).catch(() => {});
+      session.videos.push({ videoId, title, watchedAt: now });
+      await chrome.storage.local.set({ currentSession: session });
+      console.log("[content] recorded:", { videoId, title });
+
+      // 서버에 즉시 전송
+      if (anonymousId && serverUrl && !serverUrl.startsWith("YOUR_")) {
+        fetch(`${serverUrl.replace(/\/$/, "")}/api/video-events`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            anonymousId,
+            videoId,
+            title: title ?? null,
+            watchedAt: now,
+          }),
+        }).catch(() => {});
+      }
+    } catch (error) {
+      // 컨텍스트가 호출 도중 무효화된 경우 등 — 조용히 삼키지 않고 원인을 남긴다.
+      console.warn("[content] 영상 기록 실패:", error.message);
     }
   });
   return writeQueue;
