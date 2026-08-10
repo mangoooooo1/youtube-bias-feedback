@@ -37,7 +37,16 @@ ViewLens(이하 "본 확장 프로그램")는 YouTube 시청 패턴의 다양성
 | Google YouTube Data API                           | 시청 영상 ID                             | 영상 카테고리 조회 |
 | Google Gemini API                                 | 영상 제목, 카테고리 분포                 | 피드백 문구 생성   |
 
-Google API로 전송되는 데이터는 해당 서비스의 개인정보 처리방침을 따릅니다.
+Google API로 전송되는 데이터는 해당 서비스의 개인정보 처리방침을 따르며, 그중 Google Gemini API는 다음과 같이 처리됩니다(결제(billing)가 연결된 유료 프로젝트로 호출).
+
+- **모델 학습 사용 여부**: 유료 프로젝트에서는 기본적으로 프롬프트·응답이 모델 개선·학습에 사용되지 않습니다.
+- **보관 기간**: 기본 최대 55일간 보관 후 자동 삭제 처리됩니다(약관 위반 감지 목적의 별도 로그는 이 기간과 무관하게 존재할 수 있으며, 해당 보관 기간은 Google이 공개하지 않습니다).
+- **처리 지역**: Google이 공개한 문서에 특정 국가·지역 약정이 명시되어 있지 않습니다.
+- **제공 근거**: Google Gemini API 서비스 약관에 따른 계약 기반 처리입니다.
+
+(위 내용은 2026-08 기준 Google 공개 문서를 근거로 하며, Google 정책 변경 시 갱신이 필요할 수 있습니다.)
+
+본 확장 프로그램은 **YouTube API Services**를 사용합니다. 이용에 관해서는 [YouTube 서비스 약관](https://www.youtube.com/t/terms)과 [Google 개인정보 처리방침](https://policies.google.com/privacy)이 함께 적용됩니다.
 
 ## 4. 정보의 보관 및 파기
 
