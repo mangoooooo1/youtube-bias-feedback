@@ -110,6 +110,19 @@ function bindOnboarding(root, onSubmit) {
 
 // ── Today ─────────────────────────────────────────────────────────────────────
 
+// 실제 LLM 리뷰인지(플레이스홀더·빈 값 제외) — feedbackViewed 판정용.
+// popup·Studio 양쪽에서 쓰이므로(Studio는 viewlens-popup.js를 로드하지 않음) 여기 둔다.
+const POPUP_PLACEHOLDER_REVIEWS = new Set([
+  "시청 패턴을 분석하고 있어요. 잠시 후 시청 분석이 업데이트돼요.",
+]);
+function isRealReview(text) {
+  return (
+    typeof text === "string" &&
+    text.trim() !== "" &&
+    !POPUP_PLACEHOLDER_REVIEWS.has(text.trim())
+  );
+}
+
 function _collectingBanner(count) {
   if (!count) return "";
   const timerText = VL.today?.collectingTimer || "";
