@@ -216,8 +216,13 @@ router.post("/", (req, res, next) => {
 // column은 요청 값이 아니라 아래 두 router.patch 호출부에서만 하드코딩으로 주어지므로
 // SQL 인젝션 경로가 없다(server/db.js의 addColumn(table, name, type) 패턴과 동일한 근거).
 function makeFeedbackTimestampHandler(column) {
+  const exists = db.prepare(
+    `SELECT 1 FROM sessions WHERE sessionId = @sessionId AND anonymousId = @anonymousId`,
+  );
+  // 최초 호출만 기록 — 퍼널 지연 분석(생성→알림→클릭→확인)은 최초 시각이 필요하므로
+  // 이미 값이 있으면(재호출) 덮어쓰지 않는다.
   const update = db.prepare(
-    `UPDATE sessions SET ${column} = @value WHERE sessionId = @sessionId AND anonymousId = @anonymousId`,
+    `UPDATE sessions SET ${column} = @value WHERE sessionId = @sessionId AND anonymousId = @anonymousId AND ${column} IS NULL`,
   );
   return (req, res, next) => {
     const { sessionId } = req.params;
@@ -234,12 +239,7 @@ function makeFeedbackTimestampHandler(column) {
     }
 
     try {
-      const result = update.run({
-        sessionId,
-        anonymousId,
-        value: new Date().toISOString(),
-      });
-      if (result.changes === 0) {
+      if (!exists.get({ sessionId, anonymousId })) {
         return fail(
           res,
           404,
@@ -248,6 +248,12 @@ function makeFeedbackTimestampHandler(column) {
           sessionId,
         );
       }
+      // changes === 0이어도(이미 값이 있던 재호출) 세션은 존재하므로 성공으로 처리한다.
+      update.run({
+        sessionId,
+        anonymousId,
+        value: new Date().toISOString(),
+      });
     } catch (err) {
       return next(err);
     }
