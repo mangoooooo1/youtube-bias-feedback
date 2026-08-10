@@ -86,7 +86,7 @@ function initializeDB() {
     -- 팝업 상호작용 마이크로 로그 — 세션과 무관해 별도 테이블
     CREATE TABLE IF NOT EXISTS popup_events (
       id             INTEGER PRIMARY KEY AUTOINCREMENT,
-      eventId        TEXT    UNIQUE,  -- 오픈당 1회 발급하는 멱등 키. UNIQUE로 재전송 중복을 막는다(NULL끼리는 distinct라 구버전 요청은 허용)
+      eventId        TEXT,     -- 오픈당 1회 발급하는 멱등 키 (재전송 중복 방지). UNIQUE는 별도 인덱스로 아래에서 건다
       anonymousId    TEXT    NOT NULL,
       dwellMs        INTEGER,  -- 팝업 체류 시간(ms)
       tabTodayClicks INTEGER DEFAULT 0,  -- '오늘' 탭 클릭 횟수
@@ -97,13 +97,9 @@ function initializeDB() {
     );
   `);
 
-  // 스키마의 단일 진실 원천(single source of truth)은 위 CREATE TABLE 하나다.
-  // (eventId의 UNIQUE도 위 CREATE TABLE에 인라인으로 선언 — 별도 인덱스로 분리하던
-  //  이유였던 'ALTER는 UNIQUE 컬럼을 못 만든다' 제약이 ALTER를 걷어내며 사라졌다.)
-  //
-  // 다만 이미 만들어진 DB 파일(로컬 개발용·이미 배포된 서버)에는 CREATE TABLE IF NOT EXISTS가
+  // 이미 만들어진 DB 파일(로컬 개발용·이미 배포된 서버)에는 CREATE TABLE IF NOT EXISTS가
   // no-op이라 새 컬럼이 반영되지 않는다 — Story 10-6에서 처음 이 문제가 실제로 발생해(로컬
-  // 서버 기동 시 "no column named feedbackNotifiedAt" 에러 재현 확인) addColumn 패턴을 도입한다.
+  // 서버 기동 시 "no column named feedbackNotifiedAt" 에러 재현 확인) addColumn 패턴을 도입
   addColumn("sessions", "feedbackNotifiedAt", "TEXT");
   addColumn("sessions", "feedbackViewedAt", "TEXT");
   addColumn("sessions", "feedbackConfirmedAt", "TEXT");
@@ -111,6 +107,14 @@ function initializeDB() {
   addColumn("sessions", "reviewTopic", "TEXT");
   addColumn("sessions", "source", "TEXT");
   addColumn("sessions", "promptVersion", "TEXT");
+
+  // popup_events.eventId도 같은 이유로 addColumn 필요. UNIQUE는 ALTER TABLE ADD COLUMN이
+  // 만들 수 없으므로(SQLite 제약) 컬럼 추가 후 별도 유니크 인덱스로 건다 — 신규/기존 DB 모두
+  // IF NOT EXISTS라 안전하게 반복 실행된다.
+  addColumn("popup_events", "eventId", "TEXT");
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_popup_events_eventId ON popup_events(eventId)",
+  );
 }
 
 // 이미 컬럼이 있으면(신규 DB) 조용히 넘어가고, 없으면(기존 DB) 추가한다.
