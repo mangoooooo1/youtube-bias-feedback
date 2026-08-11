@@ -296,7 +296,7 @@ function screenFeedback(currentWeek, selWeek) {
     ? `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">베이스라인 기간이라 아직 비교할 데이터가 없어요.</p>`
     : prevW
       ? `<div>
-        <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">어제(${prevW.label}) 대비</div>
+        <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">직전 기간(${prevW.label}) 대비</div>
         <div style="display:flex;align-items:center;gap:7px">
           ${vlDeltaChip({ value: vsPrev })}
           <span style="font-size:12px;color:var(--vl-ink-2)">${vsPrev >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
