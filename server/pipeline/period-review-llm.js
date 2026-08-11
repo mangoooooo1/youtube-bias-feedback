@@ -105,9 +105,8 @@ async function generatePeriodReview(prompt, apiKey) {
     controller.abort();
   }, TIMEOUT_MS);
 
-  let response;
   try {
-    response = await fetch(GEMINI_API_URL, {
+    const response = await fetch(GEMINI_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -119,7 +118,64 @@ async function generatePeriodReview(prompt, apiKey) {
       }),
       signal: controller.signal,
     });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error("[period-review-llm] API error body:", errorBody);
+      throw llmError("http_error", `Gemini API error: ${response.status}`, {
+        httpStatus: response.status,
+      });
+    }
+
+    let data;
+    try {
+      data = await response.json();
+    } catch (error) {
+      if (timedOut) throw error;
+      throw llmError(
+        "parse_error",
+        `응답 본문 JSON 파싱 실패: ${error.message}`,
+      );
+    }
+
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text)
+      throw llmError("empty_response", "Gemini API: 응답에 텍스트가 없습니다");
+
+    const cleaned = text
+      .trim()
+      .replace(/^```(?:json)?\n?/, "")
+      .replace(/\n?```$/, "");
+    let topic, feedback;
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        Array.isArray(parsed) ||
+        typeof parsed.topic !== "string" ||
+        typeof parsed.feedback !== "string" ||
+        parsed.topic.trim() === "" ||
+        parsed.feedback.trim() === ""
+      ) {
+        throw new Error("topic/feedback 누락, 빈 값 또는 잘못된 타입");
+      }
+      topic = parsed.topic;
+      feedback = parsed.feedback;
+    } catch (error) {
+      throw llmError("parse_error", `피드백 JSON 파싱 실패: ${error.message}`);
+    }
+
+    if (SENSITIVE_PATTERN.test(feedback) || SENSITIVE_PATTERN.test(topic)) {
+      throw llmError(
+        "policy_filtered",
+        "정치·이념 관련 표현이 감지되어 폴백으로 대체",
+      );
+    }
+
+    return { topic, feedback, source: "llm", promptVersion: PROMPT_VERSION };
   } catch (error) {
+    if (error.failureReason) throw error;
     if (timedOut)
       throw llmError("timeout", `Gemini API 타임아웃 (${TIMEOUT_MS}ms)`, {
         timedOut: true,
@@ -128,58 +184,6 @@ async function generatePeriodReview(prompt, apiKey) {
   } finally {
     clearTimeout(timeoutId);
   }
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    console.error("[period-review-llm] API error body:", errorBody);
-    throw llmError("http_error", `Gemini API error: ${response.status}`, {
-      httpStatus: response.status,
-    });
-  }
-
-  let data;
-  try {
-    data = await response.json();
-  } catch (error) {
-    throw llmError("parse_error", `응답 본문 JSON 파싱 실패: ${error.message}`);
-  }
-
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text)
-    throw llmError("empty_response", "Gemini API: 응답에 텍스트가 없습니다");
-
-  const cleaned = text
-    .trim()
-    .replace(/^```(?:json)?\n?/, "")
-    .replace(/\n?```$/, "");
-  let topic, feedback;
-  try {
-    const parsed = JSON.parse(cleaned);
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      Array.isArray(parsed) ||
-      typeof parsed.topic !== "string" ||
-      typeof parsed.feedback !== "string" ||
-      parsed.topic.trim() === "" ||
-      parsed.feedback.trim() === ""
-    ) {
-      throw new Error("topic/feedback 누락, 빈 값 또는 잘못된 타입");
-    }
-    topic = parsed.topic;
-    feedback = parsed.feedback;
-  } catch (error) {
-    throw llmError("parse_error", `피드백 JSON 파싱 실패: ${error.message}`);
-  }
-
-  if (SENSITIVE_PATTERN.test(feedback) || SENSITIVE_PATTERN.test(topic)) {
-    throw llmError(
-      "policy_filtered",
-      "정치·이념 관련 표현이 감지되어 폴백으로 대체",
-    );
-  }
-
-  return { topic, feedback, source: "llm", promptVersion: PROMPT_VERSION };
 }
 
 function generatePeriodFallbackReview({ categoryDistribution, videoCount }) {

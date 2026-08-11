@@ -280,4 +280,31 @@ describe("generatePeriodReview — 실패 사유 분류 (failureReason 태깅)",
     await vi.advanceTimersByTimeAsync(10000);
     await assertion;
   });
+
+  it("헤더는 정상 수신했지만 본문 전송이 멈추면 timeout으로 분류한다 (cron 직렬 처리 중 무기한 대기 방지)", async () => {
+    vi.useFakeTimers();
+    // fetch() 자체는 즉시 resolve(헤더 수신 성공)하지만, response.json()이 abort될 때까지
+    // 멈춰 있는 상황 — clearTimeout을 너무 일찍 호출하면 이 본문 읽기가 영원히 안 끝난다.
+    global.fetch = vi.fn((_url, opts) =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          new Promise((_resolve, reject) => {
+            opts.signal.addEventListener("abort", () => {
+              const err = new Error("aborted");
+              err.name = "AbortError";
+              reject(err);
+            });
+          }),
+      }),
+    );
+
+    const promise = generatePeriodReview("prompt", "fake-api-key");
+    const assertion = expect(promise).rejects.toMatchObject({
+      failureReason: "timeout",
+      timedOut: true,
+    });
+    await vi.advanceTimersByTimeAsync(10000);
+    await assertion;
+  });
 });
