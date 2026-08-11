@@ -335,12 +335,20 @@ async function syncParticipant(
   }
 }
 
-// 완료된 기간 리뷰 조회 (Story 11-1) — 실패(오프라인·서버 미설정 등) 시 null.
+const PERIOD_REVIEWS_TIMEOUT_MS = 5000;
+
+// 완료된 기간 리뷰 조회 (Story 11-1) — 실패(오프라인·서버 미설정·타임아웃 등) 시 null.
 async function fetchPeriodReviews(serverUrl, anonymousId) {
   if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    PERIOD_REVIEWS_TIMEOUT_MS,
+  );
   try {
     const res = await fetch(
       `${serverUrl.replace(/\/$/, "")}/api/period-reviews?anonymousId=${encodeURIComponent(anonymousId)}`,
+      { signal: controller.signal },
     );
     if (!res.ok) return null;
     const json = await res.json();
@@ -348,6 +356,8 @@ async function fetchPeriodReviews(serverUrl, anonymousId) {
   } catch (error) {
     console.warn("[popup] 기간 리뷰 조회 오류:", error.message);
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
