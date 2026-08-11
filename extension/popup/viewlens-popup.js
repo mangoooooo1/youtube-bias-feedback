@@ -178,12 +178,17 @@ function buildDataForDate(allSessions, targetDate) {
 
 // ── Build VL.weeks ────────────────────────────────────────────────────────────
 
-function buildWeeksData(allSessions, installDate) {
+function buildWeeksData(allSessions, installDate, periodReviews = []) {
   const analyzedSessions = allSessions.filter(
     (s) =>
       s.endTime &&
       s.categoryDistribution &&
       Object.keys(s.categoryDistribution).length > 0,
+  );
+
+  // 서버가 배치로 생성한 기간 리뷰
+  const reviewsByIndex = new Map(
+    (periodReviews || []).map((r) => [r.periodIndex, r]),
   );
 
   const weeks = [];
@@ -228,9 +233,9 @@ function buildWeeksData(allSessions, installDate) {
     endD.setDate(endD.getDate() + endOffset);
     const range = `${startD.getMonth() + 1}/${startD.getDate()} – ${endD.getMonth() + 1}/${endD.getDate()}`;
 
-    // Review: latest session's review in this week
+    // Review: 서버가 생성한 기간 리뷰
     const review =
-      weekSessions.at(-1)?.review ||
+      reviewsByIndex.get(w)?.review ||
       (isBaseline
         ? "베이스라인 기간 동안의 시청 습관을 기준선으로 담아 두었어요. 이건 평가가 아니라 출발점이에요."
         : "이번 주 데이터를 분석 중이에요. 세션이 쌓이면 더 자세한 리포트를 볼 수 있어요.");
@@ -328,6 +333,51 @@ async function syncParticipant(
   } catch (error) {
     console.warn("[popup] participants 등록 오류:", error.message);
   }
+}
+
+// 완료된 기간 리뷰 조회 (Story 11-1) — 실패(오프라인·서버 미설정 등) 시 null.
+async function fetchPeriodReviews(serverUrl, anonymousId) {
+  if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId) return null;
+  try {
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/period-reviews?anonymousId=${encodeURIComponent(anonymousId)}`,
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    return Array.isArray(json.data) ? json.data : null;
+  } catch (error) {
+    console.warn("[popup] 기간 리뷰 조회 오류:", error.message);
+    return null;
+  }
+}
+
+// 기간 리뷰 로컬 캐싱
+// 팝업을 열 때마다 서버를 조회하지 않고, 캐시가 오늘 날짜 것이 아닐 때만 재조회
+async function getPeriodReviewsCached(serverUrl, anonymousId) {
+  const { periodReviewsCache } =
+    await chrome.storage.local.get("periodReviewsCache");
+  const todayStr = dateStr(new Date());
+
+  if (
+    periodReviewsCache &&
+    periodReviewsCache.anonymousId === anonymousId &&
+    periodReviewsCache.dateStr === todayStr
+  ) {
+    return periodReviewsCache.reviews;
+  }
+
+  const fetched = await fetchPeriodReviews(serverUrl, anonymousId);
+  if (fetched) {
+    await chrome.storage.local.set({
+      periodReviewsCache: { anonymousId, dateStr: todayStr, reviews: fetched },
+    });
+    return fetched;
+  }
+
+  // 조회 실패 — 같은 참여자의 이전 캐시가 있으면(날짜는 지났어도) 빈 화면보다는 낫다.
+  return periodReviewsCache?.anonymousId === anonymousId
+    ? periodReviewsCache.reviews
+    : [];
 }
 
 // 온보딩 코드 서버 검증 — 발급 명단(issued_codes)과 대조 (등록 없이 확인만).
@@ -570,8 +620,18 @@ async function boot() {
     clearUnviewedIconDot();
   }
 
+  // 대조군은 애초에 이 엔드포인트를 호출하지 않는다(서버도 이중 방어하지만, 불필요한
+  // 요청 자체를 만들지 않는 게 우선) — GROUPS[...].feedback으로 실험군만 걸러낸다.
+  let cachedPeriodReviews = [];
+  if (installDate && stored.anonymousId && VL.GROUPS[stored.group]?.feedback) {
+    cachedPeriodReviews = await getPeriodReviewsCached(
+      stored.serverUrl,
+      stored.anonymousId,
+    );
+  }
+
   if (installDate) {
-    VL.weeks = buildWeeksData(sessions, installDate);
+    VL.weeks = buildWeeksData(sessions, installDate, cachedPeriodReviews);
     VL.baselineH = calculateBaselineEntropy(VL.weeks);
   }
 
@@ -710,7 +770,13 @@ async function boot() {
       clearUnviewedIconDot();
     }
     if (installDate) {
-      VL.weeks = buildWeeksData(updatedSessions, installDate);
+      // 기간 리뷰는 세션이 갱신될 때마다 다시 조회하지 않는다 — 서버 cron이 하루/일주일에
+      // 한 번만 새로 생성하므로, boot() 시점에 캐시로 가져온 값을 그대로 재사용한다.
+      VL.weeks = buildWeeksData(
+        updatedSessions,
+        installDate,
+        cachedPeriodReviews,
+      );
       VL.baselineH = calculateBaselineEntropy(VL.weeks);
     }
     popup.render();
