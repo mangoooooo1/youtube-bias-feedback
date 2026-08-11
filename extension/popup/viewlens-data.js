@@ -27,10 +27,9 @@ function entropy(arr) {
   return arr.reduce((h, d) => (d.p > 0 ? h - d.p * Math.log2(d.p) : h), 0);
 }
 
-// 베이스라인 기간(설치 후 1일 미만) 판정 — extension/pipeline/baseline.js와 규칙이 동일해야 한다.
-// 테스트 기간으로 1일로 단축
+// 베이스라인 기간(설치 후 BASELINE_DAYS 미만) 판정
 // 팝업/Studio는 classic script라 ESM import를 쓸 수 없어(background.js는 type=module) 로직을 중복 정의한다.
-const BASELINE_DAYS = 1;
+const BASELINE_DAYS = 2;
 function isBaselinePeriod(installDate, now = new Date()) {
   if (!installDate) return true;
   return (
@@ -166,10 +165,11 @@ const TIMELINE = {
     todayWeek: 6,
   },
 };
-// 테스트 기간으로 7일로 단축
-const TOTAL_DAYS = 7;
-// 탭을 며칠 단위로 나눌지 — 평소 운영값은 7(주 단위), 테스트 기간엔 1(일 단위)로 촘촘히 확인
-const DAYS_PER_PERIOD = 1;
+// 파일럿 검증용으로 6일로 단축(베이스라인 2일 + 일반 2일×2)
+const TOTAL_DAYS = 6;
+// 탭을 며칠 단위로 나눌지 — 평소 운영값은 7(주 단위), 파일럿 기간엔 2일 단위로 여러 날짜에
+// 걸친 집계 경로(본조사에서만 타는 경로)를 미리 검증한다.
+const DAYS_PER_PERIOD = 2;
 const TOTAL_WEEKS = Math.ceil(TOTAL_DAYS / DAYS_PER_PERIOD);
 
 // DAYS_PER_PERIOD가 1이면 "N일차", 그 외(평소 7)엔 "N주차"로 표기

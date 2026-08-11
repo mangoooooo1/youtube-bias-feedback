@@ -25,11 +25,9 @@ const {
   generatePeriodFallbackReview,
 } = require("../pipeline/period-review-llm");
 
-// 클라이언트(extension/popup/viewlens-data.js)와 반드시 같은 값을 유지해야 하는 상수 —
-// 값을 바꿀 때는 양쪽을 함께 수정할 것 (명세서 18절).
-const TOTAL_DAYS = 7;
-const DAYS_PER_PERIOD = 1;
-const BASELINE_DAYS = 1;
+const TOTAL_DAYS = 6;
+const DAYS_PER_PERIOD = 2;
+const BASELINE_DAYS = 2;
 
 // 대조군(CON, TEST-CON)은 여기 포함하지 않는 것으로 제외된다 — 명세서 6절.
 const ELIGIBLE_GROUPS = ["EXP", "TEST-EXP"];
