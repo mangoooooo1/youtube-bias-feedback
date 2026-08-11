@@ -146,25 +146,6 @@ const baselineWeeks = weeks.filter((w) => w.isBaseline);
 const baselineH =
   baselineWeeks.reduce((s, w) => s + w.entropy, 0) / baselineWeeks.length;
 
-const TIMELINE = {
-  w1_mid: { label: "1주차 진행 중", day: 4, currentWeek: 1, todayWeek: 1 },
-  w1_end: { label: "1주차 종료", day: 7, currentWeek: 1, todayWeek: 1 },
-  w2_mid: { label: "2주차 진행 중", day: 11, currentWeek: 2, todayWeek: 2 },
-  w2_end: { label: "2주차 종료", day: 14, currentWeek: 2, todayWeek: 2 },
-  w3_mid: { label: "3주차 진행 중", day: 18, currentWeek: 3, todayWeek: 3 },
-  w3_end: { label: "3주차 종료", day: 21, currentWeek: 3, todayWeek: 3 },
-  w4_mid: { label: "4주차 진행 중", day: 25, currentWeek: 4, todayWeek: 4 },
-  w4_end: { label: "4주차 종료", day: 28, currentWeek: 4, todayWeek: 4 },
-  w5_mid: { label: "5주차 진행 중", day: 32, currentWeek: 5, todayWeek: 5 },
-  w5_end: { label: "5주차 종료", day: 35, currentWeek: 5, todayWeek: 5 },
-  w6_mid: { label: "6주차 진행 중", day: 39, currentWeek: 6, todayWeek: 6 },
-  w6_end: {
-    label: "6주차 종료 · 연구 종료",
-    day: 42,
-    currentWeek: 6,
-    todayWeek: 6,
-  },
-};
 // 파일럿 검증용으로 6일로 단축(베이스라인 2일 + 일반 2일×2)
 const TOTAL_DAYS = 6;
 // 탭을 며칠 단위로 나눌지 — 평소 운영값은 7(주 단위), 파일럿 기간엔 2일 단위로 여러 날짜에
@@ -176,6 +157,28 @@ const TOTAL_WEEKS = Math.ceil(TOTAL_DAYS / DAYS_PER_PERIOD);
 function periodLabel(n) {
   return DAYS_PER_PERIOD === 1 ? `${n}일차` : `${n}주차`;
 }
+
+// Studio "실험 시점" 프리셋 — TOTAL_DAYS/DAYS_PER_PERIOD로부터 매 기간의 "진행 중"/"종료"
+// 체크포인트를 동적으로 생성한다. 예전엔 이걸 12개 통째로 하드코딩해뒀는데, 본조사(42일)
+// 기준값이라 파일럿(6일)으로 바꿀 때마다 따로 손대야 했다(실제 화면엔 영향 없지만 Studio
+// 프리뷰만 안 맞는 문제 — coderabbitai 리뷰로 발견). 실제 화면 상수를 그대로 따라가게 만들어
+// 이 동기화 문제 자체를 없앤다.
+function buildTimeline() {
+  const entries = {};
+  for (let p = 1; p <= TOTAL_WEEKS; p++) {
+    const startDay = (p - 1) * DAYS_PER_PERIOD + 1;
+    const endDay = p * DAYS_PER_PERIOD;
+    const midDay = startDay + Math.floor((DAYS_PER_PERIOD - 1) / 2);
+    const label = periodLabel(p);
+    entries[`w${p}_mid`] = { label: `${label} 진행 중`, day: midDay };
+    entries[`w${p}_end`] = {
+      label: p === TOTAL_WEEKS ? `${label} 종료 · 연구 종료` : `${label} 종료`,
+      day: endDay,
+    };
+  }
+  return entries;
+}
+const TIMELINE = buildTimeline();
 
 const GROUPS = {
   EXP: {
