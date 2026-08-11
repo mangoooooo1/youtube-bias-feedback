@@ -153,9 +153,10 @@ const TOTAL_DAYS = 6;
 const DAYS_PER_PERIOD = 2;
 const TOTAL_WEEKS = Math.ceil(TOTAL_DAYS / DAYS_PER_PERIOD);
 
-// DAYS_PER_PERIOD가 1이면 "N일차", 그 외(평소 7)엔 "N주차"로 표기
 function periodLabel(n) {
-  return DAYS_PER_PERIOD === 1 ? `${n}일차` : `${n}주차`;
+  if (DAYS_PER_PERIOD === 1) return `${n}일차`;
+  if (DAYS_PER_PERIOD === 7) return `${n}주차`;
+  return `${n}구간`;
 }
 
 // Studio "실험 시점" 프리셋 — TOTAL_DAYS/DAYS_PER_PERIOD로부터 매 기간의 "진행 중"/"종료"

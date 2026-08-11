@@ -79,7 +79,12 @@ function _tabs(activeTab, needsConfirmNudge = false) {
     { id: "today", label: "오늘" },
     {
       id: "feedback",
-      label: VL.DAYS_PER_PERIOD === 1 ? "일별 피드백" : "주차별 피드백",
+      label:
+        VL.DAYS_PER_PERIOD === 1
+          ? "일별 피드백"
+          : VL.DAYS_PER_PERIOD === 7
+            ? "주차별 피드백"
+            : "기간별 피드백",
     },
   ];
   return `<div style="display:flex;gap:4px;padding:10px 16px 0;background:var(--vl-card)">
