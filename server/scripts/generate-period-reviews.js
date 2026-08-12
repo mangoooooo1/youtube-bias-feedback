@@ -31,10 +31,18 @@ const BASELINE_DAYS = 2;
 
 // 대조군(CON, TEST-CON)은 여기 포함하지 않는 것으로 제외된다 — 명세서 6절.
 const ELIGIBLE_GROUPS = ["EXP", "TEST-EXP"];
+const FALLBACK_RETRY_WINDOW_DAYS = 3;
 
 /** 해당 참여자의 세션/영상 제목을 기간 범위(KST 날짜 문자열 기준)로 좁힌다 */
 function inRange(dateStr, periodStart, periodEnd) {
   return dateStr >= periodStart && dateStr <= periodEnd;
+}
+
+/** periodEnd로부터 FALLBACK_RETRY_WINDOW_DAYS 안이면(오늘 포함) 아직 재시도 대상이다. */
+function isRetryEligible(periodEnd) {
+  const deadlineMs =
+    new Date(periodEnd).getTime() + FALLBACK_RETRY_WINDOW_DAYS * 86400000;
+  return kstDateStr(new Date()) <= kstDateStr(new Date(deadlineMs));
 }
 
 async function processPeriod({
@@ -138,11 +146,14 @@ async function run(db, apiKey) {
     WHERE anonymousId = ? AND title IS NOT NULL
     ORDER BY watchedAt ASC
   `);
-  const selectExistingPeriodIndexes = db.prepare(`
-    SELECT periodIndex FROM period_reviews WHERE anonymousId = ?
+  const selectExistingPeriodReviews = db.prepare(`
+    SELECT periodIndex, llmStatus, periodEnd FROM period_reviews WHERE anonymousId = ?
   `);
+  // OR REPLACE — llmStatus='fallback'이고 재시도 대상인 기간은 새로 덮어써야 한다.
+  // lockedIndexes(아래)가 success/재시도 기간 만료 건만 걸러내므로, 이 문장이 실수로
+  // success 행을 덮어쓸 일은 없다(그런 periodIndex는 애초에 처리 대상에 포함되지 않는다).
   const insertPeriodReview = db.prepare(`
-    INSERT OR IGNORE INTO period_reviews
+    INSERT OR REPLACE INTO period_reviews
       (anonymousId, periodIndex, periodStart, periodEnd, isBaseline, sessionCount,
        videoCount, categoryDistribution, entropy, review, reviewTopic, source,
        promptVersion, llmStatus, failureReason, geminiMs, generatedAt)
@@ -160,12 +171,17 @@ async function run(db, apiKey) {
   for (const participant of participants) {
     const { anonymousId, installDate } = participant;
 
-    const existingIndexes = new Set(
-      selectExistingPeriodIndexes.all(anonymousId).map((r) => r.periodIndex),
+    const lockedIndexes = new Set(
+      selectExistingPeriodReviews
+        .all(anonymousId)
+        .filter(
+          (r) => r.llmStatus === "success" || !isRetryEligible(r.periodEnd),
+        )
+        .map((r) => r.periodIndex),
     );
     const periods = pendingCompletedPeriods({
       installDate,
-      existingIndexes,
+      existingIndexes: lockedIndexes,
       totalDays: TOTAL_DAYS,
       daysPerPeriod: DAYS_PER_PERIOD,
       baselineDays: BASELINE_DAYS,

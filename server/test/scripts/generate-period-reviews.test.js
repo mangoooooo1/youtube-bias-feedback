@@ -229,4 +229,131 @@ describe("generate-period-reviews.js — run()", () => {
     expect(row.llmStatus).toBe("fallback");
     expect(row.failureReason).toBe("http_error");
   });
+
+  describe("fallback 재시도 정책 (periodEnd 기준 3일 이내)", () => {
+    // 1일차(offset 0-1, periodEnd=2026-06-02) 하나만 완료되도록 고정 — 나머지 기간은
+    // 이 테스트들과 무관하니 아직 진행 중인 채로 둔다.
+    const P1_INSTALL_DATE = "2026-06-01T00:00:00+09:00";
+    const P1_SESSION_AT = "2026-06-01T10:00:00+09:00";
+
+    it("성공(llmStatus=success)한 기간은 재실행해도 다시 시도하지 않는다", async () => {
+      vi.setSystemTime(new Date("2026-06-03T10:00:00+09:00"));
+      db.prepare(
+        "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+      ).run("locked-success-user", P1_INSTALL_DATE);
+      db.prepare(
+        "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+      ).run("locked-success-user", JSON.stringify({ 음악: 1 }), 5, P1_SESSION_AT);
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            { content: { parts: [{ text: '{"topic":"음악","feedback":"문장"}' }] } },
+          ],
+        }),
+      });
+
+      await run(db, "fake-key");
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      await run(db, "fake-key"); // 재실행 — success는 다시 건드리지 않아야 함
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      const row = db
+        .prepare(
+          "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+        )
+        .get("locked-success-user");
+      expect(row.llmStatus).toBe("success");
+    });
+
+    it("fallback 기간은 periodEnd로부터 3일 이내면 재시도해 성공으로 갱신될 수 있다", async () => {
+      vi.setSystemTime(new Date("2026-06-03T10:00:00+09:00"));
+      db.prepare(
+        "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+      ).run("retry-user", P1_INSTALL_DATE);
+      db.prepare(
+        "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+      ).run("retry-user", JSON.stringify({ 음악: 1 }), 5, P1_SESSION_AT);
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: async () => "server error",
+      });
+      await run(db, "fake-key"); // 1회차 — 실패 → fallback 저장 (periodEnd=6/2, 재시도 기한 6/5)
+
+      let row = db
+        .prepare(
+          "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+        )
+        .get("retry-user");
+      expect(row.llmStatus).toBe("fallback");
+
+      // 하루 뒤(재시도 기한 안) — 이번엔 성공하도록 변경 후 재실행
+      vi.setSystemTime(new Date("2026-06-04T10:00:00+09:00"));
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            { content: { parts: [{ text: '{"topic":"음악","feedback":"복구된 리뷰"}' }] } },
+          ],
+        }),
+      });
+      await run(db, "fake-key");
+
+      row = db
+        .prepare(
+          "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+        )
+        .get("retry-user");
+      expect(row.llmStatus).toBe("success");
+      expect(row.review).toBe("복구된 리뷰");
+      // OR REPLACE로 갱신돼도 같은 기간에 행이 여러 개 생기면 안 된다.
+      const rows = db
+        .prepare(
+          "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+        )
+        .all("retry-user");
+      expect(rows.length).toBe(1);
+    });
+
+    it("fallback 기간이 재시도 기한(periodEnd+3일)을 지나면 더 이상 재시도하지 않는다", async () => {
+      vi.setSystemTime(new Date("2026-06-03T10:00:00+09:00"));
+      db.prepare(
+        "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+      ).run("expired-user", P1_INSTALL_DATE);
+      db.prepare(
+        "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+      ).run("expired-user", JSON.stringify({ 음악: 1 }), 5, P1_SESSION_AT);
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: async () => "server error",
+      });
+      await run(db, "fake-key"); // periodEnd=6/2, 재시도 기한 6/5
+
+      // 기한(6/5)을 지난 시점 — 이제 성공하도록 바꿔도 더 이상 호출되면 안 된다.
+      vi.setSystemTime(new Date("2026-06-06T10:00:00+09:00"));
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          candidates: [
+            { content: { parts: [{ text: '{"topic":"음악","feedback":"너무 늦은 성공"}' }] } },
+          ],
+        }),
+      });
+      await run(db, "fake-key");
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      const row = db
+        .prepare(
+          "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+        )
+        .get("expired-user");
+      expect(row.llmStatus).toBe("fallback");
+    });
+  });
 });
