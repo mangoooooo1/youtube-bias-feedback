@@ -178,7 +178,7 @@ function buildDataForDate(allSessions, targetDate) {
 
 // ── Build VL.weeks ────────────────────────────────────────────────────────────
 
-function buildWeeksData(allSessions, installDate) {
+function buildWeeksData(allSessions, installDate, periodReviews = []) {
   const analyzedSessions = allSessions.filter(
     (s) =>
       s.endTime &&
@@ -186,11 +186,16 @@ function buildWeeksData(allSessions, installDate) {
       Object.keys(s.categoryDistribution).length > 0,
   );
 
+  // 서버가 배치로 생성한 기간 리뷰
+  const reviewsByIndex = new Map(
+    (periodReviews || []).map((r) => [r.periodIndex, r]),
+  );
+
   const weeks = [];
 
   for (let w = 1; w <= VL.TOTAL_WEEKS; w++) {
-    const startOffset = (w - 1) * 7; // day offset from install
-    const endOffset = w * 7 - 1;
+    const startOffset = (w - 1) * VL.DAYS_PER_PERIOD; // day offset from install
+    const endOffset = w * VL.DAYS_PER_PERIOD - 1;
     const isBaseline = startOffset < VL.BASELINE_DAYS; // 14일(2주) 미만이면 베이스라인 — 1·2주차
 
     const weekStart = dayFromInstall(installDate, startOffset);
@@ -201,9 +206,9 @@ function buildWeeksData(allSessions, installDate) {
       return d >= weekStart && d <= weekEnd;
     });
 
-    // Daily entropy (7 values — 0 if no data that day)
+    // Daily entropy (기간 내 일수만큼 — 0 if no data that day)
     const daily = [];
-    for (let d = 0; d < 7; d++) {
+    for (let d = 0; d < VL.DAYS_PER_PERIOD; d++) {
       const dayKey = dayFromInstall(installDate, startOffset + d);
       const daySess = weekSessions.filter(
         (s) => dateStr(new Date(s.endTime)) === dayKey,
@@ -228,9 +233,9 @@ function buildWeeksData(allSessions, installDate) {
     endD.setDate(endD.getDate() + endOffset);
     const range = `${startD.getMonth() + 1}/${startD.getDate()} – ${endD.getMonth() + 1}/${endD.getDate()}`;
 
-    // Review: latest session's review in this week
+    // Review: 서버가 생성한 기간 리뷰
     const review =
-      weekSessions.at(-1)?.review ||
+      reviewsByIndex.get(w)?.review ||
       (isBaseline
         ? "베이스라인 기간 동안의 시청 습관을 기준선으로 담아 두었어요. 이건 평가가 아니라 출발점이에요."
         : "이번 주 데이터를 분석 중이에요. 세션이 쌓이면 더 자세한 리포트를 볼 수 있어요.");
@@ -242,7 +247,7 @@ function buildWeeksData(allSessions, installDate) {
 
     weeks.push({
       week: w,
-      label: `${w}주차`,
+      label: VL.periodLabel(w),
       isBaseline,
       range,
       videoCount: totalVids,
@@ -299,50 +304,6 @@ function calcTimelineKey(installDate) {
   return reached ? reached[0] : "w1_mid";
 }
 
-// ── Survey status helpers ─────────────────────────────────────────────────────
-
-function storageToCompleted(surveyStatus) {
-  if (!surveyStatus) return {};
-  return {
-    ...(surveyStatus.week1 ? { 1: true } : {}),
-    ...(surveyStatus.week2 ? { 2: true } : {}),
-    ...(surveyStatus.week3 ? { 3: true } : {}),
-  };
-}
-
-async function markWeekComplete(week) {
-  const key = `week${week}`;
-  const { surveyStatus } = await chrome.storage.local.get("surveyStatus");
-  const updated = {
-    week1: false,
-    week2: false,
-    week3: false,
-    ...(surveyStatus || {}),
-    [key]: true,
-  };
-  await chrome.storage.local.set({ surveyStatus: updated });
-}
-
-// ── RealPopup: persists survey to storage ─────────────────────────────────────
-
-class RealPopup extends ViewLensPopup {
-  constructor(container, surveyStatus) {
-    super(container);
-    this._completed = storageToCompleted(surveyStatus);
-  }
-
-  // _isFeedbackActive는 오버라이드하지 않는다 — 베이스라인 게이트는 ViewLensPopup 기본 구현
-  // 하나로 통일해, Studio 프리뷰와 실제 팝업이 항상 같은 규칙을 따르게 한다(viewlens-app.js 참고).
-
-  _bind(groupCfg, surveyWeek, surveyPending, currentWeek) {
-    super._bind(groupCfg, surveyWeek, surveyPending, currentWeek);
-    const doneBtn = this.container.querySelector("#vl-survey-done");
-    if (doneBtn && surveyWeek != null) {
-      doneBtn.addEventListener("click", () => markWeekComplete(surveyWeek));
-    }
-  }
-}
-
 // participants 서버 등록 — 성공(200) 시에만 participantSynced 플래그를 저장한다.
 // 실패하면 플래그를 세우지 않으므로 다음 팝업 boot에서 재시도된다(서버는 anonymousId UNIQUE로 멱등 처리).
 async function syncParticipant(
@@ -372,6 +333,61 @@ async function syncParticipant(
   } catch (error) {
     console.warn("[popup] participants 등록 오류:", error.message);
   }
+}
+
+const PERIOD_REVIEWS_TIMEOUT_MS = 5000;
+
+// 완료된 기간 리뷰 조회 (Story 11-1) — 실패(오프라인·서버 미설정·타임아웃 등) 시 null.
+async function fetchPeriodReviews(serverUrl, anonymousId) {
+  if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    PERIOD_REVIEWS_TIMEOUT_MS,
+  );
+  try {
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/period-reviews?anonymousId=${encodeURIComponent(anonymousId)}`,
+      { signal: controller.signal },
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    return Array.isArray(json.data) ? json.data : null;
+  } catch (error) {
+    console.warn("[popup] 기간 리뷰 조회 오류:", error.message);
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// 기간 리뷰 로컬 캐싱
+// 팝업을 열 때마다 서버를 조회하지 않고, 캐시가 오늘 날짜 것이 아닐 때만 재조회
+async function getPeriodReviewsCached(serverUrl, anonymousId) {
+  const { periodReviewsCache } =
+    await chrome.storage.local.get("periodReviewsCache");
+  const todayStr = dateStr(new Date());
+
+  if (
+    periodReviewsCache &&
+    periodReviewsCache.anonymousId === anonymousId &&
+    periodReviewsCache.dateStr === todayStr
+  ) {
+    return periodReviewsCache.reviews;
+  }
+
+  const fetched = await fetchPeriodReviews(serverUrl, anonymousId);
+  if (fetched) {
+    await chrome.storage.local.set({
+      periodReviewsCache: { anonymousId, dateStr: todayStr, reviews: fetched },
+    });
+    return fetched;
+  }
+
+  // 조회 실패 — 같은 참여자의 이전 캐시가 있으면(날짜는 지났어도) 빈 화면보다는 낫다.
+  return periodReviewsCache?.anonymousId === anonymousId
+    ? periodReviewsCache.reviews
+    : [];
 }
 
 // 온보딩 코드 서버 검증 — 발급 명단(issued_codes)과 대조 (등록 없이 확인만).
@@ -547,7 +563,6 @@ async function boot() {
   const stored = await chrome.storage.local.get([
     "group",
     "installDate",
-    "surveyStatus",
     "sessions",
     "tone",
     "dark",
@@ -615,8 +630,18 @@ async function boot() {
     clearUnviewedIconDot();
   }
 
+  // 대조군은 애초에 이 엔드포인트를 호출하지 않는다(서버도 이중 방어하지만, 불필요한
+  // 요청 자체를 만들지 않는 게 우선) — GROUPS[...].feedback으로 실험군만 걸러낸다.
+  let cachedPeriodReviews = [];
+  if (installDate && stored.anonymousId && VL.GROUPS[stored.group]?.feedback) {
+    cachedPeriodReviews = await getPeriodReviewsCached(
+      stored.serverUrl,
+      stored.anonymousId,
+    );
+  }
+
   if (installDate) {
-    VL.weeks = buildWeeksData(sessions, installDate);
+    VL.weeks = buildWeeksData(sessions, installDate, cachedPeriodReviews);
     VL.baselineH = calculateBaselineEntropy(VL.weeks);
   }
 
@@ -625,7 +650,7 @@ async function boot() {
   applyTokens(popEl, toneName, darkMode);
 
   // Mount popup
-  const popup = new RealPopup(popEl, stored.surveyStatus);
+  const popup = new ViewLensPopup(popEl);
   popup.mount({
     onboarded: !!stored.group,
     group: stored.group || null,
@@ -644,7 +669,6 @@ async function boot() {
           participantCode,
           group: g,
           installDate,
-          surveyStatus: { week1: false, week2: false, week3: false },
           participantSynced: false,
         });
 
@@ -660,7 +684,6 @@ async function boot() {
           "group",
           "participantCode",
           "installDate",
-          "surveyStatus",
           "participantSynced",
         ]);
         window.location.reload();
@@ -757,7 +780,13 @@ async function boot() {
       clearUnviewedIconDot();
     }
     if (installDate) {
-      VL.weeks = buildWeeksData(updatedSessions, installDate);
+      // 기간 리뷰는 세션이 갱신될 때마다 다시 조회하지 않는다 — 서버 cron이 하루/일주일에
+      // 한 번만 새로 생성하므로, boot() 시점에 캐시로 가져온 값을 그대로 재사용한다.
+      VL.weeks = buildWeeksData(
+        updatedSessions,
+        installDate,
+        cachedPeriodReviews,
+      );
       VL.baselineH = calculateBaselineEntropy(VL.weeks);
     }
     popup.render();

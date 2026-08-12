@@ -266,12 +266,8 @@ function screenToday() {
 
 function screenFeedback(currentWeek, selWeek) {
   const w = VL.weeks[selWeek - 1];
-  const vsBase = w.entropy - VL.baselineH;
   const prevW = selWeek >= 2 ? VL.weeks[selWeek - 2] : null;
   const vsPrev = prevW ? w.entropy - prevW.entropy : 0;
-  // 직전 주가 베이스라인 기간(1·2주차)과 다를 때만 별도 표시 — 개입 첫 주(3주차)의
-  // "직전 주"는 베이스라인 2주차라 "베이스라인 대비"와 중복이라 4주차부터 보여준다.
-  const showPrev = selWeek >= 4;
 
   const weekBtns = VL.weeks
     .map((wk) => {
@@ -288,32 +284,25 @@ function screenFeedback(currentWeek, selWeek) {
         ${locked ? _lockIcon(10) : ""}${wk.label}
       </span>
       <span style="font-size:9.5px;font-weight:500;color:inherit;opacity:0.8;white-space:nowrap">
-        ${locked ? `${wk.week}주차 공개` : wk.isBaseline ? "베이스라인" : ""}
+        ${locked ? `${VL.periodLabel(wk.week)} 공개` : wk.isBaseline ? "베이스라인" : ""}
       </span>
     </button>`;
     })
     .join("");
 
+  // 베이스라인 대비는 별도 문구 없이도 아래 미니 차트의 점선(baselineLegend)으로 이미
+  // 보여주고 있어 중복이라, 여기선 직전 기간 대비만 보여준다.
   const vsBaseContent = w.isBaseline
     ? `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">베이스라인 기간이라 아직 비교할 데이터가 없어요.</p>`
-    : `<div>
-        <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">베이스라인 대비</div>
+    : prevW
+      ? `<div>
+        <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">직전 기간(${prevW.label}) 대비</div>
         <div style="display:flex;align-items:center;gap:7px">
-          ${vlDeltaChip({ value: vsBase })}
-          <span style="font-size:12px;color:var(--vl-ink-2)">${vsBase >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
+          ${vlDeltaChip({ value: vsPrev })}
+          <span style="font-size:12px;color:var(--vl-ink-2)">${vsPrev >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
         </div>
-        ${
-          showPrev
-            ? `<div style="margin-top:8px">
-          <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">직전 주(${prevW.label}) 대비</div>
-          <div style="display:flex;align-items:center;gap:7px">
-            ${vlDeltaChip({ value: vsPrev })}
-            <span style="font-size:12px;color:var(--vl-ink-2)">${vsPrev >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
-          </div>
-        </div>`
-            : ""
-        }
-      </div>`;
+      </div>`
+      : `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">비교할 데이터가 없어요.</p>`;
 
   const baselineLegend = !w.isBaseline
     ? `
@@ -349,7 +338,12 @@ function screenFeedback(currentWeek, selWeek) {
       </div>
       <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--vl-line)">
         ${vlSectionLabel({ text: "일별 다양성 추이" })}
-        ${vlMiniLine({ data: w.daily, baseline: w.isBaseline ? null : VL.baselineH })}
+        ${vlMiniLine({
+          // 기간이 1일뿐이면 점 하나라 선을 못 그림(내부에서 0으로 나눠 깨짐) — 같은 값을
+          // 2번 넣어 평평한 선으로라도 표시(테스트 기간 한정 임시 처리, 실제 연구 땐 불필요).
+          data: w.daily.length > 1 ? w.daily : [w.daily[0] ?? 0, w.daily[0] ?? 0],
+          baseline: w.isBaseline ? null : VL.baselineH,
+        })}
         ${baselineLegend}
       </div>
     `,
@@ -431,32 +425,8 @@ function screenControlHome(day, stats = {}) {
   </div>`;
 }
 
-// ── Survey modal ──────────────────────────────────────────────────────────────
-
-function screenSurveyModal(week) {
-  return `<div id="vl-survey-overlay" style="position:absolute;inset:0;z-index:40;background:color-mix(in oklab,var(--vl-ink) 42%,transparent);backdrop-filter:blur(2px)">
-    <div style="position:absolute;left:0;right:0;bottom:0;background:var(--vl-card);border-radius:22px 22px 0 0;padding:22px 20px 20px;box-shadow:0 -16px 40px rgba(0,0,0,.18);animation:vlSheet .32s cubic-bezier(.2,.9,.2,1)">
-      <div style="width:38px;height:4px;border-radius:999px;background:var(--vl-line-2);margin:0 auto 16px"></div>
-      ${vlBadge({ text: `${week}주차 설문`, tone: "accent", size: "sm" })}
-      <h3 style="margin:12px 0 0;font-size:18px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${week}주차가 끝났어요!</h3>
-      <p style="margin:8px 0 0;font-size:13.5px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
-        연구자가 개인적으로 보내드린 <b style="color:var(--vl-ink)">설문 링크</b>에 참여해 주세요.
-        여러분의 응답이 연구에 큰 도움이 돼요.
-      </p>
-      <div style="display:flex;flex-direction:column;gap:9px;margin-top:18px">
-        <button id="vl-survey-done"
-          style="width:100%;padding:13px;border:none;border-radius:13px;cursor:pointer;background:var(--vl-accent);color:var(--vl-on-accent);font-size:14px;font-weight:700;font-family:inherit">설문 완료했어요</button>
-        <button id="vl-survey-later"
-          style="width:100%;padding:12px;border-radius:13px;cursor:pointer;background:transparent;color:var(--vl-ink-2);border:1px solid var(--vl-line-2);font-size:13.5px;font-weight:600;font-family:inherit">아직 안 했어요</button>
-      </div>
-      <p style="margin:12px 0 0;font-size:11px;color:var(--vl-ink-3);text-align:center;line-height:1.5">완료를 누르기 전까지 이 안내가 계속 표시돼요.</p>
-    </div>
-  </div>`;
-}
-
 window.screenOnboarding = screenOnboarding;
 window.bindOnboarding = bindOnboarding;
 window.screenToday = screenToday;
 window.screenFeedback = screenFeedback;
 window.screenControlHome = screenControlHome;
-window.screenSurveyModal = screenSurveyModal;

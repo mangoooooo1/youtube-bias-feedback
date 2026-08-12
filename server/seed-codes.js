@@ -12,6 +12,12 @@
 // - 코드를 추가 발급하면 CSV에 덧붙여 다시 실행하면 된다.
 
 const fs = require("fs");
+const path = require("path");
+
+// node server/seed-codes.js처럼 repo 루트에서 실행될 수 있으므로, cwd 기준 기본 동작에
+// 의존하지 않고 명시적으로 server/.env를 불러온다 (server/scripts/backup-db.js와 동일 이유).
+require("dotenv").config({ path: path.join(__dirname, ".env") });
+
 const { db, initializeDB } = require("./db");
 
 initializeDB(); // issued_codes 테이블 보장

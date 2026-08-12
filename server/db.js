@@ -95,6 +95,35 @@ function initializeDB() {
       openedAt       TEXT,     -- 팝업 오픈 시각 (engagement 최근성 분석용)
       createdAt      TEXT    DEFAULT (datetime('now'))
     );
+
+    -- 기간(일차·주차) 단위 리뷰 (Story 11-1) — 완료된 기간 전체를 요약하는 서버 배치(cron)
+    -- 생성 리뷰. sessions/video_events를 그때그때 집계해 만들며, 세션 리뷰(sessions.review)와는
+    -- 독립적으로 저장된다.
+    CREATE TABLE IF NOT EXISTS period_reviews (
+      id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+      anonymousId          TEXT    NOT NULL,
+      periodIndex          INTEGER NOT NULL,  -- 설치일 기준 몇 번째 기간인지 (1부터)
+      periodStart          TEXT    NOT NULL,  -- 기간 시작 날짜 (YYYY-MM-DD)
+      periodEnd            TEXT    NOT NULL,  -- 기간 종료 날짜 (YYYY-MM-DD)
+      isBaseline           INTEGER NOT NULL,  -- 생성 시점 기준 베이스라인 여부 스냅샷 (0|1)
+      sessionCount         INTEGER,
+      videoCount           INTEGER,
+      categoryDistribution TEXT,              -- JSON 문자열 (sessions와 동일 포맷)
+      entropy              REAL,
+      review               TEXT,              -- 참여자에게 노출된 리뷰 문장
+      reviewTopic          TEXT,
+      source               TEXT,              -- 'llm' | 'fallback'
+      promptVersion        TEXT,              -- 기간 리뷰 전용 버전 (세션 PROMPT_VERSION과 별개)
+      llmStatus            TEXT,              -- 'success' | 'fallback'
+      failureReason        TEXT,              -- timeout | http_error | empty_response
+                                               -- | parse_error | network_error | policy_filtered
+      geminiMs             INTEGER,
+      generatedAt          TEXT    NOT NULL,  -- cron이 이 행을 생성(확정)한 시각
+      createdAt            TEXT    DEFAULT (datetime('now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_period_reviews_participant_period
+      ON period_reviews(anonymousId, periodIndex);
   `);
 
   // 이미 만들어진 DB 파일(로컬 개발용·이미 배포된 서버)에는 CREATE TABLE IF NOT EXISTS가

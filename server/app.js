@@ -21,6 +21,7 @@ app.use("/api/sessions", require("./routes/sessions"));
 app.use("/api/surveys", require("./routes/surveys"));
 app.use("/api/video-events", require("./routes/video-events"));
 app.use("/api/popup-events", require("./routes/popup-events"));
+app.use("/api/period-reviews", require("./routes/period-reviews"));
 
 app.use(errorHandler);
 
