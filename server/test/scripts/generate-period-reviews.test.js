@@ -195,7 +195,7 @@ describe("generate-period-reviews.js — run()", () => {
       .all("repeat-user");
     // 1~3일차 각각 정확히 1건씩만 존재 (재실행으로 중복 생성되지 않음)
     expect(rows.length).toBe(3);
-    const indexes = rows.map((r) => r.periodIndex).sort();
+    const indexes = rows.map((r) => r.periodIndex).sort((a, b) => a - b);
     expect(indexes).toEqual([1, 2, 3]);
   });
 
