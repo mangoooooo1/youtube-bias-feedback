@@ -257,9 +257,30 @@ function screenToday() {
     `,
     })}
 
-    ${vlReview({ text: d.review, topic: d.reviewTopic, videos: d.videos, locked: reviewLocked, sessionId: d.sessionId })}
+    ${_todayCumulativeCard(isToday, d.videos)}
+
+    ${vlReview({ title: "가장 최근 시청", text: d.review, topic: d.reviewTopic, videos: d.lastSessionVideos, locked: reviewLocked, sessionId: d.sessionId })}
   </div>
   </div>`;
+}
+
+// "오늘" 하루 전체를 반영하는 누적 리뷰 카드
+// 세션 리뷰 카드(블러/확인)는 그대로 두고 그 위에 별도로 얹는다 — 블러가 없어 어떤 연구 측정(feedbackConfirmedAt/
+// feedbackViewed)도 바꾸지 않는다. 상태는 VL.today가 아니라 VL._todayCumulative에서 읽는다
+function _todayCumulativeCard(isToday, todayVideos) {
+  const cumulative = VL._todayCumulative;
+  if (!isToday || !cumulative?.eligible) return "";
+
+  return vlReview({
+    id: "vl-review-card-cumulative",
+    title: "오늘 하루 돌아보기",
+    text: cumulative.generating
+      ? "오늘 하루 전체 시청을 분석하고 있어요. 잠시 후 업데이트돼요."
+      : cumulative.review || "",
+    topic: cumulative.generating ? "" : cumulative.reviewTopic || "",
+    videos: todayVideos,
+    locked: false,
+  });
 }
 
 // ── Feedback ──────────────────────────────────────────────────────────────────
@@ -341,7 +362,8 @@ function screenFeedback(currentWeek, selWeek) {
         ${vlMiniLine({
           // 기간이 1일뿐이면 점 하나라 선을 못 그림(내부에서 0으로 나눠 깨짐) — 같은 값을
           // 2번 넣어 평평한 선으로라도 표시(테스트 기간 한정 임시 처리, 실제 연구 땐 불필요).
-          data: w.daily.length > 1 ? w.daily : [w.daily[0] ?? 0, w.daily[0] ?? 0],
+          data:
+            w.daily.length > 1 ? w.daily : [w.daily[0] ?? 0, w.daily[0] ?? 0],
           baseline: w.isBaseline ? null : VL.baselineH,
         })}
         ${baselineLegend}

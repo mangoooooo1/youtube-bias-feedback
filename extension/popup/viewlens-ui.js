@@ -141,6 +141,8 @@ function vlReview({
   videos = [],
   locked = false,
   sessionId = null,
+  // "오늘" 탭에 세션 리뷰 카드와 누적 리뷰 카드가 동시에 렌더될 때 DOM id가 겹치지 않게 하는 용도
+  id = "vl-review-card",
 } = {}) {
   const cats = VL.CATS;
 
@@ -194,7 +196,7 @@ function vlReview({
       </div>`
     : "";
 
-  return `<div id="vl-review-card" style="position:relative;overflow:hidden;background:var(--vl-accent-soft);border:1px solid color-mix(in oklab,var(--vl-accent) 22%,transparent);border-radius:16px;padding:15px">
+  return `<div id="${id}" style="position:relative;overflow:hidden;background:var(--vl-accent-soft);border:1px solid color-mix(in oklab,var(--vl-accent) 22%,transparent);border-radius:16px;padding:15px">
     <div style="${locked ? "filter:blur(6px);user-select:none;pointer-events:none" : ""}">
       <div style="display:flex;align-items:center;gap:7px;margin-bottom:9px">
         ${markSVG({ size: 18, filled: false, accent: "var(--vl-accent)" })}
