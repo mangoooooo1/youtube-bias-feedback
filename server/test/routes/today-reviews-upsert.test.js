@@ -88,6 +88,34 @@ describe("upsertTodayReview", () => {
     expect(rows[0].review).toBe("세 번째 리뷰");
   });
 
+  it("역순으로 도착해도(genCount가 더 낮은 요청이 나중에 도착) 최신 genCount가 유지된다", () => {
+    upsertTodayReview(db, basePayload({ genCount: 3, review: "세 번째 리뷰" }));
+    // 네트워크 지연 등으로 더 이전(genCount 낮음) 요청이 나중에 도착한 상황을 재현
+    upsertTodayReview(db, basePayload({ genCount: 1, review: "첫 번째 리뷰(지연 도착)" }));
+
+    const row = db.prepare("SELECT * FROM today_reviews").get();
+    expect(row.genCount).toBe(3);
+    expect(row.review).toBe("세 번째 리뷰");
+  });
+
+  it("같은 genCount로 재시도 도착해도 정상적으로 갱신된다(멱등)", () => {
+    upsertTodayReview(db, basePayload({ genCount: 2, review: "리뷰 A" }));
+    upsertTodayReview(db, basePayload({ genCount: 2, review: "리뷰 A(재시도)" }));
+
+    const row = db.prepare("SELECT * FROM today_reviews").get();
+    expect(row.genCount).toBe(2);
+    expect(row.review).toBe("리뷰 A(재시도)");
+  });
+
+  it("기존 행의 genCount가 없으면(과거 데이터) 비교 없이 항상 덮어쓴다", () => {
+    upsertTodayReview(db, basePayload({ genCount: undefined, review: "genCount 없는 옛 리뷰" }));
+    upsertTodayReview(db, basePayload({ genCount: 1, review: "새 리뷰" }));
+
+    const row = db.prepare("SELECT * FROM today_reviews").get();
+    expect(row.genCount).toBe(1);
+    expect(row.review).toBe("새 리뷰");
+  });
+
   it("날짜가 다르면 별도 행으로 저장된다", () => {
     upsertTodayReview(db, basePayload({ reviewDate: "2026-08-12" }));
     upsertTodayReview(db, basePayload({ reviewDate: "2026-08-13" }));

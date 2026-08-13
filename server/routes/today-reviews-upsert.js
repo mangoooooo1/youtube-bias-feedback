@@ -45,7 +45,10 @@ function upsertTodayReview(db, payload) {
        geminiMs             = excluded.geminiMs,
        genCount             = excluded.genCount,
        generatedAt          = excluded.generatedAt,
-       updatedAt            = excluded.updatedAt`,
+       updatedAt            = excluded.updatedAt
+     WHERE excluded.genCount IS NULL
+        OR today_reviews.genCount IS NULL
+        OR excluded.genCount >= today_reviews.genCount`,
   ).run({
     anonymousId,
     reviewDate,
