@@ -18,6 +18,8 @@ import {
   buildTodayCumulativePrompt,
   generateReview,
   generateFallbackReview,
+  generateTodayFallbackReview,
+  TODAY_PROMPT_VERSION,
 } from "./pipeline/llm.js";
 import { isBaselinePeriod } from "./pipeline/baseline.js";
 import { SERVER_URL } from "./config.js";
@@ -404,7 +406,7 @@ async function generateTodayCumulativeReview() {
   let timedOut = 0; // SQLite INTEGER — 1/0
   const geminiStart = Date.now();
   try {
-    result = await generateReview(prompt);
+    result = await generateReview(prompt, TODAY_PROMPT_VERSION);
     console.log("[background] 오늘 누적 리뷰 생성 완료");
   } catch (error) {
     llmStatus = "fallback";
@@ -416,7 +418,7 @@ async function generateTodayCumulativeReview() {
       failureReason,
       error.message,
     );
-    result = generateFallbackReview(aggregate);
+    result = generateTodayFallbackReview(aggregate);
   }
   const geminiMs = Date.now() - geminiStart;
 

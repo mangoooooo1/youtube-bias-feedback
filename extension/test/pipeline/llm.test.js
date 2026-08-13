@@ -4,6 +4,7 @@ import {
   buildTodayCumulativePrompt,
   generateReview,
   generateFallbackReview,
+  generateTodayFallbackReview,
   PROMPT_VERSION,
   TODAY_PROMPT_VERSION,
 } from "../../pipeline/llm.js";
@@ -242,6 +243,80 @@ describe("generateFallbackReview", () => {
   });
 });
 
+describe("generateTodayFallbackReview — 오늘 하루 프레이밍 (Story 11-2)", () => {
+  it("promptVersion은 TODAY_PROMPT_VERSION이다(세션용 아님)", () => {
+    const result = generateTodayFallbackReview(
+      baseArgs({ categoryDistribution: { 음악: 1 }, videoCount: 3 }),
+    );
+    expect(result.promptVersion).toBe(TODAY_PROMPT_VERSION);
+    expect(result.promptVersion).not.toBe(PROMPT_VERSION);
+  });
+
+  it("카테고리 데이터가 없으면 '세션' 언급 없는 placeholder를 반환한다", () => {
+    const result = generateTodayFallbackReview(
+      baseArgs({ categoryDistribution: {}, videoCount: 0 }),
+    );
+    expect(result.topic).toBe("분석 불가");
+    expect(result.feedback).not.toContain("세션");
+    expect(result.source).toBe("fallback");
+  });
+
+  it("카테고리가 1개뿐이면 '오늘은 ~ 집중적으로 시청' 문구를 만든다(세션 언급 없음)", () => {
+    const result = generateTodayFallbackReview(
+      baseArgs({ categoryDistribution: { 음악: 1 }, videoCount: 3 }),
+    );
+    expect(result.topic).toBe("음악");
+    expect(result.feedback).toContain("오늘은 음악 영상을 3개 집중적으로 시청");
+    expect(result.feedback).not.toContain("이번 세션");
+  });
+
+  it("top 비율이 0.5 초과면 top 2개를 언급하는 문구를 만든다", () => {
+    const result = generateTodayFallbackReview(
+      baseArgs({
+        categoryDistribution: { 음악: 0.6, 게임: 0.4 },
+        videoCount: 10,
+      }),
+    );
+    expect(result.feedback).toContain("오늘은 주로 음악 영상을 보셨고");
+  });
+
+  it("top 비율이 0.5 이하면 '다양한 카테고리' 문구를 만든다", () => {
+    const result = generateTodayFallbackReview(
+      baseArgs({
+        categoryDistribution: { 음악: 0.4, 게임: 0.35, 교육: 0.25 },
+        videoCount: 10,
+      }),
+    );
+    expect(result.feedback).toContain("다양한 카테고리의 영상을");
+  });
+
+  it("추세 문구는 '직전 세션'이 아니라 '직전 시청일'로 표현한다", () => {
+    const result = generateTodayFallbackReview(
+      baseArgs({
+        categoryDistribution: { 음악: 0.9, 게임: 0.1 },
+        videoCount: 10,
+        entropy: 1.5,
+        prevEntropy: 0.1,
+      }),
+    );
+    expect(result.feedback).toContain("직전 시청일보다");
+    expect(result.feedback).not.toContain("직전 세션");
+  });
+
+  it("videoCount가 MIN_VIDEOS_FOR_TREND 미만이면 트렌드/편중 문구를 넣지 않는다", () => {
+    const result = generateTodayFallbackReview(
+      baseArgs({
+        categoryDistribution: { 음악: 0.9, 게임: 0.1 },
+        videoCount: 2,
+        prevEntropy: 0.1,
+        entropy: 1.5,
+      }),
+    );
+    expect(result.feedback).not.toContain("직전 시청일");
+    expect(result.feedback).not.toContain("한 주제에 크게 모여");
+  });
+});
+
 describe("generateReview — 실패 사유 분류 (failureReason 태깅)", () => {
   const originalFetch = global.fetch;
 
@@ -276,6 +351,25 @@ describe("generateReview — 실패 사유 분류 (failureReason 태깅)", () =>
       source: "llm",
       promptVersion: PROMPT_VERSION,
     });
+  });
+
+  it("두 번째 인자로 promptVersion을 넘기면 결과에 그 값이 찍힌다(오늘 누적 리뷰가 재사용)", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"과학과 기술","feedback":"관찰 문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    const result = await generateReview("prompt", TODAY_PROMPT_VERSION);
+    expect(result.promptVersion).toBe(TODAY_PROMPT_VERSION);
+    expect(result.promptVersion).not.toBe(PROMPT_VERSION);
   });
 
   it("HTTP 오류 응답이면 http_error + httpStatus를 태깅한다", async () => {

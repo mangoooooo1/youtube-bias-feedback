@@ -255,7 +255,9 @@ function llmError(failureReason, message, extra = {}) {
 const SENSITIVE_PATTERN =
   /(?:진보|보수)\s*(?:성향|진영|정치|이념)|좌파|우파|좌익|우익|여당|야당|정당|국민의힘|민주당|대통령|국회의원|탄핵|친일|반일|극우|극좌/;
 
-export async function generateReview(prompt) {
+// promptVersion은 기본적으로 세션 리뷰 버전이지만, 오늘 누적 리뷰가 같은 함수를
+// 재사용할 때는 TODAY_PROMPT_VERSION을 넘겨 결과에 어느 프롬프트로 생성됐는지 정확히 남긴다
+export async function generateReview(prompt, promptVersion = PROMPT_VERSION) {
   const controller = new AbortController();
   let timedOut = false;
   const timeoutId = setTimeout(() => {
@@ -348,7 +350,7 @@ export async function generateReview(prompt) {
     );
   }
 
-  return { topic, feedback, source: "llm", promptVersion: PROMPT_VERSION };
+  return { topic, feedback, source: "llm", promptVersion };
 }
 
 export function generateFallbackReview({
@@ -415,4 +417,75 @@ export function generateFallbackReview({
 
   const feedback = [summary, trend, skewNote].filter(Boolean).join(" ");
   return { topic, feedback, source: "fallback", promptVersion: PROMPT_VERSION };
+}
+
+// "오늘" 누적 리뷰의 폴백 — generateFallbackReview와 판단 로직(분기·임계값)은
+// 완전히 동일하되, "이번 세션에서는"/"직전 세션" 같은 세션 전용 표현을 "오늘은"/"직전 시청일"로
+// 바꿔 오늘 하루 프레이밍에 맞춘다. 누적 카드는 세션 카드와 나란히 노출되므로, 폴백에서 "세션"이라는
+// 단어가 그대로 남으면 두 카드가 같은 세션 얘기를 하는 것처럼 보여 참여자에게 혼동을 준다.
+export function generateTodayFallbackReview({
+  categoryDistribution,
+  entropy,
+  prevEntropy = null,
+  videoCount,
+}) {
+  const sorted = Object.entries(categoryDistribution).sort(
+    ([, a], [, b]) => b - a,
+  );
+
+  if (sorted.length === 0) {
+    return {
+      topic: "분석 불가",
+      feedback:
+        "오늘의 시청 데이터를 분석하지 못했습니다. 잠시 후 다시 확인해 주세요!",
+      source: "fallback",
+      promptVersion: TODAY_PROMPT_VERSION,
+    };
+  }
+
+  const [topName, topRatio] = sorted[0];
+  const topNames = sorted
+    .slice(0, 3)
+    .map(([name]) => name)
+    .join(", ");
+
+  let summary;
+  let topic;
+  if (sorted.length === 1) {
+    topic = topName;
+    summary = `오늘은 ${topName} 영상을 ${videoCount}개 집중적으로 시청하셨네요.`;
+  } else if (topRatio > 0.5) {
+    topic = topName;
+    summary = `오늘은 주로 ${topName} 영상을 보셨고, ${sorted[1][0]} 영상도 함께 총 ${videoCount}개를 시청하셨어요.`;
+  } else {
+    topic = topNames;
+    summary = `오늘은 ${topNames} 등 다양한 카테고리의 영상을 총 ${videoCount}개 고루 시청하셨네요.`;
+  }
+
+  let trend = "";
+  let skewNote = "";
+  if (videoCount >= MIN_VIDEOS_FOR_TREND) {
+    const hasPrev = Number.isFinite(prevEntropy);
+    const delta = hasPrev ? roundedDelta(entropy, prevEntropy) : 0;
+
+    if (hasPrev) {
+      if (delta >= ENTROPY_DELTA_EPS)
+        trend = "직전 시청일보다 여러 주제를 두루 보셨어요.";
+      else if (delta <= -ENTROPY_DELTA_EPS)
+        trend = "직전 시청일보다 더 적은 수의 주제에 모여 있었어요.";
+      else trend = "직전 시청일과 비슷한 다양성이었어요.";
+    }
+
+    if (topRatio >= BIAS_WARN_RATIO) {
+      skewNote = "특히 시청이 한 주제에 크게 모여 있었어요.";
+    }
+  }
+
+  const feedback = [summary, trend, skewNote].filter(Boolean).join(" ");
+  return {
+    topic,
+    feedback,
+    source: "fallback",
+    promptVersion: TODAY_PROMPT_VERSION,
+  };
 }
