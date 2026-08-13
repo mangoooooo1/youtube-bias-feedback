@@ -27,6 +27,10 @@ const FAILURE_REASONS = [
 const SOURCES = ["llm", "fallback"];
 
 function validateSession(body) {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "body" };
+  }
+
   const { startTime, endTime, videoCount, entropy } = body;
 
   const requiredFields = ["anonymousId", "sessionId", "startTime", "endTime"];
@@ -226,7 +230,9 @@ function makeFeedbackTimestampHandler(column) {
   );
   return (req, res, next) => {
     const { sessionId } = req.params;
-    const { anonymousId } = req.body;
+    // req.body가 null/undefined일 수 있어(본문 없는 요청) 구조 분해 대신 옵셔널 체이닝으로
+    // 접근한다 — 구조 분해였다면 여기서 예외가 던져져 아래 400 검증을 건너뛰고 500으로 샜다.
+    const anonymousId = req.body?.anonymousId;
 
     if (typeof anonymousId !== "string" || !anonymousId.trim()) {
       return fail(
