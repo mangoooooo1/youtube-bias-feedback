@@ -23,6 +23,22 @@ function basePayload(overrides = {}) {
   };
 }
 
+describe("validateTodayReview — 잘못된 형태의 body", () => {
+  it.each([
+    ["undefined", undefined],
+    ["null", null],
+    ["배열", []],
+    ["문자열", "not-an-object"],
+    ["숫자", 42],
+  ])("body가 %s이면 예외 없이 INVALID_FIELD_VALUE(field: body)를 반환한다", (_label, body) => {
+    expect(() => validateTodayReview(body)).not.toThrow();
+    expect(validateTodayReview(body)).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "body",
+    });
+  });
+});
+
 describe("validateTodayReview", () => {
   it("전체 스냅샷(정상 payload)은 통과한다", () => {
     expect(validateTodayReview(basePayload())).toBeNull();

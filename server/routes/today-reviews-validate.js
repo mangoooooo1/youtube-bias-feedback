@@ -22,6 +22,11 @@ const FAILURE_REASONS = [
 const SOURCES = ["llm", "fallback"];
 
 function validateTodayReview(body) {
+  // body가 null/undefined/배열/원시값이면 아래 body[field] 접근이 예외를 던진다.
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "body" };
+  }
+
   const requiredFields = [
     "anonymousId",
     "reviewDate",
