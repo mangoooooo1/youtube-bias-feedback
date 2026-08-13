@@ -1,9 +1,11 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   buildPrompt,
+  buildTodayCumulativePrompt,
   generateReview,
   generateFallbackReview,
   PROMPT_VERSION,
+  TODAY_PROMPT_VERSION,
 } from "../../pipeline/llm.js";
 
 function baseArgs(overrides = {}) {
@@ -18,7 +20,9 @@ function baseArgs(overrides = {}) {
 describe("buildPrompt — 트렌드 문구 경계값 (buildTrendGuidance)", () => {
   it("videoCount가 5 미만이면 '패턴 단정 어려움' 문구만 넣는다", () => {
     const prompt = buildPrompt(baseArgs({ videoCount: 4, prevEntropy: 0.5 }));
-    expect(prompt).toContain("시청한 영상 수가 적어 패턴을 단정하기 어렵습니다");
+    expect(prompt).toContain(
+      "시청한 영상 수가 적어 패턴을 단정하기 어렵습니다",
+    );
     // 영상 수가 적을 때는 편중 경고·증감 비교를 하지 않는다
     expect(prompt).not.toContain("여러 주제로 다양해졌습니다");
   });
@@ -37,8 +41,12 @@ describe("buildPrompt — 트렌드 문구 경계값 (buildTrendGuidance)", () =
     const decreased = buildPrompt(
       baseArgs({ videoCount: 5, entropy: 0.5, prevEntropy: 1.0 }),
     );
-    expect(increased).toContain("다양해졌습니다. 이 변화를 부드럽고 또렷하게 사실로");
-    expect(decreased).toContain("모였습니다. 이 변화를 부드럽고 또렷하게 사실로");
+    expect(increased).toContain(
+      "다양해졌습니다. 이 변화를 부드럽고 또렷하게 사실로",
+    );
+    expect(decreased).toContain(
+      "모였습니다. 이 변화를 부드럽고 또렷하게 사실로",
+    );
   });
 
   it("직전 대비 entropy delta가 -0.1 이하이면 '적은 주제에 모였다' 문구를 넣는다", () => {
@@ -90,6 +98,91 @@ describe("buildPrompt — 트렌드 문구 경계값 (buildTrendGuidance)", () =
     const prompt = buildPrompt(baseArgs());
     expect(prompt).toContain("소재 수준으로만 지칭");
     expect(prompt).toContain("주장이나 논조는 절대 요약·평가하지 마세요");
+  });
+});
+
+describe("buildTodayCumulativePrompt — 오늘 하루 전체 프레이밍", () => {
+  it("TODAY_PROMPT_VERSION은 세션 PROMPT_VERSION과 다른 값이다", () => {
+    expect(TODAY_PROMPT_VERSION).not.toBe(PROMPT_VERSION);
+  });
+
+  it("[오늘 정보] 헤더와 '오늘 시청한 영상 수' 문구를 쓴다(세션 프레이밍 아님)", () => {
+    const prompt = buildTodayCumulativePrompt(baseArgs());
+    expect(prompt).toContain("[오늘 정보]");
+    expect(prompt).toContain("오늘 시청한 영상 수: 10개");
+    expect(prompt).not.toContain("[세션 정보]");
+  });
+
+  it("videoCount가 5 미만이면 '패턴 단정 어려움' 문구만 넣는다", () => {
+    const prompt = buildTodayCumulativePrompt(
+      baseArgs({ videoCount: 4, prevEntropy: 0.5 }),
+    );
+    expect(prompt).toContain(
+      "오늘은 시청한 영상 수가 적어 패턴을 단정하기 어렵습니다",
+    );
+    expect(prompt).not.toContain("여러 주제로 다양해졌습니다");
+  });
+
+  it("직전 시청일 대비 entropy delta가 +0.1 이상이면 '다양해졌다' 문구를 넣는다", () => {
+    const prompt = buildTodayCumulativePrompt(
+      baseArgs({ videoCount: 5, entropy: 1.5, prevEntropy: 1.0 }),
+    );
+    expect(prompt).toContain(
+      "직전 시청일보다 오늘 시청이 여러 주제로 다양해졌습니다",
+    );
+  });
+
+  it("직전 시청일 대비 entropy delta가 -0.1 이하이면 '적은 주제에 모였다' 문구를 넣는다", () => {
+    const prompt = buildTodayCumulativePrompt(
+      baseArgs({ videoCount: 5, entropy: 0.5, prevEntropy: 1.0 }),
+    );
+    expect(prompt).toContain(
+      "직전 시청일보다 오늘 시청이 더 적은 수의 주제에 모였습니다",
+    );
+  });
+
+  it("delta가 ±0.1 미만이면 '비슷한 다양성' 문구를 넣는다 (경계값 안쪽)", () => {
+    const prompt = buildTodayCumulativePrompt(
+      baseArgs({ videoCount: 5, entropy: 1.05, prevEntropy: 1.0 }),
+    );
+    expect(prompt).toContain("직전 시청일과 비슷한 다양성을 유지하고 있습니다");
+  });
+
+  it("top 카테고리 비율이 0.7 이상이면 편중 경고 문구를 추가한다", () => {
+    const prompt = buildTodayCumulativePrompt(
+      baseArgs({
+        videoCount: 5,
+        categoryDistribution: { 음악: 0.8, 게임: 0.2 },
+      }),
+    );
+    expect(prompt).toContain("시청이 한 주제에 크게 모여 있습니다");
+  });
+
+  it("prevEntropy가 없고 편중도 없으면 트렌드 섹션 자체를 넣지 않는다", () => {
+    const prompt = buildTodayCumulativePrompt(
+      baseArgs({
+        videoCount: 5,
+        categoryDistribution: { 음악: 0.5, 게임: 0.5 },
+        prevEntropy: null,
+      }),
+    );
+    expect(prompt).not.toContain("[피드백 작성 지침]");
+  });
+
+  it("오늘 있었던 여러 세션을 개별 나열하지 말고 하나로 요약하라는 지침을 포함한다", () => {
+    const prompt = buildTodayCumulativePrompt(baseArgs());
+    expect(prompt).toContain(
+      "오늘 있었던 여러 세션을 개별적으로 나열하지 말고, 오늘 하루 전체를 하나로 요약하세요",
+    );
+  });
+
+  it("[피드백 원칙]·가드레일 문구는 세션 프롬프트와 문자 그대로 동일하다", () => {
+    const sessionPrompt = buildPrompt(baseArgs());
+    const todayPrompt = buildTodayCumulativePrompt(baseArgs());
+    const guardrailLine =
+      '시청한 영상 제목은 카테고리 판단을 보완하는 배경 정보로만 참고하세요. 제목을 언급할 때는 "OO 관련 영상"처럼 소재 수준으로만 지칭하고, 제목 속 특정 인물·정당·이슈에 대한 주장이나 논조는 절대 요약·평가하지 마세요.';
+    expect(sessionPrompt).toContain(guardrailLine);
+    expect(todayPrompt).toContain(guardrailLine);
   });
 });
 
@@ -306,7 +399,9 @@ describe("generateReview — 실패 사유 분류 (failureReason 태깅)", () =>
         candidates: [
           {
             content: {
-              parts: [{ text: '{"topic":["음악","게임"],"feedback":"관찰 문장"}' }],
+              parts: [
+                { text: '{"topic":["음악","게임"],"feedback":"관찰 문장"}' },
+              ],
             },
           },
         ],
