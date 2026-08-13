@@ -96,7 +96,7 @@ function initializeDB() {
       createdAt      TEXT    DEFAULT (datetime('now'))
     );
 
-    -- 기간(일차·주차) 단위 리뷰 (Story 11-1) — 완료된 기간 전체를 요약하는 서버 배치(cron)
+    -- 기간(일차·주차) 단위 리뷰 — 완료된 기간 전체를 요약하는 서버 배치(cron)
     -- 생성 리뷰. sessions/video_events를 그때그때 집계해 만들며, 세션 리뷰(sessions.review)와는
     -- 독립적으로 저장된다.
     CREATE TABLE IF NOT EXISTS period_reviews (
@@ -124,6 +124,34 @@ function initializeDB() {
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_period_reviews_participant_period
       ON period_reviews(anonymousId, periodIndex);
+
+    -- "오늘" 탭 누적 리뷰 — 클라이언트 백그라운드 워커가 오늘 세션 전체를
+    -- 병합 집계해 생성한 리뷰. 세션 리뷰(sessions.review)·기간 리뷰(period_reviews)와는
+    -- 독립적으로, 진행 중인 오늘 하루치만 (anonymousId, reviewDate) 1행 최신본으로 upsert한다.
+    CREATE TABLE IF NOT EXISTS today_reviews (
+      id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+      anonymousId          TEXT    NOT NULL,
+      reviewDate           TEXT    NOT NULL,  -- 참여자 로컬 기준 날짜 (YYYY-MM-DD)
+      sessionCount         INTEGER,
+      videoCount           INTEGER,
+      categoryDistribution TEXT,              -- JSON 문자열 (sessions와 동일 포맷)
+      entropy              REAL,
+      review               TEXT,              -- 참여자에게 노출된 누적 리뷰 문장(최신본)
+      reviewTopic          TEXT,
+      source               TEXT,              -- 'llm' | 'fallback'
+      promptVersion        TEXT,              -- 오늘 누적 리뷰 전용 버전 (세션 PROMPT_VERSION과 별개)
+      llmStatus            TEXT,              -- 'success' | 'fallback'
+      failureReason        TEXT,              -- timeout | http_error | empty_response
+                                               -- | parse_error | network_error | policy_filtered
+      geminiMs             INTEGER,
+      genCount             INTEGER,           -- 그날 몇 번째 재생성으로 만들어진 최신본인지(관측용)
+      generatedAt          TEXT    NOT NULL,  -- 이 최신본을 생성한 시각
+      createdAt            TEXT    DEFAULT (datetime('now')),
+      updatedAt            TEXT
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_today_reviews_participant_date
+      ON today_reviews(anonymousId, reviewDate);
   `);
 
   // 이미 만들어진 DB 파일(로컬 개발용·이미 배포된 서버)에는 CREATE TABLE IF NOT EXISTS가
