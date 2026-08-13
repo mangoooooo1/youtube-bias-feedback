@@ -105,6 +105,7 @@ function buildDataForDate(allSessions, targetDate) {
       prevEntropy: 0,
       prevDateLabel: "—",
       videos: [],
+      lastSessionVideos: [],
       review: "",
       sessionIds: [],
     };
@@ -141,6 +142,20 @@ function buildDataForDate(allSessions, targetDate) {
     })
     .slice(0, 9);
 
+  // "가장 최근 시청" 세션 카드용 — review/reviewTopic/sessionId와 같은 세션(마지막 세션)
+  // 하나로 범위를 맞춘다. 여기서 벗어나 오늘 전체 목록(videos)을 쓰면 카드 제목이 가리키는
+  // 범위와 실제 내용이 어긋난다(리뷰는 마지막 세션 얘기인데 목록은 오늘 전체가 되는 문제).
+  const lastSession = sourceSessions.at(-1);
+  const lastSessionVideos = lastSession
+    ? (lastSession.videos || [])
+        .map((v) => ({
+          title: v.title,
+          cat: topKey(lastSession),
+          videoId: v.videoId || null,
+        }))
+        .slice(0, 9)
+    : [];
+
   // Previous available day entropy
   const prevSessions = allSessions
     .filter(
@@ -174,6 +189,7 @@ function buildDataForDate(allSessions, targetDate) {
     prevEntropy,
     prevDateLabel,
     videos,
+    lastSessionVideos,
     review,
     reviewTopic,
     sessionId,
@@ -724,7 +740,8 @@ async function boot() {
   // 리뷰와 동일하게 맞춘다"). VL.today가 아니라 별도 키(VL._todayCumulative)에 두는 이유는
   // VL._todayConfirmed와 같다 — ViewLensPopup.render()가 탭 렌더마다 VL.today를
   // buildDataForDate로 통째로 재생성해서, 거기 두면 날짜를 옮길 때 상태가 오염된다.
-  const todayCumulativeEligible =
+  // let인 이유: 팝업을 열어둔 채 오늘 첫 세션이 끝나면(boot 시점엔 세션 0개라 대상에서 제외됨) storage.onChanged에서 "대상 아님 → 대상"으로 한 번 갱신해야 함
+  let todayCumulativeEligible =
     feedbackActive && realToday.sessionIds.length > 0;
   VL._todayCumulative = await resolveTodayCumulative(
     todayCumulativeEligible,
@@ -898,6 +915,22 @@ async function boot() {
     if (freshNeedsConfirm && VL._todayConfirmed) {
       clearUnviewedIconDot();
     }
+
+    // 팝업을 연 채로 오늘 첫 세션이 막 끝난 경우 — boot() 시점엔 오늘 세션이 0개라
+    // 대상에서 제외됐던 상태를 여기서 한 번만 다시 판정한다. 이미 대상이었다면(세션이
+    // 더 늘어난 것뿐이라면) 다시 판정하지 않는다 — 그러면 세션이 끝날 때마다 재생성을
+    // 트리거하게 되어 "재생성은 팝업 오픈 시로 한정"이라는 설계가 깨진다.
+    if (!todayCumulativeEligible) {
+      const nowEligible = feedbackActive && freshToday.sessionIds.length > 0;
+      if (nowEligible) {
+        todayCumulativeEligible = true;
+        VL._todayCumulative = await resolveTodayCumulative(
+          true,
+          freshToday.sessionIds,
+        );
+      }
+    }
+
     if (installDate) {
       // 기간 리뷰는 세션이 갱신될 때마다 다시 조회하지 않는다 — 서버 cron이 하루/일주일에
       // 한 번만 새로 생성하므로, boot() 시점에 캐시로 가져온 값을 그대로 재사용한다.

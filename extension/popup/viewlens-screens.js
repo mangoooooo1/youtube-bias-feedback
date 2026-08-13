@@ -259,7 +259,7 @@ function screenToday() {
 
     ${_todayCumulativeCard(isToday, d.videos)}
 
-    ${vlReview({ title: "가장 최근 시청", text: d.review, topic: d.reviewTopic, videos: d.videos, locked: reviewLocked, sessionId: d.sessionId })}
+    ${vlReview({ title: "가장 최근 시청", text: d.review, topic: d.reviewTopic, videos: d.lastSessionVideos, locked: reviewLocked, sessionId: d.sessionId })}
   </div>
   </div>`;
 }
