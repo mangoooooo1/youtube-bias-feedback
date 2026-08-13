@@ -391,8 +391,21 @@ async function postSessionToServer(
 
 const TODAY_CUMULATIVE_CACHE_KEY = "todayCumulativeReview";
 
+// 팝업을 짧은 간격으로 다시 열거나 창을 두 개 띄우면 생성 요청이 겹쳐 들어올 수 있다
+let todayCumulativeReviewInFlight = null;
+
 // 팝업 오픈 시 지연 생성 요청을 받아 실행
-async function generateTodayCumulativeReview() {
+function generateTodayCumulativeReview() {
+  if (todayCumulativeReviewInFlight) return todayCumulativeReviewInFlight;
+  todayCumulativeReviewInFlight = runGenerateTodayCumulativeReview().finally(
+    () => {
+      todayCumulativeReviewInFlight = null;
+    },
+  );
+  return todayCumulativeReviewInFlight;
+}
+
+async function runGenerateTodayCumulativeReview() {
   const sessions = await getAllSessions();
   const aggregate = aggregateTodayCumulative(sessions);
   if (!aggregate) return { ok: false, reason: "no_sessions" };
