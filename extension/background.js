@@ -11,9 +11,11 @@ import { fetchVideoCategories } from "./pipeline/youtube.js";
 import {
   calculateDistribution,
   calculateEntropy,
+  aggregateTodayCumulative,
 } from "./pipeline/analysis.js";
 import {
   buildPrompt,
+  buildTodayCumulativePrompt,
   generateReview,
   generateFallbackReview,
 } from "./pipeline/llm.js";
@@ -104,6 +106,15 @@ chrome.storage.local.set({ serverUrl: SERVER_URL });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "VIDEO_DETECTED") {
     handleVideoDetected(message)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ ok: false, reason: error.message }));
+    return true;
+  }
+  if (message.type === "GENERATE_TODAY_CUMULATIVE_REVIEW") {
+    // 팝업이 이 메시지를 보낸 뒤 닫혀도(sendResponse 채널이 끊겨도) 아래 Promise 체인은
+    // 서비스 워커에서 계속 실행돼 캐시·서버 저장까지 마친다 — 명세서 §9 "생성 도중 팝업이
+    // 닫힘" 요구사항.
+    generateTodayCumulativeReview()
       .then(sendResponse)
       .catch((error) => sendResponse({ ok: false, reason: error.message }));
     return true;
@@ -371,5 +382,138 @@ async function postSessionToServer(
     console.log("[background] 서버 전송 완료:", session.sessionId);
   } catch (error) {
     console.warn("[background] 서버 전송 오류:", error);
+  }
+}
+
+// "오늘" 탭 누적 리뷰
+
+const TODAY_CUMULATIVE_CACHE_KEY = "todayCumulativeReview";
+
+// 팝업 오픈 시 지연 생성 요청을 받아 실행
+async function generateTodayCumulativeReview() {
+  const sessions = await getAllSessions();
+  const aggregate = aggregateTodayCumulative(sessions);
+  if (!aggregate) return { ok: false, reason: "no_sessions" };
+
+  const prompt = buildTodayCumulativePrompt(aggregate);
+
+  let result;
+  let llmStatus = "success";
+  let failureReason = null;
+  let httpStatus = null;
+  let timedOut = 0; // SQLite INTEGER — 1/0
+  const geminiStart = Date.now();
+  try {
+    result = await generateReview(prompt);
+    console.log("[background] 오늘 누적 리뷰 생성 완료");
+  } catch (error) {
+    llmStatus = "fallback";
+    failureReason = error.failureReason || "network_error";
+    httpStatus = error.httpStatus ?? null;
+    timedOut = error.timedOut === true ? 1 : 0;
+    console.warn(
+      "[background] 오늘 누적 리뷰 생성 실패, 폴백 사용:",
+      failureReason,
+      error.message,
+    );
+    result = generateFallbackReview(aggregate);
+  }
+  const geminiMs = Date.now() - geminiStart;
+
+  // 하루 상한 N 판정(팝업 책임)의 관측용 값
+  // 같은 날짜 캐시가 있으면 이어서 세고, 날짜가 바뀌었으면(자정 경과) 1부터 다시 센다.
+  const { [TODAY_CUMULATIVE_CACHE_KEY]: prevCache } =
+    await chrome.storage.local.get(TODAY_CUMULATIVE_CACHE_KEY);
+  const genCount =
+    prevCache?.reviewDate === aggregate.reviewDate
+      ? (prevCache.genCount ?? 0) + 1
+      : 1;
+
+  const cacheEntry = {
+    reviewDate: aggregate.reviewDate,
+    // 팝업이 "새 세션이 있는지"로 캐시 신선도를 판정할 때 쓴다
+    sourceSessionIds: aggregate.sessionIds,
+    sessionCount: aggregate.sessionCount,
+    videoCount: aggregate.videoCount,
+    categoryDistribution: aggregate.categoryDistribution,
+    entropy: aggregate.entropy,
+    review: result.feedback,
+    reviewTopic: result.topic,
+    source: result.source,
+    promptVersion: result.promptVersion,
+    llmStatus,
+    failureReason,
+    httpStatus,
+    timedOut,
+    geminiMs,
+    genCount,
+    generatedAt: new Date().toISOString(),
+  };
+  await chrome.storage.local.set({ [TODAY_CUMULATIVE_CACHE_KEY]: cacheEntry });
+  console.log("[background] 오늘 누적 리뷰 캐시 저장 완료:", cacheEntry);
+
+  const onboarding = await getOnboarding();
+  await postTodayCumulativeReviewToServer(onboarding, cacheEntry);
+
+  return { ok: true };
+}
+
+// today_reviews upsert
+async function postTodayCumulativeReviewToServer(onboarding, cacheEntry) {
+  if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) {
+    console.warn(
+      "[background] SERVER_URL이 설정되지 않았습니다. 오늘 누적 리뷰 서버 전송을 건너뜁니다.",
+    );
+    return;
+  }
+
+  if (!onboarding?.anonymousId) {
+    console.warn(
+      "[background] anonymousId 없음, 오늘 누적 리뷰 서버 전송 건너뜀",
+    );
+    return;
+  }
+
+  const cleanUrl = SERVER_URL.replace(/\/$/, "");
+
+  try {
+    const response = await fetch(`${cleanUrl}/api/today-reviews`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        anonymousId: onboarding.anonymousId,
+        reviewDate: cacheEntry.reviewDate,
+        sessionCount: cacheEntry.sessionCount,
+        videoCount: cacheEntry.videoCount,
+        categoryDistribution: cacheEntry.categoryDistribution,
+        entropy: cacheEntry.entropy,
+        review: cacheEntry.review,
+        reviewTopic: cacheEntry.reviewTopic,
+        source: cacheEntry.source,
+        promptVersion: cacheEntry.promptVersion,
+        llmStatus: cacheEntry.llmStatus,
+        failureReason: cacheEntry.failureReason,
+        geminiMs: cacheEntry.geminiMs,
+        genCount: cacheEntry.genCount,
+        generatedAt: cacheEntry.generatedAt,
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      console.warn(
+        "[background] 오늘 누적 리뷰 서버 전송 실패:",
+        response.status,
+        body,
+      );
+      return;
+    }
+
+    console.log(
+      "[background] 오늘 누적 리뷰 서버 전송 완료:",
+      cacheEntry.reviewDate,
+    );
+  } catch (error) {
+    console.warn("[background] 오늘 누적 리뷰 서버 전송 오류:", error);
   }
 }
