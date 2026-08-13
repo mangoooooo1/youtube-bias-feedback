@@ -187,6 +187,31 @@ describe("aggregateTodayCumulative", () => {
     ]);
   });
 
+  it("videoCount가 없는 세션은 videos.length로 폴백하고, 그 값이 분포 가중치에도 동일하게 반영된다", () => {
+    const sessions = [
+      {
+        sessionId: "s1",
+        endTime: new Date(2026, 0, 10, 9).toISOString(),
+        // videoCount 없음 — videos.length(3)로 폴백해야 함
+        categoryDistribution: { 음악: 1 },
+        videos: [{ title: "음악1" }, { title: "음악2" }, { title: "음악3" }],
+      },
+      {
+        sessionId: "s2",
+        endTime: new Date(2026, 0, 10, 11).toISOString(),
+        videoCount: 1,
+        categoryDistribution: { 게임: 1 },
+        videos: [{ title: "게임1" }],
+      },
+    ];
+
+    const result = aggregateTodayCumulative(sessions);
+    // 총 영상 수: 3(videos.length 폴백) + 1 = 4
+    expect(result.videoCount).toBe(4);
+    // 가중치도 같은 3:1 비율을 써야 한다(1:1로 잘못 계산되면 0.5/0.5가 나옴)
+    expect(result.categoryDistribution).toEqual({ 음악: 0.75, 게임: 0.25 });
+  });
+
   it("직전 세션이 아니라 가장 최근 데이터가 있었던 이전 날짜의 entropy를 prevEntropy로 계산한다", () => {
     const sessions = [
       // 1/7 (사흘 전) — 오늘 대비 더 오래된 날짜

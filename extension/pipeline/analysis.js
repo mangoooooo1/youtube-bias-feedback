@@ -88,15 +88,24 @@ export function aggregateDailyData(sessions) {
   return { dates, distributions, entropies };
 }
 
+// videoCount가 없으면 videos 배열 길이로, 그마저 없으면 1로 폴백
+// 아래 mergeCategoryDistribution의 가중치와 aggregateTodayCumulative의 총 영상 수 집계가 서로 같은 폴백 규칙을 쓰도록 함
+function sessionVideoCount(session) {
+  return session.videoCount ?? session.videos?.length ?? 1;
+}
+
 // videoCount 가중 평균으로 여러 세션의 categoryDistribution을 하나로 합친다.
 // aggregateDailyData와 동일한 가중 병합 공식(세션 규모만큼 비중을 둠)을 오늘 하루 범위에도 적용한다.
 function mergeCategoryDistribution(sessions) {
-  const totalVideos = sessions.reduce((sum, s) => sum + (s.videoCount ?? 1), 0);
+  const totalVideos = sessions.reduce(
+    (sum, s) => sum + sessionVideoCount(s),
+    0,
+  );
   if (totalVideos === 0) return {};
 
   const merged = {};
   for (const session of sessions) {
-    const weight = (session.videoCount ?? 1) / totalVideos;
+    const weight = sessionVideoCount(session) / totalVideos;
     for (const [cat, ratio] of Object.entries(session.categoryDistribution)) {
       merged[cat] = (merged[cat] ?? 0) + ratio * weight;
     }
@@ -127,7 +136,7 @@ export function aggregateTodayCumulative(sessions) {
   const categoryDistribution = mergeCategoryDistribution(todaySessions);
   const entropy = calculateEntropy(categoryDistribution);
   const videoCount = todaySessions.reduce(
-    (sum, s) => sum + (s.videoCount ?? s.videos?.length ?? 1),
+    (sum, s) => sum + sessionVideoCount(s),
     0,
   );
   const videoTitles = todaySessions
