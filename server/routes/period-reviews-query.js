@@ -20,15 +20,20 @@ function isStudyEnded(installDate, now = new Date()) {
   return now.getTime() >= endMs;
 }
 
-/** 대조군에게 기간 리뷰 열람을 허용할지 판단한다 */
+/**
+ * 대조군에게 기간 리뷰 열람을 허용할지 판단한다 — 1..TOTAL_PERIODS 범위의 periodIndex가
+ * 정확히 전부 있을 때만 허용한다. 범위를 두지 않고 단순 COUNT(*)만 보면, 상수(TOTAL_DAYS/
+ * DAYS_PER_PERIOD)가 파일럿→본조사 등으로 바뀐 뒤 옛 설정으로 생성된 행이 남아있을 때
+ * "개수는 맞지만 1구간이 빠진" 상태로도 잠금이 풀릴 수 있다(coderabbitai 리뷰로 발견).
+ */
 function isStudyEndUnlocked(db, anonymousId, installDate) {
   if (!isStudyEnded(installDate)) return false;
   const { count } = db
     .prepare(
-      "SELECT COUNT(*) AS count FROM period_reviews WHERE anonymousId = ?",
+      "SELECT COUNT(*) AS count FROM period_reviews WHERE anonymousId = ? AND periodIndex BETWEEN 1 AND ?",
     )
-    .get(anonymousId);
-  return count >= TOTAL_PERIODS;
+    .get(anonymousId, TOTAL_PERIODS);
+  return count === TOTAL_PERIODS;
 }
 
 /** anonymousId의 완료된 기간 리뷰를 periodIndex 오름차순으로 반환한다. 대상이 아니면 빈 배열. */
@@ -50,11 +55,15 @@ function getPeriodReviews(db, anonymousId) {
     return [];
   }
 
+  // 범위 제한(periodIndex BETWEEN 1 AND TOTAL_PERIODS)도 isStudyEndUnlocked와 동일한
+  // 이유 — 상수 변경 후 남은 범위 밖 옛 행이 EXP/CON 어느 쪽에도 응답에 섞이지 않게 한다.
   const rows = db
     .prepare(
-      `SELECT ${SELECT_COLUMNS} FROM period_reviews WHERE anonymousId = ? ORDER BY periodIndex ASC`,
+      `SELECT ${SELECT_COLUMNS} FROM period_reviews
+       WHERE anonymousId = ? AND periodIndex BETWEEN 1 AND ?
+       ORDER BY periodIndex ASC`,
     )
-    .all(anonymousId);
+    .all(anonymousId, TOTAL_PERIODS);
 
   // categoryDistribution은 sessions 테이블과 동일하게 JSON 문자열 그대로 반환
   return rows.map((row) => ({ ...row, isBaseline: !!row.isBaseline }));

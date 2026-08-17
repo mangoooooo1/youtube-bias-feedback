@@ -129,6 +129,15 @@ describe("getPeriodReviews", () => {
     expect(getPeriodReviews(db, "user-b").length).toBe(2);
   });
 
+  it("TOTAL_PERIODS(파일럿=3) 범위 밖의 periodIndex는 응답에서 제외한다(상수 변경 후 남은 옛 행 방어)", () => {
+    insertParticipant(db, "exp-user", "EXP");
+    insertReview(db, "exp-user", 1);
+    insertReview(db, "exp-user", 99); // 옛 설정으로 생성된 범위 밖 행 가정
+
+    const result = getPeriodReviews(db, "exp-user");
+    expect(result.map((r) => r.periodIndex)).toEqual([1]);
+  });
+
   // 대조군(CON, TEST-CON) — 연구 종료 + 전체 기간(파일럿 TOTAL_PERIODS=3) 리뷰 생성 완료
   // 여부에 따라 조건부로만 열람을 허용한다. Story 10-10, 명세서 2·7절.
   describe("대조군(CON, TEST-CON) 종료 후 조건부 열람", () => {
@@ -169,9 +178,20 @@ describe("getPeriodReviews", () => {
       insertReview(db, "con-complete", 1);
       insertReview(db, "con-complete", 2);
       insertReview(db, "con-complete", 3);
+      insertReview(db, "con-complete", 99); // 범위 밖 옛 행 — 응답에 섞이면 안 됨
 
       const result = getPeriodReviews(db, "con-complete");
       expect(result.map((r) => r.periodIndex)).toEqual([1, 2, 3]);
+    });
+
+    it("periodIndex가 1을 포함하지 않으면 개수가 맞아도 잠금이 풀리지 않는다", () => {
+      // count=3=TOTAL_PERIODS지만 1구간이 없음 — 범위를 안 보면 잘못 풀리는 경우(coderabbitai 리뷰).
+      insertParticipant(db, "con-gap", "CON", ENDED_INSTALL_DATE);
+      insertReview(db, "con-gap", 2);
+      insertReview(db, "con-gap", 3);
+      insertReview(db, "con-gap", 4);
+
+      expect(getPeriodReviews(db, "con-gap")).toEqual([]);
     });
 
     it("TEST-CON도 CON과 동일한 조건을 따른다", () => {
@@ -238,5 +258,14 @@ describe("isStudyEnded / isStudyEndUnlocked", () => {
     insertReview(db, "con-user", 3);
 
     expect(isStudyEndUnlocked(db, "con-user", ENDED_INSTALL_DATE)).toBe(true);
+  });
+
+  it("isStudyEndUnlocked — periodIndex가 1..TOTAL_PERIODS 범위를 벗어나면 개수가 맞아도 false", () => {
+    // count=3=TOTAL_PERIODS지만 1구간이 없음(2,3,4) — 단순 COUNT(*)만 보면 잘못 true가 됨.
+    insertReview(db, "con-user", 2);
+    insertReview(db, "con-user", 3);
+    insertReview(db, "con-user", 4);
+
+    expect(isStudyEndUnlocked(db, "con-user", ENDED_INSTALL_DATE)).toBe(false);
   });
 });
