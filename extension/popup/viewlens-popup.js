@@ -543,12 +543,39 @@ async function validateParticipantCode(code) {
     const json = await res.json();
     const data = json.data ?? json;
     if (data.valid === false) return { ok: false };
-    return { ok: true, group: data.group_code || null };
+    return {
+      ok: true,
+      group: data.group_code || null,
+      previouslyRegistered: !!data.previouslyRegistered,
+    };
   } catch {
     return { ok: true }; // 네트워크 오류 → 폴백 통과
   }
 }
 window.validateParticipantCode = validateParticipantCode;
+
+// 참여코드 기반 재설치 복구
+async function recoverParticipant(participantCode) {
+  const { serverUrl } = await chrome.storage.local.get("serverUrl");
+  if (!serverUrl || serverUrl.startsWith("YOUR_")) return null;
+  try {
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/participants/recover`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ participantCode }),
+      },
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    const data = json.data ?? json;
+    return data.anonymousId ? data : null;
+  } catch {
+    return null;
+  }
+}
+window.recoverParticipant = recoverParticipant;
 
 // ── 팝업 상호작용 마이크로 로그 ────────────────────────────────────────
 // 수집: openedAt, dwellMs, tabTodayClicks, tabWeekClicks, feedbackViewed.
@@ -838,7 +865,24 @@ async function boot() {
     group: stored.group || null,
     timelineKey: calcTimelineKey(installDate),
     installDate,
-    onChange: async ({ onboarded: ob, group: g, participantCode }) => {
+    onChange: async ({
+      onboarded: ob,
+      group: g,
+      participantCode,
+      recovered,
+    }) => {
+      if (ob && g && recovered) {
+        // 재설치 복구(새 anonymousId/installDate를 만들지 않고 서버가 돌려준 기존 값을 그대로 쓴다.
+        VL._installDate = recovered.installDate; // 온보딩 직후 첫 렌더부터 실제 경과일 반영
+        await chrome.storage.local.set({
+          anonymousId: recovered.anonymousId,
+          participantCode,
+          group: g,
+          installDate: recovered.installDate,
+          participantSynced: true,
+        });
+        return;
+      }
       if (ob && g) {
         const installDate = new Date().toISOString();
         VL._installDate = installDate; // 온보딩 직후 첫 렌더부터 실제 경과일(1일째) 반영

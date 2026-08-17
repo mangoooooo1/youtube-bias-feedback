@@ -91,8 +91,46 @@ function bindOnboarding(root, onSubmit) {
       return;
     }
     // 서버가 그룹을 확정해 주면 그 값을 사용(권위), 아니면 코드 접두사 기준
-    onSubmit({ group: check.group || parsed.group, code: parsed.code });
+    const group = check.group || parsed.group;
+
+    // 이 참여코드로 이미 등록된 이력이 있으면(TEST 코드는 서버가 항상 false를
+    // 반환) 바로 신규 등록하지 않고 재설치 복구 여부를 먼저 확인한다.
+    if (check.previouslyRegistered) {
+      showRecoverConfirm(group, parsed.code);
+      return;
+    }
+    onSubmit({ group, code: parsed.code });
   }
+
+  // "이전에 설치한 적이 있는 [코드]님이 맞습니까?" 확인 모달 — "예"면 서버에서 기존
+  // anonymousId/installDate를 복구해 그대로 쓰고, "아니오"/복구 실패 시 신규 등록으로 진행한다.
+  function showRecoverConfirm(group, code) {
+    root.insertAdjacentHTML("beforeend", screenRecoverConfirmModal(code));
+    const modal = root.querySelector("#vl-recover-modal");
+    const yesBtn = modal.querySelector("#vl-recover-yes");
+    const noBtn = modal.querySelector("#vl-recover-no");
+
+    noBtn.addEventListener("click", () => {
+      modal.remove();
+      onSubmit({ group, code });
+    });
+
+    yesBtn.addEventListener("click", async () => {
+      yesBtn.disabled = true;
+      yesBtn.textContent = "확인하는 중…";
+      const recovered = window.recoverParticipant
+        ? await window.recoverParticipant(code)
+        : null;
+      modal.remove();
+      if (!recovered) {
+        // 서버에 등록 이력이 없거나(경쟁 상태 등) 오프라인 — 조용히 신규 등록으로 폴백(6절).
+        onSubmit({ group, code });
+        return;
+      }
+      onSubmit({ group: recovered.group_code || group, code, recovered });
+    });
+  }
+
   function showErr(msg) {
     errEl.textContent = msg;
     errEl.style.display = "block";
@@ -476,9 +514,33 @@ function screenStudyEndModal() {
   </div>`;
 }
 
+// ── Recover confirm modal (Story 10-10, 이슈 4) ─────────────────────────────────
+
+// 온보딩 중 재설치 확인 모달 — 참여코드가 이미 등록된 이력이 있을 때만 노출된다
+// (노출 여부는 bindOnboarding의 previouslyRegistered 분기가 판정). code는 사용자 입력을
+// 그대로 화면에 표시하므로 vlEscapeHtml로 이스케이프한다.
+function screenRecoverConfirmModal(code) {
+  return `<div id="vl-recover-modal" style="position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:24px;background:color-mix(in oklab,var(--vl-ink) 45%,transparent)">
+    <div style="width:100%;background:var(--vl-card);border-radius:18px;padding:26px 22px 22px;box-shadow:0 24px 60px -12px rgba(0,0,0,.4);text-align:center">
+      <div style="width:52px;height:52px;margin:0 auto;border-radius:50%;background:var(--vl-accent-soft);display:grid;place-items:center">
+        ${markSVG({ size: 26, filled: false, accent: "var(--vl-accent)" })}
+      </div>
+      <div style="margin-top:16px;font-size:16px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">이전에 설치한 적이 있는<br/>${vlEscapeHtml(code)}님이 맞습니까?</div>
+      <p style="margin:9px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
+        맞다면 이전 기록을 그대로 이어서 확인할 수 있어요.
+      </p>
+      <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px">
+        <button id="vl-recover-yes" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">예, 맞아요</button>
+        <button id="vl-recover-no" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">아니오, 처음이에요</button>
+      </div>
+    </div>
+  </div>`;
+}
+
 window.screenOnboarding = screenOnboarding;
 window.bindOnboarding = bindOnboarding;
 window.screenToday = screenToday;
 window.screenFeedback = screenFeedback;
 window.screenControlHome = screenControlHome;
 window.screenStudyEndModal = screenStudyEndModal;
+window.screenRecoverConfirmModal = screenRecoverConfirmModal;

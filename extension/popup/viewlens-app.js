@@ -258,10 +258,15 @@ class ViewLensPopup {
 
   _renderOnboarding() {
     this.container.innerHTML = `<div style="height:100%;overflow-y:auto;background:var(--vl-bg)">${screenOnboarding()}</div>`;
-    bindOnboarding(this.container, ({ group, code }) => {
+    bindOnboarding(this.container, ({ group, code, recovered }) => {
       this._onboarded = true;
       this._group = group;
-      this._onChange({ onboarded: true, group, participantCode: code });
+      this._onChange({
+        onboarded: true,
+        group,
+        participantCode: code,
+        recovered,
+      });
       this.render();
     });
   }
