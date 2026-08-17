@@ -216,6 +216,8 @@ class ViewLensPopup {
       VL._periodReviews,
     );
     const showStudyEndModal = studyEndReady && !VL._studyEndModalShown;
+    // 모달을 이미 본 뒤에만 CTA로 전환한다.
+    const showStudyEndCta = studyEndReady && !!VL._studyEndModalShown;
 
     let bodyHTML;
     if (feedbackActive) {
@@ -240,6 +242,7 @@ class ViewLensPopup {
         todayCount: _controlTodayCount(),
         totalCount: _controlTotalCount(),
         baselineDaysLeft,
+        studyEndCtaReady: showStudyEndCta,
       });
     }
 
@@ -335,6 +338,14 @@ class ViewLensPopup {
     if (studyEndBack) {
       studyEndBack.addEventListener("click", () => {
         this._studyEndReviewOpen = false;
+        this.render();
+      });
+    }
+    // 대조군 상시 CTA(모달을 이미 본 뒤 재진입) — 목적지는 모달의 "지금 확인하기"와 동일.
+    const studyEndCta = this.container.querySelector("#vl-study-end-cta");
+    if (studyEndCta) {
+      studyEndCta.addEventListener("click", () => {
+        this._studyEndReviewOpen = true;
         this.render();
       });
     }

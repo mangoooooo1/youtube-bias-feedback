@@ -436,14 +436,22 @@ function screenControlHome(day, stats = {}) {
 
     ${vlCard({ pad: 0, children: `<div style="display:grid;grid-template-columns:1fr 1fr">${gridCells}</div>` })}
 
-    <div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card-2);border:1px solid var(--vl-line);border-radius:13px">
+    ${
+      // 종료 안내 모달을 이미 본 뒤엔 이 자리가 상시 재진입 CTA로 바뀐다.
+      stats.studyEndCtaReady
+        ? `<button id="vl-study-end-cta" style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:15px 16px;background:var(--vl-accent-soft);border:1px solid color-mix(in oklab,var(--vl-accent) 30%,transparent);border-radius:13px;cursor:pointer;font-family:inherit;text-align:left">
+        <span style="font-size:13px;font-weight:700;color:var(--vl-accent)">6주간의 시청 리뷰가 준비됐어요</span>
+        <span style="font-size:15px;color:var(--vl-accent);flex-shrink:0">→</span>
+      </button>`
+        : `<div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card-2);border:1px solid var(--vl-line);border-radius:13px">
       <div style="width:25px;height:25px;border-radius:7px;background:var(--vl-accent-soft);color:var(--vl-accent);display:grid;place-items:center;flex-shrink:0;margin-top:1px">
         ${_lockIcon(15)}
       </div>
       <p style="margin:0;font-size:11.5px;line-height:1.55;color:var(--vl-ink-2);text-wrap:pretty">
         실험 기간 중 피드백 제공 시점은 참여자마다 다를 수 있으며, 실험 종료 후 모든 참여자에게 결과를 공유합니다.
       </p>
-    </div>
+    </div>`
+    }
   </div>`;
 }
 
