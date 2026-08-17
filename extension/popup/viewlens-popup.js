@@ -75,6 +75,16 @@ function mergeDist(sessions) {
   return merged;
 }
 
+// period_reviews.categoryDistribution은 sessions와 동일 포맷으로 저장돼 있어 VL.dist가 기대하는 {vlKey: fraction} 형태가 아니다.
+function vlDistFromCategoryDistribution(categoryDistribution) {
+  const merged = {};
+  for (const [catName, ratio] of Object.entries(categoryDistribution || {})) {
+    const k = toVlKey(catName);
+    merged[k] = (merged[k] ?? 0) + ratio;
+  }
+  return Object.keys(merged).length > 0 ? VL.dist(merged) : VL.dist({ etc: 1 });
+}
+
 /** Top VL key from a session's categoryDistribution */
 function topKey(sess) {
   const dist = sess.categoryDistribution || {};
@@ -227,25 +237,45 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
       return d >= weekStart && d <= weekEnd;
     });
 
+    // 재설치 등으로 로컬 세션 캐시가 비어 있을 때, 서버가 사전 생성해 둔 기간 리뷰
+    // 스냅샷(categoryDistribution/entropy/videoCount/sessionCount)을 대신 쓴다(4-2절 폴백).
+    // EXP는 로컬 세션이 정상적으로 쌓여 있어 weekSessions가 비지 않으므로 이 분기를 타지 않는다.
+    const reviewRow = reviewsByIndex.get(w) || null;
+    const useServerSnapshot = weekSessions.length === 0 && !!reviewRow;
+
     // Daily entropy (기간 내 일수만큼 — 0 if no data that day)
     const daily = [];
-    for (let d = 0; d < VL.DAYS_PER_PERIOD; d++) {
-      const dayKey = dayFromInstall(installDate, startOffset + d);
-      const daySess = weekSessions.filter(
-        (s) => dateStr(new Date(s.endTime)) === dayKey,
-      );
-      const dayDist = mergeDist(daySess);
-      const dayDistArr =
-        Object.keys(dayDist).length > 0 ? VL.dist(dayDist) : [];
-      daily.push(dayDistArr.length > 0 ? VL.entropy(dayDistArr) : 0);
+    if (useServerSnapshot) {
+      // period_reviews는 기간 집계값만 저장하고 일별 값은 없다 — 없는 값을 0으로 채우면
+      // "다양성이 0"으로 오인될 수 있어, 기존 screenFeedback의 "데이터 부족 시 같은 값을
+      // 반복해 평평한 선으로 표시" 관례를 따라 기간 엔트로피를 일수만큼 반복한다.
+      for (let d = 0; d < VL.DAYS_PER_PERIOD; d++) {
+        daily.push(reviewRow.entropy ?? 0);
+      }
+    } else {
+      for (let d = 0; d < VL.DAYS_PER_PERIOD; d++) {
+        const dayKey = dayFromInstall(installDate, startOffset + d);
+        const daySess = weekSessions.filter(
+          (s) => dateStr(new Date(s.endTime)) === dayKey,
+        );
+        const dayDist = mergeDist(daySess);
+        const dayDistArr =
+          Object.keys(dayDist).length > 0 ? VL.dist(dayDist) : [];
+        daily.push(dayDistArr.length > 0 ? VL.entropy(dayDistArr) : 0);
+      }
     }
 
     // Weekly aggregate
-    const weekDist = mergeDist(weekSessions);
-    const weekDistArr =
-      Object.keys(weekDist).length > 0
-        ? VL.dist(weekDist)
-        : VL.dist({ etc: 1 });
+    const weekDistArr = useServerSnapshot
+      ? vlDistFromCategoryDistribution(
+          JSON.parse(reviewRow.categoryDistribution || "{}"),
+        )
+      : (() => {
+          const weekDist = mergeDist(weekSessions);
+          return Object.keys(weekDist).length > 0
+            ? VL.dist(weekDist)
+            : VL.dist({ etc: 1 });
+        })();
 
     // Range label
     const startD = new Date(installDate);
@@ -256,15 +286,20 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
 
     // Review: 서버가 생성한 기간 리뷰
     const review =
-      reviewsByIndex.get(w)?.review ||
+      reviewRow?.review ||
       (isBaseline
         ? "베이스라인 기간 동안의 시청 습관을 기준선으로 담아 두었어요. 이건 평가가 아니라 출발점이에요."
         : "이번 주 데이터를 분석 중이에요. 세션이 쌓이면 더 자세한 리포트를 볼 수 있어요.");
 
-    const totalVids = weekSessions.reduce(
-      (s, sess) => s + (sess.videoCount ?? sess.videos?.length ?? 1),
-      0,
-    );
+    const totalVids = useServerSnapshot
+      ? (reviewRow.videoCount ?? 0)
+      : weekSessions.reduce(
+          (s, sess) => s + (sess.videoCount ?? sess.videos?.length ?? 1),
+          0,
+        );
+    const sessionCount = useServerSnapshot
+      ? (reviewRow.sessionCount ?? 0)
+      : weekSessions.length;
 
     weeks.push({
       week: w,
@@ -272,7 +307,7 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
       isBaseline,
       range,
       videoCount: totalVids,
-      sessionCount: weekSessions.length,
+      sessionCount,
       dist: weekDistArr,
       daily,
       review,
