@@ -51,6 +51,15 @@ function _installDateForDay(day) {
   return new Date(Date.now() - (day - 1) * 86400000).toISOString();
 }
 
+// 대조군 종료 후 6주 리뷰 열람 게이트
+function _isStudyEndReviewReady(groupCfg, installDate, periodReviews) {
+  return (
+    VL.isConGroup(groupCfg.code) &&
+    VL.isStudyEnded(installDate) &&
+    (periodReviews || []).length === VL.TOTAL_WEEKS
+  );
+}
+
 function _popupHeader(groupCfg, day) {
   const isTest = groupCfg.code.startsWith("TEST");
   const badge = isTest

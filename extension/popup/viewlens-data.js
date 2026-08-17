@@ -181,6 +181,20 @@ function buildTimeline() {
 }
 const TIMELINE = buildTimeline();
 
+// installDate로부터 TOTAL_DAYS가 지났으면 연구 관찰 기간이 종료된 것으로 본다.
+function isStudyEnded(installDate, now = new Date()) {
+  if (!installDate) return false;
+  return (
+    now.getTime() >= new Date(installDate).getTime() + TOTAL_DAYS * 86400000
+  );
+}
+
+// 대조군(CON, TEST-CON) 판별
+const CONTROL_GROUP_CODES = new Set(["CON", "TEST-CON"]);
+function isConGroup(code) {
+  return CONTROL_GROUP_CODES.has(code);
+}
+
 const GROUPS = {
   EXP: {
     code: "EXP",
@@ -264,6 +278,8 @@ window.VL = {
   BASELINE_DAYS,
   isBaselinePeriod,
   isTestGroup,
+  isStudyEnded,
+  isConGroup,
   con: { todayCount: 12, totalCount: 47 },
 };
 
