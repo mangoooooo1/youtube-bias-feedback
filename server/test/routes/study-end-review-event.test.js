@@ -67,7 +67,11 @@ describe("recordStudyEndReviewEvent", () => {
   it("연구 종료 전 CON은 not_eligible을 반환하고 기록하지 않는다", () => {
     insertParticipant(db, "con-not-ended", "CON", NOT_ENDED_INSTALL_DATE);
 
-    const result = recordStudyEndReviewEvent(db, "con-not-ended", "modal_shown");
+    const result = recordStudyEndReviewEvent(
+      db,
+      "con-not-ended",
+      "modal_shown",
+    );
 
     expect(result).toBe("not_eligible");
     expect(getParticipant(db, "con-not-ended").studyEndModalShownAt).toBeNull();
@@ -78,10 +82,16 @@ describe("recordStudyEndReviewEvent", () => {
     insertPeriodReview(db, "con-incomplete", 1);
     insertPeriodReview(db, "con-incomplete", 2); // 3구간 중 2개만 — 아직 미완성
 
-    const result = recordStudyEndReviewEvent(db, "con-incomplete", "modal_shown");
+    const result = recordStudyEndReviewEvent(
+      db,
+      "con-incomplete",
+      "modal_shown",
+    );
 
     expect(result).toBe("not_eligible");
-    expect(getParticipant(db, "con-incomplete").studyEndModalShownAt).toBeNull();
+    expect(
+      getParticipant(db, "con-incomplete").studyEndModalShownAt,
+    ).toBeNull();
   });
 
   it("EXP는 종료·완성 상태여도 not_eligible을 반환한다(이 이벤트는 대조군 전용)", () => {
@@ -137,10 +147,14 @@ describe("recordStudyEndReviewEvent", () => {
     recordStudyEndReviewEvent(db, "con-complete", "modal_shown");
     const first = getParticipant(db, "con-complete").studyEndModalShownAt;
 
+    // 시각을 실제로 이동시켜 재호출한다 — COALESCE로 인해 덮어쓰이지 않아야 한다
+    const laterTime = new Date(FIXED_NOW.getTime() + 60000);
+    vi.setSystemTime(laterTime);
     recordStudyEndReviewEvent(db, "con-complete", "modal_shown");
     const second = getParticipant(db, "con-complete").studyEndModalShownAt;
 
     expect(second).toBe(first);
+    expect(second).not.toBe(laterTime.toISOString());
   });
 
   it("두 이벤트는 서로 독립적으로 기록된다", () => {
