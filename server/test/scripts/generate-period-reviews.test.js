@@ -72,16 +72,27 @@ describe("generate-period-reviews.js — run()", () => {
     vi.restoreAllMocks();
   });
 
-  it("대조군(CON)은 처리 대상에서 제외한다", async () => {
+  it("대조군(CON, TEST-CON)도 실험군과 동일하게 처리 대상에 포함된다 (Story 10-10 사전 생성)", async () => {
     db.prepare(
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'CON', ?)",
     ).run("con-user", INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'TEST-CON', ?)",
+    ).run("test-con-user", INSTALL_DATE);
 
     global.fetch = vi.fn();
     await run(db, "fake-key");
 
-    const rows = db.prepare("SELECT * FROM period_reviews").all();
-    expect(rows).toEqual([]);
+    for (const anonymousId of ["con-user", "test-con-user"]) {
+      const rows = db
+        .prepare(
+          "SELECT * FROM period_reviews WHERE anonymousId = ? ORDER BY periodIndex",
+        )
+        .all(anonymousId);
+      expect(rows.length).toBe(3); // 1~3구간 — EXP와 동일하게 전부 생성됨
+      expect(rows.every((r) => r.source === "fallback")).toBe(true);
+    }
+    // 세션이 없는 케이스라 Gemini 호출은 여전히 생략된다(기존 fallback 경로 재사용).
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
