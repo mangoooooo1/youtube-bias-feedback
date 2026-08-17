@@ -60,4 +60,9 @@ function getPeriodReviews(db, anonymousId) {
   return rows.map((row) => ({ ...row, isBaseline: !!row.isBaseline }));
 }
 
-module.exports = { getPeriodReviews, isStudyEndUnlocked, isStudyEnded };
+module.exports = {
+  getPeriodReviews,
+  isStudyEndUnlocked,
+  isStudyEnded,
+  CONTROL_GROUPS,
+};

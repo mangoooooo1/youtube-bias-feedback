@@ -145,10 +145,30 @@ router.post("/study-end-review-event", (req, res, next) => {
     );
   }
 
+  let result;
   try {
-    recordStudyEndReviewEvent(db, anonymousId, event);
+    result = recordStudyEndReviewEvent(db, anonymousId, event);
   } catch (err) {
     return next(err);
+  }
+
+  if (result === "not_found") {
+    return fail(
+      res,
+      404,
+      ERROR_CODES.NOT_FOUND,
+      "등록되지 않은 참여자입니다.",
+      "anonymousId",
+    );
+  }
+  if (result === "not_eligible") {
+    return fail(
+      res,
+      403,
+      ERROR_CODES.NOT_ELIGIBLE,
+      "연구 종료 후 리뷰 열람이 아직 허용되지 않은 참여자입니다.",
+      "anonymousId",
+    );
   }
 
   return success(res);
