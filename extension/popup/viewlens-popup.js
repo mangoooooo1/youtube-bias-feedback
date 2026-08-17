@@ -601,6 +601,29 @@ async function postFeedbackConfirmed(sessionId) {
   }
 }
 
+// 대조군 종료 안내 모달 노출/6주 리뷰 열람 이벤트 기록
+async function postStudyEndReviewEvent(event) {
+  const { serverUrl, anonymousId } = await chrome.storage.local.get([
+    "serverUrl",
+    "anonymousId",
+  ]);
+  if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId) return;
+  try {
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/participants/study-end-review-event`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anonymousId, event }),
+      },
+    );
+    if (!res.ok)
+      console.warn("[popup] 종료 리뷰 이벤트 기록 실패:", res.status);
+  } catch (error) {
+    console.warn("[popup] 종료 리뷰 이벤트 기록 오류:", error.message);
+  }
+}
+
 // "피드백 확인하기" 버튼 클릭 처리 — 로컬 확인 상태 저장, 블러 해제 재렌더링,
 // 아이콘 점 제거, 서버 기록을 한 번에 묶는다.
 async function handleFeedbackConfirmClick(popup, sessionId) {
@@ -902,14 +925,24 @@ async function boot() {
         return;
       }
 
-      // 대조군 종료 안내 모달
-      const studyEndModalBtn =
-        e.target.closest &&
-        e.target.closest(
-          "#vl-study-end-modal-confirm, #vl-study-end-modal-later",
-        );
-      if (studyEndModalBtn) {
+      // 대조군 종료 안내 모달 — "지금 확인하기"는 모달 노출+리뷰 열람을 모두, "나중에"는
+      // 모달 노출만 기록한다(3절 플로우차트 F/G와 동일).
+      const studyEndConfirmBtn =
+        e.target.closest && e.target.closest("#vl-study-end-modal-confirm");
+      const studyEndLaterBtn =
+        e.target.closest && e.target.closest("#vl-study-end-modal-later");
+      if (studyEndConfirmBtn || studyEndLaterBtn) {
         chrome.storage.local.set({ studyEndModalShown: true });
+        postStudyEndReviewEvent("modal_shown");
+        if (studyEndConfirmBtn) postStudyEndReviewEvent("review_viewed");
+        return;
+      }
+
+      // 대조군 상시 CTA — 재진입할 때마다 호출되지만 서버가 최초 1회만 반영한다.
+      const studyEndCtaBtn =
+        e.target.closest && e.target.closest("#vl-study-end-cta");
+      if (studyEndCtaBtn) {
+        postStudyEndReviewEvent("review_viewed");
       }
     });
 
