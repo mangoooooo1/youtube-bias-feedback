@@ -24,10 +24,11 @@ const {
   generatePeriodReview,
   generatePeriodFallbackReview,
 } = require("../pipeline/period-review-llm");
-
-const TOTAL_DAYS = 6;
-const DAYS_PER_PERIOD = 2;
-const BASELINE_DAYS = 2;
+const {
+  TOTAL_DAYS,
+  DAYS_PER_PERIOD,
+  BASELINE_DAYS,
+} = require("../pipeline/study-constants");
 
 // 대조군(CON, TEST-CON)은 여기 포함하지 않는 것으로 제외된다 — 명세서 6절.
 const ELIGIBLE_GROUPS = ["EXP", "TEST-EXP"];
