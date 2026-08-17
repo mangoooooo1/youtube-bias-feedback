@@ -60,6 +60,13 @@ function _isStudyEndReviewReady(groupCfg, installDate, periodReviews) {
   );
 }
 
+// 대조군 6주 리뷰 화면 상단에 붙는 뒤로가기 행
+function _studyEndBackRow() {
+  return `<div style="padding:12px 16px 0">
+    <button id="vl-study-end-back" style="display:flex;align-items:center;gap:5px;padding:5px 2px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:700;color:var(--vl-ink-2)">‹ 홈으로</button>
+  </div>`;
+}
+
 function _popupHeader(groupCfg, day) {
   const isTest = groupCfg.code.startsWith("TEST");
   const badge = isTest
@@ -122,6 +129,8 @@ class ViewLensPopup {
     this._tab = "today";
     this._selWeek = 1;
     this._selectedDate = new Date();
+    // 대조군 종료 후 리뷰 화면 보기 상태
+    this._studyEndReviewOpen = false;
     // External app state (set via mount)
     this._onboarded = false;
     this._group = null;
@@ -145,6 +154,7 @@ class ViewLensPopup {
     this._timelineKey = timelineKey;
     this._installDate = installDate ?? null;
     this._onChange = onChange;
+    this._studyEndReviewOpen = false;
     this.render();
   }
 
@@ -154,6 +164,7 @@ class ViewLensPopup {
     this._group = group;
     this._timelineKey = timelineKey;
     this._installDate = installDate ?? null;
+    this._studyEndReviewOpen = false;
     this.render();
   }
 
@@ -197,6 +208,14 @@ class ViewLensPopup {
     }
 
     const feedbackActive = this._isFeedbackActive(groupCfg);
+    // 대조군 종료 후 6주 리뷰 열람(Story 10-10) — _isFeedbackActive와 독립된 축이라
+    // feedbackActive가 false인 경로 안에서만 추가로 분기한다.
+    const studyEndReady = _isStudyEndReviewReady(
+      groupCfg,
+      this._installDate,
+      VL._periodReviews,
+    );
+    const showStudyEndModal = studyEndReady && !VL._studyEndModalShown;
 
     let bodyHTML;
     if (feedbackActive) {
@@ -204,6 +223,9 @@ class ViewLensPopup {
         this._tab === "today"
           ? screenToday()
           : screenFeedback(currentWeek, selWeek);
+    } else if (studyEndReady && this._studyEndReviewOpen) {
+      // currentWeek는 day(경과일)로 계산되는데, studyEndReady가 참이면 이미 day >= TOTAL_DAYS라
+      bodyHTML = _studyEndBackRow() + screenFeedback(currentWeek, selWeek);
     } else {
       // 10-8: groupCfg.feedback이 true인데 feedbackActive가 false라는 건 "EXP인데 베이스라인
       // 게이트에 걸렸다"는 뜻이다(CON은 애초에 groupCfg.feedback이 false). 이 경우에만
@@ -225,6 +247,7 @@ class ViewLensPopup {
       ${_popupHeader(groupCfg, day)}
       ${feedbackActive ? _tabs(this._tab, !VL._todayConfirmed) : ""}
       <div style="flex:1;overflow-y:auto;overflow-x:hidden">${bodyHTML}</div>
+      ${showStudyEndModal ? screenStudyEndModal() : ""}
     </div>`;
 
     this._bind(groupCfg, currentWeek);
@@ -285,6 +308,34 @@ class ViewLensPopup {
           this._selectedDate = d;
           this.render();
         }
+      });
+    }
+    // 대조군 종료 안내 모달 — "지금 확인하기"는 리뷰 화면까지 바로 연다.
+    const studyEndConfirm = this.container.querySelector(
+      "#vl-study-end-modal-confirm",
+    );
+    if (studyEndConfirm) {
+      studyEndConfirm.addEventListener("click", () => {
+        VL._studyEndModalShown = true;
+        this._studyEndReviewOpen = true;
+        this.render();
+      });
+    }
+    const studyEndLater = this.container.querySelector(
+      "#vl-study-end-modal-later",
+    );
+    if (studyEndLater) {
+      studyEndLater.addEventListener("click", () => {
+        VL._studyEndModalShown = true;
+        this.render();
+      });
+    }
+    // 대조군 6주 리뷰 화면 → 대기 화면으로 돌아가기
+    const studyEndBack = this.container.querySelector("#vl-study-end-back");
+    if (studyEndBack) {
+      studyEndBack.addEventListener("click", () => {
+        this._studyEndReviewOpen = false;
+        this.render();
       });
     }
     // 연구자 모드 전용 — 온보딩 화면으로 돌아가기

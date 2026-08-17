@@ -677,6 +677,7 @@ async function boot() {
     "serverUrl",
     "participantSynced",
     "participantCode",
+    "studyEndModalShown",
   ]);
 
   // 이미 온보딩된 사용자 중 anonymousId가 없는 경우 생성
@@ -748,15 +749,20 @@ async function boot() {
     realToday.sessionIds,
   );
 
-  // 대조군은 애초에 이 엔드포인트를 호출하지 않는다(서버도 이중 방어하지만, 불필요한
-  // 요청 자체를 만들지 않는 게 우선) — GROUPS[...].feedback으로 실험군만 걸러낸다.
+  // 실험군(진행 중 주차별 피드백)뿐 아니라 대조군도 조회 대상
   let cachedPeriodReviews = [];
-  if (installDate && stored.anonymousId && VL.GROUPS[stored.group]?.feedback) {
+  if (
+    installDate &&
+    stored.anonymousId &&
+    (VL.GROUPS[stored.group]?.feedback || VL.isConGroup(stored.group))
+  ) {
     cachedPeriodReviews = await getPeriodReviewsCached(
       stored.serverUrl,
       stored.anonymousId,
     );
   }
+  VL._periodReviews = cachedPeriodReviews;
+  VL._studyEndModalShown = !!stored.studyEndModalShown;
 
   if (installDate) {
     VL.weeks = buildWeeksData(sessions, installDate, cachedPeriodReviews);
@@ -858,6 +864,17 @@ async function boot() {
         e.target.closest && e.target.closest("#vl-feedback-confirm-btn");
       if (confirmBtn) {
         handleFeedbackConfirmClick(popup, confirmBtn.dataset.sessionId);
+        return;
+      }
+
+      // 대조군 종료 안내 모달
+      const studyEndModalBtn =
+        e.target.closest &&
+        e.target.closest(
+          "#vl-study-end-modal-confirm, #vl-study-end-modal-later",
+        );
+      if (studyEndModalBtn) {
+        chrome.storage.local.set({ studyEndModalShown: true });
       }
     });
 
