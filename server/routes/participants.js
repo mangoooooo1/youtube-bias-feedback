@@ -1,8 +1,11 @@
 const express = require("express");
 const { db } = require("../db");
 const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
+const { recordStudyEndReviewEvent } = require("./study-end-review-event");
 
 const router = express.Router();
+
+const STUDY_END_EVENTS = new Set(["modal_shown", "review_viewed"]);
 
 const insertParticipant = db.prepare(`
   INSERT INTO participants (anonymousId, participantCode, group_code, installDate)
@@ -117,6 +120,58 @@ router.get("/validate", (req, res) => {
     res,
     issued ? { valid: true, group_code: issued.group_code } : { valid: false },
   );
+});
+
+// 대조군 종료 안내 모달 노출 / 6주 누적 리뷰 열람 이벤트 기록
+router.post("/study-end-review-event", (req, res, next) => {
+  const { anonymousId, event } = req.body;
+
+  if (typeof anonymousId !== "string" || !anonymousId.trim()) {
+    return fail(
+      res,
+      400,
+      ERROR_CODES.MISSING_REQUIRED_FIELD,
+      "anonymousId 필드가 올바르지 않습니다.",
+      "anonymousId",
+    );
+  }
+  if (!STUDY_END_EVENTS.has(event)) {
+    return fail(
+      res,
+      400,
+      ERROR_CODES.INVALID_FIELD_VALUE,
+      "event 필드가 올바르지 않습니다.",
+      "event",
+    );
+  }
+
+  let result;
+  try {
+    result = recordStudyEndReviewEvent(db, anonymousId, event);
+  } catch (err) {
+    return next(err);
+  }
+
+  if (result === "not_found") {
+    return fail(
+      res,
+      404,
+      ERROR_CODES.NOT_FOUND,
+      "등록되지 않은 참여자입니다.",
+      "anonymousId",
+    );
+  }
+  if (result === "not_eligible") {
+    return fail(
+      res,
+      403,
+      ERROR_CODES.NOT_ELIGIBLE,
+      "연구 종료 후 리뷰 열람이 아직 허용되지 않은 참여자입니다.",
+      "anonymousId",
+    );
+  }
+
+  return success(res);
 });
 
 module.exports = router;

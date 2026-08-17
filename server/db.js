@@ -65,6 +65,9 @@ function initializeDB() {
       participantCode TEXT,
       group_code      TEXT    NOT NULL,
       installDate     TEXT    NOT NULL,
+      -- 대조군 연구 종료 후 리뷰 열람 이벤트 (Story 10-10) — 최초 1회만 기록(recordStudyEndReviewEvent)
+      studyEndModalShownAt   TEXT,  -- 종료 안내 모달을 처음 노출한 시각
+      studyEndReviewViewedAt TEXT,  -- 6주 누적 리뷰 화면에 처음 진입한 시각
       createdAt       TEXT    DEFAULT (datetime('now'))
     );
 
@@ -164,6 +167,8 @@ function initializeDB() {
   addColumn("sessions", "reviewTopic", "TEXT");
   addColumn("sessions", "source", "TEXT");
   addColumn("sessions", "promptVersion", "TEXT");
+  addColumn("participants", "studyEndModalShownAt", "TEXT");
+  addColumn("participants", "studyEndReviewViewedAt", "TEXT");
 
   // popup_events.eventId도 같은 이유로 addColumn 필요. UNIQUE는 ALTER TABLE ADD COLUMN이
   // 만들 수 없으므로(SQLite 제약) 컬럼 추가 후 별도 유니크 인덱스로 건다 — 신규/기존 DB 모두
