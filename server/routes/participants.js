@@ -2,6 +2,11 @@ const express = require("express");
 const { db } = require("../db");
 const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const { recordStudyEndReviewEvent } = require("./study-end-review-event");
+const {
+  TEST_CODES,
+  isPreviouslyRegistered,
+  findEarliestParticipant,
+} = require("./participant-recovery");
 
 const router = express.Router();
 
@@ -18,8 +23,6 @@ const countIssuedCodes = db.prepare("SELECT COUNT(*) AS c FROM issued_codes");
 const findParticipant = db.prepare(
   "SELECT 1 AS x FROM participants WHERE anonymousId = ?",
 );
-
-const TEST_CODES = new Set(["TEST-EXP", "TEST-CON"]);
 
 router.post("/", (req, res, next) => {
   const { anonymousId, participantCode, installDate } = req.body;
@@ -99,7 +102,7 @@ router.post("/", (req, res, next) => {
 });
 
 // 온보딩 코드 검증 — 발급 명단(issued_codes)과 대조 (등록 없이 확인만)
-// 응답 data: { valid: boolean, group_code?: string }
+// 응답 data: { valid: boolean, group_code?: string, previouslyRegistered?: boolean }
 router.get("/validate", (req, res) => {
   const code = (req.query.code || "").toString().trim().toUpperCase();
   if (!code) {
@@ -111,15 +114,58 @@ router.get("/validate", (req, res) => {
       "code",
     );
   }
+  const previouslyRegistered = isPreviouslyRegistered(db, code);
   if (TEST_CODES.has(code))
-    return success(res, { valid: true, group_code: code });
+    return success(res, {
+      valid: true,
+      group_code: code,
+      previouslyRegistered,
+    });
   if (countIssuedCodes.get().c === 0)
-    return success(res, { valid: true, group_code: null }); // 시드 전 permissive
+    return success(res, {
+      valid: true,
+      group_code: null,
+      previouslyRegistered,
+    }); // 시드 전 permissive
   const issued = findIssuedCode.get(code);
   return success(
     res,
-    issued ? { valid: true, group_code: issued.group_code } : { valid: false },
+    issued
+      ? { valid: true, group_code: issued.group_code, previouslyRegistered }
+      : { valid: false },
   );
+});
+
+// 참여코드 기반 재설치 복구 (이슈 4) — bindOnboarding 확인 모달에서 "예" 선택 시에만 호출된다.
+// 응답 data: { anonymousId, installDate, group_code }
+router.post("/recover", (req, res) => {
+  const participantCode = (req.body.participantCode || "")
+    .toString()
+    .trim()
+    .toUpperCase();
+
+  if (!participantCode || TEST_CODES.has(participantCode)) {
+    return fail(
+      res,
+      400,
+      ERROR_CODES.INVALID_FIELD_VALUE,
+      "복구할 수 없는 코드입니다.",
+      "participantCode",
+    );
+  }
+
+  const row = findEarliestParticipant(db, participantCode);
+  if (!row) {
+    return fail(
+      res,
+      404,
+      ERROR_CODES.NOT_FOUND,
+      "등록 이력을 찾을 수 없습니다.",
+      "participantCode",
+    );
+  }
+
+  return success(res, row);
 });
 
 // 대조군 종료 안내 모달 노출 / 6주 누적 리뷰 열람 이벤트 기록
