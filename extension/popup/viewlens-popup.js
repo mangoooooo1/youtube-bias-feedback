@@ -75,6 +75,16 @@ function mergeDist(sessions) {
   return merged;
 }
 
+// period_reviews.categoryDistribution은 sessions와 동일 포맷으로 저장돼 있어 VL.dist가 기대하는 {vlKey: fraction} 형태가 아니다.
+function vlDistFromCategoryDistribution(categoryDistribution) {
+  const merged = {};
+  for (const [catName, ratio] of Object.entries(categoryDistribution || {})) {
+    const k = toVlKey(catName);
+    merged[k] = (merged[k] ?? 0) + ratio;
+  }
+  return Object.keys(merged).length > 0 ? VL.dist(merged) : VL.dist({ etc: 1 });
+}
+
 /** Top VL key from a session's categoryDistribution */
 function topKey(sess) {
   const dist = sess.categoryDistribution || {};
@@ -227,25 +237,45 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
       return d >= weekStart && d <= weekEnd;
     });
 
+    // 재설치 등으로 로컬 세션 캐시가 비어 있을 때, 서버가 사전 생성해 둔 기간 리뷰
+    // 스냅샷(categoryDistribution/entropy/videoCount/sessionCount)을 대신 쓴다(4-2절 폴백).
+    // EXP는 로컬 세션이 정상적으로 쌓여 있어 weekSessions가 비지 않으므로 이 분기를 타지 않는다.
+    const reviewRow = reviewsByIndex.get(w) || null;
+    const useServerSnapshot = weekSessions.length === 0 && !!reviewRow;
+
     // Daily entropy (기간 내 일수만큼 — 0 if no data that day)
     const daily = [];
-    for (let d = 0; d < VL.DAYS_PER_PERIOD; d++) {
-      const dayKey = dayFromInstall(installDate, startOffset + d);
-      const daySess = weekSessions.filter(
-        (s) => dateStr(new Date(s.endTime)) === dayKey,
-      );
-      const dayDist = mergeDist(daySess);
-      const dayDistArr =
-        Object.keys(dayDist).length > 0 ? VL.dist(dayDist) : [];
-      daily.push(dayDistArr.length > 0 ? VL.entropy(dayDistArr) : 0);
+    if (useServerSnapshot) {
+      // period_reviews는 기간 집계값만 저장하고 일별 값은 없다 — 없는 값을 0으로 채우면
+      // "다양성이 0"으로 오인될 수 있어, 기존 screenFeedback의 "데이터 부족 시 같은 값을
+      // 반복해 평평한 선으로 표시" 관례를 따라 기간 엔트로피를 일수만큼 반복한다.
+      for (let d = 0; d < VL.DAYS_PER_PERIOD; d++) {
+        daily.push(reviewRow.entropy ?? 0);
+      }
+    } else {
+      for (let d = 0; d < VL.DAYS_PER_PERIOD; d++) {
+        const dayKey = dayFromInstall(installDate, startOffset + d);
+        const daySess = weekSessions.filter(
+          (s) => dateStr(new Date(s.endTime)) === dayKey,
+        );
+        const dayDist = mergeDist(daySess);
+        const dayDistArr =
+          Object.keys(dayDist).length > 0 ? VL.dist(dayDist) : [];
+        daily.push(dayDistArr.length > 0 ? VL.entropy(dayDistArr) : 0);
+      }
     }
 
     // Weekly aggregate
-    const weekDist = mergeDist(weekSessions);
-    const weekDistArr =
-      Object.keys(weekDist).length > 0
-        ? VL.dist(weekDist)
-        : VL.dist({ etc: 1 });
+    const weekDistArr = useServerSnapshot
+      ? vlDistFromCategoryDistribution(
+          JSON.parse(reviewRow.categoryDistribution || "{}"),
+        )
+      : (() => {
+          const weekDist = mergeDist(weekSessions);
+          return Object.keys(weekDist).length > 0
+            ? VL.dist(weekDist)
+            : VL.dist({ etc: 1 });
+        })();
 
     // Range label
     const startD = new Date(installDate);
@@ -256,15 +286,20 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
 
     // Review: 서버가 생성한 기간 리뷰
     const review =
-      reviewsByIndex.get(w)?.review ||
+      reviewRow?.review ||
       (isBaseline
         ? "베이스라인 기간 동안의 시청 습관을 기준선으로 담아 두었어요. 이건 평가가 아니라 출발점이에요."
         : "이번 주 데이터를 분석 중이에요. 세션이 쌓이면 더 자세한 리포트를 볼 수 있어요.");
 
-    const totalVids = weekSessions.reduce(
-      (s, sess) => s + (sess.videoCount ?? sess.videos?.length ?? 1),
-      0,
-    );
+    const totalVids = useServerSnapshot
+      ? (reviewRow.videoCount ?? 0)
+      : weekSessions.reduce(
+          (s, sess) => s + (sess.videoCount ?? sess.videos?.length ?? 1),
+          0,
+        );
+    const sessionCount = useServerSnapshot
+      ? (reviewRow.sessionCount ?? 0)
+      : weekSessions.length;
 
     weeks.push({
       week: w,
@@ -272,7 +307,7 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
       isBaseline,
       range,
       videoCount: totalVids,
-      sessionCount: weekSessions.length,
+      sessionCount,
       dist: weekDistArr,
       daily,
       review,
@@ -508,12 +543,50 @@ async function validateParticipantCode(code) {
     const json = await res.json();
     const data = json.data ?? json;
     if (data.valid === false) return { ok: false };
-    return { ok: true, group: data.group_code || null };
+    return {
+      ok: true,
+      group: data.group_code || null,
+      previouslyRegistered: !!data.previouslyRegistered,
+    };
   } catch {
     return { ok: true }; // 네트워크 오류 → 폴백 통과
   }
 }
 window.validateParticipantCode = validateParticipantCode;
+
+// 참여코드 기반 재설치 복구
+const RECOVER_PARTICIPANT_TIMEOUT_MS = 5000;
+
+async function recoverParticipant(participantCode) {
+  const { serverUrl } = await chrome.storage.local.get("serverUrl");
+  if (!serverUrl || serverUrl.startsWith("YOUR_")) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    RECOVER_PARTICIPANT_TIMEOUT_MS,
+  );
+  try {
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/participants/recover`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ participantCode }),
+        signal: controller.signal,
+      },
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    const data = json.data ?? json;
+    return data.anonymousId ? data : null;
+  } catch (error) {
+    console.warn("[popup] 참여코드 복구 요청 오류:", error.message);
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+window.recoverParticipant = recoverParticipant;
 
 // ── 팝업 상호작용 마이크로 로그 ────────────────────────────────────────
 // 수집: openedAt, dwellMs, tabTodayClicks, tabWeekClicks, feedbackViewed.
@@ -563,6 +636,29 @@ async function postFeedbackConfirmed(sessionId) {
     if (!res.ok) console.warn("[popup] 피드백 확인 기록 실패:", res.status);
   } catch (error) {
     console.warn("[popup] 피드백 확인 기록 오류:", error.message);
+  }
+}
+
+// 대조군 종료 안내 모달 노출/6주 리뷰 열람 이벤트 기록
+async function postStudyEndReviewEvent(event) {
+  const { serverUrl, anonymousId } = await chrome.storage.local.get([
+    "serverUrl",
+    "anonymousId",
+  ]);
+  if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId) return;
+  try {
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/participants/study-end-review-event`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anonymousId, event }),
+      },
+    );
+    if (!res.ok)
+      console.warn("[popup] 종료 리뷰 이벤트 기록 실패:", res.status);
+  } catch (error) {
+    console.warn("[popup] 종료 리뷰 이벤트 기록 오류:", error.message);
   }
 }
 
@@ -677,6 +773,7 @@ async function boot() {
     "serverUrl",
     "participantSynced",
     "participantCode",
+    "studyEndModalShown",
   ]);
 
   // 이미 온보딩된 사용자 중 anonymousId가 없는 경우 생성
@@ -748,15 +845,20 @@ async function boot() {
     realToday.sessionIds,
   );
 
-  // 대조군은 애초에 이 엔드포인트를 호출하지 않는다(서버도 이중 방어하지만, 불필요한
-  // 요청 자체를 만들지 않는 게 우선) — GROUPS[...].feedback으로 실험군만 걸러낸다.
+  // 실험군(진행 중 주차별 피드백)뿐 아니라 대조군도 조회 대상
   let cachedPeriodReviews = [];
-  if (installDate && stored.anonymousId && VL.GROUPS[stored.group]?.feedback) {
+  if (
+    installDate &&
+    stored.anonymousId &&
+    (VL.GROUPS[stored.group]?.feedback || VL.isConGroup(stored.group))
+  ) {
     cachedPeriodReviews = await getPeriodReviewsCached(
       stored.serverUrl,
       stored.anonymousId,
     );
   }
+  VL._periodReviews = cachedPeriodReviews;
+  VL._studyEndModalShown = !!stored.studyEndModalShown;
 
   if (installDate) {
     VL.weeks = buildWeeksData(sessions, installDate, cachedPeriodReviews);
@@ -774,7 +876,26 @@ async function boot() {
     group: stored.group || null,
     timelineKey: calcTimelineKey(installDate),
     installDate,
-    onChange: async ({ onboarded: ob, group: g, participantCode }) => {
+    onChange: async ({
+      onboarded: ob,
+      group: g,
+      participantCode,
+      recovered,
+    }) => {
+      if (ob && g && recovered) {
+        // 재설치 복구 — 새 anonymousId/installDate를 만들지 않고 서버가 돌려준 기존 값을 그대로 쓴다.
+        // 이미 서버에 있는 행이므로 POST /api/participants는 다시 호출하지 않는다.
+        await chrome.storage.local.set({
+          anonymousId: recovered.anonymousId,
+          participantCode,
+          group: g,
+          installDate: recovered.installDate,
+          participantSynced: true,
+        });
+        // 연구자 모드 리셋과 동일하게 boot() 전체를 다시 태워 새 값으로 재계산한다.
+        window.location.reload();
+        return;
+      }
       if (ob && g) {
         const installDate = new Date().toISOString();
         VL._installDate = installDate; // 온보딩 직후 첫 렌더부터 실제 경과일(1일째) 반영
@@ -858,6 +979,27 @@ async function boot() {
         e.target.closest && e.target.closest("#vl-feedback-confirm-btn");
       if (confirmBtn) {
         handleFeedbackConfirmClick(popup, confirmBtn.dataset.sessionId);
+        return;
+      }
+
+      // 대조군 종료 안내 모달 — "지금 확인하기"는 모달 노출+리뷰 열람을 모두, "나중에"는
+      // 모달 노출만 기록한다(3절 플로우차트 F/G와 동일).
+      const studyEndConfirmBtn =
+        e.target.closest && e.target.closest("#vl-study-end-modal-confirm");
+      const studyEndLaterBtn =
+        e.target.closest && e.target.closest("#vl-study-end-modal-later");
+      if (studyEndConfirmBtn || studyEndLaterBtn) {
+        chrome.storage.local.set({ studyEndModalShown: true });
+        postStudyEndReviewEvent("modal_shown");
+        if (studyEndConfirmBtn) postStudyEndReviewEvent("review_viewed");
+        return;
+      }
+
+      // 대조군 상시 CTA — 재진입할 때마다 호출되지만 서버가 최초 1회만 반영한다.
+      const studyEndCtaBtn =
+        e.target.closest && e.target.closest("#vl-study-end-cta");
+      if (studyEndCtaBtn) {
+        postStudyEndReviewEvent("review_viewed");
       }
     });
 

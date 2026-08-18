@@ -91,8 +91,46 @@ function bindOnboarding(root, onSubmit) {
       return;
     }
     // 서버가 그룹을 확정해 주면 그 값을 사용(권위), 아니면 코드 접두사 기준
-    onSubmit({ group: check.group || parsed.group, code: parsed.code });
+    const group = check.group || parsed.group;
+
+    // 이 참여코드로 이미 등록된 이력이 있으면(TEST 코드는 서버가 항상 false를
+    // 반환) 바로 신규 등록하지 않고 재설치 복구 여부를 먼저 확인한다.
+    if (check.previouslyRegistered) {
+      showRecoverConfirm(group, parsed.code);
+      return;
+    }
+    onSubmit({ group, code: parsed.code });
   }
+
+  // "이전에 설치한 적이 있는 [코드]님이 맞습니까?" 확인 모달 — "예"면 서버에서 기존
+  // anonymousId/installDate를 복구해 그대로 쓰고, "아니오"/복구 실패 시 신규 등록으로 진행한다.
+  function showRecoverConfirm(group, code) {
+    root.insertAdjacentHTML("beforeend", screenRecoverConfirmModal(code));
+    const modal = root.querySelector("#vl-recover-modal");
+    const yesBtn = modal.querySelector("#vl-recover-yes");
+    const noBtn = modal.querySelector("#vl-recover-no");
+
+    noBtn.addEventListener("click", () => {
+      modal.remove();
+      onSubmit({ group, code });
+    });
+
+    yesBtn.addEventListener("click", async () => {
+      yesBtn.disabled = true;
+      yesBtn.textContent = "확인하는 중…";
+      const recovered = window.recoverParticipant
+        ? await window.recoverParticipant(code)
+        : null;
+      modal.remove();
+      if (!recovered) {
+        // 서버에 등록 이력이 없거나(경쟁 상태 등) 오프라인 — 조용히 신규 등록으로 폴백(6절).
+        onSubmit({ group, code });
+        return;
+      }
+      onSubmit({ group: recovered.group_code || group, code, recovered });
+    });
+  }
+
   function showErr(msg) {
     errEl.textContent = msg;
     errEl.style.display = "block";
@@ -436,13 +474,65 @@ function screenControlHome(day, stats = {}) {
 
     ${vlCard({ pad: 0, children: `<div style="display:grid;grid-template-columns:1fr 1fr">${gridCells}</div>` })}
 
-    <div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card-2);border:1px solid var(--vl-line);border-radius:13px">
+    ${
+      // 종료 안내 모달을 이미 본 뒤엔 이 자리가 상시 재진입 CTA로 바뀐다.
+      stats.studyEndCtaReady
+        ? `<button id="vl-study-end-cta" style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:15px 16px;background:var(--vl-accent-soft);border:1px solid color-mix(in oklab,var(--vl-accent) 30%,transparent);border-radius:13px;cursor:pointer;font-family:inherit;text-align:left">
+        <span style="font-size:13px;font-weight:700;color:var(--vl-accent)">6주간의 시청 리뷰가 준비됐어요</span>
+        <span style="font-size:15px;color:var(--vl-accent);flex-shrink:0">→</span>
+      </button>`
+        : `<div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card-2);border:1px solid var(--vl-line);border-radius:13px">
       <div style="width:25px;height:25px;border-radius:7px;background:var(--vl-accent-soft);color:var(--vl-accent);display:grid;place-items:center;flex-shrink:0;margin-top:1px">
         ${_lockIcon(15)}
       </div>
       <p style="margin:0;font-size:11.5px;line-height:1.55;color:var(--vl-ink-2);text-wrap:pretty">
         실험 기간 중 피드백 제공 시점은 참여자마다 다를 수 있으며, 실험 종료 후 모든 참여자에게 결과를 공유합니다.
       </p>
+    </div>`
+    }
+  </div>`;
+}
+
+// ── Study end modal ───────────────────────────────────────
+
+// 대조군 종료 안내 모달 — 연구 종료 + 전체 기간 리뷰 생성 완료 시 최초 1회만 노출된다
+function screenStudyEndModal() {
+  return `<div style="position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:24px;background:color-mix(in oklab,var(--vl-ink) 45%,transparent)">
+    <div style="width:100%;background:var(--vl-card);border-radius:18px;padding:26px 22px 22px;box-shadow:0 24px 60px -12px rgba(0,0,0,.4);text-align:center">
+      <div style="width:52px;height:52px;margin:0 auto;border-radius:50%;background:var(--vl-accent-soft);display:grid;place-items:center">
+        ${markSVG({ size: 26, filled: false, accent: "var(--vl-accent)" })}
+      </div>
+      <div style="margin-top:16px;font-size:17px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">연구 기간이 종료되었습니다</div>
+      <p style="margin:9px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
+        그동안의 시청 기록을 분석한 리뷰가 준비됐어요. 지금 확인하시겠어요?
+      </p>
+      <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px">
+        <button id="vl-study-end-modal-confirm" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">지금 확인하기</button>
+        <button id="vl-study-end-modal-later" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">나중에</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── Recover confirm modal (Story 10-10, 이슈 4) ─────────────────────────────────
+
+// 온보딩 중 재설치 확인 모달 — 참여코드가 이미 등록된 이력이 있을 때만 노출된다
+// (노출 여부는 bindOnboarding의 previouslyRegistered 분기가 판정). code는 사용자 입력을
+// 그대로 화면에 표시하므로 vlEscapeHtml로 이스케이프한다.
+function screenRecoverConfirmModal(code) {
+  return `<div id="vl-recover-modal" style="position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:24px;background:color-mix(in oklab,var(--vl-ink) 45%,transparent)">
+    <div style="width:100%;background:var(--vl-card);border-radius:18px;padding:26px 22px 22px;box-shadow:0 24px 60px -12px rgba(0,0,0,.4);text-align:center">
+      <div style="width:52px;height:52px;margin:0 auto;border-radius:50%;background:var(--vl-accent-soft);display:grid;place-items:center">
+        ${markSVG({ size: 26, filled: false, accent: "var(--vl-accent)" })}
+      </div>
+      <div style="margin-top:16px;font-size:16px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">이전에 설치한 적이 있는<br/>${vlEscapeHtml(code)}님이 맞습니까?</div>
+      <p style="margin:9px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
+        맞다면 이전 기록을 그대로 이어서 확인할 수 있어요.
+      </p>
+      <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px">
+        <button id="vl-recover-yes" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">예, 맞아요</button>
+        <button id="vl-recover-no" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">아니오, 처음이에요</button>
+      </div>
     </div>
   </div>`;
 }
@@ -452,3 +542,5 @@ window.bindOnboarding = bindOnboarding;
 window.screenToday = screenToday;
 window.screenFeedback = screenFeedback;
 window.screenControlHome = screenControlHome;
+window.screenStudyEndModal = screenStudyEndModal;
+window.screenRecoverConfirmModal = screenRecoverConfirmModal;
