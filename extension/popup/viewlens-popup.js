@@ -883,8 +883,8 @@ async function boot() {
       recovered,
     }) => {
       if (ob && g && recovered) {
-        // 재설치 복구(새 anonymousId/installDate를 만들지 않고 서버가 돌려준 기존 값을 그대로 쓴다.
-        VL._installDate = recovered.installDate; // 온보딩 직후 첫 렌더부터 실제 경과일 반영
+        // 재설치 복구 — 새 anonymousId/installDate를 만들지 않고 서버가 돌려준 기존 값을 그대로 쓴다.
+        // 이미 서버에 있는 행이므로 POST /api/participants는 다시 호출하지 않는다.
         await chrome.storage.local.set({
           anonymousId: recovered.anonymousId,
           participantCode,
@@ -892,6 +892,8 @@ async function boot() {
           installDate: recovered.installDate,
           participantSynced: true,
         });
+        // 연구자 모드 리셋과 동일하게 boot() 전체를 다시 태워 새 값으로 재계산한다.
+        window.location.reload();
         return;
       }
       if (ob && g) {
