@@ -555,9 +555,16 @@ async function validateParticipantCode(code) {
 window.validateParticipantCode = validateParticipantCode;
 
 // 참여코드 기반 재설치 복구
+const RECOVER_PARTICIPANT_TIMEOUT_MS = 5000;
+
 async function recoverParticipant(participantCode) {
   const { serverUrl } = await chrome.storage.local.get("serverUrl");
   if (!serverUrl || serverUrl.startsWith("YOUR_")) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    RECOVER_PARTICIPANT_TIMEOUT_MS,
+  );
   try {
     const res = await fetch(
       `${serverUrl.replace(/\/$/, "")}/api/participants/recover`,
@@ -565,14 +572,18 @@ async function recoverParticipant(participantCode) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ participantCode }),
+        signal: controller.signal,
       },
     );
     if (!res.ok) return null;
     const json = await res.json();
     const data = json.data ?? json;
     return data.anonymousId ? data : null;
-  } catch {
+  } catch (error) {
+    console.warn("[popup] 참여코드 복구 요청 오류:", error.message);
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 window.recoverParticipant = recoverParticipant;
