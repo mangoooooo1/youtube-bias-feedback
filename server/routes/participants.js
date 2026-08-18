@@ -7,10 +7,15 @@ const {
   isPreviouslyRegistered,
   findEarliestParticipant,
 } = require("./participant-recovery");
+const { rateLimiter } = require("../middleware/rateLimiter");
 
 const router = express.Router();
 
 const STUDY_END_EVENTS = new Set(["modal_shown", "review_viewed"]);
+
+// 참여코드는 "사실상의 인증 수단"이라 별도 강한 인증은 두지 않되, 온라인 대입 시도를 비현실적으로 느리게 만드는 최소 방어선을 둔다.
+// 실제 참여자는 재설치당 1회만 호출하므로 15분에 5회면 정상 사용을 막지 않는다.
+const recoverRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5 });
 
 const insertParticipant = db.prepare(`
   INSERT INTO participants (anonymousId, participantCode, group_code, installDate)
@@ -138,7 +143,7 @@ router.get("/validate", (req, res) => {
 
 // 참여코드 기반 재설치 복구 (이슈 4) — bindOnboarding 확인 모달에서 "예" 선택 시에만 호출된다.
 // 응답 data: { anonymousId, installDate, group_code }
-router.post("/recover", (req, res) => {
+router.post("/recover", recoverRateLimit, (req, res) => {
   const participantCode = (req.body.participantCode || "")
     .toString()
     .trim()
