@@ -115,7 +115,6 @@ function buildDataForDate(allSessions, targetDate) {
       prevEntropy: 0,
       prevDateLabel: "—",
       videos: [],
-      lastSessionVideos: [],
       review: "",
       sessionIds: [],
     };
@@ -152,20 +151,6 @@ function buildDataForDate(allSessions, targetDate) {
     })
     .slice(0, 9);
 
-  // "가장 최근 시청" 세션 카드용 — review/reviewTopic/sessionId와 같은 세션(마지막 세션)
-  // 하나로 범위를 맞춘다. 여기서 벗어나 오늘 전체 목록(videos)을 쓰면 카드 제목이 가리키는
-  // 범위와 실제 내용이 어긋난다(리뷰는 마지막 세션 얘기인데 목록은 오늘 전체가 되는 문제).
-  const lastSession = sourceSessions.at(-1);
-  const lastSessionVideos = lastSession
-    ? (lastSession.videos || [])
-        .map((v) => ({
-          title: v.title,
-          cat: topKey(lastSession),
-          videoId: v.videoId || null,
-        }))
-        .slice(0, 9)
-    : [];
-
   // Previous available day entropy
   const prevSessions = allSessions
     .filter(
@@ -199,7 +184,6 @@ function buildDataForDate(allSessions, targetDate) {
     prevEntropy,
     prevDateLabel,
     videos,
-    lastSessionVideos,
     review,
     reviewTopic,
     sessionId,
