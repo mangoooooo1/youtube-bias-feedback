@@ -451,6 +451,7 @@ function isTodayCumulativeStale(cache, todayStr, todaySessionIds) {
 
 // 오늘 누적 리뷰의 현재 표시 상태를 판정한다. 대상이 아니면 즉시 빈 상태를 반환하고,
 // 대상이면 캐시를 읽어 최신인지만 확인한다(생성 요청은 하지 않음 — background.js가 이미 하고 있음).
+// sessionId/locked도 이 함수가 "같은 캐시 읽기 한 번"으로 함께 계산해서 반환한다.
 async function resolveTodayCumulative(eligible, todaySessionIds) {
   if (!eligible) {
     return {
@@ -458,6 +459,8 @@ async function resolveTodayCumulative(eligible, todaySessionIds) {
       generating: false,
       review: null,
       reviewTopic: null,
+      sessionId: null,
+      locked: false,
     };
   }
 
@@ -465,11 +468,30 @@ async function resolveTodayCumulative(eligible, todaySessionIds) {
   const cache = await getTodayCumulativeCache();
   const stale = isTodayCumulativeStale(cache, todayStr, todaySessionIds);
 
+  if (stale) {
+    return {
+      eligible: true,
+      generating: true,
+      review: null,
+      reviewTopic: null,
+      sessionId: null,
+      locked: false,
+    };
+  }
+
+  // sourceSessionIds는 오늘 세션을 병합한 순서 그대로라 마지막 원소가 곧 가장 최근 세션이다
+  const sessionId = cache.sourceSessionIds?.at(-1) ?? null;
+  const locked = isRealReview(cache.review)
+    ? !(await isFeedbackConfirmed(sessionId))
+    : false;
+
   return {
     eligible: true,
-    generating: stale,
-    review: stale ? null : cache.review,
-    reviewTopic: stale ? null : cache.reviewTopic,
+    generating: false,
+    review: cache.review,
+    reviewTopic: cache.reviewTopic,
+    sessionId,
+    locked,
   };
 }
 
@@ -763,19 +785,7 @@ async function boot() {
   const feedbackActive =
     !!VL.GROUPS[stored.group]?.feedback &&
     (VL.isTestGroup(stored.group) || !VL.isBaselinePeriod(installDate));
-  const needsConfirm = feedbackActive && isRealReview(realToday.review);
-  // "피드백 확인하기" 블러 해제 버튼을 눌러야만 확인된 것으로 친다(단순히 팝업을 연 것만으로는 아님).
-  // 날짜 이동(어제/그제 보기)에 영향받지 않도록 VL.today가 아니라 별도 키에 둔다 — VL.today는
-  // 날짜를 옮길 때마다 통째로 재생성돼서, 여기 두면 어제를 봤다 오늘로 돌아올 때 상태가 오염된다.
-  VL._todayConfirmed = needsConfirm
-    ? await isFeedbackConfirmed(realToday.sessionId)
-    : true;
-  // 미열람 아이콘 표시도 "열기"가 아니라 "확인" 기준으로 지운다 — feedbackConfirmedAt과 의미를 맞춘다.
-  if (needsConfirm && VL._todayConfirmed) {
-    clearUnviewedIconDot();
-  }
-
-  // "오늘" 누적 리뷰(Story 11-2) — 세션 리뷰와 같은 게이팅(feedbackActive)을 재사용하고,
+  // "오늘" 누적 리뷰 — 세션 리뷰와 같은 게이팅(feedbackActive)을 재사용하고,
   // 오늘 세션이 하나도 없으면 대상에서 제외한다(§18 "베이스라인/대상 판별 규칙을 세션
   // 리뷰와 동일하게 맞춘다"). VL.today가 아니라 별도 키(VL._todayCumulative)에 두는 이유는
   // VL._todayConfirmed와 같다 — ViewLensPopup.render()가 탭 렌더마다 VL.today를
@@ -788,6 +798,16 @@ async function boot() {
     todayCumulativeEligible,
     realToday.sessionIds,
   );
+
+  // 확인(블러) 상태는 VL._todayCumulative(누적 캐시 기준)에서 파생한다.
+  const needsConfirm =
+    !VL._todayCumulative.generating && isRealReview(VL._todayCumulative.review);
+  // "피드백 확인하기" 블러 해제 버튼을 눌러야만 확인된 것으로 친다.
+  VL._todayConfirmed = needsConfirm ? !VL._todayCumulative.locked : true;
+  // 미열람 아이콘 표시도 "열기"가 아니라 "확인" 기준으로 지운다 — feedbackConfirmedAt과 의미를 맞춘다.
+  if (needsConfirm && VL._todayConfirmed) {
+    clearUnviewedIconDot();
+  }
 
   // 실험군(진행 중 주차별 피드백)뿐 아니라 대조군도 조회 대상
   let cachedPeriodReviews = [];
@@ -970,16 +990,25 @@ async function boot() {
 
     // background.js의 세션-종료 트리거가 생성을 마치고 캐시를 갱신하면 여기서
     // 받아 플레이스홀더를 실제 리뷰로 교체한다. 팝업은 생성을 요청하지 않고 결과만 반영한다.
+    // resolveTodayCumulative를 다시 호출해 텍스트·잠금 상태를 "같은 캐시 읽기"에서 함께
+    // 얻는다 — sessions 변경(아래 분기)이 아직 안 왔어도 이 시점의 render()가 이미 올바른
+    // 잠금 상태로 나가게 하기 위함(coderabbitai 지적, 이슈1 사후 발견 버그 수정).
     if (changes.todayCumulativeReview && todayCumulativeEligible) {
       const newCache = changes.todayCumulativeReview.newValue || null;
       const todayStr = dateStr(new Date());
       if (newCache && newCache.reviewDate === todayStr) {
-        VL._todayCumulative = {
-          eligible: true,
-          generating: false,
-          review: newCache.review,
-          reviewTopic: newCache.reviewTopic,
-        };
+        VL._todayCumulative = await resolveTodayCumulative(
+          true,
+          newCache.sourceSessionIds || [],
+        );
+        VL._todayConfirmed = !VL._todayCumulative.locked;
+        if (
+          !VL._todayCumulative.generating &&
+          isRealReview(VL._todayCumulative.review) &&
+          VL._todayConfirmed
+        ) {
+          clearUnviewedIconDot();
+        }
         popup.render();
       }
     }
@@ -990,16 +1019,9 @@ async function boot() {
     const freshToday = buildDataForDate(updatedSessions, new Date());
     freshToday.collectingCount = localCurrentSession?.videos?.length ?? 0;
     freshToday.collectingTimer = _computeTimerText(localLastWatchedAt);
-    const freshNeedsConfirm = feedbackActive && isRealReview(freshToday.review);
-    // 새로 완료된 세션은 아직 로컬에 확인 기록이 없을 테니 다시 블러 처리된다(의도된 동작).
-    // 날짜 이동에 오염되지 않도록 VL.today가 아니라 VL._todayConfirmed에 둔다(위 boot()와 동일 이유).
-    VL._todayConfirmed = freshNeedsConfirm
-      ? await isFeedbackConfirmed(freshToday.sessionId)
-      : true;
+    // 확인(블러) 상태는 여기서 다시 계산하지 않는다 — VL._todayCumulative(위 분기)가
+    // 유일한 소스다. sessions 변경은 도넛·영상목록 등 리뷰와 무관한 필드 갱신용.
     VL.today = freshToday;
-    if (freshNeedsConfirm && VL._todayConfirmed) {
-      clearUnviewedIconDot();
-    }
 
     // 팝업을 연 채로 오늘 첫 세션이 막 끝난 경우 — boot() 시점엔 오늘 세션이 0개라
     // 대상에서 제외됐던 상태를 여기서 한 번만 다시 판정한다. 이미 대상이었다면(세션이

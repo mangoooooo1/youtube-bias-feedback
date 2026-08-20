@@ -227,8 +227,9 @@ function screenToday() {
     .join("");
 
   const isToday = d.dateLabel === koreanDateLabel(new Date());
-  // 오늘의 실제 리뷰인데 아직 "확인하기"를 안 눌렀으면 블러 처리 — 지난 날짜는 대상 아님.
-  const reviewLocked = isToday && !d.confirmed && isRealReview(d.review);
+  // 잠금 상태는 VL._todayCumulative에서 읽는다.
+  // d(VL.today, sessions 기준)에서 따로 계산하면 세션 종료 시 두 storage 갱신 사이의 간극 동안 블러 없이 새 리뷰가 잠깐 보이는 경합이 생긴다
+  const reviewLocked = isToday && !!VL._todayCumulative?.locked;
   const isCollecting = d.collectingCount > 0 || !!d.collectingTimer;
   const collectingRow = isCollecting
     ? `
@@ -295,7 +296,7 @@ function screenToday() {
     `,
     })}
 
-    ${_todayCumulativeCard(isToday, d.videos, reviewLocked, d.sessionId)}
+    ${_todayCumulativeCard(isToday, d.videos, reviewLocked, VL._todayCumulative?.sessionId ?? null)}
   </div>
   </div>`;
 }
@@ -533,6 +534,8 @@ function screenRecoverConfirmModal(code) {
   </div>`;
 }
 
+// popup·Studio 양쪽에서 쓰는 헬퍼라 이 파일에는 호출부가 없을 수 있다(no-unused-vars 방지).
+window.isRealReview = isRealReview;
 window.screenOnboarding = screenOnboarding;
 window.bindOnboarding = bindOnboarding;
 window.screenToday = screenToday;

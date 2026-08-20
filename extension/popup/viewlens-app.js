@@ -200,10 +200,6 @@ class ViewLensPopup {
         this._selectedDate.toDateString() === new Date().toDateString();
       d.collectingCount = isToday ? (VL.today?.collectingCount ?? 0) : 0;
       d.collectingTimer = isToday ? _collectingTimerText() : "";
-      // 지난 날짜 조회 시엔 블러 대상이 아니므로 항상 확인된 것으로 취급한다.
-      // VL.today가 아니라 VL._todayConfirmed(날짜 이동에 영향받지 않는 별도 키)에서 읽는다 —
-      // VL.today에 두면 어제를 봤다가 오늘로 돌아올 때 "확인됨"으로 잘못 남는 버그가 있었다.
-      d.confirmed = isToday ? !!VL._todayConfirmed : true;
       VL.today = d;
     }
 
