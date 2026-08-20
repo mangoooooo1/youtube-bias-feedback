@@ -14,10 +14,8 @@ import {
   aggregateTodayCumulative,
 } from "./pipeline/analysis.js";
 import {
-  buildPrompt,
   buildTodayCumulativePrompt,
   generateReview,
-  generateFallbackReview,
   generateTodayFallbackReview,
   TODAY_PROMPT_VERSION,
 } from "./pipeline/llm.js";
@@ -112,15 +110,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch((error) => sendResponse({ ok: false, reason: error.message }));
     return true;
   }
-  if (message.type === "GENERATE_TODAY_CUMULATIVE_REVIEW") {
-    // 팝업이 이 메시지를 보낸 뒤 닫혀도(sendResponse 채널이 끊겨도) 아래 Promise 체인은
-    // 서비스 워커에서 계속 실행돼 캐시·서버 저장까지 마친다 — 명세서 §9 "생성 도중 팝업이
-    // 닫힘" 요구사항.
-    generateTodayCumulativeReview()
-      .then(sendResponse)
-      .catch((error) => sendResponse({ ok: false, reason: error.message }));
-    return true;
-  }
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -191,16 +180,6 @@ async function checkSessionTimeout() {
   await analyzeSession(session);
 }
 
-// 현재 세션을 제외하고, 분석이 완료된(entropy가 유한 숫자인) 가장 최근 세션의 entropy를 반환
-function findPrevEntropy(sessions, currentSessionId) {
-  for (let i = sessions.length - 1; i >= 0; i--) {
-    const s = sessions[i];
-    if (s.sessionId === currentSessionId) continue;
-    if (Number.isFinite(s.entropy)) return s.entropy;
-  }
-  return null;
-}
-
 async function analyzeSession(session) {
   // 지연시간 측정 — 세션 종료 후 처리 파이프라인 전체를 t0로 감싼다.
   const t0 = Date.now();
@@ -214,57 +193,35 @@ async function analyzeSession(session) {
   const categoryDistribution = calculateDistribution(categoryIds);
   const entropy = calculateEntropy(categoryDistribution);
   const videoCount = session.videos.length;
-  const videoTitles = session.videos.map((v) => v.title).filter(Boolean);
-
-  // saveAnalysis로 현재 세션에 entropy를 저장하기 전에 직전 세션 entropy를 조회
-  const allSessions = await getAllSessions();
-  const prevEntropy = findPrevEntropy(allSessions, session.sessionId);
 
   await saveAnalysis(session.sessionId, {
     categoryDistribution,
     entropy,
     videoCount,
   });
-  console.log("[background] 분석 완료:", {
-    entropy,
-    prevEntropy,
-    categoryDistribution,
-  });
+  console.log("[background] 분석 완료:", { entropy, categoryDistribution });
 
-  const analysisData = {
-    categoryDistribution,
-    entropy,
-    prevEntropy,
-    videoCount,
-    videoTitles,
-  };
-  const prompt = buildPrompt(analysisData);
+  // 오늘 누적 리뷰 생성
+  const cumulative = await generateTodayCumulativeReview();
 
-  let result;
-  // LLM 성공/폴백 로깅 (). generateReview가 실패 사유를 태깅해 던지므로 분류해 기록한다.
-  let llmStatus = "success";
-  let failureReason = null;
-  let httpStatus = null;
-  let timedOut = 0; // SQLite INTEGER — 1/0
-  // 성공/폴백 무관하게 Gemini 호출(및 타임아웃까지의 대기) 소요를 기록한다.
-  const geminiStart = Date.now();
-  try {
-    result = await generateReview(prompt);
-    console.log("[background] 리뷰 생성 완료");
-  } catch (error) {
-    llmStatus = "fallback";
-    // 태깅 안 된 예상 밖 에러는 network_error로 수렴(죽은 카테고리 방지)
-    failureReason = error.failureReason || "network_error";
-    httpStatus = error.httpStatus ?? null;
-    timedOut = error.timedOut === true ? 1 : 0;
-    console.warn(
-      "[background] 리뷰 생성 실패, 폴백 사용:",
-      failureReason,
-      error.message,
-    );
-    result = generateFallbackReview(analysisData);
-  }
-  const geminiMs = Date.now() - geminiStart;
+  // 오늘 모든 세션의 categoryDistribution이 비어 있는 극히 드문 경우(YouTube 카테고리
+  // 조회가 전부 실패)에만 aggregateTodayCumulative가 null을 반환해 cumulative.ok가 false다.
+  // 이때는 Gemini를 부르지 않고 "분석 불가" 플레이스홀더로 대체한다(generateTodayFallbackReview의
+  // 빈 분포 분기 재사용) — llmStatus는 fallback으로 기록하되, 실제 LLM 실패가 아니므로
+  // failureReason은 남기지 않는다(문서화된 분류값에 없는 값을 지어내지 않기 위함).
+  const result = cumulative.ok
+    ? {
+        feedback: cumulative.review,
+        topic: cumulative.reviewTopic,
+        source: cumulative.source,
+        promptVersion: cumulative.promptVersion,
+      }
+    : generateTodayFallbackReview({ categoryDistribution: {}, videoCount: 0 });
+  const llmStatus = cumulative.ok ? cumulative.llmStatus : "fallback";
+  const failureReason = cumulative.ok ? cumulative.failureReason : null;
+  const httpStatus = cumulative.ok ? cumulative.httpStatus : null;
+  const timedOut = cumulative.ok ? cumulative.timedOut : 0;
+  const geminiMs = cumulative.ok ? cumulative.geminiMs : null;
 
   await saveAnalysis(session.sessionId, {
     review: result.feedback,
@@ -315,7 +272,7 @@ function notifyFeedbackReady(session, onboarding) {
     type: "basic",
     iconUrl: chrome.runtime.getURL("assets/icons/icon128.png"),
     title: "ViewLens",
-    message: "이번 세션 분석이 준비됐어요.",
+    message: "방금 시청한 내용을 반영해 오늘의 피드백이 업데이트됐어요.",
     buttons: [{ title: "피드백 보러 가기" }],
   });
   // 개수 대신 있음/없음만 표시 — 정확한 미열람 개수는 연구 지표가 아니다.
@@ -391,10 +348,11 @@ async function postSessionToServer(
 
 const TODAY_CUMULATIVE_CACHE_KEY = "todayCumulativeReview";
 
-// 팝업을 짧은 간격으로 다시 열거나 창을 두 개 띄우면 생성 요청이 겹쳐 들어올 수 있다
+// 세션-종료 알람이 짧은 간격으로 겹치면(이론상 거의 없음) 생성 요청이 겹쳐 들어올 수 있어
+// 방어적으로 유지한다.
 let todayCumulativeReviewInFlight = null;
 
-// 팝업 오픈 시 지연 생성 요청을 받아 실행
+// 세션-종료 트리거(analyzeSession, 이슈1 1-B)가 호출한다.
 function generateTodayCumulativeReview() {
   if (todayCumulativeReviewInFlight) return todayCumulativeReviewInFlight;
   todayCumulativeReviewInFlight = runGenerateTodayCumulativeReview().finally(
@@ -435,7 +393,8 @@ async function runGenerateTodayCumulativeReview() {
   }
   const geminiMs = Date.now() - geminiStart;
 
-  // 하루 상한 N 판정(팝업 책임)의 관측용 값
+  // 그날 몇 번째 갱신인지 관측용(더 이상 팝업의 상한 판정에는 쓰이지 않음, 1-B에서
+  // 팝업 쪽 하루 상한 로직을 제거했다 — 세션-종료 트리거는 세션 수만큼만 자연히 호출된다).
   // 같은 날짜 캐시가 있으면 이어서 세고, 날짜가 바뀌었으면(자정 경과) 1부터 다시 센다.
   const { [TODAY_CUMULATIVE_CACHE_KEY]: prevCache } =
     await chrome.storage.local.get(TODAY_CUMULATIVE_CACHE_KEY);
@@ -470,7 +429,9 @@ async function runGenerateTodayCumulativeReview() {
   const onboarding = await getOnboarding();
   await postTodayCumulativeReviewToServer(onboarding, cacheEntry);
 
-  return { ok: true };
+  // analyzeSession(1-B)이 이 결과를 그대로 그 세션의 review/reviewTopic에도 저장하므로
+  // cacheEntry 전체를 반환한다 — 한 번의 생성으로 sessions 행과 today_reviews를 함께 채운다.
+  return { ok: true, ...cacheEntry };
 }
 
 // today_reviews upsert
