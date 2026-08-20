@@ -47,10 +47,16 @@ function initializeDB() {
       httpStatus           INTEGER,  -- failureReason='http_error'일 때만 (429 쿼터 vs 5xx 장애 구분)
       timedOut             INTEGER,  -- 타임아웃으로 실패한 경우 1
       -- 실제 생성된 피드백 텍스트 (Story 10-11) — 면담·로그·설문 삼각검증 및 처치 충실도 판정에 필요
+      -- "오늘" 탭 리뷰 카드 통합 이후로는 이 세션 하나만의 격리된 관찰치가 아니라,
+      -- 그 세션 종료 시점까지의 "오늘 누적" 스냅샷이다(세션 경계마다 찍힌 시계열) — 생성 당시
+      -- today_reviews에 기록된 그 날짜 최신 스냅샷과 같은 계산 결과를 공유한다(한 번의 생성으로
+      -- 두 테이블에 나눠 저장). 이후 같은 날 세션이 추가로 끝나면 today_reviews는 그 다음
+      -- 스냅샷으로 갱신되므로, 과거 sessions.review는 today_reviews의 "현재" 최신본과 값이
+      -- 갈라진다 — 두 테이블을 조인해 비교할 때는 이 시점 차이를 반드시 감안할 것.
       review               TEXT,     -- 사용자에게 노출된 피드백 문장 (llm 성공 또는 fallback 결과)
       reviewTopic          TEXT,     -- 같은 응답의 topic
       source               TEXT,     -- 'llm' | 'fallback' — 어느 경로로 생성됐는지
-      promptVersion        TEXT,     -- llm.js PROMPT_VERSION — 파일럿/본조사 처치 동일성 추적용
+      promptVersion        TEXT,     -- extension/pipeline/llm.js TODAY_PROMPT_VERSION — 파일럿/본조사 처치 동일성 추적용
       -- 피드백 알림·열람·확인 시점 (Story 10-6) — 측정 퍼널: 생성 → 알림(feedbackNotifiedAt)
       -- → 클릭(feedbackViewedAt, 알림 클릭 기준) → 확인(feedbackConfirmedAt, 블러 해제 버튼 클릭 기준 — 가장 엄격한 신호)
       feedbackNotifiedAt   TEXT,     -- 분석 완료 알림을 표시한 시각 (미대상/미전달이면 NULL)
@@ -101,7 +107,7 @@ function initializeDB() {
 
     -- 기간(일차·주차) 단위 리뷰 — 완료된 기간 전체를 요약하는 서버 배치(cron)
     -- 생성 리뷰. sessions/video_events를 그때그때 집계해 만들며, 세션 리뷰(sessions.review)와는
-    -- 독립적으로 저장된다.
+    -- 별도 파이프라인(서버 cron vs 클라이언트 세션-종료 트리거)에서 독립적으로 생성·저장된다.
     CREATE TABLE IF NOT EXISTS period_reviews (
       id                   INTEGER PRIMARY KEY AUTOINCREMENT,
       anonymousId          TEXT    NOT NULL,
@@ -128,9 +134,7 @@ function initializeDB() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_period_reviews_participant_period
       ON period_reviews(anonymousId, periodIndex);
 
-    -- "오늘" 탭 누적 리뷰 — 클라이언트 백그라운드 워커가 오늘 세션 전체를
-    -- 병합 집계해 생성한 리뷰. 세션 리뷰(sessions.review)·기간 리뷰(period_reviews)와는
-    -- 독립적으로, 진행 중인 오늘 하루치만 (anonymousId, reviewDate) 1행 최신본으로 upsert한다.
+    -- "오늘" 탭 누적 리뷰 — 클라이언트 백그라운드 워커가 오늘 세션 전체를 병합 집계해 생성한 리뷰
     CREATE TABLE IF NOT EXISTS today_reviews (
       id                   INTEGER PRIMARY KEY AUTOINCREMENT,
       anonymousId          TEXT    NOT NULL,

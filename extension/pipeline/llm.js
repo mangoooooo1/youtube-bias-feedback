@@ -11,11 +11,8 @@ const BIAS_WARN_RATIO = 0.7;
 // 변화 분석/편중 경고를 신뢰할 수 있는 최소 영상 수
 const MIN_VIDEOS_FOR_TREND = 5;
 
-// 파일럿 완료 후 커밋 태그(pilot-freeze-v1.0)로 동결 — 본조사 중에는 buildPrompt 문구를
-// 바꾸지 않고, 부득이하게 바꿀 때만 이 값을 올려 세션에 함께 저장된 값으로 처치 시점을 구분한다.
-export const PROMPT_VERSION = "viewlens-mirror-v1.0";
-
-// "오늘" 탭 누적 리뷰 전용 버전 — 세션 리뷰 PROMPT_VERSION과 독립적으로 관리한다.
+// 파일럿 완료 후 커밋 태그로 동결
+// 본조사 중에는 buildTodayCumulativePrompt 문구를 바꾸지 않고, 부득이하게 바꿀 때만 이 값을 올려 세션에 함께 저장된 값으로 처치 시점을 구분한다.
 export const TODAY_PROMPT_VERSION = "viewlens-today-mirror-v1.0";
 
 // entropy는 소수점 둘째 자리로 반올림된 값(analysis.js)이므로, 부동소수점 오차로
@@ -25,110 +22,8 @@ function roundedDelta(entropy, prevEntropy) {
 }
 
 // prevEntropy 및 편중 비율을 LLM에게 줄 자연어 지시로 번역
-function buildTrendGuidance({ entropy, prevEntropy, topRatio, videoCount }) {
-  if (videoCount < MIN_VIDEOS_FOR_TREND) {
-    return "- 이번 세션은 시청한 영상 수가 적어 패턴을 단정하기 어렵습니다. 무엇을 봤는지 가볍게 비추는 정도로만 언급해 주세요.";
-  }
-
-  const lines = [];
-  // 다양성 증가/감소·편중 경고 모두 같은 강도로 지시 — 방향에 따라 강조가 달라지면
-  // "안 좋아 보이는" 변화에만 더 또렷하게 비추라는 암묵적 방향성 신호가 되어 거울형(중립) 원칙과 충돌한다.
-  const TONE = "부드럽고 또렷하게";
-
-  if (Number.isFinite(prevEntropy)) {
-    const delta = roundedDelta(entropy, prevEntropy);
-    if (delta >= ENTROPY_DELTA_EPS) {
-      lines.push(
-        `- 직전 세션보다 시청이 여러 주제로 다양해졌습니다. 이 변화를 ${TONE} 사실로 비춰 주세요.`,
-      );
-    } else if (delta <= -ENTROPY_DELTA_EPS) {
-      lines.push(
-        `- 직전 세션보다 시청이 더 적은 수의 주제에 모였습니다. 이 변화를 ${TONE} 사실로 비춰 주세요.`,
-      );
-    } else {
-      lines.push(
-        "- 직전 세션과 비슷한 다양성을 유지하고 있습니다. 이 사실을 중립적으로 비춰 주세요.",
-      );
-    }
-  }
-
-  if (topRatio >= BIAS_WARN_RATIO) {
-    lines.push(
-      `- 시청이 한 주제에 크게 모여 있습니다. 그 쏠림을 ${TONE} 사실로 비춰 주세요. 다양하게 보라는 권유나 지시는 하지 마세요.`,
-    );
-  }
-
-  return lines.join("\n");
-}
-
-export function buildPrompt({
-  categoryDistribution,
-  entropy,
-  prevEntropy = null,
-  videoCount,
-  videoTitles = [],
-}) {
-  const sorted = Object.entries(categoryDistribution).sort(
-    ([, a], [, b]) => b - a,
-  );
-
-  const categoryLines = sorted
-    .map(([name, ratio]) => `  · ${name}: ${Math.round(ratio * 100)}%`)
-    .join("\n");
-
-  const categoryCount = sorted.length;
-  const maxEntropy =
-    categoryCount > 1 ? Math.log2(categoryCount).toFixed(2) : null;
-  const entropyLine =
-    maxEntropy !== null
-      ? `- 다양성 지수: ${entropy} (최대 ${maxEntropy})`
-      : `- 다양성 지수: ${entropy}`;
-
-  const titleLines =
-    videoTitles.length > 0
-      ? `\n- 시청한 영상 제목:\n${videoTitles
-          .slice(0, 10)
-          .map((t) => `  · ${t}`)
-          .join("\n")}`
-      : "";
-
-  const topRatio = sorted.length > 0 ? sorted[0][1] : 0;
-  const trendGuidance = buildTrendGuidance({
-    entropy,
-    prevEntropy,
-    topRatio,
-    videoCount,
-  });
-  const trendSection = trendGuidance
-    ? `\n\n[피드백 작성 지침]\n${trendGuidance}`
-    : "";
-
-  return `당신은 사용자가 자신의 YouTube 콘텐츠 소비 패턴을 스스로 돌아볼 수 있도록 있는 그대로 비춰 주는 거울 같은 조력자입니다.
-
-[세션 정보]
-- 시청 영상 수: ${videoCount}개
-- 카테고리 분포:
-${categoryLines}
-${entropyLine}${titleLines}${trendSection}
-
-[피드백 원칙]
-- 위에 제시된 카테고리 분포와 다양성 변화에만 근거하세요. 정치 성향·이념·성격 등 데이터로 알 수 없는 내용은 추론하거나 단정하지 마세요.
-- 평가하거나 가르치려 들지 말고, 친근하고 중립적인 톤으로 사용자가 자신의 시청 패턴을 스스로 알아차리도록 돕는 데 집중하세요.
-- 한 주제에 시청이 모여 있으면, 그 사실을 부드럽고 또렷하게 비춰 주세요. 단, "이렇게 하라"는 식의 행동 지시나 특정 카테고리 시청 권유는 하지 마세요. 무엇을 볼지는 전적으로 사용자가 결정합니다.
-- entropy·통계·퍼센트 같은 수치나 전문 용어는 직접 노출하지 마세요.
-- 시청한 영상 제목은 카테고리 판단을 보완하는 배경 정보로만 참고하세요. 제목을 언급할 때는 "OO 관련 영상"처럼 소재 수준으로만 지칭하고, 제목 속 특정 인물·정당·이슈에 대한 주장이나 논조는 절대 요약·평가하지 마세요.
-
-아래 JSON 형식으로만 응답하세요. 다른 텍스트는 포함하지 마세요.
-
-{
-  "topic": "시청 카테고리 기반 주요 관심사를 5단어 이내 명사구로 (예: 과학과 기술)",
-  "feedback": "위 원칙에 따른 2~3문장. 무엇을 봤는지 비추기 → (쏠림이 있으면) 그 쏠림을 알아차리게 하기. 행동을 처방하지 말고 관찰에서 멈출 것"
-}`;
-}
-
-// "오늘" 누적 리뷰(Story 11-2)용 추세 안내 — buildTrendGuidance와 판단 로직은 동일하지만,
-// 비교 단위가 "직전 세션"이 아니라 "직전 시청일"이라는 점만 문구에 반영한다
-// (prevEntropy로 넘어오는 값 자체가 이전 세션이 아니라 이전 시청일의 entropy).
+// 비교 단위는 "직전 세션"이 아니라 "직전 시청일"이다(prevEntropy로 넘어오는 값 자체가
+// 이전 세션이 아니라 이전 시청일의 entropy).
 function buildTodayTrendGuidance({
   entropy,
   prevEntropy,
@@ -249,15 +144,16 @@ function llmError(failureReason, message, extra = {}) {
 // 프롬프트 가드레일이 뚫려 정치·이념 관련 표현이 출력에 섞였을 때 잡아내는 최후 방어선.
 // LLM 판단에만 의존하지 않도록, 생성 결과를 코드가 결정론적으로 재검증한다(감지 시 폴백 전환).
 // "진보"/"보수"는 "기술의 진보", "보수 작업"처럼 정치와 무관한 의미로도 흔히 쓰여
-// 단독으로 매칭하면 정상 피드백이 오탐으로 폴백 처리된다(특히 buildPrompt가 "쏠림"을
+// 단독으로 매칭하면 정상 피드백이 오탐으로 폴백 처리된다(특히 buildTodayCumulativePrompt가 "쏠림"을
 // 묘사하도록 유도하는 문구에서 "보수적으로"가 나올 수 있음). 이념을 명시하는 단어와
 // 붙어 있을 때만 매칭해 오탐을 줄인다("정당"은 아래 목록에 이미 있어 별도 명시 불필요).
 const SENSITIVE_PATTERN =
   /(?:진보|보수)\s*(?:성향|진영|정치|이념)|좌파|우파|좌익|우익|여당|야당|정당|국민의힘|민주당|대통령|국회의원|탄핵|친일|반일|극우|극좌/;
 
-// promptVersion은 기본적으로 세션 리뷰 버전이지만, 오늘 누적 리뷰가 같은 함수를
-// 재사용할 때는 TODAY_PROMPT_VERSION을 넘겨 결과에 어느 프롬프트로 생성됐는지 정확히 남긴다
-export async function generateReview(prompt, promptVersion = PROMPT_VERSION) {
+export async function generateReview(
+  prompt,
+  promptVersion = TODAY_PROMPT_VERSION,
+) {
   const controller = new AbortController();
   let timedOut = false;
   const timeoutId = setTimeout(() => {
@@ -277,8 +173,7 @@ export async function generateReview(prompt, promptVersion = PROMPT_VERSION) {
         contents: [{ parts: [{ text: prompt }] }],
         // "생각" 토큰 상한을 안 두면 프롬프트가 복잡할수록 thinking에 쓰는 시간이 늘어나
         // TIMEOUT_MS(10초)를 넘겨 timeout으로 폴백되는 사례를 실측으로 확인했다
-        // trend 판단은 이미 buildTrendGuidance가 JS로 계산해 지시문으로 넘기므로, 모델은 문장으로 옮기는
-        // 정도만 하면 돼 깊은 추론이 필요 없다 — 512로 캡핑해 지연시간을 예측 가능하게 만든다.
+        // trend 판단은 이미 buildTodayTrendGuidance가 JS로 계산해 지시문으로 넘기므로, 모델은 문장으로 옮기는 정도만 하면 돼 깊은 추론이 필요 없다.
         generationConfig: { thinkingConfig: { thinkingBudget: 512 } },
       }),
       signal: controller.signal,
@@ -353,76 +248,8 @@ export async function generateReview(prompt, promptVersion = PROMPT_VERSION) {
   return { topic, feedback, source: "llm", promptVersion };
 }
 
-export function generateFallbackReview({
-  categoryDistribution,
-  entropy,
-  prevEntropy = null,
-  videoCount,
-}) {
-  const sorted = Object.entries(categoryDistribution).sort(
-    ([, a], [, b]) => b - a,
-  );
-
-  if (sorted.length === 0) {
-    // topic은 앱 전체에서 "항상 비어있지 않은 문자열"이 계약이다(서버 검증도 이를 전제로
-    // 한다) — 카테고리를 하나도 못 얻은 경우도 빈 문자열 대신 의미 있는 placeholder를 쓴다.
-    return {
-      topic: "분석 불가",
-      feedback:
-        "이번 세션의 시청 데이터를 분석하지 못했습니다. 다음 세션을 기대해 주세요!",
-      source: "fallback",
-      promptVersion: PROMPT_VERSION,
-    };
-  }
-
-  const [topName, topRatio] = sorted[0];
-  const topNames = sorted
-    .slice(0, 3)
-    .map(([name]) => name)
-    .join(", ");
-
-  // [무엇을 봤는지]
-  let summary;
-  let topic;
-  if (sorted.length === 1) {
-    topic = topName;
-    summary = `이번 세션에서는 ${topName} 영상을 ${videoCount}개 집중적으로 시청하셨네요.`;
-  } else if (topRatio > 0.5) {
-    topic = topName;
-    summary = `이번 세션에서는 주로 ${topName} 영상을 보셨고, ${sorted[1][0]} 영상도 함께 총 ${videoCount}개를 시청하셨어요.`;
-  } else {
-    topic = topNames;
-    summary = `이번 세션에서는 ${topNames} 등 다양한 카테고리의 영상을 총 ${videoCount}개 고루 시청하셨네요.`;
-  }
-
-  // [변화 추세] + [쏠림] — 거울형: 사실만 비추고 권유·처방은 하지 않음
-  let trend = "";
-  let skewNote = "";
-  if (videoCount >= MIN_VIDEOS_FOR_TREND) {
-    const hasPrev = Number.isFinite(prevEntropy);
-    const delta = hasPrev ? roundedDelta(entropy, prevEntropy) : 0;
-
-    if (hasPrev) {
-      if (delta >= ENTROPY_DELTA_EPS)
-        trend = "직전 세션보다 여러 주제를 두루 보셨어요.";
-      else if (delta <= -ENTROPY_DELTA_EPS)
-        trend = "직전 세션보다 더 적은 수의 주제에 모여 있었어요.";
-      else trend = "직전 세션과 비슷한 다양성이었어요.";
-    }
-
-    if (topRatio >= BIAS_WARN_RATIO) {
-      skewNote = "특히 시청이 한 주제에 크게 모여 있었어요.";
-    }
-  }
-
-  const feedback = [summary, trend, skewNote].filter(Boolean).join(" ");
-  return { topic, feedback, source: "fallback", promptVersion: PROMPT_VERSION };
-}
-
-// "오늘" 누적 리뷰의 폴백 — generateFallbackReview와 판단 로직(분기·임계값)은
-// 완전히 동일하되, "이번 세션에서는"/"직전 세션" 같은 세션 전용 표현을 "오늘은"/"직전 시청일"로
-// 바꿔 오늘 하루 프레이밍에 맞춘다. 누적 카드는 세션 카드와 나란히 노출되므로, 폴백에서 "세션"이라는
-// 단어가 그대로 남으면 두 카드가 같은 세션 얘기를 하는 것처럼 보여 참여자에게 혼동을 준다.
+// "오늘" 누적 리뷰의 폴백
+// 세션 종료마다 오늘 누적을 재계산하는 유일한 경로라 "오늘은"/"직전 시청일" 프레이밍으로 통일한다("이번 세션" 전용 폴백은 더 이상 없음).
 export function generateTodayFallbackReview({
   categoryDistribution,
   entropy,
