@@ -1,5 +1,6 @@
 window.buildDataForDate = buildDataForDate;
 window.koreanDateLabel = koreanDateLabel;
+window.findUnrevealedPastDate = findUnrevealedPastDate;
 const DEFAULT_TONE = "indigo";
 
 // ── Category name (Korean) → VL short key ─────────────────────────────────────
@@ -189,6 +190,30 @@ function buildDataForDate(allSessions, targetDate) {
     sessionId,
     sessionIds,
   };
+}
+
+// "어제 돌아보기" 리빌 대상 날짜를 찾는다
+// 로컬 sessions를 스캔해 revealedDateStr보다 최근이고 오늘보다 이전인 날짜 중 세션이 있는 가장 최근 날짜 하나만 반환한다.
+function findUnrevealedPastDate(
+  allSessions,
+  revealedDateStr,
+  today = new Date(),
+) {
+  const todayStr = dateStr(today);
+  let mostRecent = null;
+  for (const s of allSessions) {
+    if (
+      !s.endTime ||
+      !s.categoryDistribution ||
+      Object.keys(s.categoryDistribution).length === 0
+    )
+      continue;
+    const d = dateStr(new Date(s.endTime));
+    if (d !== todayStr && (!mostRecent || d > mostRecent)) mostRecent = d;
+  }
+  if (!mostRecent) return null;
+  if (revealedDateStr && mostRecent <= revealedDateStr) return null;
+  return mostRecent;
 }
 
 // ── Build VL.weeks ────────────────────────────────────────────────────────────
