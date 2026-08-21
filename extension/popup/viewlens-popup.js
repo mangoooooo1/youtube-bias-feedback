@@ -32,6 +32,12 @@ function dateStr(d) {
   return d.toLocaleDateString("sv");
 }
 
+// "YYYY-MM-DD"를 로컬 자정 Date로 만든다.
+function localDateFromDateStr(str) {
+  const [y, m, d] = str.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 function koreanDateLabel(d) {
   const days = ["일", "월", "화", "수", "목", "금", "토"];
   return `${d.getMonth() + 1}월 ${d.getDate()}일 ${days[d.getDay()]}요일`;
@@ -835,7 +841,7 @@ async function boot() {
     if (revealPastDateStr) {
       const revealData = buildDataForDate(
         sessions,
-        new Date(revealPastDateStr),
+        localDateFromDateStr(revealPastDateStr),
       );
       // 베이스라인 마지막 날처럼 실제 리뷰 없이 플레이스홀더만 있는 날은 리빌하지 않는다 —
       // revealedDate를 갱신하지 않으므로, 다음에 실제 리뷰가 쌓인 날이 오면 그 날짜가
