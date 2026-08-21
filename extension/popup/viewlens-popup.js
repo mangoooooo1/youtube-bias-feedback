@@ -300,11 +300,17 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
     const range = `${startD.getMonth() + 1}/${startD.getDate()} – ${endD.getMonth() + 1}/${endD.getDate()}`;
 
     // Review: 서버가 생성한 기간 리뷰
+    // 기간이 아직 안 끝났으면(진행 중) "분석 중"이 아니라 아직 시도조차 안 한 것이므로
+    // 문구를 분리한다 — 서버 배치는 periodEnd가 지난 기간만 처리 대상으로 삼는다
+    // (server/pipeline/period-boundaries.js pendingCompletedPeriods와 동일 기준).
+    const periodEnded = weekEnd < dateStr(new Date());
     const review =
       reviewRow?.review ||
       (isBaseline
         ? "베이스라인 기간 동안의 시청 습관을 기준선으로 담아 두었어요. 이건 평가가 아니라 출발점이에요."
-        : "이번 주 데이터를 분석 중이에요. 세션이 쌓이면 더 자세한 리포트를 볼 수 있어요.");
+        : periodEnded
+          ? "이번 기간 데이터를 분석 중이에요. 곧 리포트를 볼 수 있어요."
+          : "아직 진행 중인 기간이에요. 기간이 끝나면 리뷰가 생성돼요.");
 
     const totalVids = useServerSnapshot
       ? (reviewRow.videoCount ?? 0)
