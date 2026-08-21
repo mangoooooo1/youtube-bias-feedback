@@ -1,7 +1,7 @@
 // 기간 단위 리뷰 생성 파이프라인
 
 const GEMINI_API_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent";
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent";
 const TIMEOUT_MS = 10000;
 
 // 단일 카테고리 편중 경고 임계 비율
