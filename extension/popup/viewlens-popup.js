@@ -303,11 +303,9 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
     const periodEnded = weekEnd < dateStr(new Date());
     const review =
       reviewRow?.review ||
-      (isBaseline
-        ? "베이스라인 기간 동안의 시청 습관을 기준선으로 담아 두었어요. 이건 평가가 아니라 출발점이에요."
-        : periodEnded
-          ? "이번 기간 데이터를 분석 중이에요. 곧 리포트를 볼 수 있어요."
-          : "아직 진행 중인 기간이에요. 기간이 끝나면 리뷰가 생성돼요.");
+      (periodEnded
+        ? "이번 기간 데이터를 분석 중이에요. 곧 리포트를 볼 수 있어요."
+        : "아직 진행 중인 기간이에요. 기간이 끝나면 리뷰가 생성돼요.");
 
     const totalVids = useServerSnapshot
       ? (reviewRow.videoCount ?? 0)
