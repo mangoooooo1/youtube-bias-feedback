@@ -300,9 +300,6 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
     const range = `${startD.getMonth() + 1}/${startD.getDate()} – ${endD.getMonth() + 1}/${endD.getDate()}`;
 
     // Review: 서버가 생성한 기간 리뷰
-    // 기간이 아직 안 끝났으면(진행 중) "분석 중"이 아니라 아직 시도조차 안 한 것이므로
-    // 문구를 분리한다 — 서버 배치는 periodEnd가 지난 기간만 처리 대상으로 삼는다
-    // (server/pipeline/period-boundaries.js pendingCompletedPeriods와 동일 기준).
     const periodEnded = weekEnd < dateStr(new Date());
     const review =
       reviewRow?.review ||
