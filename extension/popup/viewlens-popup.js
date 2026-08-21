@@ -209,7 +209,7 @@ function findUnrevealedPastDate(
     )
       continue;
     const d = dateStr(new Date(s.endTime));
-    if (d !== todayStr && (!mostRecent || d > mostRecent)) mostRecent = d;
+    if (d < todayStr && (!mostRecent || d > mostRecent)) mostRecent = d;
   }
   if (!mostRecent) return null;
   if (revealedDateStr && mostRecent <= revealedDateStr) return null;
