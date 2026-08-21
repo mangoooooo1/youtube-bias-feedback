@@ -1,5 +1,6 @@
 window.buildDataForDate = buildDataForDate;
 window.koreanDateLabel = koreanDateLabel;
+window.findUnrevealedPastDate = findUnrevealedPastDate;
 const DEFAULT_TONE = "indigo";
 
 // ── Category name (Korean) → VL short key ─────────────────────────────────────
@@ -29,6 +30,12 @@ function toVlKey(catName) {
 function dateStr(d) {
   // 로컬 시간대 기준 YYYY-MM-DD
   return d.toLocaleDateString("sv");
+}
+
+// "YYYY-MM-DD"를 로컬 자정 Date로 만든다.
+function localDateFromDateStr(str) {
+  const [y, m, d] = str.split("-").map(Number);
+  return new Date(y, m - 1, d);
 }
 
 function koreanDateLabel(d) {
@@ -189,6 +196,30 @@ function buildDataForDate(allSessions, targetDate) {
     sessionId,
     sessionIds,
   };
+}
+
+// "어제 돌아보기" 리빌 대상 날짜를 찾는다
+// 로컬 sessions를 스캔해 revealedDateStr보다 최근이고 오늘보다 이전인 날짜 중 세션이 있는 가장 최근 날짜 하나만 반환한다.
+function findUnrevealedPastDate(
+  allSessions,
+  revealedDateStr,
+  today = new Date(),
+) {
+  const todayStr = dateStr(today);
+  let mostRecent = null;
+  for (const s of allSessions) {
+    if (
+      !s.endTime ||
+      !s.categoryDistribution ||
+      Object.keys(s.categoryDistribution).length === 0
+    )
+      continue;
+    const d = dateStr(new Date(s.endTime));
+    if (d < todayStr && (!mostRecent || d > mostRecent)) mostRecent = d;
+  }
+  if (!mostRecent) return null;
+  if (revealedDateStr && mostRecent <= revealedDateStr) return null;
+  return mostRecent;
 }
 
 // ── Build VL.weeks ────────────────────────────────────────────────────────────
@@ -739,6 +770,7 @@ async function boot() {
     "participantSynced",
     "participantCode",
     "studyEndModalShown",
+    "todayCumulativeRevealedDate",
   ]);
 
   // 이미 온보딩된 사용자 중 anonymousId가 없는 경우 생성
@@ -798,6 +830,27 @@ async function boot() {
     todayCumulativeEligible,
     realToday.sessionIds,
   );
+
+  // "어제 돌아보기" 리빌 (feedbackActive(EXP + 베이스라인 이후)일 때만 계산)
+  VL._revealPastDay = null;
+  if (feedbackActive) {
+    const revealPastDateStr = findUnrevealedPastDate(
+      sessions,
+      stored.todayCumulativeRevealedDate || null,
+    );
+    if (revealPastDateStr) {
+      const revealData = buildDataForDate(
+        sessions,
+        localDateFromDateStr(revealPastDateStr),
+      );
+      // 베이스라인 마지막 날처럼 실제 리뷰 없이 플레이스홀더만 있는 날은 리빌하지 않는다 —
+      // revealedDate를 갱신하지 않으므로, 다음에 실제 리뷰가 쌓인 날이 오면 그 날짜가
+      // 자연히 최신 후보로 대체된다(소급 리빌 금지 정책과 일관).
+      if (isRealReview(revealData.review)) {
+        VL._revealPastDay = { dateStr: revealPastDateStr, data: revealData };
+      }
+    }
+  }
 
   // 확인(블러) 상태는 VL._todayCumulative(누적 캐시 기준)에서 파생한다.
   const needsConfirm =
@@ -964,6 +1017,15 @@ async function boot() {
         e.target.closest && e.target.closest("#vl-study-end-cta");
       if (studyEndCtaBtn) {
         postStudyEndReviewEvent("review_viewed");
+      }
+
+      // "어제 돌아보기" 리빌 확인
+      const revealDismissBtn =
+        e.target.closest && e.target.closest("#vl-reveal-dismiss");
+      if (revealDismissBtn && VL._revealPastDay) {
+        chrome.storage.local.set({
+          todayCumulativeRevealedDate: VL._revealPastDay.dateStr,
+        });
       }
     });
 
