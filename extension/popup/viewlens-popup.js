@@ -764,6 +764,7 @@ async function boot() {
     "participantSynced",
     "participantCode",
     "studyEndModalShown",
+    "todayCumulativeRevealedDate",
   ]);
 
   // 이미 온보딩된 사용자 중 anonymousId가 없는 경우 생성
@@ -823,6 +824,27 @@ async function boot() {
     todayCumulativeEligible,
     realToday.sessionIds,
   );
+
+  // "어제 돌아보기" 리빌 (feedbackActive(EXP + 베이스라인 이후)일 때만 계산)
+  VL._revealPastDay = null;
+  if (feedbackActive) {
+    const revealPastDateStr = findUnrevealedPastDate(
+      sessions,
+      stored.todayCumulativeRevealedDate || null,
+    );
+    if (revealPastDateStr) {
+      const revealData = buildDataForDate(
+        sessions,
+        new Date(revealPastDateStr),
+      );
+      // 베이스라인 마지막 날처럼 실제 리뷰 없이 플레이스홀더만 있는 날은 리빌하지 않는다 —
+      // revealedDate를 갱신하지 않으므로, 다음에 실제 리뷰가 쌓인 날이 오면 그 날짜가
+      // 자연히 최신 후보로 대체된다(소급 리빌 금지 정책과 일관).
+      if (isRealReview(revealData.review)) {
+        VL._revealPastDay = { dateStr: revealPastDateStr, data: revealData };
+      }
+    }
+  }
 
   // 확인(블러) 상태는 VL._todayCumulative(누적 캐시 기준)에서 파생한다.
   const needsConfirm =
@@ -989,6 +1011,15 @@ async function boot() {
         e.target.closest && e.target.closest("#vl-study-end-cta");
       if (studyEndCtaBtn) {
         postStudyEndReviewEvent("review_viewed");
+      }
+
+      // "어제 돌아보기" 리빌 확인
+      const revealDismissBtn =
+        e.target.closest && e.target.closest("#vl-reveal-dismiss");
+      if (revealDismissBtn && VL._revealPastDay) {
+        chrome.storage.local.set({
+          todayCumulativeRevealedDate: VL._revealPastDay.dateStr,
+        });
       }
     });
 

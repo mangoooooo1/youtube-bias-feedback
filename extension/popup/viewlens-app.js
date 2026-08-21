@@ -131,6 +131,8 @@ class ViewLensPopup {
     this._selectedDate = new Date();
     // 대조군 종료 후 리뷰 화면 보기 상태
     this._studyEndReviewOpen = false;
+    // "어제 돌아보기" 리빌 모달을 이번 팝업 세션 안에서 이미 닫았는지
+    this._pastDayRevealDismissed = false;
     // External app state (set via mount)
     this._onboarded = false;
     this._group = null;
@@ -214,6 +216,9 @@ class ViewLensPopup {
     const showStudyEndModal = studyEndReady && !VL._studyEndModalShown;
     // 모달을 이미 본 뒤에만 CTA로 전환한다.
     const showStudyEndCta = studyEndReady && !!VL._studyEndModalShown;
+    // "어제 돌아보기" 리빌
+    const showPastDayReveal =
+      !!VL._revealPastDay && !this._pastDayRevealDismissed;
 
     let bodyHTML;
     if (feedbackActive) {
@@ -247,6 +252,7 @@ class ViewLensPopup {
       ${feedbackActive ? _tabs(this._tab, !VL._todayConfirmed) : ""}
       <div style="flex:1;overflow-y:auto;overflow-x:hidden">${bodyHTML}</div>
       ${showStudyEndModal ? screenStudyEndModal() : ""}
+      ${showPastDayReveal ? screenPastDayRevealModal(VL._revealPastDay.data) : ""}
     </div>`;
 
     this._bind(groupCfg, currentWeek);
@@ -347,6 +353,14 @@ class ViewLensPopup {
     if (studyEndCta) {
       studyEndCta.addEventListener("click", () => {
         this._studyEndReviewOpen = true;
+        this.render();
+      });
+    }
+    // "어제 돌아보기" 리빌 모달 닫기
+    const revealDismiss = this.container.querySelector("#vl-reveal-dismiss");
+    if (revealDismiss) {
+      revealDismiss.addEventListener("click", () => {
+        this._pastDayRevealDismissed = true;
         this.render();
       });
     }
