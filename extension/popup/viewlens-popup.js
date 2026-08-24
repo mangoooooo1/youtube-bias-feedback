@@ -877,8 +877,14 @@ async function boot() {
   // buildDataForDate로 통째로 재생성해서, 거기 두면 날짜를 옮길 때 상태가 오염된다.
   // let인 이유: 팝업을 열어둔 채 오늘 첫 세션이 끝나면(boot 시점엔 세션 0개라 대상에서 제외됨) storage.onChanged에서
   // "대상 아님 → 대상"으로 한 번 갱신해야 함(생성은 background.js의 세션-종료 트리거가 이미 하고 있음)
+  // 대조군 종료 후(코드 검증 통과)에도 오늘 탭을 열어준다.
+  const studyEndTodayEligible =
+    VL.isConGroup(stored.group) &&
+    _isStudyEndTimeReached(installDate) &&
+    !!stored.studyEndCodeVerified;
   let todayCumulativeEligible =
-    feedbackActive && realToday.sessionIds.length > 0;
+    (feedbackActive || studyEndTodayEligible) &&
+    realToday.sessionIds.length > 0;
   VL._todayCumulative = await resolveTodayCumulative(
     todayCumulativeEligible,
     realToday.sessionIds,

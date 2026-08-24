@@ -203,6 +203,16 @@ class ViewLensPopup {
     );
   }
 
+  // 대조군 종료 후(코드 검증 통과)
+  // 실험군과 동일한 오늘/주차별 탭을 노출한다.
+  _studyEndTabsActive(groupCfg) {
+    return (
+      _isStudyEndReviewReady(groupCfg, this._installDate) &&
+      this._studyEndReviewOpen &&
+      !!VL._studyEndCodeVerified
+    );
+  }
+
   render() {
     if (!this._onboarded || !this._group) {
       this._renderOnboarding();
@@ -250,7 +260,9 @@ class ViewLensPopup {
       bodyHTML =
         _studyEndBackRow() +
         (VL._studyEndCodeVerified
-          ? screenFeedback(currentWeek, selWeek)
+          ? this._tab === "today"
+            ? screenToday()
+            : screenFeedback(currentWeek, selWeek)
           : screenStudyEndCodeInput());
     } else {
       // 10-8: groupCfg.feedback이 true인데 feedbackActive가 false라는 건 "EXP인데 베이스라인
@@ -272,7 +284,11 @@ class ViewLensPopup {
 
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
       ${_popupHeader(groupCfg, day, { participantCode: this._participantCode, studyEnded })}
-      ${feedbackActive ? _tabs(this._tab, !VL._todayConfirmed) : ""}
+      ${
+        feedbackActive || this._studyEndTabsActive(groupCfg)
+          ? _tabs(this._tab, !VL._todayConfirmed)
+          : ""
+      }
       <div style="flex:1;overflow-y:auto;overflow-x:hidden">${bodyHTML}</div>
       ${showStudyEndNotice ? screenStudyEndNoticeModal() : ""}
       ${showPastDayReveal ? screenPastDayRevealModal(VL._revealPastDay.data) : ""}
@@ -298,7 +314,10 @@ class ViewLensPopup {
 
   _bind(groupCfg, currentWeek) {
     // Tabs
-    if (this._isFeedbackActive(groupCfg)) {
+    if (
+      this._isFeedbackActive(groupCfg) ||
+      this._studyEndTabsActive(groupCfg)
+    ) {
       this.container.querySelectorAll("[data-tab]").forEach((btn) => {
         btn.addEventListener("click", () => {
           this._tab = btn.dataset.tab;
