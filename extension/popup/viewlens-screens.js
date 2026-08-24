@@ -487,23 +487,17 @@ function screenControlHome(day, stats = {}) {
 
 // ── Study end modal ───────────────────────────────────────
 
-// 대조군 종료 안내 모달 — 연구 종료 + 전체 기간 리뷰 생성 완료 시 최초 1회만 노출된다
+// 대조군 종료 안내 모달 — 연구 종료 시점(시간 기준)에 최초 1회만 노출된다.
 function screenStudyEndModal() {
-  return `<div style="position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:24px;background:color-mix(in oklab,var(--vl-ink) 45%,transparent)">
-    <div style="width:100%;background:var(--vl-card);border-radius:18px;padding:26px 22px 22px;box-shadow:0 24px 60px -12px rgba(0,0,0,.4);text-align:center">
-      <div style="width:52px;height:52px;margin:0 auto;border-radius:50%;background:var(--vl-accent-soft);display:grid;place-items:center">
-        ${markSVG({ size: 26, filled: false, accent: "var(--vl-accent)" })}
-      </div>
-      <div style="margin-top:16px;font-size:17px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">연구 기간이 종료되었습니다</div>
-      <p style="margin:9px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
-        그동안의 시청 기록을 분석한 리뷰가 준비됐어요. 지금 확인하시겠어요?
-      </p>
-      <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px">
-        <button id="vl-study-end-modal-confirm" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">지금 확인하기</button>
-        <button id="vl-study-end-modal-later" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">나중에</button>
-      </div>
-    </div>
-  </div>`;
+  return vlConfirmModal({
+    icon: markSVG({ size: 26, filled: false, accent: "var(--vl-accent)" }),
+    title: "연구 기간이 종료되었습니다",
+    message: `귀하의 ${VL.TOTAL_DAYS}일간의 시청 기록과 그에 대한 뷰렌즈의 피드백을 확인하시겠습니까?`,
+    confirmLabel: "지금 확인하기",
+    confirmId: "vl-study-end-modal-confirm",
+    cancelLabel: "나중에",
+    cancelId: "vl-study-end-modal-later",
+  });
 }
 
 // ── Past-day reveal modal (자정 경계 처리) ───────────────────────────────────────
