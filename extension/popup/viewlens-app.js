@@ -51,13 +51,9 @@ function _installDateForDay(day) {
   return new Date(Date.now() - (day - 1) * 86400000).toISOString();
 }
 
-// 대조군 종료 후 6주 리뷰 열람 게이트
-function _isStudyEndReviewReady(groupCfg, installDate, periodReviews) {
-  return (
-    VL.isConGroup(groupCfg.code) &&
-    VL.isStudyEnded(installDate) &&
-    (periodReviews || []).length === VL.TOTAL_WEEKS
-  );
+// 대조군 종료 후 리뷰 열람 게이트 — 시간(연구 기간 종료) 기준만 본다.
+function _isStudyEndReviewReady(groupCfg, installDate) {
+  return VL.isConGroup(groupCfg.code) && VL.isStudyEnded(installDate);
 }
 
 // 대조군 6주 리뷰 화면 상단에 붙는 뒤로가기 행
@@ -208,11 +204,7 @@ class ViewLensPopup {
     const feedbackActive = this._isFeedbackActive(groupCfg);
     // 대조군 종료 후 6주 리뷰 열람(Story 10-10) — _isFeedbackActive와 독립된 축이라
     // feedbackActive가 false인 경로 안에서만 추가로 분기한다.
-    const studyEndReady = _isStudyEndReviewReady(
-      groupCfg,
-      this._installDate,
-      VL._periodReviews,
-    );
+    const studyEndReady = _isStudyEndReviewReady(groupCfg, this._installDate);
     const showStudyEndModal = studyEndReady && !VL._studyEndModalShown;
     // 모달을 이미 본 뒤에만 CTA로 전환한다.
     const showStudyEndCta = studyEndReady && !!VL._studyEndModalShown;
