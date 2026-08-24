@@ -432,9 +432,14 @@ async function fetchPeriodReviews(serverUrl, anonymousId) {
   }
 }
 
+// 대조군은 연구종료 리뷰 열람이 "구간 전부 완결"을 전제로 한다
+function _isIncompleteForCon(group, reviews) {
+  return VL.isConGroup(group) && (reviews || []).length < VL.TOTAL_WEEKS;
+}
+
 // 기간 리뷰 로컬 캐싱
 // 팝업을 열 때마다 서버를 조회하지 않고, 캐시가 오늘 날짜 것이 아닐 때만 재조회
-async function getPeriodReviewsCached(serverUrl, anonymousId) {
+async function getPeriodReviewsCached(serverUrl, anonymousId, group) {
   const { periodReviewsCache } =
     await chrome.storage.local.get("periodReviewsCache");
   const todayStr = dateStr(new Date());
@@ -442,16 +447,23 @@ async function getPeriodReviewsCached(serverUrl, anonymousId) {
   if (
     periodReviewsCache &&
     periodReviewsCache.anonymousId === anonymousId &&
-    periodReviewsCache.dateStr === todayStr
+    periodReviewsCache.dateStr === todayStr &&
+    !_isIncompleteForCon(group, periodReviewsCache.reviews)
   ) {
     return periodReviewsCache.reviews;
   }
 
   const fetched = await fetchPeriodReviews(serverUrl, anonymousId);
   if (fetched) {
-    await chrome.storage.local.set({
-      periodReviewsCache: { anonymousId, dateStr: todayStr, reviews: fetched },
-    });
+    if (!_isIncompleteForCon(group, fetched)) {
+      await chrome.storage.local.set({
+        periodReviewsCache: {
+          anonymousId,
+          dateStr: todayStr,
+          reviews: fetched,
+        },
+      });
+    }
     return fetched;
   }
 
@@ -872,6 +884,7 @@ async function boot() {
     cachedPeriodReviews = await getPeriodReviewsCached(
       stored.serverUrl,
       stored.anonymousId,
+      stored.group,
     );
   }
   VL._studyEndModalShown = !!stored.studyEndModalShown;
