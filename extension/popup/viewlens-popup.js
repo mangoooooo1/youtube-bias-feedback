@@ -947,6 +947,7 @@ async function boot() {
     group: stored.group || null,
     timelineKey: calcTimelineKey(installDate),
     installDate,
+    participantCode: stored.participantCode || null,
     onStudyEndCodeVerified: () => {
       chrome.storage.local.set({ studyEndCodeVerified: true });
       postStudyEndReviewEvent("review_viewed");
