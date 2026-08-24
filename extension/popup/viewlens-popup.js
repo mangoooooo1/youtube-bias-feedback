@@ -795,7 +795,7 @@ async function boot() {
     "serverUrl",
     "participantSynced",
     "participantCode",
-    "studyEndModalShown",
+    "studyEndNoticeShown",
     "todayCumulativeRevealedDate",
   ]);
 
@@ -901,7 +901,7 @@ async function boot() {
       stored.group,
     );
   }
-  VL._studyEndModalShown = !!stored.studyEndModalShown;
+  VL._studyEndNoticeShown = !!stored.studyEndNoticeShown;
 
   if (installDate) {
     VL.weeks = buildWeeksData(sessions, installDate, cachedPeriodReviews);
@@ -1025,16 +1025,12 @@ async function boot() {
         return;
       }
 
-      // 대조군 종료 안내 모달 — "지금 확인하기"는 모달 노출+리뷰 열람을 모두, "나중에"는
-      // 모달 노출만 기록한다(3절 플로우차트 F/G와 동일).
-      const studyEndConfirmBtn =
-        e.target.closest && e.target.closest("#vl-study-end-modal-confirm");
-      const studyEndLaterBtn =
-        e.target.closest && e.target.closest("#vl-study-end-modal-later");
-      if (studyEndConfirmBtn || studyEndLaterBtn) {
-        chrome.storage.local.set({ studyEndModalShown: true });
-        postStudyEndReviewEvent("modal_shown");
-        if (studyEndConfirmBtn) postStudyEndReviewEvent("review_viewed");
+      // 종료 안내(그룹 무관) — 서버 이벤트 기록은 대조군에게만 의미가 있다(EXP는 서버가 거부).
+      const studyEndNoticeConfirmBtn =
+        e.target.closest && e.target.closest("#vl-study-end-notice-confirm");
+      if (studyEndNoticeConfirmBtn) {
+        chrome.storage.local.set({ studyEndNoticeShown: true });
+        if (VL.isConGroup(stored.group)) postStudyEndReviewEvent("modal_shown");
         return;
       }
 

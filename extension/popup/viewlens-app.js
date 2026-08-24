@@ -51,11 +51,15 @@ function _installDateForDay(day) {
   return new Date(Date.now() - (day - 1) * 86400000).toISOString();
 }
 
-// 대조군 종료 후 리뷰 열람 게이트
-function _isStudyEndReviewReady(groupCfg, installDate) {
-  if (!VL.isConGroup(groupCfg.code) || !installDate) return false;
+function _isStudyEndTimeReached(installDate) {
+  if (!installDate) return false;
   const revealDateStr = dayFromInstall(installDate, VL.TOTAL_DAYS);
   return Date.now() >= new Date(`${revealDateStr}T09:00:00+09:00`).getTime();
+}
+
+// 대조군 종료 후 리뷰 열람 게이트
+function _isStudyEndReviewReady(groupCfg, installDate) {
+  return VL.isConGroup(groupCfg.code) && _isStudyEndTimeReached(installDate);
 }
 
 // 대조군 6주 리뷰 화면 상단에 붙는 뒤로가기 행
@@ -206,9 +210,11 @@ class ViewLensPopup {
     // 대조군 종료 후 6주 리뷰 열람(Story 10-10) — _isFeedbackActive와 독립된 축이라
     // feedbackActive가 false인 경로 안에서만 추가로 분기한다.
     const studyEndReady = _isStudyEndReviewReady(groupCfg, this._installDate);
-    const showStudyEndModal = studyEndReady && !VL._studyEndModalShown;
-    // 모달을 이미 본 뒤에만 CTA로 전환한다.
-    const showStudyEndCta = studyEndReady && !!VL._studyEndModalShown;
+    // 종료 안내는 그룹 무관(EXP+CON) — feedbackActive 화면 위에도 오버레이로 뜬다.
+    const showStudyEndNotice =
+      _isStudyEndTimeReached(this._installDate) && !VL._studyEndNoticeShown;
+    // 안내를 이미 본 뒤에만 CTA로 전환한다(대조군 전용).
+    const showStudyEndCta = studyEndReady && !!VL._studyEndNoticeShown;
     // "어제 돌아보기" 리빌
     const showPastDayReveal =
       !!VL._revealPastDay && !this._pastDayRevealDismissed;
@@ -244,7 +250,7 @@ class ViewLensPopup {
       ${_popupHeader(groupCfg, day)}
       ${feedbackActive ? _tabs(this._tab, !VL._todayConfirmed) : ""}
       <div style="flex:1;overflow-y:auto;overflow-x:hidden">${bodyHTML}</div>
-      ${showStudyEndModal ? screenStudyEndModal() : ""}
+      ${showStudyEndNotice ? screenStudyEndNoticeModal() : ""}
       ${showPastDayReveal ? screenPastDayRevealModal(VL._revealPastDay.data) : ""}
     </div>`;
 
@@ -294,7 +300,10 @@ class ViewLensPopup {
     if (prevBtn) {
       prevBtn.addEventListener("click", () => {
         const d = addDaysKst(this._selectedDate, -1);
-        if (!VL._installDate || dateStr(d) >= dateStr(new Date(VL._installDate))) {
+        if (
+          !VL._installDate ||
+          dateStr(d) >= dateStr(new Date(VL._installDate))
+        ) {
           this._selectedDate = d;
           this.render();
         }
@@ -308,23 +317,13 @@ class ViewLensPopup {
         }
       });
     }
-    // 대조군 종료 안내 모달 — "지금 확인하기"는 리뷰 화면까지 바로 연다.
-    const studyEndConfirm = this.container.querySelector(
-      "#vl-study-end-modal-confirm",
+    // 종료 안내(그룹 무관) — 확인만 기록한다. 리뷰 열람은 별도 CTA(코드 게이트 예정)가 담당.
+    const studyEndNoticeConfirm = this.container.querySelector(
+      "#vl-study-end-notice-confirm",
     );
-    if (studyEndConfirm) {
-      studyEndConfirm.addEventListener("click", () => {
-        VL._studyEndModalShown = true;
-        this._studyEndReviewOpen = true;
-        this.render();
-      });
-    }
-    const studyEndLater = this.container.querySelector(
-      "#vl-study-end-modal-later",
-    );
-    if (studyEndLater) {
-      studyEndLater.addEventListener("click", () => {
-        VL._studyEndModalShown = true;
+    if (studyEndNoticeConfirm) {
+      studyEndNoticeConfirm.addEventListener("click", () => {
+        VL._studyEndNoticeShown = true;
         this.render();
       });
     }
@@ -336,7 +335,7 @@ class ViewLensPopup {
         this.render();
       });
     }
-    // 대조군 상시 CTA(모달을 이미 본 뒤 재진입) — 목적지는 모달의 "지금 확인하기"와 동일.
+    // 대조군 상시 CTA(종료 안내를 이미 본 뒤 재진입)
     const studyEndCta = this.container.querySelector("#vl-study-end-cta");
     if (studyEndCta) {
       studyEndCta.addEventListener("click", () => {

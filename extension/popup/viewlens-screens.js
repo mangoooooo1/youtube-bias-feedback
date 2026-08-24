@@ -485,18 +485,17 @@ function screenControlHome(day, stats = {}) {
   </div>`;
 }
 
-// ── Study end modal ───────────────────────────────────────
+// ── Study end notice modal ───────────────────────────────────────
 
-// 대조군 종료 안내 모달 — 연구 종료 시점(시간 기준)에 최초 1회만 노출된다.
-function screenStudyEndModal() {
+// 종료 안내(그룹 무관) — 연구 종료 시점(시간 기준)에 최초 1회만 노출된다.
+function screenStudyEndNoticeModal() {
   return vlConfirmModal({
     icon: markSVG({ size: 26, filled: false, accent: "var(--vl-accent)" }),
     title: "연구 기간이 종료되었습니다",
-    message: `귀하의 ${VL.TOTAL_DAYS}일간의 시청 기록과 그에 대한 뷰렌즈의 피드백을 확인하시겠습니까?`,
-    confirmLabel: "지금 확인하기",
-    confirmId: "vl-study-end-modal-confirm",
-    cancelLabel: "나중에",
-    cancelId: "vl-study-end-modal-later",
+    message:
+      "지금까지 참여해주셔서 감사합니다. 연구자로부터 곧 설문을 받게 되실 겁니다. 설문 완료 후 보상 규정에 맞는 참여율을 보이셨다면 보상이 제공될 예정입니다.",
+    confirmLabel: "확인",
+    confirmId: "vl-study-end-notice-confirm",
   });
 }
 
@@ -550,6 +549,6 @@ window.bindOnboarding = bindOnboarding;
 window.screenToday = screenToday;
 window.screenFeedback = screenFeedback;
 window.screenControlHome = screenControlHome;
-window.screenStudyEndModal = screenStudyEndModal;
+window.screenStudyEndNoticeModal = screenStudyEndNoticeModal;
 window.screenPastDayRevealModal = screenPastDayRevealModal;
 window.screenRecoverConfirmModal = screenRecoverConfirmModal;
