@@ -51,9 +51,11 @@ function _installDateForDay(day) {
   return new Date(Date.now() - (day - 1) * 86400000).toISOString();
 }
 
-// 대조군 종료 후 리뷰 열람 게이트 — 시간(연구 기간 종료) 기준만 본다.
+// 대조군 종료 후 리뷰 열람 게이트
 function _isStudyEndReviewReady(groupCfg, installDate) {
-  return VL.isConGroup(groupCfg.code) && VL.isStudyEnded(installDate);
+  if (!VL.isConGroup(groupCfg.code) || !installDate) return false;
+  const revealDateStr = dayFromInstall(installDate, VL.TOTAL_DAYS);
+  return Date.now() >= new Date(`${revealDateStr}T09:00:00+09:00`).getTime();
 }
 
 // 대조군 6주 리뷰 화면 상단에 붙는 뒤로가기 행
