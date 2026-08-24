@@ -875,7 +875,6 @@ async function boot() {
       stored.anonymousId,
     );
   }
-  VL._periodReviews = cachedPeriodReviews;
   VL._studyEndModalShown = !!stored.studyEndModalShown;
 
   if (installDate) {
