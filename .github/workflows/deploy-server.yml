@@ -7,6 +7,10 @@ on:
       - "server/**"
   workflow_dispatch:
 
+# 이 워크플로는 SSH로 서버에 접속해 배포할 뿐 GITHUB_TOKEN으로 GitHub API를 호출하는
+# 단계가 없다 — 최소 권한 원칙에 따라 기본 상속 권한을 전부 꺼둔다(coderabbitai 지적 반영).
+permissions: {}
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
