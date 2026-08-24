@@ -33,9 +33,9 @@ describe("checkRateLimit", () => {
     expect(checkRateLimit(state, "1.2.3.4", now, WINDOW_MS, MAX)).toBe(false);
 
     const afterWindow = now + WINDOW_MS;
-    expect(
-      checkRateLimit(state, "1.2.3.4", afterWindow, WINDOW_MS, MAX),
-    ).toBe(true);
+    expect(checkRateLimit(state, "1.2.3.4", afterWindow, WINDOW_MS, MAX)).toBe(
+      true,
+    );
   });
 
   it("서로 다른 키(IP)는 독립적으로 카운트된다", () => {

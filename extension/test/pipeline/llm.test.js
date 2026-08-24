@@ -240,7 +240,9 @@ describe("generateReview — 실패 사유 분류 (failureReason 태깅)", () =>
         candidates: [
           {
             content: {
-              parts: [{ text: '{"topic":"과학과 기술","feedback":"관찰 문장"}' }],
+              parts: [
+                { text: '{"topic":"과학과 기술","feedback":"관찰 문장"}' },
+              ],
             },
           },
         ],

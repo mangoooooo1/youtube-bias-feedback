@@ -43,7 +43,12 @@ function createTestDb() {
   return db;
 }
 
-function insertParticipant(db, anonymousId, groupCode, installDate = FILLER_INSTALL_DATE) {
+function insertParticipant(
+  db,
+  anonymousId,
+  groupCode,
+  installDate = FILLER_INSTALL_DATE,
+) {
   db.prepare(
     "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
   ).run(anonymousId, groupCode, installDate);
@@ -195,7 +200,12 @@ describe("getPeriodReviews", () => {
     });
 
     it("TEST-CON도 CON과 동일한 조건을 따른다", () => {
-      insertParticipant(db, "test-con-complete", "TEST-CON", ENDED_INSTALL_DATE);
+      insertParticipant(
+        db,
+        "test-con-complete",
+        "TEST-CON",
+        ENDED_INSTALL_DATE,
+      );
       insertReview(db, "test-con-complete", 1);
       insertReview(db, "test-con-complete", 2);
       insertReview(db, "test-con-complete", 3);
@@ -242,7 +252,9 @@ describe("isStudyEnded / isStudyEndUnlocked", () => {
     insertReview(db, "con-user", 2);
     insertReview(db, "con-user", 3);
 
-    expect(isStudyEndUnlocked(db, "con-user", NOT_ENDED_INSTALL_DATE)).toBe(false);
+    expect(isStudyEndUnlocked(db, "con-user", NOT_ENDED_INSTALL_DATE)).toBe(
+      false,
+    );
   });
 
   it("isStudyEndUnlocked — 종료 후·미완성이면 false", () => {

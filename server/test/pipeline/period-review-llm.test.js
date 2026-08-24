@@ -18,7 +18,9 @@ function baseArgs(overrides = {}) {
 describe("buildPeriodPrompt — 패턴 문구 경계값 (buildPatternGuidance)", () => {
   it("videoCount가 5 미만이면 '패턴 단정 어려움' 문구만 넣는다", () => {
     const prompt = buildPeriodPrompt(baseArgs({ videoCount: 4 }));
-    expect(prompt).toContain("시청한 영상 수가 적어 패턴을 단정하기 어렵습니다");
+    expect(prompt).toContain(
+      "시청한 영상 수가 적어 패턴을 단정하기 어렵습니다",
+    );
     expect(prompt).not.toContain("한 주제에 크게 모여 있습니다");
   });
 
@@ -116,7 +118,9 @@ describe("generatePeriodFallbackReview", () => {
         videoCount: 10,
       }),
     );
-    expect(result.feedback).toContain("특히 시청이 한 주제에 크게 모여 있었어요");
+    expect(result.feedback).toContain(
+      "특히 시청이 한 주제에 크게 모여 있었어요",
+    );
   });
 
   it("videoCount가 MIN_VIDEOS_FOR_PATTERN 미만이면 편중 문구를 넣지 않는다", () => {
@@ -130,9 +134,7 @@ describe("generatePeriodFallbackReview", () => {
   });
 
   it("베이스라인 대비 증감 문구는 더 이상 만들지 않는다", () => {
-    const result = generatePeriodFallbackReview(
-      baseArgs({ videoCount: 10 }),
-    );
+    const result = generatePeriodFallbackReview(baseArgs({ videoCount: 10 }));
     expect(result.feedback).not.toContain("기준이 된 첫 기간");
     expect(result.feedback).not.toContain("비교의 기준으로 담아 두었어요");
   });

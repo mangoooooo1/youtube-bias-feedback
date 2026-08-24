@@ -14,9 +14,7 @@ describe("isBaselinePeriod", () => {
 
   it(`경과 ${BASELINE_DAYS - 1}일은 베이스라인이다`, () => {
     const install = new Date("2026-01-01T00:00:00Z");
-    const now = new Date(
-      install.getTime() + (BASELINE_DAYS - 1) * 86400000,
-    );
+    const now = new Date(install.getTime() + (BASELINE_DAYS - 1) * 86400000);
     expect(isBaselinePeriod(install.toISOString(), now)).toBe(true);
   });
 
@@ -28,9 +26,7 @@ describe("isBaselinePeriod", () => {
 
   it(`경과 ${BASELINE_DAYS + 7}일은 베이스라인이 아니다`, () => {
     const install = new Date("2026-01-01T00:00:00Z");
-    const now = new Date(
-      install.getTime() + (BASELINE_DAYS + 7) * 86400000,
-    );
+    const now = new Date(install.getTime() + (BASELINE_DAYS + 7) * 86400000);
     expect(isBaselinePeriod(install.toISOString(), now)).toBe(false);
   });
 });

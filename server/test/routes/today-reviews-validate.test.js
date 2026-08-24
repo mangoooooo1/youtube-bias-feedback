@@ -30,13 +30,16 @@ describe("validateTodayReview — 잘못된 형태의 body", () => {
     ["배열", []],
     ["문자열", "not-an-object"],
     ["숫자", 42],
-  ])("body가 %s이면 예외 없이 INVALID_FIELD_VALUE(field: body)를 반환한다", (_label, body) => {
-    expect(() => validateTodayReview(body)).not.toThrow();
-    expect(validateTodayReview(body)).toEqual({
-      code: ERROR_CODES.INVALID_FIELD_VALUE,
-      field: "body",
-    });
-  });
+  ])(
+    "body가 %s이면 예외 없이 INVALID_FIELD_VALUE(field: body)를 반환한다",
+    (_label, body) => {
+      expect(() => validateTodayReview(body)).not.toThrow();
+      expect(validateTodayReview(body)).toEqual({
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "body",
+      });
+    },
+  );
 });
 
 describe("validateTodayReview", () => {
@@ -45,7 +48,9 @@ describe("validateTodayReview", () => {
   });
 
   it("failureReason이 null(성공 케이스)이어도 통과한다", () => {
-    expect(validateTodayReview(basePayload({ failureReason: null }))).toBeNull();
+    expect(
+      validateTodayReview(basePayload({ failureReason: null })),
+    ).toBeNull();
   });
 
   // today_reviews는 전체 스냅샷을 통째로 upsert하는 테이블이라, 이 필드들이 빠지면
@@ -90,7 +95,9 @@ describe("validateTodayReview", () => {
   });
 
   it("reviewDate 형식이 YYYY-MM-DD가 아니면 거부한다", () => {
-    const result = validateTodayReview(basePayload({ reviewDate: "2026/08/13" }));
+    const result = validateTodayReview(
+      basePayload({ reviewDate: "2026/08/13" }),
+    );
     expect(result).toEqual({
       code: ERROR_CODES.INVALID_FIELD_VALUE,
       field: "reviewDate",

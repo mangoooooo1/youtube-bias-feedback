@@ -20,7 +20,10 @@ function createTestDb() {
   return db;
 }
 
-function insertParticipant(db, { anonymousId, participantCode, groupCode, installDate }) {
+function insertParticipant(
+  db,
+  { anonymousId, participantCode, groupCode, installDate },
+) {
   db.prepare(
     "INSERT INTO participants (anonymousId, participantCode, group_code, installDate) VALUES (?, ?, ?, ?)",
   ).run(anonymousId, participantCode, groupCode, installDate);

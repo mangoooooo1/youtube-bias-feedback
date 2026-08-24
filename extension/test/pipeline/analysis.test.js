@@ -43,9 +43,7 @@ describe("calculateEntropy", () => {
   });
 
   it("네 카테고리 균등 분포면 entropy는 log2(4)=2다", () => {
-    expect(
-      calculateEntropy({ a: 0.25, b: 0.25, c: 0.25, d: 0.25 }),
-    ).toBe(2);
+    expect(calculateEntropy({ a: 0.25, b: 0.25, c: 0.25, d: 0.25 })).toBe(2);
   });
 
   it("비균등 분포(0.25/0.75)의 entropy를 소수점 2자리로 반올림한다", () => {
@@ -66,7 +64,10 @@ describe("aggregateDailyData", () => {
 
   it("분석되지 않은 세션(categoryDistribution 없음)은 집계에서 제외한다", () => {
     const sessions = [
-      { endTime: new Date(2026, 0, 8, 12).toISOString(), categoryDistribution: {} },
+      {
+        endTime: new Date(2026, 0, 8, 12).toISOString(),
+        categoryDistribution: {},
+      },
       { endTime: new Date(2026, 0, 8, 12).toISOString() }, // categoryDistribution 자체가 없음
     ];
     const { dates, distributions, entropies } = aggregateDailyData(sessions);
