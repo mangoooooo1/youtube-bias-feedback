@@ -33,19 +33,33 @@ function dateStr(d) {
   return d.toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
 }
 
-// "YYYY-MM-DD"를 로컬 자정 Date로 만든다.
+// "YYYY-MM-DD"(KST 날짜 문자열)를 Date로 만든다. KST 정오(=UTC 03:00)에 고정한다 —
+// 자정 근처를 쓰면 참여자 브라우저 시간대에 따라 dateStr()로 되돌렸을 때 하루 어긋날 수
+// 있는데(예: KST보다 많이 앞선 시간대), 정오는 그런 극단적인 시간대 오프셋에서도 안전하다.
 function localDateFromDateStr(str) {
   const [y, m, d] = str.split("-").map(Number);
-  return new Date(y, m - 1, d);
+  return new Date(Date.UTC(y, m - 1, d, 3, 0, 0));
+}
+
+// installDate/오늘 등 임의의 Date를 KST 기준으로 deltaDays만큼 이동한다.
+// d.setDate(d.getDate()+n) 같은 로컬 캘린더 연산 대신 dayFromInstall과 동일하게
+// ms 연산 → KST 포맷 → 안전한 Date로 왕복해, 참여자 시간대와 무관하게 항상 KST 기준
+// 하루 단위로 움직인다("어제 돌아보기"/기간 계산과 동일한 기준 유지).
+function addDaysKst(date, deltaDays) {
+  const ms = date.getTime() + deltaDays * 86400000;
+  return localDateFromDateStr(dateStr(new Date(ms)));
 }
 
 function koreanDateLabel(d) {
   const days = ["일", "월", "화", "수", "목", "금", "토"];
-  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${days[d.getDay()]}요일`;
+  const [y, m, day] = dateStr(d).split("-").map(Number);
+  const weekday = new Date(Date.UTC(y, m - 1, day)).getUTCDay();
+  return `${m}월 ${day}일 ${days[weekday]}요일`;
 }
 
 function koreanShortDate(d) {
-  return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+  const [, m, day] = dateStr(d).split("-").map(Number);
+  return `${m}월 ${day}일`;
 }
 
 /** Returns YYYY-MM-DD string for day offset from installDate */
