@@ -28,8 +28,9 @@ function toVlKey(catName) {
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 function dateStr(d) {
-  // 로컬 시간대 기준 YYYY-MM-DD
-  return d.toLocaleDateString("sv");
+  // KST(Asia/Seoul) 기준 YYYY-MM-DD
+  // 서버와 동일 기준. 참여자 브라우저의 로컬 시간대에 따라 화면의 날짜/구간 판정이 서버가 실제로 생성하는 구간과 어긋나는 걸 막는다.
+  return d.toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
 }
 
 // "YYYY-MM-DD"를 로컬 자정 Date로 만든다.
@@ -49,9 +50,9 @@ function koreanShortDate(d) {
 
 /** Returns YYYY-MM-DD string for day offset from installDate */
 function dayFromInstall(installDate, offset) {
-  const d = new Date(installDate);
-  d.setDate(d.getDate() + offset);
-  return dateStr(d);
+  // 로컬 캘린더 필드로 날짜를 더하지 않고, 서버와 동일하게 순수 ms 연산 후 KST로 포맷한다.
+  const ms = new Date(installDate).getTime() + offset * 86400000;
+  return dateStr(new Date(ms));
 }
 
 // ── Distribution helpers ───────────────────────────────────────────────────────
@@ -292,12 +293,10 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
             : VL.dist({ etc: 1 });
         })();
 
-    // Range label
-    const startD = new Date(installDate);
-    startD.setDate(startD.getDate() + startOffset);
-    const endD = new Date(installDate);
-    endD.setDate(endD.getDate() + endOffset);
-    const range = `${startD.getMonth() + 1}/${startD.getDate()} – ${endD.getMonth() + 1}/${endD.getDate()}`;
+    // 위에서 이미 KST 기준으로 구한 weekStart/weekEnd 문자열을 그대로 쓴다.
+    const mdLabel = (ymd) =>
+      `${Number(ymd.slice(5, 7))}/${Number(ymd.slice(8, 10))}`;
+    const range = `${mdLabel(weekStart)} – ${mdLabel(weekEnd)}`;
 
     // Review: 서버가 생성한 기간 리뷰
     const periodEnded = weekEnd < dateStr(new Date());
