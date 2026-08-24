@@ -610,6 +610,32 @@ async function recoverParticipant(participantCode) {
 }
 window.recoverParticipant = recoverParticipant;
 
+// 대조군 종료 코드 검증
+// validateParticipantCode와 달리 오류/오프라인 시에도 통과시키지 않는다.
+async function validateStudyEndCode(code) {
+  const { serverUrl } = await chrome.storage.local.get("serverUrl");
+  if (!serverUrl || serverUrl.startsWith("YOUR_"))
+    return { ok: false, reason: "offline" };
+  try {
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/study-end-code/validate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      },
+    );
+    if (!res.ok) return { ok: false, reason: "server" };
+    const json = await res.json();
+    const data = json.data ?? json;
+    return data.valid ? { ok: true } : { ok: false, reason: "invalid" };
+  } catch (error) {
+    console.warn("[popup] 종료 코드 검증 오류:", error.message);
+    return { ok: false, reason: "network" };
+  }
+}
+window.validateStudyEndCode = validateStudyEndCode;
+
 // ── 팝업 상호작용 마이크로 로그 ────────────────────────────────────────
 // 수집: openedAt, dwellMs, tabTodayClicks, tabWeekClicks, feedbackViewed.
 // 전송: 팝업 close 시점의 storage 쓰기는 teardown에 잘릴 수 있어 신뢰하지 않는다.
@@ -796,6 +822,7 @@ async function boot() {
     "participantSynced",
     "participantCode",
     "studyEndNoticeShown",
+    "studyEndCodeVerified",
     "todayCumulativeRevealedDate",
   ]);
 
@@ -902,6 +929,7 @@ async function boot() {
     );
   }
   VL._studyEndNoticeShown = !!stored.studyEndNoticeShown;
+  VL._studyEndCodeVerified = !!stored.studyEndCodeVerified;
 
   if (installDate) {
     VL.weeks = buildWeeksData(sessions, installDate, cachedPeriodReviews);
@@ -919,6 +947,10 @@ async function boot() {
     group: stored.group || null,
     timelineKey: calcTimelineKey(installDate),
     installDate,
+    onStudyEndCodeVerified: () => {
+      chrome.storage.local.set({ studyEndCodeVerified: true });
+      postStudyEndReviewEvent("review_viewed");
+    },
     onChange: async ({
       onboarded: ob,
       group: g,
@@ -1032,13 +1064,6 @@ async function boot() {
         chrome.storage.local.set({ studyEndNoticeShown: true });
         if (VL.isConGroup(stored.group)) postStudyEndReviewEvent("modal_shown");
         return;
-      }
-
-      // 대조군 상시 CTA — 재진입할 때마다 호출되지만 서버가 최초 1회만 반영한다.
-      const studyEndCtaBtn =
-        e.target.closest && e.target.closest("#vl-study-end-cta");
-      if (studyEndCtaBtn) {
-        postStudyEndReviewEvent("review_viewed");
       }
 
       // "어제 돌아보기" 리빌 확인

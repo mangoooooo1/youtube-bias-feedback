@@ -485,6 +485,32 @@ function screenControlHome(day, stats = {}) {
   </div>`;
 }
 
+// ── Study end code input ───────────────────────────────────────
+
+function screenStudyEndCodeInput() {
+  return `<div style="padding:34px 22px 26px;display:flex;flex-direction:column;min-height:100%;box-sizing:border-box">
+    <div style="display:flex;flex-direction:column;align-items:center;text-align:center;margin-top:8px">
+      ${markSVG({ size: 52, accent: "var(--vl-accent)" })}
+      <div style="margin-top:16px;font-size:17px;font-weight:800;letter-spacing:-0.02em;color:var(--vl-ink)">시청 기록 리뷰 열람</div>
+      <p style="margin:9px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">설문에서 안내받은 코드를 입력해 주세요.</p>
+    </div>
+
+    <div style="margin-top:32px">
+      <label style="font-size:12px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--vl-ink-3)">코드</label>
+      <input id="vl-study-end-code-input" value="" placeholder="설문에서 안내받은 코드" spellcheck="false" autocomplete="off"
+        style="display:block;margin-top:9px;width:100%;box-sizing:border-box;padding:13px 15px;
+          border:1.5px solid var(--vl-line-2);border-radius:13px;background:var(--vl-card-2);
+          color:var(--vl-ink);outline:none;
+          font-size:13px; letter-spacing:0.1em;text-transform:uppercase"/>
+      <p id="vl-study-end-code-err" style="display:none;margin:9px 2px 0;font-size:12px;color:var(--vl-warn);line-height:1.5"></p>
+      <button id="vl-study-end-code-btn"
+        style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:13px;
+          background:var(--vl-accent);color:var(--vl-on-accent);font-size:14.5px;
+          font-weight:700;cursor:pointer;font-family:inherit">확인</button>
+    </div>
+  </div>`;
+}
+
 // ── Study end notice modal ───────────────────────────────────────
 
 // 종료 안내(그룹 무관) — 연구 종료 시점(시간 기준)에 최초 1회만 노출된다.
@@ -549,6 +575,7 @@ window.bindOnboarding = bindOnboarding;
 window.screenToday = screenToday;
 window.screenFeedback = screenFeedback;
 window.screenControlHome = screenControlHome;
+window.screenStudyEndCodeInput = screenStudyEndCodeInput;
 window.screenStudyEndNoticeModal = screenStudyEndNoticeModal;
 window.screenPastDayRevealModal = screenPastDayRevealModal;
 window.screenRecoverConfirmModal = screenRecoverConfirmModal;

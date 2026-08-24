@@ -141,6 +141,7 @@ class ViewLensPopup {
     this._timelineKey = "w1_mid";
     this._installDate = null;
     this._onChange = () => {};
+    this._onStudyEndCodeVerified = () => {};
   }
 
   /**
@@ -152,12 +153,20 @@ class ViewLensPopup {
    * @param {string}   [opts.installDate] - ISO 문자열. RealPopup의 베이스라인 게이트가 참조한다.
    * @param {Function} opts.onChange - called with { onboarded, group } on onboard submit
    */
-  mount({ onboarded, group, timelineKey, installDate, onChange }) {
+  mount({
+    onboarded,
+    group,
+    timelineKey,
+    installDate,
+    onChange,
+    onStudyEndCodeVerified,
+  }) {
     this._onboarded = onboarded;
     this._group = group;
     this._timelineKey = timelineKey;
     this._installDate = installDate ?? null;
     this._onChange = onChange;
+    this._onStudyEndCodeVerified = onStudyEndCodeVerified ?? (() => {});
     this._studyEndReviewOpen = false;
     this.render();
   }
@@ -227,7 +236,11 @@ class ViewLensPopup {
           : screenFeedback(currentWeek, selWeek);
     } else if (studyEndReady && this._studyEndReviewOpen) {
       // currentWeek는 day(경과일)로 계산되는데, studyEndReady가 참이면 이미 day >= TOTAL_DAYS라
-      bodyHTML = _studyEndBackRow() + screenFeedback(currentWeek, selWeek);
+      bodyHTML =
+        _studyEndBackRow() +
+        (VL._studyEndCodeVerified
+          ? screenFeedback(currentWeek, selWeek)
+          : screenStudyEndCodeInput());
     } else {
       // 10-8: groupCfg.feedback이 true인데 feedbackActive가 false라는 건 "EXP인데 베이스라인
       // 게이트에 걸렸다"는 뜻이다(CON은 애초에 groupCfg.feedback이 false). 이 경우에만
@@ -327,6 +340,7 @@ class ViewLensPopup {
         this.render();
       });
     }
+    this._bindStudyEndCodeInput();
     // 대조군 6주 리뷰 화면 → 대기 화면으로 돌아가기
     const studyEndBack = this.container.querySelector("#vl-study-end-back");
     if (studyEndBack) {
@@ -363,6 +377,57 @@ class ViewLensPopup {
         this.render();
       });
     }
+  }
+
+  // 온보딩(bindOnboarding)과 동일하게 실패 시 전체 재렌더 없이 로컬 DOM만 갱신한다 —
+  // this.render()를 매 시도마다 부르면 입력값이 날아간다. 검증 성공 시에만 한 번 render().
+  _bindStudyEndCodeInput() {
+    const btn = this.container.querySelector("#vl-study-end-code-btn");
+    if (!btn) return;
+    const input = this.container.querySelector("#vl-study-end-code-input");
+    const errEl = this.container.querySelector("#vl-study-end-code-err");
+    const btnLabel = btn.textContent;
+
+    const showErr = (msg) => {
+      errEl.textContent = msg;
+      errEl.style.display = "block";
+      input.style.borderColor = "var(--vl-warn)";
+    };
+    input.addEventListener("input", () => {
+      errEl.style.display = "none";
+      input.style.borderColor = "var(--vl-line-2)";
+    });
+
+    const submit = async () => {
+      const code = input.value.trim();
+      if (!code) {
+        showErr("코드를 입력해 주세요.");
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = "확인 중…";
+      const result = window.validateStudyEndCode
+        ? await window.validateStudyEndCode(code)
+        : { ok: false };
+      btn.disabled = false;
+      btn.textContent = btnLabel;
+
+      if (!result.ok) {
+        showErr(
+          result.reason === "invalid"
+            ? "코드가 올바르지 않아요. 설문에서 안내받은 코드를 확인해 주세요."
+            : "지금은 확인할 수 없어요. 잠시 후 다시 시도해 주세요.",
+        );
+        return;
+      }
+      VL._studyEndCodeVerified = true;
+      this._onStudyEndCodeVerified();
+      this.render();
+    };
+    btn.addEventListener("click", submit);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submit();
+    });
   }
 }
 
