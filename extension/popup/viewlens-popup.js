@@ -28,30 +28,45 @@ function toVlKey(catName) {
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 function dateStr(d) {
-  // 로컬 시간대 기준 YYYY-MM-DD
-  return d.toLocaleDateString("sv");
+  // KST(Asia/Seoul) 기준 YYYY-MM-DD
+  // 서버와 동일 기준. 참여자 브라우저의 로컬 시간대에 따라 화면의 날짜/구간 판정이 서버가 실제로 생성하는 구간과 어긋나는 걸 막는다.
+  return d.toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
 }
 
-// "YYYY-MM-DD"를 로컬 자정 Date로 만든다.
+// "YYYY-MM-DD"(KST 날짜 문자열)를 Date로 만든다. KST 정오(=UTC 03:00)에 고정한다 —
+// 자정 근처를 쓰면 참여자 브라우저 시간대에 따라 dateStr()로 되돌렸을 때 하루 어긋날 수
+// 있는데(예: KST보다 많이 앞선 시간대), 정오는 그런 극단적인 시간대 오프셋에서도 안전하다.
 function localDateFromDateStr(str) {
   const [y, m, d] = str.split("-").map(Number);
-  return new Date(y, m - 1, d);
+  return new Date(Date.UTC(y, m - 1, d, 3, 0, 0));
+}
+
+// installDate/오늘 등 임의의 Date를 KST 기준으로 deltaDays만큼 이동한다.
+// d.setDate(d.getDate()+n) 같은 로컬 캘린더 연산 대신 dayFromInstall과 동일하게
+// ms 연산 → KST 포맷 → 안전한 Date로 왕복해, 참여자 시간대와 무관하게 항상 KST 기준
+// 하루 단위로 움직인다("어제 돌아보기"/기간 계산과 동일한 기준 유지).
+function addDaysKst(date, deltaDays) {
+  const ms = date.getTime() + deltaDays * 86400000;
+  return localDateFromDateStr(dateStr(new Date(ms)));
 }
 
 function koreanDateLabel(d) {
   const days = ["일", "월", "화", "수", "목", "금", "토"];
-  return `${d.getMonth() + 1}월 ${d.getDate()}일 ${days[d.getDay()]}요일`;
+  const [y, m, day] = dateStr(d).split("-").map(Number);
+  const weekday = new Date(Date.UTC(y, m - 1, day)).getUTCDay();
+  return `${m}월 ${day}일 ${days[weekday]}요일`;
 }
 
 function koreanShortDate(d) {
-  return `${d.getMonth() + 1}월 ${d.getDate()}일`;
+  const [, m, day] = dateStr(d).split("-").map(Number);
+  return `${m}월 ${day}일`;
 }
 
 /** Returns YYYY-MM-DD string for day offset from installDate */
 function dayFromInstall(installDate, offset) {
-  const d = new Date(installDate);
-  d.setDate(d.getDate() + offset);
-  return dateStr(d);
+  // 로컬 캘린더 필드로 날짜를 더하지 않고, 서버와 동일하게 순수 ms 연산 후 KST로 포맷한다.
+  const ms = new Date(installDate).getTime() + offset * 86400000;
+  return dateStr(new Date(ms));
 }
 
 // ── Distribution helpers ───────────────────────────────────────────────────────
@@ -292,19 +307,18 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
             : VL.dist({ etc: 1 });
         })();
 
-    // Range label
-    const startD = new Date(installDate);
-    startD.setDate(startD.getDate() + startOffset);
-    const endD = new Date(installDate);
-    endD.setDate(endD.getDate() + endOffset);
-    const range = `${startD.getMonth() + 1}/${startD.getDate()} – ${endD.getMonth() + 1}/${endD.getDate()}`;
+    // 위에서 이미 KST 기준으로 구한 weekStart/weekEnd 문자열을 그대로 쓴다.
+    const mdLabel = (ymd) =>
+      `${Number(ymd.slice(5, 7))}/${Number(ymd.slice(8, 10))}`;
+    const range = `${mdLabel(weekStart)} – ${mdLabel(weekEnd)}`;
 
     // Review: 서버가 생성한 기간 리뷰
+    const periodEnded = weekEnd < dateStr(new Date());
     const review =
       reviewRow?.review ||
-      (isBaseline
-        ? "베이스라인 기간 동안의 시청 습관을 기준선으로 담아 두었어요. 이건 평가가 아니라 출발점이에요."
-        : "이번 주 데이터를 분석 중이에요. 세션이 쌓이면 더 자세한 리포트를 볼 수 있어요.");
+      (periodEnded
+        ? "이번 기간 데이터를 분석 중이에요. 곧 리포트를 볼 수 있어요."
+        : "아직 진행 중인 기간이에요. 기간이 끝나면 리뷰가 생성돼요.");
 
     const totalVids = useServerSnapshot
       ? (reviewRow.videoCount ?? 0)
@@ -432,9 +446,14 @@ async function fetchPeriodReviews(serverUrl, anonymousId) {
   }
 }
 
+// 대조군은 연구종료 리뷰 열람이 "구간 전부 완결"을 전제로 한다
+function _isIncompleteForCon(group, reviews) {
+  return VL.isConGroup(group) && (reviews || []).length < VL.TOTAL_WEEKS;
+}
+
 // 기간 리뷰 로컬 캐싱
 // 팝업을 열 때마다 서버를 조회하지 않고, 캐시가 오늘 날짜 것이 아닐 때만 재조회
-async function getPeriodReviewsCached(serverUrl, anonymousId) {
+async function getPeriodReviewsCached(serverUrl, anonymousId, group) {
   const { periodReviewsCache } =
     await chrome.storage.local.get("periodReviewsCache");
   const todayStr = dateStr(new Date());
@@ -442,16 +461,23 @@ async function getPeriodReviewsCached(serverUrl, anonymousId) {
   if (
     periodReviewsCache &&
     periodReviewsCache.anonymousId === anonymousId &&
-    periodReviewsCache.dateStr === todayStr
+    periodReviewsCache.dateStr === todayStr &&
+    !_isIncompleteForCon(group, periodReviewsCache.reviews)
   ) {
     return periodReviewsCache.reviews;
   }
 
   const fetched = await fetchPeriodReviews(serverUrl, anonymousId);
   if (fetched) {
-    await chrome.storage.local.set({
-      periodReviewsCache: { anonymousId, dateStr: todayStr, reviews: fetched },
-    });
+    if (!_isIncompleteForCon(group, fetched)) {
+      await chrome.storage.local.set({
+        periodReviewsCache: {
+          anonymousId,
+          dateStr: todayStr,
+          reviews: fetched,
+        },
+      });
+    }
     return fetched;
   }
 
@@ -872,9 +898,9 @@ async function boot() {
     cachedPeriodReviews = await getPeriodReviewsCached(
       stored.serverUrl,
       stored.anonymousId,
+      stored.group,
     );
   }
-  VL._periodReviews = cachedPeriodReviews;
   VL._studyEndModalShown = !!stored.studyEndModalShown;
 
   if (installDate) {

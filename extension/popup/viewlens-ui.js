@@ -210,6 +210,39 @@ function vlReview({
   </div>`;
 }
 
+// 확인/취소형 팝업(모달) — 연구 종료 안내처럼 "동의하면 진행" 흐름과, 에러 상황의
+// 단순 확인 알림(cancelLabel 생략 시 버튼 1개)에 공통으로 쓴다. 버튼 id는 호출부가
+// 직접 정해서 넘기고, 클릭 바인딩은 호출부(각 화면의 _bind)에서 그 id로 건다.
+function vlConfirmModal({
+  icon = "",
+  title = "",
+  message = "",
+  confirmLabel = "확인",
+  confirmId = "",
+  cancelLabel = "",
+  cancelId = "",
+} = {}) {
+  return `<div style="position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:24px;background:color-mix(in oklab,var(--vl-ink) 45%,transparent)">
+    <div style="width:100%;background:var(--vl-card);border-radius:18px;padding:26px 22px 22px;box-shadow:0 24px 60px -12px rgba(0,0,0,.4);text-align:center">
+      ${
+        icon
+          ? `<div style="width:52px;height:52px;margin:0 auto;border-radius:50%;background:var(--vl-accent-soft);display:grid;place-items:center">${icon}</div>`
+          : ""
+      }
+      <div style="margin-top:${icon ? 16 : 0}px;font-size:17px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${title}</div>
+      <p style="margin:9px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">${message}</p>
+      <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px">
+        <button id="${confirmId}" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">${confirmLabel}</button>
+        ${
+          cancelLabel
+            ? `<button id="${cancelId}" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">${cancelLabel}</button>`
+            : ""
+        }
+      </div>
+    </div>
+  </div>`;
+}
+
 window.vlCard = vlCard;
 window.vlSectionLabel = vlSectionLabel;
 window.vlBadge = vlBadge;
@@ -218,3 +251,4 @@ window.vlBarChart = vlBarChart;
 window.vlDonut = vlDonut;
 window.vlMiniLine = vlMiniLine;
 window.vlReview = vlReview;
+window.vlConfirmModal = vlConfirmModal;

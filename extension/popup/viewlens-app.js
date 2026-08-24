@@ -23,11 +23,11 @@ function _controlTotalCount() {
 // 대조군 홈 — 오늘 시청한 영상 수 (오늘 종료된 세션 + 진행 중 세션).
 function _controlTodayCount() {
   const sessions = VL._allSessions || [];
-  const todayStr = new Date().toDateString();
+  const todayStr = dateStr(new Date());
   const ended = sessions.reduce(
     (sum, s) =>
       sum +
-      (s.endTime && new Date(s.endTime).toDateString() === todayStr
+      (s.endTime && dateStr(new Date(s.endTime)) === todayStr
         ? (s.videoCount ?? s.videos?.length ?? 0)
         : 0),
     0,
@@ -51,13 +51,11 @@ function _installDateForDay(day) {
   return new Date(Date.now() - (day - 1) * 86400000).toISOString();
 }
 
-// 대조군 종료 후 6주 리뷰 열람 게이트
-function _isStudyEndReviewReady(groupCfg, installDate, periodReviews) {
-  return (
-    VL.isConGroup(groupCfg.code) &&
-    VL.isStudyEnded(installDate) &&
-    (periodReviews || []).length === VL.TOTAL_WEEKS
-  );
+// 대조군 종료 후 리뷰 열람 게이트
+function _isStudyEndReviewReady(groupCfg, installDate) {
+  if (!VL.isConGroup(groupCfg.code) || !installDate) return false;
+  const revealDateStr = dayFromInstall(installDate, VL.TOTAL_DAYS);
+  return Date.now() >= new Date(`${revealDateStr}T09:00:00+09:00`).getTime();
 }
 
 // 대조군 6주 리뷰 화면 상단에 붙는 뒤로가기 행
@@ -198,8 +196,7 @@ class ViewLensPopup {
 
     if (this._tab === "today") {
       const d = buildDataForDate(VL._allSessions || [], this._selectedDate);
-      const isToday =
-        this._selectedDate.toDateString() === new Date().toDateString();
+      const isToday = dateStr(this._selectedDate) === dateStr(new Date());
       d.collectingCount = isToday ? (VL.today?.collectingCount ?? 0) : 0;
       d.collectingTimer = isToday ? _collectingTimerText() : "";
       VL.today = d;
@@ -208,11 +205,7 @@ class ViewLensPopup {
     const feedbackActive = this._isFeedbackActive(groupCfg);
     // 대조군 종료 후 6주 리뷰 열람(Story 10-10) — _isFeedbackActive와 독립된 축이라
     // feedbackActive가 false인 경로 안에서만 추가로 분기한다.
-    const studyEndReady = _isStudyEndReviewReady(
-      groupCfg,
-      this._installDate,
-      VL._periodReviews,
-    );
+    const studyEndReady = _isStudyEndReviewReady(groupCfg, this._installDate);
     const showStudyEndModal = studyEndReady && !VL._studyEndModalShown;
     // 모달을 이미 본 뒤에만 CTA로 전환한다.
     const showStudyEndCta = studyEndReady && !!VL._studyEndModalShown;
@@ -300,10 +293,8 @@ class ViewLensPopup {
     const nextBtn = this.container.querySelector("#vl-date-next");
     if (prevBtn) {
       prevBtn.addEventListener("click", () => {
-        const d = new Date(this._selectedDate);
-        d.setDate(d.getDate() - 1);
-        const installDate = VL._installDate ? new Date(VL._installDate) : null;
-        if (!installDate || d >= new Date(installDate.toDateString())) {
+        const d = addDaysKst(this._selectedDate, -1);
+        if (!VL._installDate || dateStr(d) >= dateStr(new Date(VL._installDate))) {
           this._selectedDate = d;
           this.render();
         }
@@ -311,11 +302,8 @@ class ViewLensPopup {
     }
     if (nextBtn) {
       nextBtn.addEventListener("click", () => {
-        const today = new Date();
-        if (this._selectedDate.toDateString() !== today.toDateString()) {
-          const d = new Date(this._selectedDate);
-          d.setDate(d.getDate() + 1);
-          this._selectedDate = d;
+        if (dateStr(this._selectedDate) !== dateStr(new Date())) {
+          this._selectedDate = addDaysKst(this._selectedDate, 1);
           this.render();
         }
       });

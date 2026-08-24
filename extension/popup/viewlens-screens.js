@@ -340,31 +340,27 @@ function screenFeedback(currentWeek, selWeek) {
         ${locked ? _lockIcon(10) : ""}${wk.label}
       </span>
       <span style="font-size:9.5px;font-weight:500;color:inherit;opacity:0.8;white-space:nowrap">
-        ${locked ? `${VL.periodLabel(wk.week)} 공개` : wk.isBaseline ? "베이스라인" : ""}
+        ${locked ? `${VL.periodLabel(wk.week)} 공개` : ""}
       </span>
     </button>`;
     })
     .join("");
 
-  // 베이스라인 대비는 별도 문구 없이도 아래 미니 차트의 점선(baselineLegend)으로 이미
-  // 보여주고 있어 중복이라, 여기선 직전 기간 대비만 보여준다.
-  const vsBaseContent = w.isBaseline
-    ? `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">베이스라인 기간이라 아직 비교할 데이터가 없어요.</p>`
-    : prevW
-      ? `<div>
+  const vsBaseContent = prevW
+    ? `<div>
         <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">직전 기간(${prevW.label}) 대비</div>
         <div style="display:flex;align-items:center;gap:7px">
           ${vlDeltaChip({ value: vsPrev })}
           <span style="font-size:12px;color:var(--vl-ink-2)">${vsPrev >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
         </div>
       </div>`
-      : `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">비교할 데이터가 없어요.</p>`;
+    : `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">첫 기간이라 비교할 데이터가 없어요.</p>`;
 
   const baselineLegend = !w.isBaseline
     ? `
     <div style="display:flex;align-items:center;gap:5px;margin-top:7px">
       <span style="width:14px;height:0;border-top:1px dashed var(--vl-ink-3)"></span>
-      <span style="font-size:10.5px;color:var(--vl-ink-3)">점선 = 베이스라인 ${VL.baselineH.toFixed(2)}</span>
+      <span style="font-size:10.5px;color:var(--vl-ink-3)">점선 = 기준값 ${VL.baselineH.toFixed(2)}</span>
     </div>`
     : "";
 
@@ -375,7 +371,6 @@ function screenFeedback(currentWeek, selWeek) {
       <div>
         <div style="font-size:16px;font-weight:800;color:var(--vl-ink)">
           ${w.label} 리포트
-          ${w.isBaseline ? '<span style="font-size:11px;color:var(--vl-ink-3);font-weight:600"> · 베이스라인 기간</span>' : ""}
         </div>
         <div style=";font-size:11.5px;color:var(--vl-ink-3);margin-top:2px">${w.range}</div>
       </div>
@@ -458,11 +453,11 @@ function screenControlHome(day, stats = {}) {
         평소처럼 유튜브를 시청해 주세요. 연구 기간 동안 시청 데이터가 기기 안에 안전하게 기록돼요.
       </p>
       ${
-        // 10-8: 베이스라인 중인 EXP에게만 보여주는 한 줄 — CON은 종료 후 일괄 제공(10-10)이라
+        // 베이스라인 중인 EXP에게만 보여주는 한 줄 — CON은 종료 후 일괄 제공(10-10)이라
         // "언제부터 분석을 받는지"라는 개념 자체가 없어 stats.baselineDaysLeft가 null로 온다.
         stats.baselineDaysLeft != null
           ? `<p style="margin:8px auto 0;max-width:250px;font-size:12.5px;line-height:1.6;color:var(--vl-accent);font-weight:600;text-wrap:pretty">
-        베이스라인 이후(D-${stats.baselineDaysLeft})부터 나만의 시청 분석을 받아볼 수 있어요.
+        ${stats.baselineDaysLeft}일 뒤부터 나만의 시청 분석을 받아볼 수 있어요.
       </p>`
           : ""
       }
@@ -492,23 +487,17 @@ function screenControlHome(day, stats = {}) {
 
 // ── Study end modal ───────────────────────────────────────
 
-// 대조군 종료 안내 모달 — 연구 종료 + 전체 기간 리뷰 생성 완료 시 최초 1회만 노출된다
+// 대조군 종료 안내 모달 — 연구 종료 시점(시간 기준)에 최초 1회만 노출된다.
 function screenStudyEndModal() {
-  return `<div style="position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:24px;background:color-mix(in oklab,var(--vl-ink) 45%,transparent)">
-    <div style="width:100%;background:var(--vl-card);border-radius:18px;padding:26px 22px 22px;box-shadow:0 24px 60px -12px rgba(0,0,0,.4);text-align:center">
-      <div style="width:52px;height:52px;margin:0 auto;border-radius:50%;background:var(--vl-accent-soft);display:grid;place-items:center">
-        ${markSVG({ size: 26, filled: false, accent: "var(--vl-accent)" })}
-      </div>
-      <div style="margin-top:16px;font-size:17px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">연구 기간이 종료되었습니다</div>
-      <p style="margin:9px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
-        그동안의 시청 기록을 분석한 리뷰가 준비됐어요. 지금 확인하시겠어요?
-      </p>
-      <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px">
-        <button id="vl-study-end-modal-confirm" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">지금 확인하기</button>
-        <button id="vl-study-end-modal-later" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">나중에</button>
-      </div>
-    </div>
-  </div>`;
+  return vlConfirmModal({
+    icon: markSVG({ size: 26, filled: false, accent: "var(--vl-accent)" }),
+    title: "연구 기간이 종료되었습니다",
+    message: `귀하의 ${VL.TOTAL_DAYS}일간의 시청 기록과 그에 대한 뷰렌즈의 피드백을 확인하시겠습니까?`,
+    confirmLabel: "지금 확인하기",
+    confirmId: "vl-study-end-modal-confirm",
+    cancelLabel: "나중에",
+    cancelId: "vl-study-end-modal-later",
+  });
 }
 
 // ── Past-day reveal modal (자정 경계 처리) ───────────────────────────────────────
