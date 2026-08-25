@@ -610,6 +610,45 @@ async function recoverParticipant(participantCode) {
 }
 window.recoverParticipant = recoverParticipant;
 
+// 대조군 종료 코드 검증
+// validateParticipantCode와 달리 오류/오프라인 시에도 통과시키지 않는다.
+const STUDY_END_CODE_TIMEOUT_MS = 5000;
+
+async function validateStudyEndCode(code) {
+  const { serverUrl, anonymousId } = await chrome.storage.local.get([
+    "serverUrl",
+    "anonymousId",
+  ]);
+  if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId)
+    return { ok: false, reason: "offline" };
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    STUDY_END_CODE_TIMEOUT_MS,
+  );
+  try {
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/study-end-code/validate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, anonymousId }),
+        signal: controller.signal,
+      },
+    );
+    if (!res.ok) return { ok: false, reason: "server" };
+    const json = await res.json();
+    const data = json.data ?? json;
+    return data.valid ? { ok: true } : { ok: false, reason: "invalid" };
+  } catch (error) {
+    console.warn("[popup] 종료 코드 검증 오류:", error.message);
+    return { ok: false, reason: "network" };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+window.validateStudyEndCode = validateStudyEndCode;
+
 // ── 팝업 상호작용 마이크로 로그 ────────────────────────────────────────
 // 수집: openedAt, dwellMs, tabTodayClicks, tabWeekClicks, feedbackViewed.
 // 전송: 팝업 close 시점의 storage 쓰기는 teardown에 잘릴 수 있어 신뢰하지 않는다.
@@ -795,7 +834,8 @@ async function boot() {
     "serverUrl",
     "participantSynced",
     "participantCode",
-    "studyEndModalShown",
+    "studyEndNoticeShown",
+    "studyEndCodeVerified",
     "todayCumulativeRevealedDate",
   ]);
 
@@ -850,8 +890,14 @@ async function boot() {
   // buildDataForDate로 통째로 재생성해서, 거기 두면 날짜를 옮길 때 상태가 오염된다.
   // let인 이유: 팝업을 열어둔 채 오늘 첫 세션이 끝나면(boot 시점엔 세션 0개라 대상에서 제외됨) storage.onChanged에서
   // "대상 아님 → 대상"으로 한 번 갱신해야 함(생성은 background.js의 세션-종료 트리거가 이미 하고 있음)
+  // 대조군 종료 후(코드 검증 통과)에도 오늘 탭을 열어준다.
+  const studyEndTodayEligible =
+    VL.isConGroup(stored.group) &&
+    _isStudyEndTimeReached(installDate) &&
+    !!stored.studyEndCodeVerified;
   let todayCumulativeEligible =
-    feedbackActive && realToday.sessionIds.length > 0;
+    (feedbackActive || studyEndTodayEligible) &&
+    realToday.sessionIds.length > 0;
   VL._todayCumulative = await resolveTodayCumulative(
     todayCumulativeEligible,
     realToday.sessionIds,
@@ -901,7 +947,8 @@ async function boot() {
       stored.group,
     );
   }
-  VL._studyEndModalShown = !!stored.studyEndModalShown;
+  VL._studyEndNoticeShown = !!stored.studyEndNoticeShown;
+  VL._studyEndCodeVerified = !!stored.studyEndCodeVerified;
 
   if (installDate) {
     VL.weeks = buildWeeksData(sessions, installDate, cachedPeriodReviews);
@@ -919,6 +966,11 @@ async function boot() {
     group: stored.group || null,
     timelineKey: calcTimelineKey(installDate),
     installDate,
+    participantCode: stored.participantCode || null,
+    onStudyEndCodeVerified: () => {
+      chrome.storage.local.set({ studyEndCodeVerified: true });
+      postStudyEndReviewEvent("review_viewed");
+    },
     onChange: async ({
       onboarded: ob,
       group: g,
@@ -1025,24 +1077,13 @@ async function boot() {
         return;
       }
 
-      // 대조군 종료 안내 모달 — "지금 확인하기"는 모달 노출+리뷰 열람을 모두, "나중에"는
-      // 모달 노출만 기록한다(3절 플로우차트 F/G와 동일).
-      const studyEndConfirmBtn =
-        e.target.closest && e.target.closest("#vl-study-end-modal-confirm");
-      const studyEndLaterBtn =
-        e.target.closest && e.target.closest("#vl-study-end-modal-later");
-      if (studyEndConfirmBtn || studyEndLaterBtn) {
-        chrome.storage.local.set({ studyEndModalShown: true });
-        postStudyEndReviewEvent("modal_shown");
-        if (studyEndConfirmBtn) postStudyEndReviewEvent("review_viewed");
+      // 종료 안내(그룹 무관) — 서버 이벤트 기록은 대조군에게만 의미가 있다(EXP는 서버가 거부).
+      const studyEndNoticeConfirmBtn =
+        e.target.closest && e.target.closest("#vl-study-end-notice-confirm");
+      if (studyEndNoticeConfirmBtn) {
+        chrome.storage.local.set({ studyEndNoticeShown: true });
+        if (VL.isConGroup(stored.group)) postStudyEndReviewEvent("modal_shown");
         return;
-      }
-
-      // 대조군 상시 CTA — 재진입할 때마다 호출되지만 서버가 최초 1회만 반영한다.
-      const studyEndCtaBtn =
-        e.target.closest && e.target.closest("#vl-study-end-cta");
-      if (studyEndCtaBtn) {
-        postStudyEndReviewEvent("review_viewed");
       }
 
       // "어제 돌아보기" 리빌 확인

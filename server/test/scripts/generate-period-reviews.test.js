@@ -254,13 +254,22 @@ describe("generate-period-reviews.js — run()", () => {
       ).run("locked-success-user", P1_INSTALL_DATE);
       db.prepare(
         "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
-      ).run("locked-success-user", JSON.stringify({ 음악: 1 }), 5, P1_SESSION_AT);
+      ).run(
+        "locked-success-user",
+        JSON.stringify({ 음악: 1 }),
+        5,
+        P1_SESSION_AT,
+      );
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
           candidates: [
-            { content: { parts: [{ text: '{"topic":"음악","feedback":"문장"}' }] } },
+            {
+              content: {
+                parts: [{ text: '{"topic":"음악","feedback":"문장"}' }],
+              },
+            },
           ],
         }),
       });
@@ -308,7 +317,11 @@ describe("generate-period-reviews.js — run()", () => {
         ok: true,
         json: async () => ({
           candidates: [
-            { content: { parts: [{ text: '{"topic":"음악","feedback":"복구된 리뷰"}' }] } },
+            {
+              content: {
+                parts: [{ text: '{"topic":"음악","feedback":"복구된 리뷰"}' }],
+              },
+            },
           ],
         }),
       });
@@ -352,7 +365,13 @@ describe("generate-period-reviews.js — run()", () => {
         ok: true,
         json: async () => ({
           candidates: [
-            { content: { parts: [{ text: '{"topic":"음악","feedback":"너무 늦은 성공"}' }] } },
+            {
+              content: {
+                parts: [
+                  { text: '{"topic":"음악","feedback":"너무 늦은 성공"}' },
+                ],
+              },
+            },
           ],
         }),
       });

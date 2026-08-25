@@ -51,11 +51,15 @@ function _installDateForDay(day) {
   return new Date(Date.now() - (day - 1) * 86400000).toISOString();
 }
 
-// 대조군 종료 후 리뷰 열람 게이트
-function _isStudyEndReviewReady(groupCfg, installDate) {
-  if (!VL.isConGroup(groupCfg.code) || !installDate) return false;
+function _isStudyEndTimeReached(installDate) {
+  if (!installDate) return false;
   const revealDateStr = dayFromInstall(installDate, VL.TOTAL_DAYS);
   return Date.now() >= new Date(`${revealDateStr}T09:00:00+09:00`).getTime();
+}
+
+// 대조군 종료 후 리뷰 열람 게이트
+function _isStudyEndReviewReady(groupCfg, installDate) {
+  return VL.isConGroup(groupCfg.code) && _isStudyEndTimeReached(installDate);
 }
 
 // 대조군 6주 리뷰 화면 상단에 붙는 뒤로가기 행
@@ -65,11 +69,19 @@ function _studyEndBackRow() {
   </div>`;
 }
 
-function _popupHeader(groupCfg, day) {
+function _popupHeader(groupCfg, day, { participantCode, studyEnded } = {}) {
   const isTest = groupCfg.code.startsWith("TEST");
   const badge = isTest
     ? vlBadge({ text: "연구자 모드", tone: "accent", size: "sm" })
-    : vlBadge({ text: "참여 중", tone: "neutral", size: "sm" });
+    : vlBadge({
+        text: studyEnded
+          ? participantCode
+            ? `참여 종료 · ${vlEscapeHtml(participantCode)}`
+            : "참여 종료"
+          : "참여 중",
+        tone: "neutral",
+        size: "sm",
+      });
   const rightArea = isTest
     ? `<div style="display:flex;align-items:center;gap:7px">
         <button id="vl-researcher-reset" style="padding:3px 8px;border:1px solid var(--vl-line-2);border-radius:6px;background:transparent;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;color:var(--vl-ink-2);line-height:1.7;white-space:nowrap">↩ 온보딩</button>
@@ -136,7 +148,9 @@ class ViewLensPopup {
     this._group = null;
     this._timelineKey = "w1_mid";
     this._installDate = null;
+    this._participantCode = null;
     this._onChange = () => {};
+    this._onStudyEndCodeVerified = () => {};
   }
 
   /**
@@ -148,12 +162,22 @@ class ViewLensPopup {
    * @param {string}   [opts.installDate] - ISO 문자열. RealPopup의 베이스라인 게이트가 참조한다.
    * @param {Function} opts.onChange - called with { onboarded, group } on onboard submit
    */
-  mount({ onboarded, group, timelineKey, installDate, onChange }) {
+  mount({
+    onboarded,
+    group,
+    timelineKey,
+    installDate,
+    participantCode,
+    onChange,
+    onStudyEndCodeVerified,
+  }) {
     this._onboarded = onboarded;
     this._group = group;
     this._timelineKey = timelineKey;
     this._installDate = installDate ?? null;
+    this._participantCode = participantCode ?? null;
     this._onChange = onChange;
+    this._onStudyEndCodeVerified = onStudyEndCodeVerified ?? (() => {});
     this._studyEndReviewOpen = false;
     this.render();
   }
@@ -176,6 +200,16 @@ class ViewLensPopup {
     return (
       groupCfg.feedback &&
       (VL.isTestGroup(groupCfg.code) || !VL.isBaselinePeriod(this._installDate))
+    );
+  }
+
+  // 대조군 종료 후(코드 검증 통과)
+  // 실험군과 동일한 오늘/주차별 탭을 노출한다.
+  _studyEndTabsActive(groupCfg) {
+    return (
+      _isStudyEndReviewReady(groupCfg, this._installDate) &&
+      this._studyEndReviewOpen &&
+      !!VL._studyEndCodeVerified
     );
   }
 
@@ -206,9 +240,11 @@ class ViewLensPopup {
     // 대조군 종료 후 6주 리뷰 열람(Story 10-10) — _isFeedbackActive와 독립된 축이라
     // feedbackActive가 false인 경로 안에서만 추가로 분기한다.
     const studyEndReady = _isStudyEndReviewReady(groupCfg, this._installDate);
-    const showStudyEndModal = studyEndReady && !VL._studyEndModalShown;
-    // 모달을 이미 본 뒤에만 CTA로 전환한다.
-    const showStudyEndCta = studyEndReady && !!VL._studyEndModalShown;
+    // 그룹 무관(EXP+CON) 시간 판정 — 종료 안내 오버레이와 헤더 배지가 함께 참조한다.
+    const studyEnded = _isStudyEndTimeReached(this._installDate);
+    const showStudyEndNotice = studyEnded && !VL._studyEndNoticeShown;
+    // 안내를 이미 본 뒤에만 CTA로 전환한다(대조군 전용).
+    const showStudyEndCta = studyEndReady && !!VL._studyEndNoticeShown;
     // "어제 돌아보기" 리빌
     const showPastDayReveal =
       !!VL._revealPastDay && !this._pastDayRevealDismissed;
@@ -221,7 +257,13 @@ class ViewLensPopup {
           : screenFeedback(currentWeek, selWeek);
     } else if (studyEndReady && this._studyEndReviewOpen) {
       // currentWeek는 day(경과일)로 계산되는데, studyEndReady가 참이면 이미 day >= TOTAL_DAYS라
-      bodyHTML = _studyEndBackRow() + screenFeedback(currentWeek, selWeek);
+      bodyHTML =
+        _studyEndBackRow() +
+        (VL._studyEndCodeVerified
+          ? this._tab === "today"
+            ? screenToday()
+            : screenFeedback(currentWeek, selWeek)
+          : screenStudyEndCodeInput());
     } else {
       // 10-8: groupCfg.feedback이 true인데 feedbackActive가 false라는 건 "EXP인데 베이스라인
       // 게이트에 걸렸다"는 뜻이다(CON은 애초에 groupCfg.feedback이 false). 이 경우에만
@@ -241,10 +283,14 @@ class ViewLensPopup {
     }
 
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
-      ${_popupHeader(groupCfg, day)}
-      ${feedbackActive ? _tabs(this._tab, !VL._todayConfirmed) : ""}
+      ${_popupHeader(groupCfg, day, { participantCode: this._participantCode, studyEnded })}
+      ${
+        feedbackActive || this._studyEndTabsActive(groupCfg)
+          ? _tabs(this._tab, !VL._todayConfirmed)
+          : ""
+      }
       <div style="flex:1;overflow-y:auto;overflow-x:hidden">${bodyHTML}</div>
-      ${showStudyEndModal ? screenStudyEndModal() : ""}
+      ${showStudyEndNotice ? screenStudyEndNoticeModal() : ""}
       ${showPastDayReveal ? screenPastDayRevealModal(VL._revealPastDay.data) : ""}
     </div>`;
 
@@ -268,7 +314,10 @@ class ViewLensPopup {
 
   _bind(groupCfg, currentWeek) {
     // Tabs
-    if (this._isFeedbackActive(groupCfg)) {
+    if (
+      this._isFeedbackActive(groupCfg) ||
+      this._studyEndTabsActive(groupCfg)
+    ) {
       this.container.querySelectorAll("[data-tab]").forEach((btn) => {
         btn.addEventListener("click", () => {
           this._tab = btn.dataset.tab;
@@ -294,7 +343,10 @@ class ViewLensPopup {
     if (prevBtn) {
       prevBtn.addEventListener("click", () => {
         const d = addDaysKst(this._selectedDate, -1);
-        if (!VL._installDate || dateStr(d) >= dateStr(new Date(VL._installDate))) {
+        if (
+          !VL._installDate ||
+          dateStr(d) >= dateStr(new Date(VL._installDate))
+        ) {
           this._selectedDate = d;
           this.render();
         }
@@ -308,26 +360,17 @@ class ViewLensPopup {
         }
       });
     }
-    // 대조군 종료 안내 모달 — "지금 확인하기"는 리뷰 화면까지 바로 연다.
-    const studyEndConfirm = this.container.querySelector(
-      "#vl-study-end-modal-confirm",
+    // 종료 안내(그룹 무관) — 확인만 기록한다. 리뷰 열람은 별도 CTA(코드 게이트 예정)가 담당.
+    const studyEndNoticeConfirm = this.container.querySelector(
+      "#vl-study-end-notice-confirm",
     );
-    if (studyEndConfirm) {
-      studyEndConfirm.addEventListener("click", () => {
-        VL._studyEndModalShown = true;
-        this._studyEndReviewOpen = true;
+    if (studyEndNoticeConfirm) {
+      studyEndNoticeConfirm.addEventListener("click", () => {
+        VL._studyEndNoticeShown = true;
         this.render();
       });
     }
-    const studyEndLater = this.container.querySelector(
-      "#vl-study-end-modal-later",
-    );
-    if (studyEndLater) {
-      studyEndLater.addEventListener("click", () => {
-        VL._studyEndModalShown = true;
-        this.render();
-      });
-    }
+    this._bindStudyEndCodeInput();
     // 대조군 6주 리뷰 화면 → 대기 화면으로 돌아가기
     const studyEndBack = this.container.querySelector("#vl-study-end-back");
     if (studyEndBack) {
@@ -336,7 +379,7 @@ class ViewLensPopup {
         this.render();
       });
     }
-    // 대조군 상시 CTA(모달을 이미 본 뒤 재진입) — 목적지는 모달의 "지금 확인하기"와 동일.
+    // 대조군 상시 CTA(종료 안내를 이미 본 뒤 재진입)
     const studyEndCta = this.container.querySelector("#vl-study-end-cta");
     if (studyEndCta) {
       studyEndCta.addEventListener("click", () => {
@@ -364,6 +407,59 @@ class ViewLensPopup {
         this.render();
       });
     }
+  }
+
+  // 온보딩(bindOnboarding)과 동일하게 실패 시 전체 재렌더 없이 로컬 DOM만 갱신한다.
+  // this.render()를 매 시도마다 부르면 입력값이 날아간다. 검증 성공 시에만 한 번 render().
+  _bindStudyEndCodeInput() {
+    const btn = this.container.querySelector("#vl-study-end-code-btn");
+    if (!btn) return;
+    const input = this.container.querySelector("#vl-study-end-code-input");
+    const errEl = this.container.querySelector("#vl-study-end-code-err");
+    const btnLabel = btn.textContent;
+
+    const showErr = (msg) => {
+      errEl.textContent = msg;
+      errEl.style.display = "block";
+      input.style.borderColor = "var(--vl-warn)";
+    };
+    input.addEventListener("input", () => {
+      errEl.style.display = "none";
+      input.style.borderColor = "var(--vl-line-2)";
+    });
+
+    const submit = async () => {
+      // 버튼 disabled만으론 Enter 키 재입력을 못 막는다. (요청 중이면 재진입 차단)
+      if (btn.disabled) return;
+      const code = input.value.trim();
+      if (!code) {
+        showErr("코드를 입력해 주세요.");
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = "확인 중…";
+      const result = window.validateStudyEndCode
+        ? await window.validateStudyEndCode(code)
+        : { ok: false };
+      btn.disabled = false;
+      btn.textContent = btnLabel;
+
+      if (!result.ok) {
+        showErr(
+          result.reason === "invalid"
+            ? "코드가 올바르지 않아요. 설문에서 안내받은 코드를 확인해 주세요."
+            : "지금은 확인할 수 없어요. 잠시 후 다시 시도해 주세요.",
+        );
+        return;
+      }
+      VL._studyEndCodeVerified = true;
+      this._onStudyEndCodeVerified();
+      this.render();
+    };
+    btn.addEventListener("click", submit);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submit();
+    });
   }
 }
 

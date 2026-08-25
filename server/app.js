@@ -23,6 +23,7 @@ app.use("/api/video-events", require("./routes/video-events"));
 app.use("/api/popup-events", require("./routes/popup-events"));
 app.use("/api/period-reviews", require("./routes/period-reviews"));
 app.use("/api/today-reviews", require("./routes/today-reviews"));
+app.use("/api/study-end-code", require("./routes/study-end-code"));
 
 app.use(errorHandler);
 

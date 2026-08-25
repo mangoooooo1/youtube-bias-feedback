@@ -37,4 +37,5 @@ jobs:
             echo "NODE_ENV=production" >> server/.env
             echo "DB_ENCRYPTION_KEY=${{ secrets.DB_ENCRYPTION_KEY }}" >> server/.env
             echo "PERIOD_REVIEW_GEMINI_API_KEY=${{ secrets.PERIOD_REVIEW_GEMINI_API_KEY }}" >> server/.env
+            echo "STUDY_END_REVEAL_CODE=${{ secrets.STUDY_END_REVEAL_CODE }}" >> server/.env
             pm2 restart youtube-bias-server
