@@ -429,6 +429,8 @@ class ViewLensPopup {
     });
 
     const submit = async () => {
+      // 버튼 disabled만으론 Enter 키 재입력을 못 막는다. (요청 중이면 재진입 차단)
+      if (btn.disabled) return;
       const code = input.value.trim();
       if (!code) {
         showErr("코드를 입력해 주세요.");
