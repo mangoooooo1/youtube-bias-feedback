@@ -612,6 +612,8 @@ window.recoverParticipant = recoverParticipant;
 
 // 대조군 종료 코드 검증
 // validateParticipantCode와 달리 오류/오프라인 시에도 통과시키지 않는다.
+const STUDY_END_CODE_TIMEOUT_MS = 5000;
+
 async function validateStudyEndCode(code) {
   const { serverUrl, anonymousId } = await chrome.storage.local.get([
     "serverUrl",
@@ -619,6 +621,11 @@ async function validateStudyEndCode(code) {
   ]);
   if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId)
     return { ok: false, reason: "offline" };
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    STUDY_END_CODE_TIMEOUT_MS,
+  );
   try {
     const res = await fetch(
       `${serverUrl.replace(/\/$/, "")}/api/study-end-code/validate`,
@@ -626,6 +633,7 @@ async function validateStudyEndCode(code) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, anonymousId }),
+        signal: controller.signal,
       },
     );
     if (!res.ok) return { ok: false, reason: "server" };
@@ -635,6 +643,8 @@ async function validateStudyEndCode(code) {
   } catch (error) {
     console.warn("[popup] 종료 코드 검증 오류:", error.message);
     return { ok: false, reason: "network" };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 window.validateStudyEndCode = validateStudyEndCode;
