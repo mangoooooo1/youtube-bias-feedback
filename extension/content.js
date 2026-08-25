@@ -28,13 +28,13 @@ function parseTitle() {
   return cleaned && cleaned !== "YouTube" ? cleaned : null;
 }
 
-function waitForTitle(maxRetries = 10, interval = 200) {
+function waitForTitle(prevTitle, maxRetries = 10, interval = 200) {
   return new Promise((resolve) => {
     let attempts = 0;
 
     const check = () => {
       const title = parseTitle();
-      if (title) {
+      if (title && title !== prevTitle) {
         resolve(title);
         return;
       }
@@ -112,12 +112,15 @@ function recordVideo(videoId, title) {
 }
 
 let lastVideoId = null;
+// waitForTitle의 staleness 비교 기준(새 title을 실제로 확보했을 때만 갱신)
+let lastTitle = null;
 
 async function handleVideoChange() {
   const videoId = extractVideoId(location.href);
 
   if (!videoId) {
     lastVideoId = null;
+    lastTitle = null;
     return;
   }
 
@@ -125,7 +128,8 @@ async function handleVideoChange() {
 
   lastVideoId = videoId;
 
-  const title = await waitForTitle();
+  const title = await waitForTitle(lastTitle);
+  if (title) lastTitle = title;
   console.log("[content] video detected:", { videoId, title });
 
   await recordVideo(videoId, title);
