@@ -651,11 +651,14 @@ window.validateStudyEndCode = validateStudyEndCode;
 
 // ── 팝업 상호작용 마이크로 로그 ────────────────────────────────────────
 // 수집: openedAt, dwellMs, tabTodayClicks, tabWeekClicks, feedbackViewed.
-// 전송: 팝업 close 시점의 storage 쓰기는 teardown에 잘릴 수 있어 신뢰하지 않는다.
-//   대신 세션 중 livePopupEvent 슬롯을 상호작용·1초 간격으로 계속 갱신해 최신 스냅샷을 남기고,
-//   다음 팝업 open(boot) 때 이전 스냅샷을 확정 큐로 승격해 서버로 전송(실패분은 큐에 남겨 재시도).
-//   팝업은 싱글턴이라 boot 시점의 잔여 livePopupEvent는 곧 "닫힌 이전 팝업"의 확정 이벤트다.
-//   sendBeacon을 쓰지 않으므로 중복 전송이 없다(전송은 항상 다음 open의 flush 한 경로).
+// 전송 경로 1(기본)
+// 팝업 close 시점의 fetch는 teardown에 끊길 수 있어 신뢰하지 않는다.
+// 대신 세션 중 livePopupEvent 슬롯을 상호작용·1초 간격으로 계속 갱신해 최신 스냅샷을 남기고,
+// 다음 팝업 open(boot) 때 이전 스냅샷을 확정 큐로 승격해 서버로 전송한다.
+// 전송 경로 2(백업)
+// close 시점 sendBeacon: 참여자가 다시 팝업을 열지 않으면 경로 1이 영영 트리거되지 않아 그 팝업 몫이 서버에 도달하지 못한다.
+// sendBeacon은 문서가 파괴되는 도중에도 브라우저가 전송을 이어가도록 보장하는 API라 pagehide/visibilitychange 핸들러에서 fetch 대신 시도해볼 수 있다.
+// eventId 멱등키 + 서버의 INSERT OR IGNORE 덕분에 경로 1과 경로 2가 같은 이벤트를 둘 다 성공시켜도 서버에는 한 행만 남는다.
 
 // "피드백 확인하기" 블러 해제 여부 () — 한 번 확인한 세션은 로컬에 기억해 다음에
 // 다시 팝업을 열어도 또 가리지 않는다. feedbackViewedAt(알림 클릭)보다 엄격한 별도 신호.
@@ -755,6 +758,19 @@ function buildPopupEventPayload(m) {
 // teardown 대비 — 현재 세션 스냅샷을 live 슬롯에 기록(fire-and-forget)
 function persistLivePopupEvent(m) {
   chrome.storage.local.set({ livePopupEvent: buildPopupEventPayload(m) });
+}
+
+// 전송 경로 2(close 시점 백업)
+function sendPopupEventBeacon(serverUrl, m) {
+  if (!serverUrl || serverUrl.startsWith("YOUR_")) return;
+  if (typeof navigator.sendBeacon !== "function") return;
+  const blob = new Blob([JSON.stringify(buildPopupEventPayload(m))], {
+    type: "application/json",
+  });
+  navigator.sendBeacon(
+    `${serverUrl.replace(/\/$/, "")}/api/popup-events`,
+    blob,
+  );
 }
 
 async function postPopupEvent(serverUrl, event) {
@@ -1096,9 +1112,13 @@ async function boot() {
       }
     });
 
-    // 팝업 종료 감지 — dwellMs 최종 반영(단일 set, teardown에 상대적으로 안전).
-    // 최종 쓰기가 잘려도 세션 중 스냅샷이 남아 다음 boot에서 승격된다.
-    const finalizePopupMetrics = () => persistLivePopupEvent(popupMetrics);
+    // 팝업 종료 감지 — dwellMs 최종 반영(단일 set, teardown에 상대적으로 안전) +
+    // sendBeacon 백업 전송(전송 경로 2) 동시 시도. 최종 쓰기가 잘려도 세션 중 스냅샷이
+    // 남아 다음 boot에서 승격되므로, sendBeacon이 실패해도 데이터가 사라지지 않는다.
+    const finalizePopupMetrics = () => {
+      persistLivePopupEvent(popupMetrics);
+      sendPopupEventBeacon(stored.serverUrl, popupMetrics);
+    };
     window.addEventListener("pagehide", finalizePopupMetrics);
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) finalizePopupMetrics();
