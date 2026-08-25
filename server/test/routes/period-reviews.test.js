@@ -17,7 +17,8 @@ function createTestDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       anonymousId TEXT NOT NULL UNIQUE,
       group_code TEXT NOT NULL,
-      installDate TEXT NOT NULL
+      installDate TEXT NOT NULL,
+      studyEndCodeVerifiedAt TEXT
     );
     CREATE TABLE period_reviews (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,10 +49,11 @@ function insertParticipant(
   anonymousId,
   groupCode,
   installDate = FILLER_INSTALL_DATE,
+  studyEndCodeVerifiedAt = null,
 ) {
   db.prepare(
-    "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
-  ).run(anonymousId, groupCode, installDate);
+    "INSERT INTO participants (anonymousId, group_code, installDate, studyEndCodeVerifiedAt) VALUES (?, ?, ?, ?)",
+  ).run(anonymousId, groupCode, installDate, studyEndCodeVerifiedAt);
 }
 
 function insertReview(db, anonymousId, periodIndex, overrides = {}) {
@@ -178,8 +180,14 @@ describe("getPeriodReviews", () => {
       expect(getPeriodReviews(db, "con-incomplete")).toEqual([]);
     });
 
-    it("종료 + 전체 기간 리뷰 생성 완료 시 CON도 정상적으로 반환한다", () => {
-      insertParticipant(db, "con-complete", "CON", ENDED_INSTALL_DATE);
+    it("종료 + 전체 기간 리뷰 생성 완료 + 코드 검증 통과 시 CON도 정상적으로 반환한다", () => {
+      insertParticipant(
+        db,
+        "con-complete",
+        "CON",
+        ENDED_INSTALL_DATE,
+        "2026-06-07T09:05:00+09:00",
+      );
       insertReview(db, "con-complete", 1);
       insertReview(db, "con-complete", 2);
       insertReview(db, "con-complete", 3);
@@ -187,6 +195,15 @@ describe("getPeriodReviews", () => {
 
       const result = getPeriodReviews(db, "con-complete");
       expect(result.map((r) => r.periodIndex)).toEqual([1, 2, 3]);
+    });
+
+    it("종료 + 전체 기간 완성이어도 코드 검증을 통과한 적 없으면 빈 배열을 반환한다(coderabbitai 지적 반영)", () => {
+      insertParticipant(db, "con-unverified", "CON", ENDED_INSTALL_DATE);
+      insertReview(db, "con-unverified", 1);
+      insertReview(db, "con-unverified", 2);
+      insertReview(db, "con-unverified", 3);
+
+      expect(getPeriodReviews(db, "con-unverified")).toEqual([]);
     });
 
     it("periodIndex가 1을 포함하지 않으면 개수가 맞아도 잠금이 풀리지 않는다", () => {
@@ -205,6 +222,7 @@ describe("getPeriodReviews", () => {
         "test-con-complete",
         "TEST-CON",
         ENDED_INSTALL_DATE,
+        "2026-06-07T09:05:00+09:00",
       );
       insertReview(db, "test-con-complete", 1);
       insertReview(db, "test-con-complete", 2);

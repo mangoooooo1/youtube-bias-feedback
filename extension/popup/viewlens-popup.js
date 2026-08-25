@@ -613,8 +613,11 @@ window.recoverParticipant = recoverParticipant;
 // 대조군 종료 코드 검증
 // validateParticipantCode와 달리 오류/오프라인 시에도 통과시키지 않는다.
 async function validateStudyEndCode(code) {
-  const { serverUrl } = await chrome.storage.local.get("serverUrl");
-  if (!serverUrl || serverUrl.startsWith("YOUR_"))
+  const { serverUrl, anonymousId } = await chrome.storage.local.get([
+    "serverUrl",
+    "anonymousId",
+  ]);
+  if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId)
     return { ok: false, reason: "offline" };
   try {
     const res = await fetch(
@@ -622,7 +625,7 @@ async function validateStudyEndCode(code) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ code, anonymousId }),
       },
     );
     if (!res.ok) return { ok: false, reason: "server" };

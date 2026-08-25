@@ -40,17 +40,20 @@ function isStudyEndUnlocked(db, anonymousId, installDate) {
 function getPeriodReviews(db, anonymousId) {
   const participant = db
     .prepare(
-      "SELECT group_code, installDate FROM participants WHERE anonymousId = ?",
+      "SELECT group_code, installDate, studyEndCodeVerifiedAt FROM participants WHERE anonymousId = ?",
     )
     .get(anonymousId);
   if (!participant) {
     return [];
   }
 
+  // 대조군은 시간·구간완결(isStudyEndUnlocked)뿐 아니라 설문 코드 검증까지 통과해야 한다.
+
   const allowed =
     FEEDBACK_GROUPS.has(participant.group_code) ||
     (CONTROL_GROUPS.has(participant.group_code) &&
-      isStudyEndUnlocked(db, anonymousId, participant.installDate));
+      isStudyEndUnlocked(db, anonymousId, participant.installDate) &&
+      !!participant.studyEndCodeVerifiedAt);
   if (!allowed) {
     return [];
   }

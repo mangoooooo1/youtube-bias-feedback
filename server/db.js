@@ -74,6 +74,9 @@ function initializeDB() {
       -- 대조군 연구 종료 후 리뷰 열람 이벤트 (Story 10-10) — 최초 1회만 기록(recordStudyEndReviewEvent)
       studyEndModalShownAt   TEXT,  -- 종료 안내 모달을 처음 노출한 시각
       studyEndReviewViewedAt TEXT,  -- 6주 누적 리뷰 화면에 처음 진입한 시각
+      -- 설문 연동 코드 검증 통과 시각 (최초 1회만, verifyAndRecordStudyEndCode) —
+      -- getPeriodReviews가 대조군 데이터 반환 여부를 판단할 때 이 값도 함께 확인한다.
+      studyEndCodeVerifiedAt TEXT,
       createdAt       TEXT    DEFAULT (datetime('now'))
     );
 
@@ -173,6 +176,7 @@ function initializeDB() {
   addColumn("sessions", "promptVersion", "TEXT");
   addColumn("participants", "studyEndModalShownAt", "TEXT");
   addColumn("participants", "studyEndReviewViewedAt", "TEXT");
+  addColumn("participants", "studyEndCodeVerifiedAt", "TEXT");
 
   // popup_events.eventId도 같은 이유로 addColumn 필요. UNIQUE는 ALTER TABLE ADD COLUMN이
   // 만들 수 없으므로(SQLite 제약) 컬럼 추가 후 별도 유니크 인덱스로 건다 — 신규/기존 DB 모두
