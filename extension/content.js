@@ -19,8 +19,13 @@ function extractVideoId(url) {
 
 function parseTitle() {
   const raw = document.title;
-  if (!raw || raw === "YouTube") return null;
-  return raw.replace(/^\(\d+\)\s+/, "").replace(/\s+-\s+YouTube$/, "") || null;
+  if (!raw) return null;
+  // placeholder 판정은 접두사(안 읽은 알림 개수)·접미사(" - YouTube") 제거 이후에 해야 한다.
+  const cleaned = raw
+    .replace(/^\(\d+\)\s+/, "")
+    .replace(/\s+-\s+YouTube$/, "")
+    .trim();
+  return cleaned && cleaned !== "YouTube" ? cleaned : null;
 }
 
 function waitForTitle(maxRetries = 10, interval = 200) {
