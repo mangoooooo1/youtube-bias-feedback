@@ -86,6 +86,8 @@ function initializeDB() {
       videoId     TEXT    NOT NULL,
       title       TEXT,
       watchedAt   TEXT    NOT NULL,
+      -- 이 영상이 속한 세션의 sessions.sessionId 
+      sessionId   TEXT,
       createdAt   TEXT    DEFAULT (datetime('now'))
     );
 
@@ -177,6 +179,7 @@ function initializeDB() {
   addColumn("participants", "studyEndModalShownAt", "TEXT");
   addColumn("participants", "studyEndReviewViewedAt", "TEXT");
   addColumn("participants", "studyEndCodeVerifiedAt", "TEXT");
+  addColumn("video_events", "sessionId", "TEXT");
 
   // popup_events.eventId도 같은 이유로 addColumn 필요. UNIQUE는 ALTER TABLE ADD COLUMN이
   // 만들 수 없으므로(SQLite 제약) 컬럼 추가 후 별도 유니크 인덱스로 건다 — 신규/기존 DB 모두

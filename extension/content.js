@@ -94,6 +94,7 @@ function recordVideo(videoId, title) {
             videoId,
             title: title ?? null,
             watchedAt: now,
+            sessionId: session.sessionId,
           }),
         }).catch(() => {});
       }
