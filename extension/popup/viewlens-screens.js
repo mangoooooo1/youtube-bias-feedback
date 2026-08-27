@@ -296,15 +296,30 @@ function screenToday() {
     `,
     })}
 
-    ${_todayCumulativeCard(isToday, d.videos, reviewLocked, VL._todayCumulative?.sessionId ?? null)}
+    ${_todayCumulativeCard(isToday, d, reviewLocked)}
   </div>
   </div>`;
 }
 
 // "오늘" 하루 전체를 반영하는 누적 리뷰 카드
-function _todayCumulativeCard(isToday, todayVideos, locked, sessionId) {
+// 오늘은 서버의 today_reviews 캐시(VL._todayCumulative)를 쓰고, 과거 날짜는
+// buildDataForDate가 그 날의 마지막 세션에서 이미 캡처해 둔 review 스냅샷(d.review)을
+// 그대로 보여준다.
+function _todayCumulativeCard(isToday, d, locked) {
+  if (!isToday) {
+    if (!isRealReview(d.review)) return "";
+    return vlReview({
+      title: `${d.dateLabel} 돌아보기`,
+      text: d.review,
+      topic: d.reviewTopic || "",
+      videos: d.videos,
+      locked: false,
+      sessionId: d.sessionId ?? null,
+    });
+  }
+
   const cumulative = VL._todayCumulative;
-  if (!isToday || !cumulative?.eligible) return "";
+  if (!cumulative?.eligible) return "";
 
   return vlReview({
     title: "오늘 하루 돌아보기",
@@ -312,9 +327,9 @@ function _todayCumulativeCard(isToday, todayVideos, locked, sessionId) {
       ? "오늘 하루 전체 시청을 분석하고 있어요. 잠시 후 업데이트돼요."
       : cumulative.review || "",
     topic: cumulative.generating ? "" : cumulative.reviewTopic || "",
-    videos: todayVideos,
+    videos: d.videos,
     locked: !!locked && !cumulative.generating,
-    sessionId,
+    sessionId: cumulative.sessionId ?? null,
   });
 }
 
