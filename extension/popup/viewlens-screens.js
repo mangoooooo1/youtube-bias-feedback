@@ -8,7 +8,7 @@ function _lockIcon(size = 12) {
 function _chevronIcon(dir, size = 14) {
   const d =
     dir === "left" ? "M14.5 5.5L8 12l6.5 6.5" : "M9.5 5.5L16 12l-6.5 6.5";
-  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" style="flex-shrink:0" xmlns="http://www.w3.org/2000/svg">
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" style="flex-shrink:0" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
     <path d="${d}" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
   </svg>`;
 }
@@ -16,7 +16,8 @@ function _chevronIcon(dir, size = 14) {
 // 날짜 이동 버튼
 function _dateNavButton({ id, dir, disabled = false }) {
   const color = disabled ? "var(--vl-ink-3)" : "var(--vl-ink-2)";
-  return `<button id="${id}" class="vl-date-nav-btn vl-press" ${disabled ? "disabled" : ""}
+  const label = dir === "left" ? "이전 날짜" : "다음 날짜";
+  return `<button id="${id}" class="vl-date-nav-btn vl-press" aria-label="${label}" ${disabled ? "disabled" : ""}
     style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:${color};cursor:${disabled ? "default" : "pointer"};display:grid;place-items:center;opacity:${disabled ? 0.4 : 1}">
     ${_chevronIcon(dir, 15)}
   </button>`;
