@@ -354,9 +354,6 @@ function screenFeedback(currentWeek, selWeek) {
       <span style="display:flex;align-items:center;gap:4px;white-space:nowrap">
         ${locked ? _lockIcon(10) : ""}${wk.label}
       </span>
-      <span style="font-size:9.5px;font-weight:500;color:inherit;opacity:0.8;white-space:nowrap">
-        ${locked ? `${VL.periodLabel(wk.week)} 공개` : ""}
-      </span>
     </button>`;
     })
     .join("");
