@@ -162,6 +162,21 @@ body {
   background: color-mix(in oklab, var(--vl-accent) 10%, transparent) !important;
 }
 
+/* 날짜 이동 */
+.vl-date-nav-btn {
+  transition:
+    background 0.15s ease,
+    transform 0.1s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.vl-date-nav-btn:hover:not(:disabled) {
+  background: var(--vl-card-2) !important;
+}
+.vl-date-nav-btn:active:not(:disabled) {
+  transform: scale(0.9);
+  background: var(--vl-line) !important;
+}
+
 /* 호버 툴팁 (data-tip 속성 사용) */
 .vl-tip {
   position: relative;

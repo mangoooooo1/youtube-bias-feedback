@@ -5,6 +5,23 @@ function _lockIcon(size = 12) {
   </svg>`;
 }
 
+function _chevronIcon(dir, size = 14) {
+  const d =
+    dir === "left" ? "M14.5 5.5L8 12l6.5 6.5" : "M9.5 5.5L16 12l-6.5 6.5";
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" style="flex-shrink:0" xmlns="http://www.w3.org/2000/svg">
+    <path d="${d}" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+// 날짜 이동 버튼
+function _dateNavButton({ id, dir, disabled = false }) {
+  const color = disabled ? "var(--vl-ink-3)" : "var(--vl-ink-2)";
+  return `<button id="${id}" class="vl-date-nav-btn" ${disabled ? "disabled" : ""}
+    style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:${color};cursor:${disabled ? "default" : "pointer"};display:grid;place-items:center;opacity:${disabled ? 0.4 : 1}">
+    ${_chevronIcon(dir, 15)}
+  </button>`;
+}
+
 // ── Onboarding ────────────────────────────────────────────────────────────────
 
 function screenOnboarding() {
@@ -178,9 +195,9 @@ function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
   return `<div style="display:flex;flex-direction:column;min-height:100%">
     ${_collectingBanner(collectingCount)}
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px 0">
-      <button id="vl-date-prev" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:var(--vl-ink-2);cursor:pointer;font-size:15px;display:grid;place-items:center">‹</button>
+      ${_dateNavButton({ id: "vl-date-prev", dir: "left" })}
       <div style="font-size:13px;font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : dateLabel}</div>
-      <button id="vl-date-next" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:${isToday ? "var(--vl-ink-3)" : "var(--vl-ink-2)"};cursor:${isToday ? "default" : "pointer"};font-size:15px;display:grid;place-items:center;opacity:${isToday ? 0.35 : 1}" ${isToday ? "disabled" : ""}>›</button>
+      ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
     </div>
     <div style="flex:1;padding:24px 24px 40px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px">
       <div style="position:relative;width:80px;height:80px">
@@ -252,11 +269,11 @@ function screenToday() {
   return `<div style="display:flex;flex-direction:column">
     <div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
     <div style="display:flex;align-items:center;justify-content:space-between">
-      <button id="vl-date-prev" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:var(--vl-ink-2);cursor:pointer;font-size:15px;display:grid;place-items:center">‹</button>
+      ${_dateNavButton({ id: "vl-date-prev", dir: "left" })}
       <div style="text-align:center">
         <div style="font-size:13px;font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : d.dateLabel}</div>
       </div>
-      <button id="vl-date-next" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:${isToday ? "var(--vl-ink-3)" : "var(--vl-ink-2)"};cursor:${isToday ? "default" : "pointer"};font-size:15px;display:grid;place-items:center;opacity:${isToday ? 0.35 : 1}" ${isToday ? "disabled" : ""}>›</button>
+      ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
     </div>
     <div style="display:flex;align-items:flex-start;justify-content:space-between">
       <div>${isCollecting ? collectingRow : scrollNudgeRow}</div>
