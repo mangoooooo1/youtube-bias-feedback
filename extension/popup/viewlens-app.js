@@ -84,7 +84,7 @@ function _popupHeader(groupCfg, day, { participantCode, studyEnded } = {}) {
       });
   const rightArea = isTest
     ? `<div style="display:flex;align-items:center;gap:7px">
-        <button id="vl-researcher-reset" style="padding:3px 8px;border:1px solid var(--vl-line-2);border-radius:6px;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-ink-2);line-height:1.7;white-space:nowrap">↩ 온보딩</button>
+        <button id="vl-researcher-reset" style="padding:3px 8px;border:none;border-radius:6px;background:var(--vl-card-2);cursor:pointer;font-family:inherit;font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-ink-2);line-height:1.7;white-space:nowrap">↩ 온보딩</button>
         ${badge}
       </div>`
     : badge;

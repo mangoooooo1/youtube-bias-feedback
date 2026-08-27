@@ -10,7 +10,7 @@ function vlEscapeHtml(str) {
 }
 
 function vlCard({ children = "", pad = 16, soft = false, style = "" } = {}) {
-  return `<div style="background:${soft ? "var(--vl-card-2)" : "var(--vl-card)"};border:1px solid var(--vl-line);border-radius:16px;padding:${pad}px;${style}">${children}</div>`;
+  return `<div style="background:${soft ? "var(--vl-card-2)" : "var(--vl-card)"};border-radius:16px;box-shadow:var(--vl-shadow-card);padding:${pad}px;${style}">${children}</div>`;
 }
 
 function vlSectionLabel({ text = "", right = "" } = {}) {

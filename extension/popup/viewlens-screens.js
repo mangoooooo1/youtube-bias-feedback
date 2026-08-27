@@ -40,7 +40,7 @@ function screenOnboarding() {
       <label style="font-size:var(--vl-fs-3); font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--vl-ink-3)">참여 코드</label>
       <input id="vl-onboard-input" value="" placeholder="연구자에게 받은 참여 코드" spellcheck="false" autocomplete="off"
         style="display:block;margin-top:9px;width:100%;box-sizing:border-box;padding:13px 15px;
-          border:1.5px solid var(--vl-line-2);border-radius:13px;background:var(--vl-card-2);
+          border:none;border-radius:13px;background:var(--vl-card-2);box-shadow:var(--vl-shadow-inset);
           color:var(--vl-ink);outline:none;
           font-size:var(--vl-fs-3); letter-spacing:0.1em;text-transform:uppercase"/>
       <p id="vl-onboard-err" style="display:none;margin:9px 2px 0;font-size:var(--vl-fs-3);color:var(--vl-warn);line-height:1.5"></p>
@@ -51,7 +51,7 @@ function screenOnboarding() {
     </div>
 
     <div style="margin-top:auto;padding-top:22px">
-      <div style="display:flex;align-items:flex-start;gap:9px;padding:12px 13px;background:var(--vl-card-2);border:1px solid var(--vl-line);border-radius:12px">
+      <div style="display:flex;align-items:flex-start;gap:9px;padding:12px 13px;background:var(--vl-card-2);border-radius:12px;box-shadow:var(--vl-shadow-card)">
         <div style="width:25px;height:25px;border-radius:7px;background:var(--vl-accent-soft);color:var(--vl-accent);display:grid;place-items:center;flex-shrink:0;margin-top:1px">
           ${_lockIcon(15)}
         </div>
@@ -501,7 +501,7 @@ function screenControlHome(day, stats = {}) {
         <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">6주간의 시청 리뷰가 준비됐어요</span>
         <span style="font-size:var(--vl-fs-4);color:var(--vl-accent);flex-shrink:0">→</span>
       </button>`
-        : `<div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card-2);border:1px solid var(--vl-line);border-radius:13px">
+        : `<div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card-2);border-radius:13px;box-shadow:var(--vl-shadow-card)">
       <div style="width:25px;height:25px;border-radius:7px;background:var(--vl-accent-soft);color:var(--vl-accent);display:grid;place-items:center;flex-shrink:0;margin-top:1px">
         ${_lockIcon(15)}
       </div>
@@ -527,7 +527,7 @@ function screenStudyEndCodeInput() {
       <label style="font-size:var(--vl-fs-3);font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--vl-ink-3)">코드</label>
       <input id="vl-study-end-code-input" value="" placeholder="설문에서 안내받은 코드" spellcheck="false" autocomplete="off"
         style="display:block;margin-top:9px;width:100%;box-sizing:border-box;padding:13px 15px;
-          border:1.5px solid var(--vl-line-2);border-radius:13px;background:var(--vl-card-2);
+          border:none;border-radius:13px;background:var(--vl-card-2);box-shadow:var(--vl-shadow-inset);
           color:var(--vl-ink);outline:none;
           font-size:var(--vl-fs-3); letter-spacing:0.1em;text-transform:uppercase"/>
       <p id="vl-study-end-code-err" style="display:none;margin:9px 2px 0;font-size:var(--vl-fs-3);color:var(--vl-warn);line-height:1.5"></p>
