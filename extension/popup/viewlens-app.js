@@ -65,7 +65,7 @@ function _isStudyEndReviewReady(groupCfg, installDate) {
 // 대조군 6주 리뷰 화면 상단에 붙는 뒤로가기 행
 function _studyEndBackRow() {
   return `<div style="padding:12px 16px 0">
-    <button id="vl-study-end-back" style="display:flex;align-items:center;gap:5px;padding:5px 2px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:12.5px;font-weight:700;color:var(--vl-ink-2)">‹ 홈으로</button>
+    <button id="vl-study-end-back" style="display:flex;align-items:center;gap:5px;padding:5px 2px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-ink-2)">‹ 홈으로</button>
   </div>`;
 }
 
@@ -84,7 +84,7 @@ function _popupHeader(groupCfg, day, { participantCode, studyEnded } = {}) {
       });
   const rightArea = isTest
     ? `<div style="display:flex;align-items:center;gap:7px">
-        <button id="vl-researcher-reset" style="padding:3px 8px;border:1px solid var(--vl-line-2);border-radius:6px;background:transparent;cursor:pointer;font-family:inherit;font-size:11px;font-weight:600;color:var(--vl-ink-2);line-height:1.7;white-space:nowrap">↩ 온보딩</button>
+        <button id="vl-researcher-reset" style="padding:3px 8px;border:1px solid var(--vl-line-2);border-radius:6px;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-ink-2);line-height:1.7;white-space:nowrap">↩ 온보딩</button>
         ${badge}
       </div>`
     : badge;
@@ -92,8 +92,8 @@ function _popupHeader(groupCfg, day, { participantCode, studyEnded } = {}) {
     <div style="display:flex;align-items:center;gap:9px">
       ${markSVG({ size: 26, accent: "var(--vl-accent)" })}
       <div style="display:flex;flex-direction:column;line-height:1.1">
-        <span style="font-size:15px;font-weight:800;letter-spacing:-0.02em;color:var(--vl-ink)">View<span style="color:var(--vl-accent)">Lens</span></span>
-        <span style="font-size:10.5px;color:var(--vl-ink-3);margin-top:2px">설치 ${day}일째 · 종료 D-${Math.max(0, VL.TOTAL_DAYS - day)}</span>
+        <span style="font-size:var(--vl-fs-4);font-weight:800;letter-spacing:-0.02em;color:var(--vl-ink)">View<span style="color:var(--vl-accent)">Lens</span></span>
+        <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:2px">설치 ${day}일째 · 종료 D-${Math.max(0, VL.TOTAL_DAYS - day)}</span>
       </div>
     </div>
     ${rightArea}
@@ -122,7 +122,7 @@ function _tabs(activeTab, needsConfirmNudge = false) {
           t.id === "today" && !on && needsConfirmNudge
             ? `<span style="display:inline-block;width:6px;height:6px;margin-left:5px;border-radius:50%;background:var(--vl-accent);vertical-align:middle;animation:vlBlink 1.4s ease-in-out infinite"></span>`
             : "";
-        return `<button data-tab="${t.id}" style="flex:1;padding:9px 6px 11px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;color:${on ? "var(--vl-accent)" : "var(--vl-ink-3)"};border-bottom:2px solid ${on ? "var(--vl-accent)" : "transparent"};transition:color .15s">${t.label}${nudge}</button>`;
+        return `<button data-tab="${t.id}" style="flex:1;padding:9px 6px 11px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-3);font-weight:700;color:${on ? "var(--vl-accent)" : "var(--vl-ink-3)"};border-bottom:2px solid ${on ? "var(--vl-accent)" : "transparent"};transition:color .15s">${t.label}${nudge}</button>`;
       })
       .join("")}
   </div>`;
@@ -515,8 +515,8 @@ class Studio {
         <div style="width:960px;max-width:100%;display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap">
           ${wordmarkHTML({ size: 26, accent, sub: "YouTube Bias Feedback" })}
           <div style="text-align:right;max-width:360px">
-            <div style="font-size:13px;font-weight:700;color:#3a3531">시청 편향 피드백 · 크롬 확장 프로그램</div>
-            <div style="font-size:12px;color:#8a837c;margin-top:3px;line-height:1.5">세션별 카테고리 다양성(Shannon Entropy)을 분석해 명확한 시청 분석으로 돌려줍니다.</div>
+            <div style="font-size:var(--vl-fs-3);font-weight:700;color:#3a3531">시청 편향 피드백 · 크롬 확장 프로그램</div>
+            <div style="font-size:var(--vl-fs-3);color:#8a837c;margin-top:3px;line-height:1.5">세션별 카테고리 다양성(Shannon Entropy)을 분석해 명확한 시청 분석으로 돌려줍니다.</div>
           </div>
         </div>
 
@@ -527,19 +527,19 @@ class Studio {
             <div style="display:flex;gap:8px">
               ${["#ff5f57", "#febc2e", "#28c840"].map((c) => `<span style="width:12px;height:12px;border-radius:50%;background:${c}"></span>`).join("")}
             </div>
-            <div style="margin-left:14px;height:30px;align-self:flex-end;background:#35363a;border-radius:9px 9px 0 0;padding:0 14px;display:flex;align-items:center;gap:8px;font-size:12.5px;color:#e8eaed;max-width:230px">
+            <div style="margin-left:14px;height:30px;align-self:flex-end;background:#35363a;border-radius:9px 9px 0 0;padding:0 14px;display:flex;align-items:center;gap:8px;font-size:var(--vl-fs-3);color:#e8eaed;max-width:230px">
               <span style="width:13px;height:13px;border-radius:3px;background:#ff0033"></span>
               <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">YouTube</span>
             </div>
           </div>
           <!-- toolbar -->
           <div style="height:46px;background:#35363a;display:flex;align-items:center;gap:6px;padding:0 12px">
-            <span style="color:#9aa0a6;font-size:17px;opacity:.7">‹</span>
-            <span style="color:#9aa0a6;font-size:17px;opacity:.35">›</span>
-            <span style="color:#9aa0a6;font-size:14px;opacity:.7;margin-left:2px">⟳</span>
+            <span style="color:#9aa0a6;font-size:var(--vl-fs-5);opacity:.7">‹</span>
+            <span style="color:#9aa0a6;font-size:var(--vl-fs-5);opacity:.35">›</span>
+            <span style="color:#9aa0a6;font-size:var(--vl-fs-4);opacity:.7;margin-left:2px">⟳</span>
             <div style="flex:1;height:30px;border-radius:16px;background:#202124;display:flex;align-items:center;gap:8px;padding:0 14px;margin:0 8px">
               <span style="width:11px;height:11px;border-radius:50%;border:1.5px solid #9aa0a6;opacity:.6"></span>
-              <span style="color:#c9ccd1;font-size:12.5px;">youtube.com<span style="color:#9aa0a6">/watch?v=dQw4w9WgXcQ</span></span>
+              <span style="color:#c9ccd1;font-size:var(--vl-fs-3);">youtube.com<span style="color:#9aa0a6">/watch?v=dQw4w9WgXcQ</span></span>
             </div>
             <!-- extension icon -->
             <div style="width:28px;height:28px;border-radius:8px;display:grid;place-items:center">
@@ -584,7 +584,7 @@ class Studio {
           </div>
         </div>
 
-        <div style="font-size:12px;color:#9a938c;;letter-spacing:.04em">
+        <div style="font-size:var(--vl-fs-3);color:#9a938c;;letter-spacing:.04em">
           오른쪽 아래 <b id="vl-tweaks-hint" style="cursor:pointer">Tweaks ▲</b> 패널에서 톤 · 그룹 · 실험 시점을 바꿔 보세요
         </div>
       </div>

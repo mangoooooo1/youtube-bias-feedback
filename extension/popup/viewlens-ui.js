@@ -15,7 +15,7 @@ function vlCard({ children = "", pad = 16, soft = false, style = "" } = {}) {
 
 function vlSectionLabel({ text = "", right = "" } = {}) {
   return `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-    <span style=";font-size:11px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--vl-ink-3);white-space:nowrap">${text}</span>
+    <span style=";font-size:var(--vl-fs-2);font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--vl-ink-3);white-space:nowrap">${text}</span>
     ${right}
   </div>`;
 }
@@ -42,8 +42,8 @@ function vlDeltaChip({ value = 0, unit = "", invertColor = false } = {}) {
         ? "var(--vl-good)"
         : "var(--vl-warn)";
   const arrow = value === 0 ? "·" : up ? "▲" : "▼";
-  return `<span style="display:inline-flex;align-items:center;gap:4px;color:${col};;font-weight:600;font-size:12px">
-    <span style="font-size:9px">${arrow}</span>${up ? "+" : ""}${value.toFixed(2)}${unit}
+  return `<span style="display:inline-flex;align-items:center;gap:4px;color:${col};;font-weight:600;font-size:var(--vl-fs-3)">
+    <span style="font-size:var(--vl-fs-1)">${arrow}</span>${up ? "+" : ""}${value.toFixed(2)}${unit}
   </span>`;
 }
 
@@ -55,11 +55,11 @@ function vlBarChart({ data = [], maxVal, animate = true } = {}) {
         (d) => `
       <div style="display:flex;align-items:center;gap:10px">
         <span style="width:8px;height:8px;border-radius:3px;background:${d.color};flex-shrink:0"></span>
-        <span style="width:86px;font-size:12.5px;color:var(--vl-ink);font-weight:500;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.name}</span>
+        <span style="width:86px;font-size:var(--vl-fs-3);color:var(--vl-ink);font-weight:500;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.name}</span>
         <div style="flex:1;height:8px;background:var(--vl-line);border-radius:999px;overflow:hidden">
           <div style="width:${(d.p / top) * 100}%;height:100%;background:${d.color};border-radius:999px;${animate ? "transition:width .7s cubic-bezier(.2,.8,.2,1)" : ""}"></div>
         </div>
-        <span style="width:34px;text-align:right;;font-size:12px;color:var(--vl-ink-2);flex-shrink:0">${Math.round(d.p * 100)}%</span>
+        <span style="width:34px;text-align:right;;font-size:var(--vl-fs-3);color:var(--vl-ink-2);flex-shrink:0">${Math.round(d.p * 100)}%</span>
       </div>
     `,
       )
@@ -93,8 +93,8 @@ function vlDonut({ data = [], size = 128, thickness = 18 } = {}) {
       <g transform="rotate(-90 ${cx} ${cy})">${segments}</g>
     </svg>
     <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
-      <span style=";font-weight:700;font-size:22px;color:var(--vl-ink);line-height:1">${Math.round(top.p * 100)}%</span>
-      <span style="font-size:10.5px;color:var(--vl-ink-3);margin-top:3px;font-weight:600">${top.name}</span>
+      <span style=";font-weight:700;font-size:var(--vl-fs-6);color:var(--vl-ink);line-height:1">${Math.round(top.p * 100)}%</span>
+      <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:3px;font-weight:600">${top.name}</span>
     </div>
   </div>`;
 }
@@ -147,7 +147,7 @@ function vlReview({
   const cats = VL.CATS;
 
   const topicBlock = topic
-    ? `<p style="margin:0 0 10px;font-size:17px;font-weight:800;color:var(--vl-ink);line-height:1.4;letter-spacing:-0.02em;text-wrap:pretty">
+    ? `<p style="margin:0 0 10px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink);line-height:1.4;letter-spacing:-0.02em;text-wrap:pretty">
         당신은 '<span style="color:var(--vl-accent)">${vlEscapeHtml(topic)}</span>'에 관심이 많습니다!
       </p>`
     : "";
@@ -157,11 +157,11 @@ function vlReview({
       ? `
     <details class="vl-vid-details" style="margin-top:13px;padding-top:12px;border-top:1px solid color-mix(in oklab,var(--vl-accent) 18%,transparent)">
       <summary style="display:flex;align-items:center;justify-content:space-between;padding:2px 0;border-radius:6px;user-select:none">
-        <span style="display:flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--vl-accent)">
-          <span class="vl-vid-chevron" style="font-size:9px;line-height:1">▸</span>
+        <span style="display:flex;align-items:center;gap:5px;font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-accent)">
+          <span class="vl-vid-chevron" style="font-size:var(--vl-fs-1);line-height:1">▸</span>
           분석한 영상
         </span>
-        <span style="font-size:11px;;color:var(--vl-ink-3)">${videos.length}개</span>
+        <span style="font-size:var(--vl-fs-2);;color:var(--vl-ink-3)">${videos.length}개</span>
       </summary>
       <div style="margin-top:9px;display:flex;flex-direction:column;gap:6px">
         ${videos
@@ -171,7 +171,7 @@ function vlReview({
               ? `https://www.youtube.com/watch?v=${encodeURIComponent(v.videoId)}`
               : null;
             const dot = `<span style="width:7px;height:7px;border-radius:2.5px;background:${color};flex-shrink:0"></span>`;
-            const label = `<span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${vlEscapeHtml(v.title)}</span>`;
+            const label = `<span style="font-size:var(--vl-fs-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${vlEscapeHtml(v.title)}</span>`;
             const base = `display:flex;align-items:center;gap:8px;min-width:0`;
             return ytUrl
               ? `<a href="${ytUrl}" target="_blank" rel="noopener" class="vl-vid-link"
@@ -189,7 +189,7 @@ function vlReview({
   //  backdrop-filter 미지원 환경에서도 filter:blur만으로 판독 불가능하도록 이중 처리).
   const revealOverlay = locked
     ? `<div style="position:absolute;inset:0;border-radius:16px;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);background:color-mix(in oklab,var(--vl-accent-soft) 60%,transparent)">
-        <button id="vl-feedback-confirm-btn" data-session-id="${sessionId ?? ""}" style="display:flex;align-items:center;gap:7px;padding:11px 20px;border:1px solid color-mix(in oklab,var(--vl-accent) 35%,transparent);border-radius:999px;background:var(--vl-card);color:var(--vl-accent);font-size:13px;font-weight:700;cursor:pointer;animation:vlGlow 2.4s ease-in-out infinite">
+        <button id="vl-feedback-confirm-btn" data-session-id="${sessionId ?? ""}" style="display:flex;align-items:center;gap:7px;padding:11px 20px;border:1px solid color-mix(in oklab,var(--vl-accent) 35%,transparent);border-radius:999px;background:var(--vl-card);color:var(--vl-accent);font-size:var(--vl-fs-3);font-weight:700;cursor:pointer;animation:vlGlow 2.4s ease-in-out infinite">
           ${markSVG({ size: 15, filled: false, accent: "var(--vl-accent)" })}
           피드백 확인하기
         </button>
@@ -200,10 +200,10 @@ function vlReview({
     <div style="${locked ? "filter:blur(6px);user-select:none;pointer-events:none" : ""}">
       <div style="display:flex;align-items:center;gap:7px;margin-bottom:9px">
         ${markSVG({ size: 18, filled: false, accent: "var(--vl-accent)" })}
-        <span style="font-size:12.5px;font-weight:700;color:var(--vl-accent)">${title}</span>
+        <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">${title}</span>
       </div>
       ${topicBlock}
-      <p style="margin:0;font-size:13.5px;line-height:1.65;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(text)}</p>
+      <p style="margin:0;font-size:var(--vl-fs-3);line-height:1.65;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(text)}</p>
       ${videoList}
     </div>
     ${revealOverlay}
@@ -229,13 +229,13 @@ function vlConfirmModal({
           ? `<div style="width:52px;height:52px;margin:0 auto;border-radius:50%;background:var(--vl-accent-soft);display:grid;place-items:center">${icon}</div>`
           : ""
       }
-      <div style="margin-top:${icon ? 16 : 0}px;font-size:17px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${title}</div>
-      <p style="margin:9px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">${message}</p>
+      <div style="margin-top:${icon ? 16 : 0}px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${title}</div>
+      <p style="margin:9px 0 0;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">${message}</p>
       <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px">
-        <button id="${confirmId}" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">${confirmLabel}</button>
+        <button id="${confirmId}" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);font-weight:700;cursor:pointer;font-family:inherit">${confirmLabel}</button>
         ${
           cancelLabel
-            ? `<button id="${cancelId}" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">${cancelLabel}</button>`
+            ? `<button id="${cancelId}" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:var(--vl-fs-3);font-weight:600;cursor:pointer;font-family:inherit">${cancelLabel}</button>`
             : ""
         }
       </div>

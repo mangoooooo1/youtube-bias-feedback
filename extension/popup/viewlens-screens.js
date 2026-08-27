@@ -28,25 +28,25 @@ function screenOnboarding() {
   return `<div style="padding:34px 22px 26px;display:flex;flex-direction:column;min-height:100%;box-sizing:border-box">
     <div style="display:flex;flex-direction:column;align-items:center;text-align:center;margin-top:18px">
       ${markSVG({ size: 64, accent: "var(--vl-accent)" })}
-      <div style="margin-top:18px;font-size:25px;font-weight:800;letter-spacing:-0.03em;color:var(--vl-ink)">
+      <div style="margin-top:18px;font-size:var(--vl-fs-7);font-weight:800;letter-spacing:-0.03em;color:var(--vl-ink)">
         View<span style="color:var(--vl-accent)">Lens</span>
       </div>
-      <p style="margin:10px 0 0;font-size:13.5px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;word-break:keep-all">
+      <p style="margin:10px 0 0;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;word-break:keep-all">
         추천 알고리즘을 넘어 당신의 시청 습관을 돌아봅니다.<br />연구자에게 받은 참여 코드를 입력하여 시작해 주세요.
       </p>
     </div>
 
     <div style="margin-top:40px">
-      <label style="font-size:12px; font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--vl-ink-3)">참여 코드</label>
+      <label style="font-size:var(--vl-fs-3); font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--vl-ink-3)">참여 코드</label>
       <input id="vl-onboard-input" value="" placeholder="연구자에게 받은 참여 코드" spellcheck="false" autocomplete="off"
         style="display:block;margin-top:9px;width:100%;box-sizing:border-box;padding:13px 15px;
           border:1.5px solid var(--vl-line-2);border-radius:13px;background:var(--vl-card-2);
           color:var(--vl-ink);outline:none;
-          font-size:13px; letter-spacing:0.1em;text-transform:uppercase"/>
-      <p id="vl-onboard-err" style="display:none;margin:9px 2px 0;font-size:12px;color:var(--vl-warn);line-height:1.5"></p>
+          font-size:var(--vl-fs-3); letter-spacing:0.1em;text-transform:uppercase"/>
+      <p id="vl-onboard-err" style="display:none;margin:9px 2px 0;font-size:var(--vl-fs-3);color:var(--vl-warn);line-height:1.5"></p>
       <button id="vl-onboard-btn"
         style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:13px;
-          background:var(--vl-accent);color:var(--vl-on-accent);font-size:14.5px;
+          background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);
           font-weight:700;cursor:pointer;font-family:inherit">시작하기</button>
     </div>
 
@@ -55,7 +55,7 @@ function screenOnboarding() {
         <div style="width:25px;height:25px;border-radius:7px;background:var(--vl-accent-soft);color:var(--vl-accent);display:grid;place-items:center;flex-shrink:0;margin-top:1px">
           ${_lockIcon(15)}
         </div>
-        <p style="margin:0;font-size:11.5px;line-height:1.55;color:var(--vl-ink-2);text-wrap:pretty">
+        <p style="margin:0;font-size:var(--vl-fs-2);line-height:1.55;color:var(--vl-ink-2);text-wrap:pretty">
           시청 기록은 익명으로 저장됩니다. 누가 어떤 영상을 봤는지는 특정되지 않으며, 수집된 데이터는 오직 연구 목적으로만 사용됩니다.
         </p>
       </div>
@@ -184,10 +184,10 @@ function _collectingBanner(count) {
   return `<div id="vl-collecting-banner" style="display:flex;align-items:center;gap:9px;padding:10px 16px;background:var(--vl-accent-soft);border-bottom:1px solid var(--vl-line)">
     <span style="width:7px;height:7px;border-radius:50%;background:var(--vl-accent);flex-shrink:0;animation:vlBlink 1.6s ease-in-out infinite"></span>
     <div style="flex:1;min-width:0">
-      <div id="vl-collecting-count" style="font-size:12.5px;font-weight:600;color:var(--vl-accent)">영상 ${count}개 수집 중</div>
-      <div style="font-size:11px;color:var(--vl-accent);opacity:0.75;margin-top:1px">이 시간 안에 더 시청하지 않으면 피드백이 생성돼요</div>
+      <div id="vl-collecting-count" style="font-size:var(--vl-fs-3);font-weight:600;color:var(--vl-accent)">영상 ${count}개 수집 중</div>
+      <div style="font-size:var(--vl-fs-2);color:var(--vl-accent);opacity:0.75;margin-top:1px">이 시간 안에 더 시청하지 않으면 피드백이 생성돼요</div>
     </div>
-    <span id="vl-collecting-timer" style="font-size:11px;font-weight:600;color:var(--vl-accent);opacity:0.8;white-space:nowrap;flex-shrink:0">${timerText}</span>
+    <span id="vl-collecting-timer" style="font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-accent);opacity:0.8;white-space:nowrap;flex-shrink:0">${timerText}</span>
   </div>`;
 }
 
@@ -196,7 +196,7 @@ function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
     ${_collectingBanner(collectingCount)}
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px 0">
       ${_dateNavButton({ id: "vl-date-prev", dir: "left" })}
-      <div style="font-size:13px;font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : dateLabel}</div>
+      <div style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : dateLabel}</div>
       ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
     </div>
     <div style="flex:1;padding:24px 24px 40px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px">
@@ -208,16 +208,16 @@ function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
         </span>
       </div>
       <div>
-        <div style="font-size:16px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${isToday ? "아직 오늘 시청 기록이 없어요" : "이 날 시청 기록이 없어요"}</div>
+        <div style="font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${isToday ? "아직 오늘 시청 기록이 없어요" : "이 날 시청 기록이 없어요"}</div>
         ${
           isToday
-            ? `<p style="margin:8px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;max-width:240px">
+            ? `<p style="margin:8px 0 0;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;max-width:240px">
           유튜브를 시청하면 자동으로 수집이 시작돼요.<br>시청 종료 10분 후 분석 결과가 나타나요.
         </p>`
             : ""
         }
       </div>
-      <div style="font-size:11px;color:var(--vl-ink-3)">${dateLabel}</div>
+      <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3)">${dateLabel}</div>
     </div>
   </div>`;
 }
@@ -236,8 +236,8 @@ function screenToday() {
       (c) => `
     <div style="display:flex;align-items:center;gap:8px">
       <span style="width:8px;height:8px;border-radius:3px;background:${c.color};flex-shrink:0"></span>
-      <span style="font-size:12px;color:var(--vl-ink);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name}</span>
-      <span style="font-size:12px;color:var(--vl-ink-2)">${Math.round(c.p * 100)}%</span>
+      <span style="font-size:var(--vl-fs-3);color:var(--vl-ink);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name}</span>
+      <span style="font-size:var(--vl-fs-3);color:var(--vl-ink-2)">${Math.round(c.p * 100)}%</span>
     </div>
   `,
     )
@@ -253,8 +253,8 @@ function screenToday() {
     <div style="display:flex;align-items:flex-start;gap:6px">
       <span style="width:6px;height:6px;margin-top:4px;border-radius:50%;background:var(--vl-accent);flex-shrink:0;animation:vlBlink 1.6s ease-in-out infinite"></span>
       <div style="display:flex;flex-direction:column;gap:1px">
-        <span id="vl-collecting-count" style="font-size:11.5px;font-weight:600;color:var(--vl-accent)">${d.collectingCount > 0 ? `영상 ${d.collectingCount}개 수집 중` : "분석 중..."}</span>
-        <span id="vl-collecting-timer" style="font-size:10.5px;color:var(--vl-accent);opacity:0.8">${d.collectingTimer || ""}</span>
+        <span id="vl-collecting-count" style="font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-accent)">${d.collectingCount > 0 ? `영상 ${d.collectingCount}개 수집 중` : "분석 중..."}</span>
+        <span id="vl-collecting-timer" style="font-size:var(--vl-fs-2);color:var(--vl-accent);opacity:0.8">${d.collectingTimer || ""}</span>
       </div>
     </div>`
     : "";
@@ -262,8 +262,8 @@ function screenToday() {
   // 보이는 상단 영역에 내려가 보라는 안내를 띄운다(수집 중 표시와 자리를 공유).
   const scrollNudgeRow = reviewLocked
     ? `<div style="display:flex;align-items:center;gap:6px">
-      <span style="display:inline-block;font-size:13px;line-height:1;color:var(--vl-accent);animation:vlBounceDown 1.2s ease-in-out infinite">↓</span>
-      <span style="font-size:11.5px;font-weight:600;color:var(--vl-accent)">아래로 스크롤해서 피드백 확인하세요!</span>
+      <span style="display:inline-block;font-size:var(--vl-fs-3);line-height:1;color:var(--vl-accent);animation:vlBounceDown 1.2s ease-in-out infinite">↓</span>
+      <span style="font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-accent)">아래로 스크롤해서 피드백 확인하세요!</span>
     </div>`
     : "";
   return `<div style="display:flex;flex-direction:column">
@@ -271,32 +271,32 @@ function screenToday() {
     <div style="display:flex;align-items:center;justify-content:space-between">
       ${_dateNavButton({ id: "vl-date-prev", dir: "left" })}
       <div style="text-align:center">
-        <div style="font-size:13px;font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : d.dateLabel}</div>
+        <div style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : d.dateLabel}</div>
       </div>
       ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
     </div>
     <div style="display:flex;align-items:flex-start;justify-content:space-between">
       <div>${isCollecting ? collectingRow : scrollNudgeRow}</div>
-      <span style="display:inline-flex;align-items:center;color:var(--vl-ink-2);font-size:11.5px;font-weight:600;line-height:1.2;white-space:nowrap">${d.videoCount}개 영상 · ${d.dist.length}개 분야</span>
+      <span style="display:inline-flex;align-items:center;color:var(--vl-ink-2);font-size:var(--vl-fs-2);font-weight:600;line-height:1.2;white-space:nowrap">${d.videoCount}개 영상 · ${d.dist.length}개 분야</span>
     </div>
 
     ${vlCard({
       pad: 16,
       children: `
-      <div style="font-size:11.5px;color:var(--vl-ink-3);font-weight:600;margin-bottom:11px">직전 시청일 대비 다양성</div>
+      <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);font-weight:600;margin-bottom:11px">직전 시청일 대비 다양성</div>
       <div style="display:flex;align-items:center;gap:13px">
         <div style="text-align:center">
-          <div style=";font-size:18px;font-weight:700;color:var(--vl-ink-3);line-height:1">${d.prevEntropy.toFixed(2)}</div>
-          <div style="font-size:10.5px;color:var(--vl-ink-3);margin-top:4px">${d.prevDateLabel}</div>
+          <div style=";font-size:var(--vl-fs-5);font-weight:700;color:var(--vl-ink-3);line-height:1">${d.prevEntropy.toFixed(2)}</div>
+          <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:4px">${d.prevDateLabel}</div>
         </div>
-        <span style="font-size:15px;color:var(--vl-ink-3)">→</span>
+        <span style="font-size:var(--vl-fs-4);color:var(--vl-ink-3)">→</span>
         <div style="text-align:center">
-          <div style=";font-size:22px;font-weight:700;color:var(--vl-ink);line-height:1">${h.toFixed(2)}</div>
-          <div style="font-size:10.5px;color:var(--vl-accent);margin-top:4px;font-weight:700">오늘</div>
+          <div style=";font-size:var(--vl-fs-6);font-weight:700;color:var(--vl-ink);line-height:1">${h.toFixed(2)}</div>
+          <div style="font-size:var(--vl-fs-2);color:var(--vl-accent);margin-top:4px;font-weight:700">오늘</div>
         </div>
         <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px">
           ${vlDeltaChip({ value: delta })}
-          <span style="font-size:11px;font-weight:700;color:${delta >= 0 ? "var(--vl-good)" : "var(--vl-warn)"}">${delta >= 0 ? "더 다양해졌어요" : "더 편중됐어요"}</span>
+          <span style="font-size:var(--vl-fs-2);font-weight:700;color:${delta >= 0 ? "var(--vl-good)" : "var(--vl-warn)"}">${delta >= 0 ? "더 다양해졌어요" : "더 편중됐어요"}</span>
         </div>
       </div>
     `,
@@ -365,7 +365,7 @@ function screenFeedback(currentWeek, selWeek) {
         border:1.5px solid ${active ? "var(--vl-accent)" : "var(--vl-line)"};
         background:${active ? "var(--vl-accent-soft)" : "var(--vl-card)"};
         color:${locked ? "var(--vl-ink-3)" : active ? "var(--vl-accent)" : "var(--vl-ink-2)"};
-        font-family:inherit;font-weight:700;font-size:13px;opacity:${locked ? 0.65 : 1};
+        font-family:inherit;font-weight:700;font-size:var(--vl-fs-3);opacity:${locked ? 0.65 : 1};
         display:flex;flex-direction:column;align-items:center;gap:3px">
       <span style="display:flex;align-items:center;gap:4px;white-space:nowrap">
         ${locked ? _lockIcon(10) : ""}${wk.label}
@@ -376,19 +376,19 @@ function screenFeedback(currentWeek, selWeek) {
 
   const vsBaseContent = prevW
     ? `<div>
-        <div style="font-size:11.5px;color:var(--vl-ink-3);margin-bottom:4px">직전 기간(${prevW.label}) 대비</div>
+        <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-bottom:4px">직전 기간(${prevW.label}) 대비</div>
         <div style="display:flex;align-items:center;gap:7px">
           ${vlDeltaChip({ value: vsPrev })}
-          <span style="font-size:12px;color:var(--vl-ink-2)">${vsPrev >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
+          <span style="font-size:var(--vl-fs-3);color:var(--vl-ink-2)">${vsPrev >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
         </div>
       </div>`
-    : `<p style="margin:0;font-size:12px;line-height:1.55;color:var(--vl-ink-2)">첫 기간이라 비교할 데이터가 없어요.</p>`;
+    : `<p style="margin:0;font-size:var(--vl-fs-3);line-height:1.55;color:var(--vl-ink-2)">첫 기간이라 비교할 데이터가 없어요.</p>`;
 
   const baselineLegend = !w.isBaseline
     ? `
     <div style="display:flex;align-items:center;gap:5px;margin-top:7px">
       <span style="width:14px;height:0;border-top:1px dashed var(--vl-ink-3)"></span>
-      <span style="font-size:10.5px;color:var(--vl-ink-3)">점선 = 기준값 ${VL.baselineH.toFixed(2)}</span>
+      <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3)">점선 = 기준값 ${VL.baselineH.toFixed(2)}</span>
     </div>`
     : "";
 
@@ -397,10 +397,10 @@ function screenFeedback(currentWeek, selWeek) {
 
     <div style="display:flex;align-items:center;justify-content:space-between">
       <div>
-        <div style="font-size:16px;font-weight:800;color:var(--vl-ink)">
+        <div style="font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink)">
           ${w.label} 리포트
         </div>
-        <div style=";font-size:11.5px;color:var(--vl-ink-3);margin-top:2px">${w.range}</div>
+        <div style=";font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:2px">${w.range}</div>
       </div>
     </div>
 
@@ -409,8 +409,8 @@ function screenFeedback(currentWeek, selWeek) {
       children: `
       <div style="display:flex;align-items:center;gap:14px">
         <div class="vl-tip" data-tip="시청한 영상이 여러 카테고리에 고르게 퍼져 있을수록 높아지는 점수예요.&#10;한 주제만 보면 낮고, 다양하게 볼수록 올라가요." style="text-align:center;flex-shrink:0">
-          <div style="font-weight:700;font-size:30px;color:var(--vl-ink);line-height:1;letter-spacing:-0.02em">${w.entropy.toFixed(2)}</div>
-          <div style="font-size:10.5px;color:var(--vl-ink-3);margin-top:4px;font-weight:600">다양성 점수 ⓘ</div>
+          <div style="font-weight:700;font-size:var(--vl-fs-7);color:var(--vl-ink);line-height:1;letter-spacing:-0.02em">${w.entropy.toFixed(2)}</div>
+          <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:4px;font-weight:600">다양성 점수 ⓘ</div>
         </div>
         <div style="width:1px;align-self:stretch;background:var(--vl-line)"></div>
         <div style="flex:1">${vsBaseContent}</div>
@@ -457,8 +457,8 @@ function screenControlHome(day, stats = {}) {
     .map(
       (cell, i) => `
     <div style="padding:16px 18px;border-right:${i % 2 === 0 ? "1px solid var(--vl-line)" : "none"};border-bottom:${i < 2 ? "1px solid var(--vl-line)" : "none"}">
-      <div style="font-weight:700;font-size:24px;color:var(--vl-ink);letter-spacing:-0.02em;line-height:1">${cell.v}</div>
-      <div style="font-size:11.5px;color:var(--vl-ink-3);margin-top:6px;font-weight:500">${cell.l}</div>
+      <div style="font-weight:700;font-size:var(--vl-fs-7);color:var(--vl-ink);letter-spacing:-0.02em;line-height:1">${cell.v}</div>
+      <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:6px;font-weight:500">${cell.l}</div>
     </div>
   `,
     )
@@ -476,15 +476,15 @@ function screenControlHome(day, stats = {}) {
           ${markSVG({ size: 36, filled: false, accent: "var(--vl-accent)" })}
         </span>
       </div>
-      <div style="margin-top:16px;font-size:16.5px;font-weight:800;color:var(--vl-ink)">시청 기록을 수집하고 있어요</div>
-      <p style="margin:9px auto 0;max-width:250px;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
+      <div style="margin-top:16px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink)">시청 기록을 수집하고 있어요</div>
+      <p style="margin:9px auto 0;max-width:250px;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
         평소처럼 유튜브를 시청해 주세요. 연구 기간 동안 시청 데이터가 기기 안에 안전하게 기록돼요.
       </p>
       ${
         // 베이스라인 중인 EXP에게만 보여주는 한 줄 — CON은 종료 후 일괄 제공(10-10)이라
         // "언제부터 분석을 받는지"라는 개념 자체가 없어 stats.baselineDaysLeft가 null로 온다.
         stats.baselineDaysLeft != null
-          ? `<p style="margin:8px auto 0;max-width:250px;font-size:12.5px;line-height:1.6;color:var(--vl-accent);font-weight:600;text-wrap:pretty">
+          ? `<p style="margin:8px auto 0;max-width:250px;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-accent);font-weight:600;text-wrap:pretty">
         ${stats.baselineDaysLeft}일 뒤부터 나만의 시청 분석을 받아볼 수 있어요.
       </p>`
           : ""
@@ -498,14 +498,14 @@ function screenControlHome(day, stats = {}) {
       // 종료 안내 모달을 이미 본 뒤엔 이 자리가 상시 재진입 CTA로 바뀐다.
       stats.studyEndCtaReady
         ? `<button id="vl-study-end-cta" style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:15px 16px;background:var(--vl-accent-soft);border:1px solid color-mix(in oklab,var(--vl-accent) 30%,transparent);border-radius:13px;cursor:pointer;font-family:inherit;text-align:left">
-        <span style="font-size:13px;font-weight:700;color:var(--vl-accent)">6주간의 시청 리뷰가 준비됐어요</span>
-        <span style="font-size:15px;color:var(--vl-accent);flex-shrink:0">→</span>
+        <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">6주간의 시청 리뷰가 준비됐어요</span>
+        <span style="font-size:var(--vl-fs-4);color:var(--vl-accent);flex-shrink:0">→</span>
       </button>`
         : `<div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card-2);border:1px solid var(--vl-line);border-radius:13px">
       <div style="width:25px;height:25px;border-radius:7px;background:var(--vl-accent-soft);color:var(--vl-accent);display:grid;place-items:center;flex-shrink:0;margin-top:1px">
         ${_lockIcon(15)}
       </div>
-      <p style="margin:0;font-size:11.5px;line-height:1.55;color:var(--vl-ink-2);text-wrap:pretty">
+      <p style="margin:0;font-size:var(--vl-fs-2);line-height:1.55;color:var(--vl-ink-2);text-wrap:pretty">
         실험 기간 중 피드백 제공 시점은 참여자마다 다를 수 있으며, 실험 종료 후 모든 참여자에게 결과를 공유합니다.
       </p>
     </div>`
@@ -519,21 +519,21 @@ function screenStudyEndCodeInput() {
   return `<div style="padding:34px 22px 26px;display:flex;flex-direction:column;min-height:100%;box-sizing:border-box">
     <div style="display:flex;flex-direction:column;align-items:center;text-align:center;margin-top:8px">
       ${markSVG({ size: 52, accent: "var(--vl-accent)" })}
-      <div style="margin-top:16px;font-size:17px;font-weight:800;letter-spacing:-0.02em;color:var(--vl-ink)">시청 기록 리뷰 열람</div>
-      <p style="margin:9px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">설문에서 안내받은 코드를 입력해 주세요.</p>
+      <div style="margin-top:16px;font-size:var(--vl-fs-5);font-weight:800;letter-spacing:-0.02em;color:var(--vl-ink)">시청 기록 리뷰 열람</div>
+      <p style="margin:9px 0 0;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">설문에서 안내받은 코드를 입력해 주세요.</p>
     </div>
 
     <div style="margin-top:32px">
-      <label style="font-size:12px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--vl-ink-3)">코드</label>
+      <label style="font-size:var(--vl-fs-3);font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:var(--vl-ink-3)">코드</label>
       <input id="vl-study-end-code-input" value="" placeholder="설문에서 안내받은 코드" spellcheck="false" autocomplete="off"
         style="display:block;margin-top:9px;width:100%;box-sizing:border-box;padding:13px 15px;
           border:1.5px solid var(--vl-line-2);border-radius:13px;background:var(--vl-card-2);
           color:var(--vl-ink);outline:none;
-          font-size:13px; letter-spacing:0.1em;text-transform:uppercase"/>
-      <p id="vl-study-end-code-err" style="display:none;margin:9px 2px 0;font-size:12px;color:var(--vl-warn);line-height:1.5"></p>
+          font-size:var(--vl-fs-3); letter-spacing:0.1em;text-transform:uppercase"/>
+      <p id="vl-study-end-code-err" style="display:none;margin:9px 2px 0;font-size:var(--vl-fs-3);color:var(--vl-warn);line-height:1.5"></p>
       <button id="vl-study-end-code-btn"
         style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:13px;
-          background:var(--vl-accent);color:var(--vl-on-accent);font-size:14.5px;
+          background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);
           font-weight:700;cursor:pointer;font-family:inherit">확인</button>
     </div>
   </div>`;
@@ -568,7 +568,7 @@ function screenPastDayRevealModal(pastDay) {
         locked: false,
         id: "vl-reveal-review-card",
       })}
-      <button id="vl-reveal-dismiss" style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">확인했어요</button>
+      <button id="vl-reveal-dismiss" style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);font-weight:700;cursor:pointer;font-family:inherit">확인했어요</button>
     </div>
   </div>`;
 }
@@ -584,13 +584,13 @@ function screenRecoverConfirmModal(code) {
       <div style="width:52px;height:52px;margin:0 auto;border-radius:50%;background:var(--vl-accent-soft);display:grid;place-items:center">
         ${markSVG({ size: 26, filled: false, accent: "var(--vl-accent)" })}
       </div>
-      <div style="margin-top:16px;font-size:16px;font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">이전에 설치한 적이 있는<br/>${vlEscapeHtml(code)}님이 맞습니까?</div>
-      <p style="margin:9px 0 0;font-size:13px;line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
+      <div style="margin-top:16px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">이전에 설치한 적이 있는<br/>${vlEscapeHtml(code)}님이 맞습니까?</div>
+      <p style="margin:9px 0 0;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
         맞다면 이전 기록을 그대로 이어서 확인할 수 있어요.
       </p>
       <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px">
-        <button id="vl-recover-yes" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:14px;font-weight:700;cursor:pointer;font-family:inherit">예, 맞아요</button>
-        <button id="vl-recover-no" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:13px;font-weight:600;cursor:pointer;font-family:inherit">아니오, 처음이에요</button>
+        <button id="vl-recover-yes" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);font-weight:700;cursor:pointer;font-family:inherit">예, 맞아요</button>
+        <button id="vl-recover-no" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:var(--vl-fs-3);font-weight:600;cursor:pointer;font-family:inherit">아니오, 처음이에요</button>
       </div>
     </div>
   </div>`;
