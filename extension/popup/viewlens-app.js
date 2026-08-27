@@ -102,15 +102,15 @@ function _popupHeader(groupCfg, day, { participantCode, studyEnded } = {}) {
 
 function _tabs(activeTab, needsConfirmNudge = false) {
   const list = [
-    { id: "today", label: "오늘" },
+    { id: "today", label: "하루 돌아보기" },
     {
       id: "feedback",
       label:
         VL.DAYS_PER_PERIOD === 1
-          ? "일별 피드백"
+          ? "일별 돌아보기"
           : VL.DAYS_PER_PERIOD === 7
-            ? "주차별 피드백"
-            : "기간별 피드백",
+            ? "주차별 돌아보기"
+            : "기간별 돌아보기",
     },
   ];
   return `<div style="display:flex;gap:4px;padding:10px 16px 0;background:var(--vl-card)">
