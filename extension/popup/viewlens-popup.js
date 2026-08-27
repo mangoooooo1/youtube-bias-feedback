@@ -732,6 +732,7 @@ async function handleFeedbackConfirmClick(popup, sessionId) {
   if (!sessionId) return;
   await markFeedbackConfirmedLocally(sessionId);
   VL._todayConfirmed = true;
+  if (VL._todayCumulative) VL._todayCumulative.locked = false;
   clearUnviewedIconDot();
   popup.render();
   // render()가 innerHTML을 통째로 교체하면서 스크롤이 맨 위로 리셋되므로 즉시 복원한다.

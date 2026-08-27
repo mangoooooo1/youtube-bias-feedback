@@ -29,6 +29,25 @@
   font-display: swap;
 }
 
+/* 타이포그래피 스케일 — 팝업 전역에서 이 7단계만 쓴다(임의의 px 금지).
+   기존에 9~30px 사이 19개 이상의 서로 다른 값이 화면마다 흩어져 있던 걸
+   정리한 것 — Apple HIG의 Caption~Title 단계처럼 용도별로 고정폭을 둔다. */
+:root {
+  --vl-fs-1: 10px; /* 최소 보조 텍스트 (타임스탬프, 캡션) */
+  --vl-fs-2: 11px; /* 라벨, 배지, 보조 캡션 */
+  --vl-fs-3: 13px; /* 보조 본문(footnote) */
+  --vl-fs-4: 15px; /* 기본 본문 */
+  --vl-fs-5: 17px; /* 강조 텍스트, 섹션 타이틀 */
+  --vl-fs-6: 20px; /* 중간 강조 숫자 */
+  --vl-fs-7: 26px; /* 큰 강조 숫자(히어로 스탯) */
+
+  /* 카드/입력 필드 elevation — 하드 보더 대신 은은한 그림자·인셋으로 구분한다.
+     다크 모드에서는 그림자가 배경에 거의 묻혀 자연스럽게 옅어지므로 별도 값을 안 둔다. */
+  --vl-shadow-card:
+    0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 1px rgba(0, 0, 0, 0.03);
+  --vl-shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.045);
+}
+
 *,
 *::before,
 *::after {
@@ -46,10 +65,8 @@ body {
     system-ui,
     -apple-system,
     sans-serif;
-  background: #e7e4df;
-  background-image: radial-gradient(rgba(0, 0, 0, 0.045) 1px, transparent 1px);
-  background-size: 22px 22px;
-  color: #1c1917;
+  background: #f1f3f8;
+  color: #171a26;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
@@ -162,6 +179,26 @@ body {
   background: color-mix(in oklab, var(--vl-accent) 10%, transparent) !important;
 }
 
+/* 인터랙션 피드백 */
+.vl-press {
+  transition:
+    transform 0.1s ease,
+    filter 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.vl-press:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+.vl-press:active:not(:disabled) {
+  transform: scale(0.96);
+  filter: brightness(0.9);
+}
+
+/* 날짜 이동 버튼은 원형이라 press 시 살짝 더 큰 스케일감이 자연스럽다 */
+.vl-date-nav-btn:active:not(:disabled) {
+  transform: scale(0.88);
+}
+
 /* 호버 툴팁 (data-tip 속성 사용) */
 .vl-tip {
   position: relative;
@@ -177,7 +214,7 @@ body {
   border-radius: 10px;
   background: var(--vl-ink);
   color: var(--vl-card);
-  font-size: 11px;
+  font-size: var(--vl-fs-2);
   font-weight: 500;
   line-height: 1.5;
   text-align: left;
