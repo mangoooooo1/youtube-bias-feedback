@@ -258,9 +258,9 @@ function screenToday() {
       </div>
       <button id="vl-date-next" style="width:32px;height:32px;border:1px solid var(--vl-line);border-radius:9px;background:var(--vl-card);color:${isToday ? "var(--vl-ink-3)" : "var(--vl-ink-2)"};cursor:${isToday ? "default" : "pointer"};font-size:15px;display:grid;place-items:center;opacity:${isToday ? 0.35 : 1}" ${isToday ? "disabled" : ""}>›</button>
     </div>
-    <div style="display:flex;align-items:center;justify-content:space-between">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between">
       <div>${isCollecting ? collectingRow : scrollNudgeRow}</div>
-      ${vlBadge({ text: `${d.videoCount}개 영상 · ${d.dist.length}개 분야`, tone: "neutral" })}
+      <span style="display:inline-flex;align-items:center;color:var(--vl-ink-2);font-size:11.5px;font-weight:600;line-height:1.2;white-space:nowrap">${d.videoCount}개 영상 · ${d.dist.length}개 분야</span>
     </div>
 
     ${vlCard({
@@ -288,8 +288,7 @@ function screenToday() {
     ${vlCard({
       pad: 16,
       children: `
-      ${vlSectionLabel({ text: "카테고리 분포", right: `<span style="font-size:11px;color:var(--vl-ink-3)">오늘 ${d.videoCount}개</span>` })}
-      <div style="display:flex;align-items:center;gap:16px;margin-top:6px">
+      <div style="display:flex;align-items:center;gap:16px">
         ${vlDonut({ data: d.dist, size: 124 })}
         <div style="flex:1;display:flex;flex-direction:column;gap:8px">${catRows}</div>
       </div>
