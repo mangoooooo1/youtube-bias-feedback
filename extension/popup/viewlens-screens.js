@@ -152,11 +152,11 @@ function bindOnboarding(root, onSubmit) {
   function showErr(msg) {
     errEl.textContent = msg;
     errEl.style.display = "block";
-    input.style.borderColor = "var(--vl-warn)";
+    input.style.boxShadow = "var(--vl-shadow-inset), 0 0 0 1.5px var(--vl-warn)";
   }
   input.addEventListener("input", () => {
     errEl.style.display = "none";
-    input.style.borderColor = "var(--vl-line-2)";
+    input.style.boxShadow = "var(--vl-shadow-inset)";
   });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") submit();
