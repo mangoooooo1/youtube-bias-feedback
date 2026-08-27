@@ -233,8 +233,8 @@ function screenToday() {
   const isCollecting = d.collectingCount > 0 || !!d.collectingTimer;
   const collectingRow = isCollecting
     ? `
-    <div style="display:flex;align-items:center;gap:6px">
-      <span style="width:6px;height:6px;border-radius:50%;background:var(--vl-accent);flex-shrink:0;animation:vlBlink 1.6s ease-in-out infinite"></span>
+    <div style="display:flex;align-items:flex-start;gap:6px">
+      <span style="width:6px;height:6px;margin-top:4px;border-radius:50%;background:var(--vl-accent);flex-shrink:0;animation:vlBlink 1.6s ease-in-out infinite"></span>
       <div style="display:flex;flex-direction:column;gap:1px">
         <span id="vl-collecting-count" style="font-size:11.5px;font-weight:600;color:var(--vl-accent)">${d.collectingCount > 0 ? `영상 ${d.collectingCount}개 수집 중` : "분석 중..."}</span>
         <span id="vl-collecting-timer" style="font-size:10.5px;color:var(--vl-accent);opacity:0.8">${d.collectingTimer || ""}</span>
