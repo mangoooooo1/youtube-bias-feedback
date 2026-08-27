@@ -65,10 +65,8 @@ body {
     system-ui,
     -apple-system,
     sans-serif;
-  background: #e7e4df;
-  background-image: radial-gradient(rgba(0, 0, 0, 0.045) 1px, transparent 1px);
-  background-size: 22px 22px;
-  color: #1c1917;
+  background: #f1f3f8;
+  color: #171a26;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
