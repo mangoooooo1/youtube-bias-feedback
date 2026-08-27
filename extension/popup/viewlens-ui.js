@@ -189,14 +189,14 @@ function vlReview({
   //  backdrop-filter 미지원 환경에서도 filter:blur만으로 판독 불가능하도록 이중 처리).
   const revealOverlay = locked
     ? `<div style="position:absolute;inset:0;border-radius:16px;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);background:color-mix(in oklab,var(--vl-accent-soft) 60%,transparent)">
-        <button id="vl-feedback-confirm-btn" class="vl-press" data-session-id="${sessionId ?? ""}" style="display:flex;align-items:center;gap:7px;padding:11px 20px;border:1px solid color-mix(in oklab,var(--vl-accent) 35%,transparent);border-radius:999px;background:var(--vl-card);color:var(--vl-accent);font-size:var(--vl-fs-3);font-weight:700;cursor:pointer;animation:vlGlow 2.4s ease-in-out infinite">
+        <button id="vl-feedback-confirm-btn" class="vl-press" data-session-id="${sessionId ?? ""}" style="display:flex;align-items:center;gap:7px;padding:11px 20px;border:none;border-radius:999px;background:var(--vl-card);color:var(--vl-accent);font-size:var(--vl-fs-3);font-weight:700;cursor:pointer;animation:vlGlow 2.4s ease-in-out infinite">
           ${markSVG({ size: 15, filled: false, accent: "var(--vl-accent)" })}
           피드백 확인하기
         </button>
       </div>`
     : "";
 
-  return `<div id="${id}" style="position:relative;overflow:hidden;background:var(--vl-accent-soft);border:1px solid color-mix(in oklab,var(--vl-accent) 22%,transparent);border-radius:16px;padding:15px">
+  return `<div id="${id}" style="position:relative;overflow:hidden;background:var(--vl-accent-soft);border-radius:16px;box-shadow:0 1px 3px color-mix(in oklab,var(--vl-accent) 10%,transparent),0 1px 2px rgba(0,0,0,.03);padding:15px">
     <div style="${locked ? "filter:blur(6px);user-select:none;pointer-events:none" : ""}">
       <div style="display:flex;align-items:center;gap:7px;margin-bottom:9px">
         ${markSVG({ size: 18, filled: false, accent: "var(--vl-accent)" })}
