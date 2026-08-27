@@ -65,7 +65,7 @@ function _isStudyEndReviewReady(groupCfg, installDate) {
 // 대조군 6주 리뷰 화면 상단에 붙는 뒤로가기 행
 function _studyEndBackRow() {
   return `<div style="padding:12px 16px 0">
-    <button id="vl-study-end-back" style="display:flex;align-items:center;gap:5px;padding:5px 2px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-ink-2)">‹ 홈으로</button>
+    <button id="vl-study-end-back" class="vl-press" style="display:flex;align-items:center;gap:5px;padding:5px 2px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-ink-2)">‹ 홈으로</button>
   </div>`;
 }
 
@@ -84,7 +84,7 @@ function _popupHeader(groupCfg, day, { participantCode, studyEnded } = {}) {
       });
   const rightArea = isTest
     ? `<div style="display:flex;align-items:center;gap:7px">
-        <button id="vl-researcher-reset" style="padding:3px 8px;border:none;border-radius:6px;background:var(--vl-card-2);cursor:pointer;font-family:inherit;font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-ink-2);line-height:1.7;white-space:nowrap">↩ 온보딩</button>
+        <button id="vl-researcher-reset" class="vl-press" style="padding:3px 8px;border:none;border-radius:6px;background:var(--vl-card-2);cursor:pointer;font-family:inherit;font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-ink-2);line-height:1.7;white-space:nowrap">↩ 온보딩</button>
         ${badge}
       </div>`
     : badge;
@@ -122,7 +122,7 @@ function _tabs(activeTab, needsConfirmNudge = false) {
           t.id === "today" && !on && needsConfirmNudge
             ? `<span style="display:inline-block;width:6px;height:6px;margin-left:5px;border-radius:50%;background:var(--vl-accent);vertical-align:middle;animation:vlBlink 1.4s ease-in-out infinite"></span>`
             : "";
-        return `<button data-tab="${t.id}" style="flex:1;padding:9px 6px 11px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-3);font-weight:700;color:${on ? "var(--vl-accent)" : "var(--vl-ink-3)"};border-bottom:2px solid ${on ? "var(--vl-accent)" : "transparent"};transition:color .15s">${t.label}${nudge}</button>`;
+        return `<button data-tab="${t.id}" class="vl-press" style="flex:1;padding:9px 6px 11px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-3);font-weight:700;color:${on ? "var(--vl-accent)" : "var(--vl-ink-3)"};border-bottom:2px solid ${on ? "var(--vl-accent)" : "transparent"};transition:color .15s,transform .1s ease,filter .15s ease">${t.label}${nudge}</button>`;
       })
       .join("")}
   </div>`;

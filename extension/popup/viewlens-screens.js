@@ -16,7 +16,7 @@ function _chevronIcon(dir, size = 14) {
 // 날짜 이동 버튼
 function _dateNavButton({ id, dir, disabled = false }) {
   const color = disabled ? "var(--vl-ink-3)" : "var(--vl-ink-2)";
-  return `<button id="${id}" class="vl-date-nav-btn" ${disabled ? "disabled" : ""}
+  return `<button id="${id}" class="vl-date-nav-btn vl-press" ${disabled ? "disabled" : ""}
     style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:${color};cursor:${disabled ? "default" : "pointer"};display:grid;place-items:center;opacity:${disabled ? 0.4 : 1}">
     ${_chevronIcon(dir, 15)}
   </button>`;
@@ -44,7 +44,7 @@ function screenOnboarding() {
           color:var(--vl-ink);outline:none;
           font-size:var(--vl-fs-3); letter-spacing:0.1em;text-transform:uppercase"/>
       <p id="vl-onboard-err" style="display:none;margin:9px 2px 0;font-size:var(--vl-fs-3);color:var(--vl-warn);line-height:1.5"></p>
-      <button id="vl-onboard-btn"
+      <button id="vl-onboard-btn" class="vl-press"
         style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:13px;
           background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);
           font-weight:700;cursor:pointer;font-family:inherit">시작하기</button>
@@ -360,7 +360,7 @@ function screenFeedback(currentWeek, selWeek) {
     .map((wk) => {
       const locked = wk.week > currentWeek;
       const active = wk.week === selWeek && !locked;
-      return `<button data-week="${wk.week}" ${locked ? "disabled" : ""}
+      return `<button data-week="${wk.week}" class="vl-press" ${locked ? "disabled" : ""}
       style="flex:0 0 72px;padding:10px 4px;border-radius:12px;cursor:${locked ? "default" : "pointer"};
         border:1.5px solid ${active ? "var(--vl-accent)" : "var(--vl-line)"};
         background:${active ? "var(--vl-accent-soft)" : "var(--vl-card)"};
@@ -497,7 +497,7 @@ function screenControlHome(day, stats = {}) {
     ${
       // 종료 안내 모달을 이미 본 뒤엔 이 자리가 상시 재진입 CTA로 바뀐다.
       stats.studyEndCtaReady
-        ? `<button id="vl-study-end-cta" style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:15px 16px;background:var(--vl-accent-soft);border:1px solid color-mix(in oklab,var(--vl-accent) 30%,transparent);border-radius:13px;cursor:pointer;font-family:inherit;text-align:left">
+        ? `<button id="vl-study-end-cta" class="vl-press" style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:15px 16px;background:var(--vl-accent-soft);border:1px solid color-mix(in oklab,var(--vl-accent) 30%,transparent);border-radius:13px;cursor:pointer;font-family:inherit;text-align:left">
         <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">6주간의 시청 리뷰가 준비됐어요</span>
         <span style="font-size:var(--vl-fs-4);color:var(--vl-accent);flex-shrink:0">→</span>
       </button>`
@@ -531,7 +531,7 @@ function screenStudyEndCodeInput() {
           color:var(--vl-ink);outline:none;
           font-size:var(--vl-fs-3); letter-spacing:0.1em;text-transform:uppercase"/>
       <p id="vl-study-end-code-err" style="display:none;margin:9px 2px 0;font-size:var(--vl-fs-3);color:var(--vl-warn);line-height:1.5"></p>
-      <button id="vl-study-end-code-btn"
+      <button id="vl-study-end-code-btn" class="vl-press"
         style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:13px;
           background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);
           font-weight:700;cursor:pointer;font-family:inherit">확인</button>
@@ -568,7 +568,7 @@ function screenPastDayRevealModal(pastDay) {
         locked: false,
         id: "vl-reveal-review-card",
       })}
-      <button id="vl-reveal-dismiss" style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);font-weight:700;cursor:pointer;font-family:inherit">확인했어요</button>
+      <button id="vl-reveal-dismiss" class="vl-press" style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);font-weight:700;cursor:pointer;font-family:inherit">확인했어요</button>
     </div>
   </div>`;
 }
@@ -589,8 +589,8 @@ function screenRecoverConfirmModal(code) {
         맞다면 이전 기록을 그대로 이어서 확인할 수 있어요.
       </p>
       <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px">
-        <button id="vl-recover-yes" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);font-weight:700;cursor:pointer;font-family:inherit">예, 맞아요</button>
-        <button id="vl-recover-no" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:var(--vl-fs-3);font-weight:600;cursor:pointer;font-family:inherit">아니오, 처음이에요</button>
+        <button id="vl-recover-yes" class="vl-press" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);font-weight:700;cursor:pointer;font-family:inherit">예, 맞아요</button>
+        <button id="vl-recover-no" class="vl-press" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:var(--vl-fs-3);font-weight:600;cursor:pointer;font-family:inherit">아니오, 처음이에요</button>
       </div>
     </div>
   </div>`;

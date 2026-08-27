@@ -43,7 +43,8 @@
 
   /* 카드/입력 필드 elevation — 하드 보더 대신 은은한 그림자·인셋으로 구분한다.
      다크 모드에서는 그림자가 배경에 거의 묻혀 자연스럽게 옅어지므로 별도 값을 안 둔다. */
-  --vl-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 1px rgba(0, 0, 0, 0.03);
+  --vl-shadow-card:
+    0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 1px rgba(0, 0, 0, 0.03);
   --vl-shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.045);
 }
 
@@ -180,19 +181,24 @@ body {
   background: color-mix(in oklab, var(--vl-accent) 10%, transparent) !important;
 }
 
-/* 날짜 이동 */
-.vl-date-nav-btn {
+/* 인터랙션 피드백 */
+.vl-press {
   transition:
-    background 0.15s ease,
-    transform 0.1s ease;
+    transform 0.1s ease,
+    filter 0.15s ease;
   -webkit-tap-highlight-color: transparent;
 }
-.vl-date-nav-btn:hover:not(:disabled) {
-  background: var(--vl-card-2) !important;
+.vl-press:hover:not(:disabled) {
+  filter: brightness(0.96);
 }
+.vl-press:active:not(:disabled) {
+  transform: scale(0.96);
+  filter: brightness(0.9);
+}
+
+/* 날짜 이동 버튼은 원형이라 press 시 살짝 더 큰 스케일감이 자연스럽다 */
 .vl-date-nav-btn:active:not(:disabled) {
-  transform: scale(0.9);
-  background: var(--vl-line) !important;
+  transform: scale(0.88);
 }
 
 /* 호버 툴팁 (data-tip 속성 사용) */

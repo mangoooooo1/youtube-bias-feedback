@@ -189,7 +189,7 @@ function vlReview({
   //  backdrop-filter 미지원 환경에서도 filter:blur만으로 판독 불가능하도록 이중 처리).
   const revealOverlay = locked
     ? `<div style="position:absolute;inset:0;border-radius:16px;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);background:color-mix(in oklab,var(--vl-accent-soft) 60%,transparent)">
-        <button id="vl-feedback-confirm-btn" data-session-id="${sessionId ?? ""}" style="display:flex;align-items:center;gap:7px;padding:11px 20px;border:1px solid color-mix(in oklab,var(--vl-accent) 35%,transparent);border-radius:999px;background:var(--vl-card);color:var(--vl-accent);font-size:var(--vl-fs-3);font-weight:700;cursor:pointer;animation:vlGlow 2.4s ease-in-out infinite">
+        <button id="vl-feedback-confirm-btn" class="vl-press" data-session-id="${sessionId ?? ""}" style="display:flex;align-items:center;gap:7px;padding:11px 20px;border:1px solid color-mix(in oklab,var(--vl-accent) 35%,transparent);border-radius:999px;background:var(--vl-card);color:var(--vl-accent);font-size:var(--vl-fs-3);font-weight:700;cursor:pointer;animation:vlGlow 2.4s ease-in-out infinite">
           ${markSVG({ size: 15, filled: false, accent: "var(--vl-accent)" })}
           피드백 확인하기
         </button>
@@ -232,10 +232,10 @@ function vlConfirmModal({
       <div style="margin-top:${icon ? 16 : 0}px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${title}</div>
       <p style="margin:9px 0 0;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">${message}</p>
       <div style="margin-top:20px;display:flex;flex-direction:column;gap:8px">
-        <button id="${confirmId}" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);font-weight:700;cursor:pointer;font-family:inherit">${confirmLabel}</button>
+        <button id="${confirmId}" class="vl-press" style="padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);font-weight:700;cursor:pointer;font-family:inherit">${confirmLabel}</button>
         ${
           cancelLabel
-            ? `<button id="${cancelId}" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:var(--vl-fs-3);font-weight:600;cursor:pointer;font-family:inherit">${cancelLabel}</button>`
+            ? `<button id="${cancelId}" class="vl-press" style="padding:12px;border:none;border-radius:13px;background:transparent;color:var(--vl-ink-3);font-size:var(--vl-fs-3);font-weight:600;cursor:pointer;font-family:inherit">${cancelLabel}</button>`
             : ""
         }
       </div>
