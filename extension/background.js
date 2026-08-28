@@ -180,7 +180,7 @@ async function checkSessionTimeout() {
   await analyzeSession(session);
 }
 
-async function analyzeSession(session) {
+export async function analyzeSession(session) {
   // 지연시간 측정 — 세션 종료 후 처리 파이프라인 전체를 t0로 감싼다.
   const t0 = Date.now();
   const videoIds = session.videos.map((v) => v.videoId);
