@@ -2,11 +2,11 @@ const express = require("express");
 const { db } = require("../db");
 const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const { recordStudyEndReviewEvent } = require("./study-end-review-event");
+const { TEST_CODES, findEarliestParticipant } = require("./participant-recovery");
 const {
-  TEST_CODES,
-  isPreviouslyRegistered,
-  findEarliestParticipant,
-} = require("./participant-recovery");
+  registerParticipant,
+  validateParticipantCode,
+} = require("./participants-store");
 const { rateLimiter } = require("../middleware/rateLimiter");
 
 const router = express.Router();
@@ -17,55 +17,32 @@ const STUDY_END_EVENTS = new Set(["modal_shown", "review_viewed"]);
 // 실제 참여자는 재설치당 1회만 호출하므로 15분에 5회면 정상 사용을 막지 않는다.
 const recoverRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5 });
 
-const insertParticipant = db.prepare(`
-  INSERT INTO participants (anonymousId, participantCode, group_code, installDate)
-  VALUES (@anonymousId, @participantCode, @group_code, @installDate)
-`);
-const findIssuedCode = db.prepare(
-  "SELECT group_code FROM issued_codes WHERE code = ?",
-);
-const countIssuedCodes = db.prepare("SELECT COUNT(*) AS c FROM issued_codes");
-const findParticipant = db.prepare(
-  "SELECT 1 AS x FROM participants WHERE anonymousId = ?",
-);
-
 router.post("/", (req, res, next) => {
-  const { anonymousId, participantCode, installDate } = req.body;
-  let { group_code } = req.body;
+  let result;
+  try {
+    result = registerParticipant(db, req.body);
+  } catch (err) {
+    return next(err);
+  }
 
-  for (const field of ["anonymousId", "group_code", "installDate"]) {
-    const value = req.body[field];
-    if (typeof value !== "string" || !value.trim()) {
+  switch (result.status) {
+    case "missing_field":
       return fail(
         res,
         400,
         ERROR_CODES.MISSING_REQUIRED_FIELD,
-        `${field} 필드가 올바르지 않습니다.`,
-        field,
+        `${result.field} 필드가 올바르지 않습니다.`,
+        result.field,
       );
-    }
-  }
-
-  if (isNaN(Date.parse(installDate))) {
-    return fail(
-      res,
-      400,
-      ERROR_CODES.INVALID_FIELD_VALUE,
-      "installDate 필드가 올바르지 않습니다.",
-      "installDate",
-    );
-  }
-
-  // 이미 등록된 참여자면 재동기화로 간주하고 그대로 성공 처리 (멱등성 보장)
-  if (findParticipant.get(anonymousId)) {
-    return success(res);
-  }
-
-  // 발급 코드 검증: issued_codes 명단이 등록돼 있으면(시드 후) 신규 등록 시 참여 코드가 필수이며,
-  // 명단에 있는 코드만 허용하고 그룹은 명단(issued_codes)을 권위로 사용한다. TEST 코드는 예외.
-  // 명단이 비어 있으면(시드 전) 검증을 건너뛴다.
-  if (countIssuedCodes.get().c > 0) {
-    if (!participantCode) {
+    case "invalid_install_date":
+      return fail(
+        res,
+        400,
+        ERROR_CODES.INVALID_FIELD_VALUE,
+        "installDate 필드가 올바르지 않습니다.",
+        "installDate",
+      );
+    case "missing_participant_code":
       return fail(
         res,
         400,
@@ -73,37 +50,17 @@ router.post("/", (req, res, next) => {
         "참여 코드가 필요합니다.",
         "participantCode",
       );
-    }
-    if (!TEST_CODES.has(participantCode)) {
-      const issued = findIssuedCode.get(participantCode);
-      if (!issued) {
-        return fail(
-          res,
-          400,
-          ERROR_CODES.INVALID_FIELD_VALUE,
-          "발급되지 않은 참여 코드입니다.",
-          "participantCode",
-        );
-      }
-      group_code = issued.group_code;
-    }
+    case "invalid_participant_code":
+      return fail(
+        res,
+        400,
+        ERROR_CODES.INVALID_FIELD_VALUE,
+        "발급되지 않은 참여 코드입니다.",
+        "participantCode",
+      );
+    default:
+      return success(res);
   }
-
-  try {
-    insertParticipant.run({
-      anonymousId,
-      participantCode: participantCode ?? null,
-      group_code,
-      installDate,
-    });
-  } catch (err) {
-    if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
-      return success(res); // 이미 등록된 참여자면 무시
-    }
-    return next(err);
-  }
-
-  return success(res);
 });
 
 // 온보딩 코드 검증 — 발급 명단(issued_codes)과 대조 (등록 없이 확인만)
@@ -119,26 +76,7 @@ router.get("/validate", (req, res) => {
       "code",
     );
   }
-  const previouslyRegistered = isPreviouslyRegistered(db, code);
-  if (TEST_CODES.has(code))
-    return success(res, {
-      valid: true,
-      group_code: code,
-      previouslyRegistered,
-    });
-  if (countIssuedCodes.get().c === 0)
-    return success(res, {
-      valid: true,
-      group_code: null,
-      previouslyRegistered,
-    }); // 시드 전 permissive
-  const issued = findIssuedCode.get(code);
-  return success(
-    res,
-    issued
-      ? { valid: true, group_code: issued.group_code, previouslyRegistered }
-      : { valid: false },
-  );
+  return success(res, validateParticipantCode(db, code));
 });
 
 // 참여코드 기반 재설치 복구 (이슈 4) — bindOnboarding 확인 모달에서 "예" 선택 시에만 호출된다.

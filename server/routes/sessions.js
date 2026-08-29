@@ -1,144 +1,10 @@
 const express = require("express");
 const { db } = require("../db");
 const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
+const { validateSession } = require("./sessions-validate");
+const { insertSession, recordFeedbackTimestamp } = require("./sessions-store");
 
 const router = express.Router();
-
-const insertSession = db.prepare(`
-  INSERT INTO sessions (anonymousId, sessionId, startTime, endTime, videoCount, categoryDistribution, entropy, totalMs, youtubeMs, geminiMs, llmStatus, failureReason, httpStatus, timedOut, feedbackNotifiedAt, review, reviewTopic, source, promptVersion)
-  VALUES (@anonymousId, @sessionId, @startTime, @endTime, @videoCount, @categoryDistribution, @entropy, @totalMs, @youtubeMs, @geminiMs, @llmStatus, @failureReason, @httpStatus, @timedOut, @feedbackNotifiedAt, @review, @reviewTopic, @source, @promptVersion)
-`);
-
-//  지연시간 필드 — 확장이 측정해 전송. 선택 항목이며, 있으면 음수 아닌 정수여야 한다.
-const LATENCY_FIELDS = ["totalMs", "youtubeMs", "geminiMs"];
-
-//  LLM 폴백 로깅 — 확장의 실패 분류값. server/db.js·llm.js와 1:1 대응.
-const LLM_STATUSES = ["success", "fallback"];
-const FAILURE_REASONS = [
-  "timeout",
-  "http_error",
-  "empty_response",
-  "parse_error",
-  "network_error",
-  "policy_filtered",
-];
-
-// 피드백 텍스트 출처 (Story 10-11) — llm.js generateReview/generateFallbackReview의 source와 1:1 대응.
-const SOURCES = ["llm", "fallback"];
-
-function validateSession(body) {
-  if (body === null || typeof body !== "object" || Array.isArray(body)) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "body" };
-  }
-
-  const { startTime, endTime, videoCount, entropy } = body;
-
-  const requiredFields = ["anonymousId", "sessionId", "startTime", "endTime"];
-  for (const field of requiredFields) {
-    const value = body[field];
-    if (value === undefined || value === null || String(value).trim() === "") {
-      return { code: ERROR_CODES.MISSING_REQUIRED_FIELD, field };
-    }
-  }
-
-  if (isNaN(Date.parse(startTime))) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "startTime" };
-  }
-  if (isNaN(Date.parse(endTime))) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "endTime" };
-  }
-  if (
-    videoCount !== undefined &&
-    (!Number.isInteger(videoCount) || videoCount < 0)
-  ) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "videoCount" };
-  }
-  if (
-    entropy !== undefined &&
-    (typeof entropy !== "number" || !Number.isFinite(entropy) || entropy < 0)
-  ) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "entropy" };
-  }
-  for (const field of LATENCY_FIELDS) {
-    const value = body[field];
-    if (
-      value !== undefined &&
-      value !== null &&
-      (!Number.isInteger(value) || value < 0)
-    ) {
-      return { code: ERROR_CODES.INVALID_FIELD_VALUE, field };
-    }
-  }
-
-  //  폴백 로깅 — 값이 있을 때만 분류값·형식 검증 (성공 시 null 허용)
-  const { llmStatus, failureReason, httpStatus, timedOut } = body;
-  if (
-    llmStatus !== undefined &&
-    llmStatus !== null &&
-    !LLM_STATUSES.includes(llmStatus)
-  ) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "llmStatus" };
-  }
-  if (
-    failureReason !== undefined &&
-    failureReason !== null &&
-    !FAILURE_REASONS.includes(failureReason)
-  ) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "failureReason" };
-  }
-  if (
-    httpStatus !== undefined &&
-    httpStatus !== null &&
-    (!Number.isInteger(httpStatus) || httpStatus < 0)
-  ) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "httpStatus" };
-  }
-  if (
-    timedOut !== undefined &&
-    timedOut !== null &&
-    timedOut !== 0 &&
-    timedOut !== 1
-  ) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "timedOut" };
-  }
-
-  // 피드백 알림 시각 () — 분석 완료 알림을 표시한 경우에만 확장이 함께 전송
-  const { feedbackNotifiedAt } = body;
-  if (
-    feedbackNotifiedAt !== undefined &&
-    feedbackNotifiedAt !== null &&
-    isNaN(Date.parse(feedbackNotifiedAt))
-  ) {
-    return {
-      code: ERROR_CODES.INVALID_FIELD_VALUE,
-      field: "feedbackNotifiedAt",
-    };
-  }
-
-  // 생성된 피드백 텍스트 (Story 10-11) — review/reviewTopic은 자유 텍스트, source만 분류값 검증.
-  // 셋 다 "보내지 않으면 null(구버전 확장 하위호환)"은 허용하되, 보냈다면 공백 문자열은
-  // 거부한다 — llm.js가 이제 topic/feedback/promptVersion을 항상 비어있지 않은 문자열로만
-  // 반환하므로(generateReview/generateFallbackReview), 빈 문자열은 클라이언트 쪽 결함 신호다.
-  const { review, reviewTopic, source, promptVersion } = body;
-  for (const [field, value] of [
-    ["review", review],
-    ["reviewTopic", reviewTopic],
-    ["promptVersion", promptVersion],
-  ]) {
-    if (
-      value !== undefined &&
-      value !== null &&
-      (typeof value !== "string" || value.trim() === "")
-    ) {
-      return { code: ERROR_CODES.INVALID_FIELD_VALUE, field };
-    }
-  }
-  if (source !== undefined && source !== null && !SOURCES.includes(source)) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "source" };
-  }
-
-  return null;
-}
 
 router.post("/", (req, res, next) => {
   const error = validateSession(req.body);
@@ -152,53 +18,8 @@ router.post("/", (req, res, next) => {
     );
   }
 
-  const {
-    anonymousId,
-    sessionId,
-    startTime,
-    endTime,
-    videoCount,
-    categoryDistribution,
-    entropy,
-    totalMs,
-    youtubeMs,
-    geminiMs,
-    llmStatus,
-    failureReason,
-    httpStatus,
-    timedOut,
-    feedbackNotifiedAt,
-    review,
-    reviewTopic,
-    source,
-    promptVersion,
-  } = req.body;
-
   try {
-    insertSession.run({
-      anonymousId,
-      sessionId,
-      startTime,
-      endTime,
-      videoCount: videoCount ?? null,
-      categoryDistribution:
-        categoryDistribution != null
-          ? JSON.stringify(categoryDistribution)
-          : null,
-      entropy: entropy ?? null,
-      totalMs: totalMs ?? null,
-      youtubeMs: youtubeMs ?? null,
-      geminiMs: geminiMs ?? null,
-      llmStatus: llmStatus ?? null,
-      failureReason: failureReason ?? null,
-      httpStatus: httpStatus ?? null,
-      timedOut: timedOut ?? null,
-      feedbackNotifiedAt: feedbackNotifiedAt ?? null,
-      review: review ?? null,
-      reviewTopic: reviewTopic ?? null,
-      source: source ?? null,
-      promptVersion: promptVersion ?? null,
-    });
+    insertSession(db, req.body);
   } catch (err) {
     if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
       return fail(
@@ -206,7 +27,7 @@ router.post("/", (req, res, next) => {
         409,
         ERROR_CODES.DUPLICATE_SESSION,
         "이미 존재하는 세션입니다.",
-        sessionId,
+        req.body.sessionId,
       );
     }
     return next(err);
@@ -215,19 +36,11 @@ router.post("/", (req, res, next) => {
   return success(res);
 });
 
-// 피드백 열람/확인 시각 갱신 () — 세션 생성 POST와 별도 시점에(알림 클릭, 확인 버튼 클릭 등)
+// 피드백 열람/확인 시각 갱신 — 세션 생성 POST와 별도 시점에(알림 클릭, 확인 버튼 클릭 등)
 // 호출된다. anonymousId로 소유권을 확인해 다른 참여자의 세션을 갱신하지 못하도록 막는다.
 // column은 요청 값이 아니라 아래 두 router.patch 호출부에서만 하드코딩으로 주어지므로
 // SQL 인젝션 경로가 없다(server/db.js의 addColumn(table, name, type) 패턴과 동일한 근거).
 function makeFeedbackTimestampHandler(column) {
-  const exists = db.prepare(
-    `SELECT 1 FROM sessions WHERE sessionId = @sessionId AND anonymousId = @anonymousId`,
-  );
-  // 최초 호출만 기록 — 퍼널 지연 분석(생성→알림→클릭→확인)은 최초 시각이 필요하므로
-  // 이미 값이 있으면(재호출) 덮어쓰지 않는다.
-  const update = db.prepare(
-    `UPDATE sessions SET ${column} = @value WHERE sessionId = @sessionId AND anonymousId = @anonymousId AND ${column} IS NULL`,
-  );
   return (req, res, next) => {
     const { sessionId } = req.params;
     // req.body가 null/undefined일 수 있어(본문 없는 요청) 구조 분해 대신 옵셔널 체이닝으로
@@ -244,24 +57,21 @@ function makeFeedbackTimestampHandler(column) {
       );
     }
 
+    let result;
     try {
-      if (!exists.get({ sessionId, anonymousId })) {
-        return fail(
-          res,
-          404,
-          ERROR_CODES.NOT_FOUND,
-          "세션을 찾을 수 없습니다.",
-          sessionId,
-        );
-      }
-      // changes === 0이어도(이미 값이 있던 재호출) 세션은 존재하므로 성공으로 처리한다.
-      update.run({
-        sessionId,
-        anonymousId,
-        value: new Date().toISOString(),
-      });
+      result = recordFeedbackTimestamp(db, column, sessionId, anonymousId);
     } catch (err) {
       return next(err);
+    }
+
+    if (result === "not_found") {
+      return fail(
+        res,
+        404,
+        ERROR_CODES.NOT_FOUND,
+        "세션을 찾을 수 없습니다.",
+        sessionId,
+      );
     }
 
     return success(res);

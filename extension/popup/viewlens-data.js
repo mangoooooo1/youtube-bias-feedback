@@ -162,7 +162,7 @@ function periodLabel(n) {
 // Studio "실험 시점" 프리셋 — TOTAL_DAYS/DAYS_PER_PERIOD로부터 매 기간의 "진행 중"/"종료"
 // 체크포인트를 동적으로 생성한다. 예전엔 이걸 12개 통째로 하드코딩해뒀는데, 본조사(42일)
 // 기준값이라 파일럿(6일)으로 바꿀 때마다 따로 손대야 했다(실제 화면엔 영향 없지만 Studio
-// 프리뷰만 안 맞는 문제 — coderabbitai 리뷰로 발견). 실제 화면 상수를 그대로 따라가게 만들어
+// 프리뷰만 안 맞는 문제). 실제 화면 상수를 그대로 따라가게 만들어
 // 이 동기화 문제 자체를 없앤다.
 function buildTimeline() {
   const entries = {};

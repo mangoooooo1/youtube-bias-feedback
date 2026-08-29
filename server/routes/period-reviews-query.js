@@ -24,7 +24,7 @@ function isStudyEnded(installDate, now = new Date()) {
  * 대조군에게 기간 리뷰 열람을 허용할지 판단한다 — 1..TOTAL_PERIODS 범위의 periodIndex가
  * 정확히 전부 있을 때만 허용한다. 범위를 두지 않고 단순 COUNT(*)만 보면, 상수(TOTAL_DAYS/
  * DAYS_PER_PERIOD)가 파일럿→본조사 등으로 바뀐 뒤 옛 설정으로 생성된 행이 남아있을 때
- * "개수는 맞지만 1구간이 빠진" 상태로도 잠금이 풀릴 수 있다(coderabbitai 리뷰로 발견).
+ * "개수는 맞지만 1구간이 빠진" 상태로도 잠금이 풀릴 수 있다.
  */
 function isStudyEndUnlocked(db, anonymousId, installDate) {
   if (!isStudyEnded(installDate)) return false;

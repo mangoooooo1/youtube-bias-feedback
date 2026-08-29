@@ -197,7 +197,7 @@ describe("getPeriodReviews", () => {
       expect(result.map((r) => r.periodIndex)).toEqual([1, 2, 3]);
     });
 
-    it("종료 + 전체 기간 완성이어도 코드 검증을 통과한 적 없으면 빈 배열을 반환한다(coderabbitai 지적 반영)", () => {
+    it("종료 + 전체 기간 완성이어도 코드 검증을 통과한 적 없으면 빈 배열을 반환한다", () => {
       insertParticipant(db, "con-unverified", "CON", ENDED_INSTALL_DATE);
       insertReview(db, "con-unverified", 1);
       insertReview(db, "con-unverified", 2);
@@ -207,7 +207,7 @@ describe("getPeriodReviews", () => {
     });
 
     it("periodIndex가 1을 포함하지 않으면 개수가 맞아도 잠금이 풀리지 않는다", () => {
-      // count=3=TOTAL_PERIODS지만 1구간이 없음 — 범위를 안 보면 잘못 풀리는 경우(coderabbitai 리뷰).
+      // count=3=TOTAL_PERIODS지만 1구간이 없음 — 범위를 안 보면 잘못 풀리는 경우.
       insertParticipant(db, "con-gap", "CON", ENDED_INSTALL_DATE);
       insertReview(db, "con-gap", 2);
       insertReview(db, "con-gap", 3);
