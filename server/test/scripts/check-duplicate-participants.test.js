@@ -149,6 +149,13 @@ describe("run", () => {
     run(db);
 
     const output = loggedOutput();
+    // 탐지 자체가 안 됐거나 조용히 실패해 원본이 우연히 안 찍힌 경우를 걸러내기 위해,
+    // 지문/건수가 실제로 출력됐는지부터 확인한 뒤에 원본 미노출을 검증한다.
+    expect(output).toContain("중복 참여코드 1건 발견");
+    expect(output).toContain(`participantCode(지문)=${sha10("SECRET-CODE-1")}`);
+    expect(output).toContain(sha10("sensitive-anon-id-1"));
+    expect(output).toContain(sha10("sensitive-anon-id-2"));
+
     expect(output).not.toContain("SECRET-CODE-1");
     expect(output).not.toContain("sensitive-anon-id-1");
     expect(output).not.toContain("sensitive-anon-id-2");
