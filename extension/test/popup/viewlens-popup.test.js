@@ -95,9 +95,13 @@ describe("mergeDist(팝업) ↔ mergeSessionDistributions(서버) 동치성", ()
   // mergeDist(및 extension/pipeline/analysis.js)는 videoCount가 없으면 videos.length로,
   // 그마저 없으면 1로 폴백한다. 반면 mergeSessionDistributions(서버)는 videoCount ?? 1까지만
   // 폴백하고 videos.length는 보지 않는다 — videoCount가 비어있는(오래된/결손) 세션 데이터에서는
-  // 두 구현이 서로 다른 가중치를 계산한다. 이 테스트는 그 차이를 고정해 문서화한다(버그 수정은
-  // 이번 범위 밖 — 08-테스트전략.md 갱신 시 팀 결정 필요 항목으로 별도 기록).
-  it("videoCount가 없고 videos 배열만 있으면 서버·팝업의 가중치 계산이 서로 다르다 (알려진 불일치, 회귀 고정용)", () => {
+  // 두 구현이 서로 다른 가중치를 계산한다.
+  // 확인 결과 실사용 영향 없음(운영 DB 확인 완료, 2026-08-29 — 서울 A1에서
+  // `sessions.videoCount IS NULL AND categoryDistribution IS NOT NULL` 0건 확인).
+  // 서버 세션 객체는 DB에 videos 컬럼이 없어 애초에 이 폴백을 못 타므로, 두 구현의
+  // 폴백 정책을 억지로 통일해도 죽은 코드가 될 뿐이다. 그래서 수정하지 않고 현재 동작을
+  // 그대로 고정해 문서화한다(결정 근거: docs/07-작업5.md 이슈 1).
+  it("videoCount가 없고 videos 배열만 있으면 서버·팝업의 가중치 계산이 서로 다르다 (알려진 불일치, 결정 완료 — 영향 없음)", () => {
     const sessions = [
       { videos: [{}, {}, {}], categoryDistribution: { 음악: 1 } }, // videoCount 없음, videos.length=3
       { videoCount: 1, categoryDistribution: { 게임: 1 } },
