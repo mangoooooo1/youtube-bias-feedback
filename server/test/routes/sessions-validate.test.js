@@ -84,6 +84,27 @@ describe("validateSession — 필수 필드", () => {
       });
     },
   );
+
+  // PATCH /:sessionId/feedback-viewed 등(sessions.js)의 anonymousId 검증은
+  // typeof === "string"을 요구한다 — POST도 같은 계약을 지켜야 한다.
+  it.each(["anonymousId", "sessionId"])(
+    "%s가 숫자면 MISSING_REQUIRED_FIELD로 거부한다(문자열이 아님)",
+    (field) => {
+      const result = validateSession(basePayload({ [field]: 12345 }));
+      expect(result).toEqual({
+        code: ERROR_CODES.MISSING_REQUIRED_FIELD,
+        field,
+      });
+    },
+  );
+
+  it("anonymousId가 객체면 MISSING_REQUIRED_FIELD로 거부한다(문자열이 아님)", () => {
+    const result = validateSession(basePayload({ anonymousId: {} }));
+    expect(result).toEqual({
+      code: ERROR_CODES.MISSING_REQUIRED_FIELD,
+      field: "anonymousId",
+    });
+  });
 });
 
 describe("validateSession — 날짜/숫자 형식", () => {
@@ -149,9 +170,12 @@ describe("validateSession — 날짜/숫자 형식", () => {
 });
 
 describe("validateSession — LLM 폴백 로깅 분류값", () => {
-  it.each(["success", "fallback"])("llmStatus가 %s이면 통과한다", (llmStatus) => {
-    expect(validateSession(basePayload({ llmStatus }))).toBeNull();
-  });
+  it.each(["success", "fallback"])(
+    "llmStatus가 %s이면 통과한다",
+    (llmStatus) => {
+      expect(validateSession(basePayload({ llmStatus }))).toBeNull();
+    },
+  );
 
   it("llmStatus가 허용 목록에 없는 값이면 거부한다", () => {
     expect(validateSession(basePayload({ llmStatus: "unknown" }))).toEqual({

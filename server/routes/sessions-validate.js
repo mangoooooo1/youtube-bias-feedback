@@ -26,10 +26,12 @@ function validateSession(body) {
 
   const { startTime, endTime, videoCount, entropy } = body;
 
+  // 문자열 타입까지 요구
+  // 빈 문자열은 허용하지 않는다. (빈 문자열은 Date.parse에서 NaN으로 처리됨)
   const requiredFields = ["anonymousId", "sessionId", "startTime", "endTime"];
   for (const field of requiredFields) {
     const value = body[field];
-    if (value === undefined || value === null || String(value).trim() === "") {
+    if (typeof value !== "string" || value.trim() === "") {
       return { code: ERROR_CODES.MISSING_REQUIRED_FIELD, field };
     }
   }
