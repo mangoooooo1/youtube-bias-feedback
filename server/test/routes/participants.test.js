@@ -248,6 +248,22 @@ describe("POST /api/participants", () => {
         .get("a1");
       expect(row.group_code).toBe("TEST-EXP");
     });
+
+    it("소문자로 보낸 participantCode도 등록된다 — GET /validate와 동일하게 정규화(회귀)", async () => {
+      const res = await request(app).post("/api/participants").send({
+        anonymousId: "a1",
+        group_code: "EXP",
+        installDate: "2026-08-13T00:00:00Z",
+        participantCode: "real-code", // 명단에는 대문자 REAL-CODE/CON으로 등록돼 있음
+      });
+      expect(res.status).toBe(200);
+
+      const row = db
+        .prepare("SELECT * FROM participants WHERE anonymousId = ?")
+        .get("a1");
+      expect(row.group_code).toBe("CON"); // 명단이 권위
+      expect(row.participantCode).toBe("REAL-CODE"); // 정규화된 값으로 저장
+    });
   });
 });
 

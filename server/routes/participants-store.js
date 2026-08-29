@@ -17,8 +17,11 @@ const {
  *   충돌) 세 경우 모두를 포함한다 — 원본 라우트가 셋 다 동일하게 success 처리하던 것과 동일.
  */
 function registerParticipant(db, body) {
-  const { anonymousId, participantCode, installDate } = body;
+  const { anonymousId, installDate } = body;
   let { group_code } = body;
+  // GET /validate·POST /recover와 동일하게 정규화
+  const participantCode =
+    (body.participantCode || "").toString().trim().toUpperCase() || undefined;
 
   for (const field of ["anonymousId", "group_code", "installDate"]) {
     const value = body[field];

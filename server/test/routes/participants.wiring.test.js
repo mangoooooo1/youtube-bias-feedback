@@ -60,6 +60,25 @@ describe("실제 server/routes/participants.js 라우터 배선", () => {
     expect(row.group_code).toBe("EXP");
   });
 
+  it("소문자 participantCode — GET /validate가 통과시키면 POST /도 동일 코드로 등록에 성공한다(회귀)", async () => {
+    db.prepare(
+      "INSERT INTO issued_codes (code, group_code) VALUES (?, ?)",
+    ).run("REAL-CODE", "CON");
+
+    const validateRes = await request(app)
+      .get("/api/participants/validate")
+      .query({ code: "real-code" });
+    expect(validateRes.body.data.valid).toBe(true);
+
+    const registerRes = await request(app).post("/api/participants").send({
+      anonymousId: "wiring-a2",
+      group_code: "EXP",
+      installDate: "2026-08-13T00:00:00Z",
+      participantCode: "real-code",
+    });
+    expect(registerRes.status).toBe(200);
+  });
+
   it("GET /api/participants/validate — 실제 파일에 라우트가 등록돼 응답한다", async () => {
     const res = await request(app)
       .get("/api/participants/validate")
