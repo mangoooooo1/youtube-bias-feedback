@@ -17,6 +17,8 @@ import {
 // 네이티브 모듈이 vi.mock을 우회함, server/test/routes/sessions.test.js 참고)로 그대로
 // import할 수 없다. 실제 라우트가 호출하는 함수(registerParticipant/validateParticipantCode)를
 // 그대로 가져와 동일하게 조립한 테스트 전용 라우터로 검증한다.
+// 이 파일은 그 함수들의 분기를 촘촘하게 도는 데 집중
+// participants.js 자체(배선)를 그대로 로드해 검증하는 테스트는 participants.wiring.test.js에 있다.
 const db = new Database(":memory:");
 db.exec(`
   CREATE TABLE participants (
@@ -112,9 +114,10 @@ function buildApp() {
 const app = buildApp();
 
 function seedIssuedCode(code, group_code) {
-  db.prepare(
-    "INSERT INTO issued_codes (code, group_code) VALUES (?, ?)",
-  ).run(code, group_code);
+  db.prepare("INSERT INTO issued_codes (code, group_code) VALUES (?, ?)").run(
+    code,
+    group_code,
+  );
 }
 
 beforeEach(() => {
@@ -153,9 +156,9 @@ describe("POST /api/participants", () => {
         code: "MISSING_REQUIRED_FIELD",
         detail: field,
       });
-      expect(
-        db.prepare("SELECT COUNT(*) AS c FROM participants").get().c,
-      ).toBe(0);
+      expect(db.prepare("SELECT COUNT(*) AS c FROM participants").get().c).toBe(
+        0,
+      );
     },
   );
 
@@ -182,9 +185,9 @@ describe("POST /api/participants", () => {
       installDate: "2026-08-13T00:00:00Z",
     });
     expect(res.status).toBe(200);
-    expect(
-      db.prepare("SELECT COUNT(*) AS c FROM participants").get().c,
-    ).toBe(1);
+    expect(db.prepare("SELECT COUNT(*) AS c FROM participants").get().c).toBe(
+      1,
+    );
   });
 
   describe("발급 코드 명단이 있을 때", () => {

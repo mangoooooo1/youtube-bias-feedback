@@ -15,6 +15,9 @@ import {
 } from "../../routes/sessions-store.js";
 
 // sessions.js는 모듈 최상단에서 실제 암호화 DB 싱글턴을 연다.
+// 아래 buildTestRouter()는 sessions.js의 라우트를 재구현한 것이라, 이 파일만으로는
+// sessions.js 자체(배선·require 순서·module.exports)를 검증하지 못한다.
+// 이 파일은 validateSession/insertSession/recordFeedbackTimestamp 각 분기를 도는 데 집중한다.
 const db = new Database(":memory:");
 db.exec(`
   CREATE TABLE sessions (
