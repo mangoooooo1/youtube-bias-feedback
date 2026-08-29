@@ -1142,7 +1142,7 @@ async function boot() {
     // 받아 플레이스홀더를 실제 리뷰로 교체한다. 팝업은 생성을 요청하지 않고 결과만 반영한다.
     // resolveTodayCumulative를 다시 호출해 텍스트·잠금 상태를 "같은 캐시 읽기"에서 함께
     // 얻는다 — sessions 변경(아래 분기)이 아직 안 왔어도 이 시점의 render()가 이미 올바른
-    // 잠금 상태로 나가게 하기 위함(coderabbitai 지적, 이슈1 사후 발견 버그 수정).
+    // 잠금 상태로 나가게 하기 위함.
     if (changes.todayCumulativeReview && todayCumulativeEligible) {
       const newCache = changes.todayCumulativeReview.newValue || null;
       const todayStr = dateStr(new Date());
