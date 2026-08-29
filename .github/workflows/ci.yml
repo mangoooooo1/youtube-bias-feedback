@@ -21,8 +21,8 @@ jobs:
           node-version: "24"
           cache: "pnpm"
 
-      - name: Install server dependencies
-        run: pnpm install --prod --filter server
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Validate server syntax
         run: |
@@ -36,3 +36,6 @@ jobs:
         run: |
           node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json', 'utf8'))"
           echo "manifest.json is valid JSON"
+
+      - name: Run test suite
+        run: pnpm test
