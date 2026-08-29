@@ -1,21 +1,47 @@
 name: Deploy Server
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "server/**"
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
   workflow_dispatch:
 
-# 이 워크플로는 SSH로 서버에 접속해 배포할 뿐 GITHUB_TOKEN으로 GitHub API를 호출하는
-# 단계가 없다 — 최소 권한 원칙에 따라 기본 상속 권한을 전부 꺼둔다.
 permissions: {}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
     steps:
-      - name: Deploy to Oracle Cloud
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Load SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Sync runtime files to server
+        run: |
+          rsync -avz \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='docs/' \
+            --exclude='extension/' \
+            --exclude='node_modules/' \
+            --exclude='server/test/' \
+            --exclude='server/node_modules/' \
+            --exclude='server/.env' \
+            --exclude='server/*.db*' \
+            -e "ssh -o StrictHostKeyChecking=no" \
+            ./ ubuntu@${{ secrets.SERVER_HOST }}:~/youtube-bias-feedback/
+
+      - name: Install deps & restart
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -26,8 +52,7 @@ jobs:
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             cd ~/youtube-bias-feedback
-            git checkout main
-            git pull origin main
+            rm -rf server/test extension docs .github .git
             pnpm install --prod
             if [ -z "${{ secrets.DB_ENCRYPTION_KEY }}" ]; then
               echo "DB_ENCRYPTION_KEY secret이 비어 있어 배포를 중단합니다." >&2

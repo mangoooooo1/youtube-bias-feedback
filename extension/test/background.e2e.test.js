@@ -5,6 +5,17 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // 실제 확장 동작에 영향이 없다. 모듈 최상단이 chrome.alarms.create 등 부작용을 즉시 실행하므로,
 // 매 테스트마다 chrome 목을 새로 세팅한 뒤 vi.resetModules()로 모듈을 새로 import한다
 
+// config.js는 gitignore 대상이라 로컬엔 개발자가 미리 채워둔 실제 값이 있을 수 있지만,
+// CI처럼 새로 체크아웃한 환경에선 scripts/ensure-config.js가 config.example.js를 그대로
+// 복사해 SERVER_URL이 "YOUR_SERVER_URL_HERE" placeholder로 남는다. background.js는 이
+// placeholder를 보면 postSessionToServer를 조용히 건너뛰므로, 로컬에서만 우연히 통과하고
+// CI에서는 항상 실패하는 결과가 났었다. 테스트가 로컬 파일 상태에 좌우되지 않도록 고정값으로 목킹한다.
+vi.mock("../config.js", () => ({
+  SERVER_URL: "http://localhost:3000",
+  YOUTUBE_API_KEY: "test-youtube-key",
+  GEMINI_API_KEY: "test-gemini-key",
+}));
+
 function createChromeMock() {
   let store = {};
   return {
