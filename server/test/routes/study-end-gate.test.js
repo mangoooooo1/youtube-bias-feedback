@@ -239,12 +239,21 @@ describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", ()
   it("15분에 5회를 초과해 검증을 시도하면 429를 반환한다(레이트리밋 배선 확인)", async () => {
     insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
 
-    let lastRes;
-    for (let i = 0; i < 6; i++) {
-      lastRes = await request(app)
+    // 공유 app(모듈 최상단에서 buildApp()을 한 번만 호출)을 쓰면 앞선 테스트들의 POST가
+    // 같은 IP의 할당량을 이미 소비해, max가 5가 아니라 1이어도 이 테스트가 우연히
+    // 통과할 수 있다 — buildApp()을 다시 호출해 이 테스트 전용 rate limiter 인스턴스를 쓴다.
+    const isolatedApp = buildApp();
+
+    for (let i = 0; i < 5; i++) {
+      const res = await request(isolatedApp)
         .post("/api/study-end-code/validate")
         .send({ code: "WRONG", anonymousId: "con-user" });
+      expect(res.status).toBe(200);
     }
-    expect(lastRes.status).toBe(429);
+
+    const sixthRes = await request(isolatedApp)
+      .post("/api/study-end-code/validate")
+      .send({ code: "WRONG", anonymousId: "con-user" });
+    expect(sixthRes.status).toBe(429);
   });
 });
