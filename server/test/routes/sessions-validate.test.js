@@ -119,6 +119,30 @@ describe("validateSession — 날짜/숫자 형식", () => {
     },
   );
 
+  it("endTime이 startTime보다 이르면 거부한다(음수 기간 방지, 회귀)", () => {
+    const result = validateSession(
+      basePayload({
+        startTime: "2026-08-13T09:10:00+09:00",
+        endTime: "2026-08-13T09:00:00+09:00",
+      }),
+    );
+    expect(result).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "endTime",
+    });
+  });
+
+  it("endTime이 startTime과 같으면 통과한다(0초 세션, 경계값)", () => {
+    expect(
+      validateSession(
+        basePayload({
+          startTime: "2026-08-13T09:00:00+09:00",
+          endTime: "2026-08-13T09:00:00+09:00",
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it("videoCount가 0이면 통과한다(경계값)", () => {
     expect(validateSession(basePayload({ videoCount: 0 }))).toBeNull();
   });

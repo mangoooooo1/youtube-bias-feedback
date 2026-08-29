@@ -36,10 +36,16 @@ function validateSession(body) {
     }
   }
 
-  if (isNaN(Date.parse(startTime))) {
+  const startMs = Date.parse(startTime);
+  if (isNaN(startMs)) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "startTime" };
   }
-  if (isNaN(Date.parse(endTime))) {
+  const endMs = Date.parse(endTime);
+  if (isNaN(endMs)) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "endTime" };
+  }
+  // 세션 기간이 음수가 되는 걸 막는다 — 동시각(0초 세션)은 허용, 역전만 거부.
+  if (endMs < startMs) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "endTime" };
   }
   if (
