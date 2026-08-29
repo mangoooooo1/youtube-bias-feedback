@@ -1,0 +1,111 @@
+import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import request from "supertest";
+import express from "express";
+import { createRequire } from "node:module";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+// sessions.wiring.test.js와 동일한 이유: 실제 server/routes/video-events.js를 그대로
+// 로드해 배선(라우트 등록, 검증 함수 연결, DB insert)까지 검증한다. DB_PATH를 임시 파일로
+// 오버라이드해 운영 DB를 열 위험 없이 실제 파일을 require한다.
+const require = createRequire(import.meta.url);
+const TEST_DB_PATH = path.join(
+  os.tmpdir(),
+  `viewlens-video-events-wiring-${process.pid}.db`,
+);
+fs.rmSync(TEST_DB_PATH, { force: true });
+process.env.DB_ENCRYPTION_KEY = "vitest-in-memory-only";
+process.env.DB_PATH = TEST_DB_PATH;
+
+const { db, initializeDB } = require("../../db.js");
+initializeDB();
+
+const { errorHandler } = require("../../middleware/responseHandler.js");
+const videoEventsRouter = require("../../routes/video-events.js");
+
+function buildApp() {
+  const app = express();
+  app.use(express.json());
+  app.use("/api/video-events", videoEventsRouter);
+  app.use(errorHandler);
+  return app;
+}
+
+const app = buildApp();
+
+afterAll(() => {
+  db.close();
+  fs.rmSync(TEST_DB_PATH, { force: true });
+});
+
+beforeEach(() => {
+  db.exec("DELETE FROM video_events");
+});
+
+function basePayload(overrides = {}) {
+  return {
+    anonymousId: "wiring-user",
+    videoId: "wiring-v1",
+    watchedAt: "2026-08-13T09:00:00+09:00",
+    title: "테스트 영상",
+    sessionId: "wiring-s1",
+    ...overrides,
+  };
+}
+
+describe("실제 server/routes/video-events.js 라우터 배선", () => {
+  it("POST /api/video-events — 파일을 그대로 로드해도 정상 저장된다", async () => {
+    const res = await request(app)
+      .post("/api/video-events")
+      .send(basePayload());
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare("SELECT * FROM video_events WHERE videoId = ?")
+      .get("wiring-v1");
+    expect(row.anonymousId).toBe("wiring-user");
+    expect(row.sessionId).toBe("wiring-s1");
+  });
+
+  it("POST /api/video-events — videoId 누락 시 400 (validateVideoEvent가 실제로 연결돼 있는지)", async () => {
+    const payload = basePayload();
+    delete payload.videoId;
+
+    const res = await request(app).post("/api/video-events").send(payload);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("MISSING_REQUIRED_FIELD");
+    expect(
+      db.prepare("SELECT COUNT(*) AS c FROM video_events").get().c,
+    ).toBe(0);
+  });
+
+  it("POST /api/video-events — sessionId 미전송(구버전 확장)이면 null로 저장된다", async () => {
+    const payload = basePayload();
+    delete payload.sessionId;
+
+    const res = await request(app).post("/api/video-events").send(payload);
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare("SELECT * FROM video_events WHERE videoId = ?")
+      .get("wiring-v1");
+    expect(row.sessionId).toBeNull();
+  });
+
+  it("POST /api/video-events — sessionId가 빈 문자열이면 400", async () => {
+    const res = await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ sessionId: "" }));
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("INVALID_FIELD_VALUE");
+  });
+
+  it("등록되지 않은 경로는 404 — 예기치 않은 라우트가 실수로 노출되지 않았는지 확인", async () => {
+    const res = await request(app).get(
+      "/api/video-events/no-such-route",
+    );
+    expect(res.status).toBe(404);
+  });
+});

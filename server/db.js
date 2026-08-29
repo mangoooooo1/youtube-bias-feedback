@@ -202,4 +202,4 @@ function addColumn(table, name, type) {
   }
 }
 
-module.exports = { db, initializeDB };
+module.exports = { db, initializeDB, addColumn };
