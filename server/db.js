@@ -1,7 +1,10 @@
 const Database = require("better-sqlite3-multiple-ciphers");
 const path = require("path");
 
-const DB_PATH = path.join(__dirname, "youtube_bias.db");
+// 테스트에서 실제 운영 DB 파일을 열지 않고 라우트 파일 자체(server/routes/*.js)를 그대로
+// import해 배선을 검증할 수 있도록, DB_PATH를 환경변수로 오버라이드할 수 있게 한다
+// (예: DB_PATH=":memory:"). 운영에서는 process.env.DB_PATH가 없으므로 기존 경로 그대로다.
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, "youtube_bias.db");
 
 const DB_ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY;
 if (!DB_ENCRYPTION_KEY) {
