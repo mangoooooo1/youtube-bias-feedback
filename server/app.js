@@ -3,7 +3,8 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const { success, errorHandler } = require("./middleware/responseHandler");
-const { initializeDB } = require("./db");
+const { db, initializeDB } = require("./db");
+const { buildHealthPayload } = require("./routes/health");
 
 initializeDB();
 
@@ -13,7 +14,7 @@ app.use(cors());
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
-  return success(res, { status: "healthy", timestamp: Date.now() });
+  return success(res, buildHealthPayload(db));
 });
 
 app.use("/api/participants", require("./routes/participants"));
