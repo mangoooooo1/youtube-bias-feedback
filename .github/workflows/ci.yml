@@ -30,7 +30,15 @@ jobs:
           node --check server/db.js
           node --check server/routes/sessions.js
           node --check server/routes/surveys.js
+          node --check server/routes/health.js
           node --check server/middleware/responseHandler.js
+          node --check server/monitoring/healthchecks-ping.js
+          node --check server/monitoring/state.js
+          node --check server/monitoring/server-health-check.js
+          node --check server/monitoring/error-monitor.js
+          node --check server/monitoring/research-pipeline-monitor.js
+          bash -n server/scripts/period-reviews-checked.sh
+          bash -n server/scripts/backup-checked.sh
 
       - name: Validate extension manifest
         run: |
