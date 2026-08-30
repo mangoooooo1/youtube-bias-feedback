@@ -63,4 +63,9 @@ jobs:
             echo "DB_ENCRYPTION_KEY=${{ secrets.DB_ENCRYPTION_KEY }}" >> server/.env
             echo "PERIOD_REVIEW_GEMINI_API_KEY=${{ secrets.PERIOD_REVIEW_GEMINI_API_KEY }}" >> server/.env
             echo "STUDY_END_REVEAL_CODE=${{ secrets.STUDY_END_REVEAL_CODE }}" >> server/.env
+            echo "SERVER_HEALTH_PING_URL=${{ secrets.SERVER_HEALTH_PING_URL }}" >> server/.env
+            echo "ERROR_MONITOR_PING_URL=${{ secrets.ERROR_MONITOR_PING_URL }}" >> server/.env
+            echo "RESEARCH_PIPELINE_PING_URL=${{ secrets.RESEARCH_PIPELINE_PING_URL }}" >> server/.env
+            echo "HEALTH_URL=https://viewlens.site/health" >> server/.env
+            echo "ERROR_LOG_PATH=/home/ubuntu/.pm2/logs/youtube-bias-server-error.log" >> server/.env
             pm2 restart youtube-bias-server
