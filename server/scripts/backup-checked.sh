@@ -34,7 +34,8 @@ echo "$OUTPUT"
 OK=true
 if [ "$STATUS" -ne 0 ]; then
   OK=false
-elif echo "$OUTPUT" | grep -q "오프사이트 전송 실패"; then
+# grep -q로 파이프를 태우지 않는다.
+elif [[ "$OUTPUT" == *"오프사이트 전송 실패"* ]]; then
   OK=false
 fi
 
