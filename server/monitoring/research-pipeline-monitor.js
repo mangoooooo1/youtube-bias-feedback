@@ -158,11 +158,17 @@ function collectRecentActivity(
       "SELECT watchedAt AS ts FROM video_events WHERE julianday(watchedAt) >= julianday(?)",
     )
     .all(cutoffIso);
-  // sessions.createdAt은 SQLite datetime('now') 형식(UTC, 'T' 없음)이라 ISO cutoff와
-  // 직접 문자열 비교가 안 맞을 수 있어 datetime()으로 양쪽을 정규화해 비교한다.
+  // sessions.createdAt은 SQLite datetime('now') 형식(UTC 값이지만 공백 구분, 'Z' 없음).
+  // WHERE 절은 datetime()으로 정규화해 비교하지만, SELECT로 꺼낸 원본 문자열을 그대로
+  // JS Date.parse에 넘기면 위험하다.
+  // 이 저장소 개발 환경(Asia/Seoul)에서 직접 재현: "2026-08-30 12:00:00"이 로컬로 해석되면 실제로는
+  // "2026-08-30T12:00:00Z"인데 "2026-08-30T03:00:00Z"로 9시간 밀려서 파싱된다. 서버가
+  // UTC가 아닌 시간대로 설정되면 6시간 윈도우 판정이 통째로 틀어질 수 있으므로, SQL에서
+  // 'T'+'Z'가 붙은 명확한 UTC ISO 문자열로 바꿔 반환한다.
   const sessionRows = db
     .prepare(
-      "SELECT createdAt AS ts FROM sessions WHERE datetime(createdAt) >= datetime(?)",
+      `SELECT replace(createdAt, ' ', 'T') || 'Z' AS ts FROM sessions
+       WHERE datetime(createdAt) >= datetime(?)`,
     )
     .all(cutoffIso);
 

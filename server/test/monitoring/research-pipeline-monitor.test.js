@@ -200,6 +200,34 @@ describe("collectRecentActivity — 실제 DB 배선", () => {
     expect(hasWeekOldParticipant).toBe(true);
   });
 
+  it("sessions.createdAt(공백 구분, 시간대 표기 없음)을 서버 로컬 시간대와 무관하게 UTC로 파싱한다", () => {
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
+    ).run("p1", "EXP", "2026-01-01T00:00:00Z");
+
+    // sessions.createdAt은 실제로 SQLite datetime('now')가 만드는 형식(공백 구분,
+    // 시간대 표기 없음)과 동일하게 직접 삽입한다 — 이 값은 UTC 값이다.
+    db.prepare(
+      `INSERT INTO sessions (anonymousId, sessionId, startTime, endTime, createdAt)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(
+      "p1",
+      "s-utc-parse",
+      "2026-08-30T12:00:00Z",
+      "2026-08-30T12:00:00Z",
+      "2026-08-30 12:00:00",
+    );
+
+    const now = Date.parse("2026-08-30T18:00:00Z");
+    const { events } = collectRecentActivity(db, now, 6 * HOUR);
+
+    // Date.UTC는 실행 환경의 로컬 시간대와 무관하게 항상 같은 절대 epoch를 만들어내므로,
+    // 이 값과 정확히 일치해야만 createdAt이 (로컬 시간대로 오파싱되지 않고) UTC로 올바르게
+    // 해석된 것이다. 이 저장소의 개발 환경(Asia/Seoul, UTC+9)에서는 수정 전 코드로 실행하면
+    // 9시간 밀려 파싱되어 이 테스트가 실패한다(직접 재현 확인).
+    expect(events).toContain(Date.UTC(2026, 7, 30, 12, 0, 0));
+  });
+
   it("video_events(ISO 문자열)와 sessions(SQLite datetime 문자열)를 모두 epoch ms로 모은다", () => {
     db.prepare(
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
