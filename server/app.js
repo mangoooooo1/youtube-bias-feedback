@@ -10,8 +10,10 @@ initializeDB();
 
 const app = express();
 
+// 임의의 확장이 아니라 실제 게시된 ViewLens 확장 ID로만 한정한다.
+const VIEWLENS_EXTENSION_ID = "hdoachgdmhdlbgbacaffihocdjagjecp";
 const ALLOWED_ORIGIN_PATTERNS = [
-  /^chrome-extension:\/\//,
+  `chrome-extension://${VIEWLENS_EXTENSION_ID}`,
   /^https:\/\/([a-z0-9-]+\.)*youtube\.com$/,
   "https://viewlens.site",
 ];
