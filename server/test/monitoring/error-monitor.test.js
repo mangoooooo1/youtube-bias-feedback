@@ -4,6 +4,7 @@ import {
   fingerprint,
   readNewText,
   decideAlerts,
+  shouldPersistState,
 } from "../../monitoring/error-monitor.js";
 
 describe("extractErrorLines", () => {
@@ -246,5 +247,21 @@ describe("decideAlerts — 지문 + 쿨다운 기반 중복 알림 방지", () =
 
     expect(alerts).toHaveLength(2);
     expect(new Set(alerts.map((x) => x.fingerprint)).size).toBe(2);
+  });
+});
+
+describe("shouldPersistState — ping이 진짜로 성공/스킵했을 때만 상태 저장을 허용", () => {
+  it("전송에 성공하면(ok:true) 저장을 허용한다", () => {
+    expect(shouldPersistState({ skipped: false, ok: true })).toBe(true);
+  });
+
+  it("ping URL이 없어 애초에 안 보냈으면(skipped:true) 저장을 허용한다", () => {
+    expect(shouldPersistState({ skipped: true, ok: false })).toBe(true);
+  });
+
+  it("실제로 전송을 시도했다가 실패했으면(ok:false, skipped:false) 저장을 막는다", () => {
+    expect(
+      shouldPersistState({ skipped: false, ok: false, error: "network down" }),
+    ).toBe(false);
   });
 });

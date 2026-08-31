@@ -164,6 +164,13 @@ function decideAlerts(
   return { alerts, fingerprints: updated };
 }
 
+/**
+ * ping 결과를 보고 상태(커서·지문)를 저장해도 되는지 판정한다
+ */
+function shouldPersistState(pingResult) {
+  return pingResult.ok || pingResult.skipped;
+}
+
 async function main() {
   const logPath = process.env.ERROR_LOG_PATH;
   if (!logPath) {
@@ -193,23 +200,31 @@ async function main() {
   const errorLines = extractErrorLines(text);
   const { alerts, fingerprints } = decideAlerts(errorLines, state.fingerprints);
 
-  writeState(STATE_NAME, { cursor, fingerprints });
-
+  let pingResult;
   if (alerts.length === 0) {
-    await pingSuccess(PING_ENV_VAR);
+    pingResult = await pingSuccess(PING_ENV_VAR);
     console.log(
       `[error-monitor] 새 에러 없음 (신규 라인 ${errorLines.length}줄 검사)`,
     );
+  } else {
+    const detail = alerts
+      .map((a) => `[${a.isNew ? "신규" : "재발"} x${a.count}] ${a.message}`)
+      .join("\n");
+    pingResult = await pingFail(PING_ENV_VAR, detail);
+    console.error(
+      `[error-monitor] 알림 대상 에러 ${alerts.length}건:\n${detail}`,
+    );
+  }
+
+  if (!shouldPersistState(pingResult)) {
+    console.error(
+      "[error-monitor] Healthchecks.io 전송 실패 — 상태 저장을 보류하고 다음 실행에서 처음부터 재시도합니다.",
+    );
+    process.exitCode = 1;
     return;
   }
 
-  const detail = alerts
-    .map((a) => `[${a.isNew ? "신규" : "재발"} x${a.count}] ${a.message}`)
-    .join("\n");
-  await pingFail(PING_ENV_VAR, detail);
-  console.error(
-    `[error-monitor] 알림 대상 에러 ${alerts.length}건:\n${detail}`,
-  );
+  writeState(STATE_NAME, { cursor, fingerprints });
 }
 
 if (require.main === module) {
@@ -225,4 +240,5 @@ module.exports = {
   fingerprint,
   readNewText,
   decideAlerts,
+  shouldPersistState,
 };
