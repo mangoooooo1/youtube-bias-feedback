@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const express = require("express");
+const cors = require("cors");
 const { success, errorHandler } = require("./middleware/responseHandler");
 const { db, initializeDB } = require("./db");
 const { buildHealthPayload } = require("./routes/health");
@@ -9,12 +10,24 @@ initializeDB();
 
 const app = express();
 
-// CORS를 의도적으로 허용하지 않는다 — 이 API를 브라우저에서 부르는 유일한 클라이언트는
-// Chrome 확장(background.js/content.js)인데, manifest.json의 host_permissions로 이미
-// CORS 검사 자체를 우회하는 특권을 가지고 있어 서버의 CORS 설정과 무관하게 동작한다.
-// 반대로 CORS를 전면 허용(Access-Control-Allow-Origin: *)해두면, 방문자가 열어본 임의의
-// 웹사이트 JS가 그 방문자의 브라우저를 통해 이 API(특히 쓰기 엔드포인트)를 호출할 수 있게
-// 되므로 아무 이득 없이 공격 표면만 넓어진다.
+const ALLOWED_ORIGIN_PATTERNS = [
+  /^chrome-extension:\/\//,
+  /^https:\/\/([a-z0-9-]+\.)*youtube\.com$/,
+  "https://viewlens.site",
+];
+app.use(
+  cors({
+    origin(origin, callback) {
+      // origin이 없는 요청(브라우저가 아닌 curl/서버-서버 호출, 헬스체크 등)은 애초에
+      // CORS 적용 대상이 아니므로 통과시킨다.
+      if (!origin) return callback(null, true);
+      const allowed = ALLOWED_ORIGIN_PATTERNS.some((p) =>
+        p instanceof RegExp ? p.test(origin) : p === origin,
+      );
+      callback(null, allowed);
+    },
+  }),
+);
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
