@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { checkRateLimit } from "../../middleware/rateLimiter.js";
+import { checkRateLimit, clientKey } from "../../middleware/rateLimiter.js";
 
 describe("checkRateLimit", () => {
   let state;
@@ -45,5 +45,19 @@ describe("checkRateLimit", () => {
     }
     expect(checkRateLimit(state, "1.2.3.4", now, WINDOW_MS, MAX)).toBe(false);
     expect(checkRateLimit(state, "5.6.7.8", now, WINDOW_MS, MAX)).toBe(true);
+  });
+});
+
+describe("clientKey", () => {
+  // 운영 환경의 nginx가 X-Real-IP로 실제 클라이언트 IP를 전달한다.
+  // 그 헤더를 req.ip보다 우선해야 서로 다른 참여자가 같은 리버스 프록시 소켓(127.0.0.1)이 아니라 실제 IP 기준으로 개별 카운트된다.
+  it("X-Real-IP 헤더가 있으면 req.ip보다 그 값을 우선한다", () => {
+    const req = { headers: { "x-real-ip": "203.0.113.9" }, ip: "127.0.0.1" };
+    expect(clientKey(req)).toBe("203.0.113.9");
+  });
+
+  it("X-Real-IP 헤더가 없으면(로컬 개발·테스트처럼 nginx를 안 거치는 경우) req.ip로 폴백한다", () => {
+    const req = { headers: {}, ip: "127.0.0.1" };
+    expect(clientKey(req)).toBe("127.0.0.1");
   });
 });

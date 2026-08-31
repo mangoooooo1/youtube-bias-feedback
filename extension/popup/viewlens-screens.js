@@ -268,7 +268,7 @@ function screenToday() {
     </div>`
     : "";
   return `<div style="display:flex;flex-direction:column">
-    <div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
+    <div style="padding:12px 16px 22px;display:flex;flex-direction:column;gap:14px">
     <div style="display:flex;align-items:center;justify-content:space-between">
       ${_dateNavButton({ id: "vl-date-prev", dir: "left" })}
       <div style="text-align:center">
