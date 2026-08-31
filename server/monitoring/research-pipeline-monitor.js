@@ -31,12 +31,14 @@ const STATE_NAME = "research-pipeline";
 const WINDOW_MS = 6 * 60 * 60 * 1000;
 const COMPARE_OFFSET_MS = 7 * 24 * 60 * 60 * 1000;
 const REQUIRED_CONSECUTIVE = 2;
+const MIN_ADJACENT_WINDOW_MS = WINDOW_MS / 2;
 
 /**
  * 순수 판정 함수(DB 접근 없이 테스트 가능)
  * events: 최근 (windowMs + compareOffsetMs) 범위 활동 타임스탬프 배열
  * hasParticipants: 등록된 참여자가 한 명이라도 있는지(연구 시작 전이면 항상 정상 취급)
  * hasWeekOldParticipant: 설치 후 compareOffsetMs(기본 7일) 이상 지난 참여자가 있는지
+ * lastEvaluatedAt: 직전 실행 시각(epoch ms). 처음 실행이면 null.
  */
 function evaluatePipelineHealth({
   now,
@@ -44,15 +46,18 @@ function evaluatePipelineHealth({
   hasParticipants,
   hasWeekOldParticipant,
   consecutiveZero = 0,
+  lastEvaluatedAt = null,
   windowMs = WINDOW_MS,
   compareOffsetMs = COMPARE_OFFSET_MS,
   requiredConsecutive = REQUIRED_CONSECUTIVE,
+  minAdjacentWindowMs = MIN_ADJACENT_WINDOW_MS,
 }) {
   if (!hasParticipants) {
     return {
       status: "skipped",
       reason: "no_participants",
       consecutiveZero: 0,
+      lastEvaluatedAt: now,
     };
   }
 
@@ -62,7 +67,12 @@ function evaluatePipelineHealth({
   ).length;
 
   if (currentCount > 0) {
-    return { status: "ok", currentCount, consecutiveZero: 0 };
+    return {
+      status: "ok",
+      currentCount,
+      consecutiveZero: 0,
+      lastEvaluatedAt: now,
+    };
   }
 
   if (hasWeekOldParticipant) {
@@ -78,26 +88,39 @@ function evaluatePipelineHealth({
         currentCount: 0,
         compareCount,
         consecutiveZero: 0,
+        lastEvaluatedAt: now,
       };
     }
     // 7일 전 같은 시간대도 원래 조용했다 — 그 시간대 자체의 정상적인 저활동으로 간주하고 리셋.
-    return { status: "ok", currentCount: 0, consecutiveZero: 0 };
+    return {
+      status: "ok",
+      currentCount: 0,
+      consecutiveZero: 0,
+      lastEvaluatedAt: now,
+    };
   }
 
   // 연구 시작 초반이라 비교할 히스토리가 없다 — 직전 윈도우 연속 침묵 횟수로만 판단.
-  const nextConsecutive = consecutiveZero + 1;
+  const isAdjacentWindow =
+    lastEvaluatedAt == null || now - lastEvaluatedAt >= minAdjacentWindowMs;
+  const nextConsecutive = isAdjacentWindow
+    ? consecutiveZero + 1
+    : consecutiveZero;
+
   if (nextConsecutive >= requiredConsecutive) {
     return {
       status: "alert",
       reason: "flatline_consecutive_windows",
       currentCount: 0,
       consecutiveZero: nextConsecutive,
+      lastEvaluatedAt: now,
     };
   }
   return {
     status: "warn_pending",
     currentCount: 0,
     consecutiveZero: nextConsecutive,
+    lastEvaluatedAt: now,
   };
 }
 
@@ -150,7 +173,10 @@ async function main() {
   const now = Date.now();
   const lookbackMs = WINDOW_MS + COMPARE_OFFSET_MS;
 
-  const state = readState(STATE_NAME, { consecutiveZero: 0 });
+  const state = readState(STATE_NAME, {
+    consecutiveZero: 0,
+    lastEvaluatedAt: null,
+  });
   const { hasParticipants, hasWeekOldParticipant, events } =
     collectRecentActivity(db, now, lookbackMs);
 
@@ -160,6 +186,7 @@ async function main() {
     hasParticipants,
     hasWeekOldParticipant,
     consecutiveZero: state.consecutiveZero,
+    lastEvaluatedAt: state.lastEvaluatedAt,
   });
 
   let pingResult;
@@ -183,7 +210,10 @@ async function main() {
     return;
   }
 
-  writeState(STATE_NAME, { consecutiveZero: result.consecutiveZero });
+  writeState(STATE_NAME, {
+    consecutiveZero: result.consecutiveZero,
+    lastEvaluatedAt: result.lastEvaluatedAt,
+  });
 }
 
 if (require.main === module) {

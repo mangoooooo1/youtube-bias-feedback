@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { evaluatePipelineHealth } from "../../monitoring/research-pipeline-monitor.js";
 
-const HOUR = 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
 describe("evaluatePipelineHealth — 순수 판정 로직", () => {
@@ -19,6 +20,7 @@ describe("evaluatePipelineHealth — 순수 판정 로직", () => {
       status: "skipped",
       reason: "no_participants",
       consecutiveZero: 0,
+      lastEvaluatedAt: 1000,
     });
   });
 
@@ -73,7 +75,7 @@ describe("evaluatePipelineHealth — 순수 판정 로직", () => {
     expect(result.consecutiveZero).toBe(1);
   });
 
-  it("비교할 만큼 오래된 참여자가 없을 때 연속 2회(12시간) 침묵이면 alert다", () => {
+  it("비교할 만큼 오래된 참여자가 없을 때, 직전 평가로부터 충분히(윈도우 절반 이상) 지난 연속 2회째 침묵이면 alert다", () => {
     const now = 1 * DAY;
     const result = evaluatePipelineHealth({
       now,
@@ -81,10 +83,39 @@ describe("evaluatePipelineHealth — 순수 판정 로직", () => {
       hasParticipants: true,
       hasWeekOldParticipant: false,
       consecutiveZero: 1, // 직전 실행에서 이미 1회 침묵
+      lastEvaluatedAt: now - 6 * HOUR, // 정상적인 6시간 간격 재실행
     });
     expect(result.status).toBe("alert");
     expect(result.reason).toBe("flatline_consecutive_windows");
     expect(result.consecutiveZero).toBe(2);
+  });
+
+  it("직전 평가로부터 너무 짧은 간격(예: 수동 재실행)으로 다시 실행되면 카운터를 증가시키지 않는다(허위 경보 방지)", () => {
+    const now = 1 * DAY;
+    const result = evaluatePipelineHealth({
+      now,
+      events: [],
+      hasParticipants: true,
+      hasWeekOldParticipant: false,
+      consecutiveZero: 1, // 직전 실행에서 이미 1회 침묵로 카운트됨
+      lastEvaluatedAt: now - 5 * MINUTE, // 몇 분 전에 막 실행됐음(같은 창 안 재실행)
+    });
+    expect(result.status).toBe("warn_pending");
+    expect(result.consecutiveZero).toBe(1); // 증가하지 않고 그대로
+  });
+
+  it("직전 평가 시각이 없으면(최초 실행) 첫 침묵을 정상적으로 1로 센다", () => {
+    const now = 1 * DAY;
+    const result = evaluatePipelineHealth({
+      now,
+      events: [],
+      hasParticipants: true,
+      hasWeekOldParticipant: false,
+      consecutiveZero: 0,
+      lastEvaluatedAt: null,
+    });
+    expect(result.status).toBe("warn_pending");
+    expect(result.consecutiveZero).toBe(1);
   });
 
   it("침묵 이후 활동이 재개되면 consecutiveZero가 0으로 리셋된다", () => {
