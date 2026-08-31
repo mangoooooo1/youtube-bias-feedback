@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
-import { pingSuccess, pingFail } from "../../monitoring/healthchecks-ping.js";
+import {
+  pingSuccess,
+  pingFail,
+  shouldPersistState,
+} from "../../monitoring/healthchecks-ping.js";
 
 describe("pingSuccess/pingFail — 환경변수 누락", () => {
   it("환경변수가 없으면 네트워크 호출 없이 안전하게 건너뛴다", async () => {
@@ -120,5 +124,39 @@ describe("네트워크 오류 처리", () => {
     });
 
     expect(result.ok).toBe(false);
+  });
+
+  it("HTTP 응답은 받았지만 상태 코드가 실패(4xx/5xx)면 ok:false로 판정한다(fetch는 이 경우 reject하지 않음)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 404 });
+    const env = { PING_URL: "https://hc-ping.com/abc-123" };
+
+    const result = await pingSuccess("PING_URL", { env, fetchImpl });
+
+    expect(result).toEqual({ skipped: false, ok: false, error: "HTTP 404" });
+  });
+
+  it("pingFail도 HTTP 실패 응답을 ok:false로 판정한다", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 500 });
+    const env = { PING_URL: "https://hc-ping.com/abc-123" };
+
+    const result = await pingFail("PING_URL", "상세", { env, fetchImpl });
+
+    expect(result).toEqual({ skipped: false, ok: false, error: "HTTP 500" });
+  });
+});
+
+describe("shouldPersistState — ping이 진짜로 성공/스킵했을 때만 상태 저장을 허용", () => {
+  it("전송에 성공하면(ok:true) 저장을 허용한다", () => {
+    expect(shouldPersistState({ skipped: false, ok: true })).toBe(true);
+  });
+
+  it("ping URL이 없어 애초에 안 보냈으면(skipped:true) 저장을 허용한다", () => {
+    expect(shouldPersistState({ skipped: true, ok: false })).toBe(true);
+  });
+
+  it("실제로 전송을 시도했다가 실패했으면(ok:false, skipped:false) 저장을 막는다", () => {
+    expect(
+      shouldPersistState({ skipped: false, ok: false, error: "HTTP 404" }),
+    ).toBe(false);
   });
 });

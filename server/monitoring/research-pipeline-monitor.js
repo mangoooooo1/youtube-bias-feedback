@@ -19,7 +19,11 @@ const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { readState, writeState } = require("./state");
-const { pingSuccess, pingFail } = require("./healthchecks-ping");
+const {
+  pingSuccess,
+  pingFail,
+  shouldPersistState,
+} = require("./healthchecks-ping");
 
 const PING_ENV_VAR = "RESEARCH_PIPELINE_PING_URL";
 const STATE_NAME = "research-pipeline";
@@ -158,19 +162,28 @@ async function main() {
     consecutiveZero: state.consecutiveZero,
   });
 
-  writeState(STATE_NAME, { consecutiveZero: result.consecutiveZero });
-
+  let pingResult;
   if (result.status === "alert") {
-    await pingFail(
+    pingResult = await pingFail(
       PING_ENV_VAR,
       `연구 데이터 수집 파이프라인 침묵 의심 (${result.reason}, 최근 6시간 이벤트 0건)`,
     );
     console.error("[research-pipeline] 침묵 의심:", result);
+  } else {
+    pingResult = await pingSuccess(PING_ENV_VAR);
+    console.log("[research-pipeline] 정상:", result);
+  }
+
+  // ping이 실제로 실패했으면(네트워크 오류·HTTP 에러 등) 상태를 저장하지 않는다.
+  if (!shouldPersistState(pingResult)) {
+    console.error(
+      "[research-pipeline] Healthchecks.io 전송 실패 — 상태 저장을 보류하고 다음 실행에서 재시도합니다.",
+    );
+    process.exitCode = 1;
     return;
   }
 
-  await pingSuccess(PING_ENV_VAR);
-  console.log("[research-pipeline] 정상:", result);
+  writeState(STATE_NAME, { consecutiveZero: result.consecutiveZero });
 }
 
 if (require.main === module) {

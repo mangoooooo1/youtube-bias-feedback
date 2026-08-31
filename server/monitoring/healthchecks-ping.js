@@ -30,7 +30,16 @@ async function ping(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    await fetchImpl(target, { method, body, signal: controller.signal });
+    const response = await fetchImpl(target, {
+      method,
+      body,
+      signal: controller.signal,
+    });
+    // fetch는 네트워크 수준 실패(끊김·타임아웃)에서만 reject한다
+    //  4xx/5xx 응답은 예외 없이 정상적으로 resolve되므로, response.ok를 직접 확인해야 진짜 전송 성공을 알 수 있다.
+    if (!response.ok) {
+      return { skipped: false, ok: false, error: `HTTP ${response.status}` };
+    }
     return { skipped: false, ok: true };
   } catch (err) {
     // ping 실패가 모니터링 스크립트 자체를 죽이면 안 된다 — 경고만 남기고 계속 진행.
@@ -56,4 +65,12 @@ function pingFail(envVarName, detail = "", opts = {}) {
   });
 }
 
-module.exports = { ping, pingSuccess, pingFail };
+/**
+ * ping 결과를 보고 그 ping에 의존하는 로컬 상태를 저장해도 되는지 판정한다.
+ * 실제로 전송에 성공했거나(ok) URL이 아예 없어 애초에 보낼 방법이 없을 때(skipped)만 저장한다.
+ */
+function shouldPersistState(pingResult) {
+  return pingResult.ok || pingResult.skipped;
+}
+
+module.exports = { ping, pingSuccess, pingFail, shouldPersistState };

@@ -46,13 +46,26 @@ async function checkHealth({
 
 async function main() {
   const result = await checkHealth();
+  const pingResult = result.ok
+    ? await pingSuccess(PING_ENV_VAR)
+    : await pingFail(PING_ENV_VAR, `헬스체크 실패: ${result.reason}`);
+
   if (result.ok) {
-    await pingSuccess(PING_ENV_VAR);
     console.log("[server-health] 정상");
-    return;
+  } else {
+    console.error("[server-health] 실패:", result.reason);
   }
-  await pingFail(PING_ENV_VAR, `헬스체크 실패: ${result.reason}`);
-  console.error("[server-health] 실패:", result.reason);
+
+  // 이 스크립트는 저장하는 상태가 없어(stateless) 이전 항목들과 달리 재시도 로직은
+  // 필요 없지만, ping 자체가 실제로 전달됐는지 확인하지 않으면 "정상"이라는 로그만 남고
+  // Healthchecks.io에는 아무것도 도착하지 않은 상황을 구분할 수 없다.
+  if (!pingResult.ok && !pingResult.skipped) {
+    console.error(
+      "[server-health] Healthchecks.io 전송 자체도 실패:",
+      pingResult.error,
+    );
+    process.exitCode = 1;
+  }
 }
 
 if (require.main === module) {

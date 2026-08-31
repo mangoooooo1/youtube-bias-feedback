@@ -21,7 +21,11 @@ const crypto = require("crypto");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { readState, writeState } = require("./state");
-const { pingSuccess, pingFail } = require("./healthchecks-ping");
+const {
+  pingSuccess,
+  pingFail,
+  shouldPersistState,
+} = require("./healthchecks-ping");
 
 const PING_ENV_VAR = "ERROR_MONITOR_PING_URL";
 const STATE_NAME = "error-monitor";
@@ -162,13 +166,6 @@ function decideAlerts(
   }
 
   return { alerts, fingerprints: updated };
-}
-
-/**
- * ping 결과를 보고 상태(커서·지문)를 저장해도 되는지 판정한다
- */
-function shouldPersistState(pingResult) {
-  return pingResult.ok || pingResult.skipped;
 }
 
 async function main() {
