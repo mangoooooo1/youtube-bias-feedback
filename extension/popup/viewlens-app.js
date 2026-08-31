@@ -71,14 +71,13 @@ function _studyEndBackRow() {
 
 function _popupHeader(groupCfg, day, { participantCode, studyEnded } = {}) {
   const isTest = groupCfg.code.startsWith("TEST");
+  const statusLabel = studyEnded ? "참여 종료" : "참여 중";
   const badge = isTest
     ? vlBadge({ text: "연구자 모드", tone: "accent", size: "sm" })
     : vlBadge({
-        text: studyEnded
-          ? participantCode
-            ? `참여 종료 · ${vlEscapeHtml(participantCode)}`
-            : "참여 종료"
-          : "참여 중",
+        text: participantCode
+          ? `${statusLabel} · ${vlEscapeHtml(participantCode)}`
+          : statusLabel,
         tone: "neutral",
         size: "sm",
       });
