@@ -7,19 +7,37 @@
 # 있는지도 함께 확인해야만 성공으로 ping한다.
 #
 # 예전엔 서버 로컬 파일(~/bin/backup-checked.sh)로만 존재했다. 저장소에 코드로
-# 편입해 재현 가능하게 한다. Ping URL은 코드에 두지 않고 인자로 받는다. 같은 스크립트를
-# 밤(23:00)·아침(08:00) 두 크론 라인에서 서로 다른 ping URL로 호출한다.
+# 편입해 재현 가능하게 한다.
 #
-# 사용: backup-checked.sh <healthchecks_ping_url>
+#
+# 사용: backup-checked.sh <night|morning>
 # crontab 예(서버 타임존 Asia/Seoul). rsync 배포가 실행 비트를 보존한다고 가정하지 않도록
 # bash를 명시적으로 붙인다:
-#   0 23 * * * bash /home/ubuntu/youtube-bias-feedback/server/scripts/backup-checked.sh "https://hc-ping.com/night-xxxx" >> /home/ubuntu/db-backups/backup.log 2>&1
-#   0 8  * * * bash /home/ubuntu/youtube-bias-feedback/server/scripts/backup-checked.sh "https://hc-ping.com/morning-xxxx" >> /home/ubuntu/db-backups/backup.log 2>&1
+#   0 23 * * * bash /home/ubuntu/youtube-bias-feedback/server/scripts/backup-checked.sh night >> /home/ubuntu/db-backups/backup.log 2>&1
+#   0 8  * * * bash /home/ubuntu/youtube-bias-feedback/server/scripts/backup-checked.sh morning >> /home/ubuntu/db-backups/backup.log 2>&1
 
 set -uo pipefail
 
-PING_URL="${1:-}"
+RUN_LABEL="${1:-}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# server/.env는 KEY=VALUE 순수 형식이라 bash에서 그대로 source할 수 있다
+# (server/db.js 등 node 스크립트가 dotenv로 읽는 것과 같은 파일, 같은 값).
+if [ -f "$REPO_DIR/server/.env" ]; then
+  set -a
+  # shellcheck source=/dev/null
+  . "$REPO_DIR/server/.env"
+  set +a
+fi
+
+case "$RUN_LABEL" in
+  night) PING_URL="${DB_BACKUP_NIGHT_PING_URL:-}" ;;
+  morning) PING_URL="${DB_BACKUP_MORNING_PING_URL:-}" ;;
+  *)
+    echo "[backup-checked] 사용법: backup-checked.sh <night|morning> — 알 수 없는 레이블 '$RUN_LABEL', ping을 건너뜁니다." >&2
+    PING_URL=""
+    ;;
+esac
 
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
