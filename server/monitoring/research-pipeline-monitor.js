@@ -149,9 +149,14 @@ function collectRecentActivity(
     Number.isFinite(earliestInstallMs) &&
     earliestInstallMs <= now - compareOffsetMs;
 
-  // video_events.watchedAt은 클라이언트가 저장한 ISO8601 문자열이라 문자열 비교로 충분하다.
+  // video_events.watchedAt은 클라이언트가 저장한 ISO8601 문자열인데, 서버가 형식을
+  // UTC('Z')로 강제하지 않아 오프셋 표기(예: +09:00)가 섞여 들어올 수 있다. 단순 문자열
+  // 비교는 오프셋이 다르면 실제 시간 순서와 어긋날 수 있어(예: "14:00+09:00"이 실제로는
+  // "06:00Z"보다 이른데도 문자열로는 더 크게 비교됨) julianday()로 정규화해 비교한다.
   const videoRows = db
-    .prepare("SELECT watchedAt AS ts FROM video_events WHERE watchedAt >= ?")
+    .prepare(
+      "SELECT watchedAt AS ts FROM video_events WHERE julianday(watchedAt) >= julianday(?)",
+    )
     .all(cutoffIso);
   // sessions.createdAt은 SQLite datetime('now') 형식(UTC, 'T' 없음)이라 ISO cutoff와
   // 직접 문자열 비교가 안 맞을 수 있어 datetime()으로 양쪽을 정규화해 비교한다.

@@ -239,4 +239,24 @@ describe("collectRecentActivity — 실제 DB 배선", () => {
     expect(events).toHaveLength(2);
     expect(events.every((ts) => ts >= now - lookbackMs)).toBe(true);
   });
+
+  it("video_events.watchedAt에 타임존 오프셋이 섞여도 절대 시각 기준으로 비교한다(문자열 비교 시 오탐 방지)", () => {
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
+    ).run("p1", "EXP", "2026-01-01T00:00:00Z");
+
+    const now = Date.parse("2026-08-30T12:00:00Z");
+    const lookbackMs = 6 * HOUR; // cutoff = 2026-08-30T06:00:00.000Z
+
+    // 절대 시각으로는 cutoff보다 1시간 이른(윈도우 밖) 이벤트지만, +09:00 오프셋 때문에
+    // 원본 문자열의 시(時) 자릿수가 커서("14" > "06") 단순 문자열 비교로는 윈도우 안으로
+    // 잘못 걸린다 — julianday() 정규화 비교가 아니면 이 테스트는 실패한다.
+    db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, watchedAt) VALUES (?, ?, ?)",
+    ).run("p1", "v-offset", "2026-08-30T14:00:00+09:00"); // = 2026-08-30T05:00:00Z
+
+    const { events } = collectRecentActivity(db, now, lookbackMs);
+
+    expect(events).toHaveLength(0);
+  });
 });
