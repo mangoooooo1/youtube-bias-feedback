@@ -58,12 +58,33 @@ function fingerprint(message) {
  * 새로 추가된 로그 바이트만 읽는다. 파일이 로테이션됐으면(inode 변경 또는 저장된
  * offset보다 파일이 작아짐) 커서를 0으로 리셋해 새 파일 전체를 새로 읽는다.
  * fsImpl을 주입해 파일시스템 없이 테스트 가능.
+ *
+ * ok:false(파일 없음·읽기 실패)와 "파일은 읽었지만 새 내용이 없음"을 반드시 구분해서
+ * 반환한다 — 둘 다 text:""로 합쳐버리면, ERROR_LOG_PATH가 잘못됐을 때도 "새 에러 없음"으로
+ * 오인해 매번 성공 ping을 보내는 무음 실패가 된다(감시 대상을 실제로는 하나도 못 읽고
+ * 있는데 계속 "정상"으로 보고하는, 이 스크립트가 막으려는 문제를 스스로 재현하는 셈).
  */
 function readNewText(filePath, cursor = {}, fsImpl = fs) {
-  if (!fsImpl.existsSync(filePath)) {
-    return { text: "", cursor: { inode: null, offset: 0 } };
+  let stat;
+  try {
+    if (!fsImpl.existsSync(filePath)) {
+      return {
+        text: "",
+        cursor: { inode: null, offset: 0 },
+        ok: false,
+        reason: `파일 없음: ${filePath}`,
+      };
+    }
+    stat = fsImpl.statSync(filePath);
+  } catch (err) {
+    return {
+      text: "",
+      cursor: { inode: null, offset: 0 },
+      ok: false,
+      reason: err.message,
+    };
   }
-  const stat = fsImpl.statSync(filePath);
+
   const rotated =
     (cursor.inode != null && cursor.inode !== stat.ino) ||
     (cursor.offset ?? 0) > stat.size;
@@ -71,19 +92,29 @@ function readNewText(filePath, cursor = {}, fsImpl = fs) {
 
   const length = stat.size - startOffset;
   if (length <= 0) {
-    return { text: "", cursor: { inode: stat.ino, offset: stat.size } };
+    return {
+      text: "",
+      cursor: { inode: stat.ino, offset: stat.size },
+      ok: true,
+    };
   }
 
-  const fd = fsImpl.openSync(filePath, "r");
   try {
-    const buffer = Buffer.alloc(length);
-    fsImpl.readSync(fd, buffer, 0, length, startOffset);
-    return {
-      text: buffer.toString("utf8"),
-      cursor: { inode: stat.ino, offset: stat.size },
-    };
-  } finally {
-    fsImpl.closeSync(fd);
+    const fd = fsImpl.openSync(filePath, "r");
+    try {
+      const buffer = Buffer.alloc(length);
+      fsImpl.readSync(fd, buffer, 0, length, startOffset);
+      return {
+        text: buffer.toString("utf8"),
+        cursor: { inode: stat.ino, offset: stat.size },
+        ok: true,
+      };
+    } finally {
+      fsImpl.closeSync(fd);
+    }
+  } catch (err) {
+    // 권한 문제 등으로 열기/읽기 자체가 실패한 경우 — 커서는 건드리지 않고 실패로 보고한다.
+    return { text: "", cursor, ok: false, reason: err.message };
   }
 }
 
@@ -146,7 +177,19 @@ async function main() {
   }
 
   const state = readState(STATE_NAME, { cursor: {}, fingerprints: {} });
-  const { text, cursor } = readNewText(logPath, state.cursor);
+  const { text, cursor, ok, reason } = readNewText(logPath, state.cursor);
+
+  if (!ok) {
+    // 커서는 갱신하지 않는다 — 경로가 고쳐지면 다음 실행이 정상적으로 이어받아야 한다.
+    await pingFail(
+      PING_ENV_VAR,
+      `ERROR_LOG_PATH를 읽을 수 없습니다(${logPath}): ${reason}`,
+    );
+    console.error(`[error-monitor] 로그 읽기 실패(${logPath}):`, reason);
+    process.exitCode = 1;
+    return;
+  }
+
   const errorLines = extractErrorLines(text);
   const { alerts, fingerprints } = decideAlerts(errorLines, state.fingerprints);
 

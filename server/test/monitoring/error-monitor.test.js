@@ -75,12 +75,27 @@ function fakeFs({ exists = true, size, ino, content }) {
 }
 
 describe("readNewText — 커서 이후만 읽기 + 로테이션 대응", () => {
-  it("파일이 없으면 빈 텍스트와 offset 0을 반환한다", () => {
+  it("파일이 없으면 ok:false와 이유를 반환한다(무음 성공 처리 방지)", () => {
     const fsImpl = fakeFs({ exists: false, size: 0, ino: 1, content: "" });
 
     const result = readNewText("/no/such/file.log", {}, fsImpl);
 
-    expect(result).toEqual({ text: "", cursor: { inode: null, offset: 0 } });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("/no/such/file.log");
+    expect(result.text).toBe("");
+    expect(result.cursor).toEqual({ inode: null, offset: 0 });
+  });
+
+  it("파일을 여는 도중 예외가 나도(권한 문제 등) ok:false로 안전하게 반환한다", () => {
+    const fsImpl = fakeFs({ size: 10, ino: 100, content: "[Error] x\n" });
+    fsImpl.openSync = () => {
+      throw new Error("EACCES: permission denied");
+    };
+
+    const result = readNewText("/log", {}, fsImpl);
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain("permission denied");
   });
 
   it("커서가 없으면(최초 실행) 파일 전체를 읽는다", () => {
@@ -89,6 +104,7 @@ describe("readNewText — 커서 이후만 읽기 + 로테이션 대응", () => 
 
     const result = readNewText("/log", {}, fsImpl);
 
+    expect(result.ok).toBe(true);
     expect(result.text).toBe(content);
     expect(result.cursor).toEqual({ inode: 100, offset: content.length });
   });
