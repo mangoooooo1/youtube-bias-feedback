@@ -219,6 +219,69 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     const ids = sessions.flatMap((s) => s.videos.map((v) => v.videoId)).sort();
     expect(ids).toEqual(["vA", "vB"]); // 둘 다 유실 없이 남는다
   });
+
+  it("get(null) 스냅샷 이후 remove() 이전에 같은 세션으로 새 영상이 도착해도 유실 없이 즉시 병합한다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    await setVideo("s1", "v1", "2026-01-01T00:00:00Z");
+
+    // content.js(별개 실행 컨텍스트)가 endSession의 get(null) 스냅샷 이후,
+    // remove() 직전에 같은 세션(s1)으로 새 영상을 기록하는 상황을 재현한다.
+    const originalRemove = global.chrome.storage.local.remove;
+    global.chrome.storage.local.remove = vi.fn((keys) => {
+      global.chrome.storage.local.set({
+        video__s1__late: {
+          videoId: "v2",
+          title: "제목-v2",
+          watchedAt: "2026-01-01T00:00:05Z",
+        },
+      });
+      return originalRemove(keys);
+    });
+
+    await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].videos.map((v) => v.videoId)).toEqual(["v1", "v2"]);
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(Object.keys(all).some((k) => k.startsWith("video__"))).toBe(false);
+  });
+
+  it("종료 중 새로 시작된 다른 세션의 영상은 건드리지 않는다(아직 진행 중이라 조기 종료하면 안 됨)", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    await setVideo("s1", "v1", "2026-01-01T00:00:00Z");
+
+    const originalRemove = global.chrome.storage.local.remove;
+    global.chrome.storage.local.remove = vi.fn((keys) => {
+      // s1 종료 처리 중, 이미 새로 시작된 s2(다음 세션)의 영상이 끼어든 상황
+      global.chrome.storage.local.set({
+        video__s2__early: {
+          videoId: "v9",
+          title: "제목-v9",
+          watchedAt: "2026-01-01T00:10:00Z",
+        },
+      });
+      return originalRemove(keys);
+    });
+
+    await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].sessionId).toBe("s1");
+    expect(sessions[0].videos.map((v) => v.videoId)).toEqual(["v1"]);
+
+    // s2의 영상 키는 지워지지 않고 그대로 남아, s2가 실제로 끝날 때 처리된다
+    const all = await global.chrome.storage.local.get(null);
+    expect(Object.keys(all).some((k) => k.startsWith("video__s2__"))).toBe(
+      true,
+    );
+  });
 });
 
 describe("saveAnalysis", () => {
