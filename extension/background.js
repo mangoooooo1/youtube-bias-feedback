@@ -1,5 +1,4 @@
 import {
-  addVideo,
   endSession,
   getLastWatchedAt,
   getCurrentSession,
@@ -96,15 +95,6 @@ chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
 // content script가 읽을 수 있도록 SERVER_URL을 storage에 저장
 chrome.storage.local.set({ serverUrl: SERVER_URL });
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "VIDEO_DETECTED") {
-    handleVideoDetected(message)
-      .then(sendResponse)
-      .catch((error) => sendResponse({ ok: false, reason: error.message }));
-    return true;
-  }
-});
-
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== ALARM_NAME) return;
   checkSessionTimeout();
@@ -144,13 +134,6 @@ async function markFeedbackViewed(sessionId) {
   } catch (error) {
     console.warn("[background] 피드백 열람 기록 오류:", error);
   }
-}
-
-async function handleVideoDetected(message) {
-  const { videoId, title } = message;
-  await addVideo(videoId, title);
-  console.log("[background] saved:", { videoId, title });
-  return { ok: true };
 }
 
 async function checkSessionTimeout() {

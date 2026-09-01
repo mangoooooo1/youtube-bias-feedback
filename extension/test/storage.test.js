@@ -1,11 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
-  addVideo,
   endSession,
   getCurrentSession,
   getAllSessions,
   getRecentSessions,
-  getLastWatchedAt,
   getOnboarding,
   saveAnalysis,
 } from "../storage.js";
@@ -32,6 +30,11 @@ function createChromeStorageMock() {
           store = { ...store, ...obj };
           return Promise.resolve();
         },
+        remove: (keys) => {
+          const list = Array.isArray(keys) ? keys : [keys];
+          for (const k of list) delete store[k];
+          return Promise.resolve();
+        },
       },
     },
   };
@@ -46,53 +49,24 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("addVideo — 세션 큐 직렬화 (P0 ⑦)", () => {
-  it("세션이 없으면 새 세션을 만들고 첫 영상을 기록한다", async () => {
-    await addVideo("v1", "제목1");
-    const session = await getCurrentSession();
-    expect(session.videos).toEqual([
-      expect.objectContaining({ videoId: "v1", title: "제목1" }),
-    ]);
+// content.js는 이제 addVideo()를 거치지 않고 영상마다 독립된 storage 키
+// (video__<sessionId>__<uuid>)에 직접 쓴다(연구 무결성 점검 항목 3 — 다중 탭 경합으로
+// 영상 기록이 사라지던 문제의 후속 조치). endSession()은 그 키들을 모아 최종 세션으로
+// 마감하는 쪽만 담당하므로, 테스트도 그 키를 직접 채워 넣어 검증한다.
+// 실제 키는 uuid를 쓰지만, 테스트에서는 (sessionId, videoId)가 같아도 다른 시각에 여러 번
+// 호출할 수 있어야 하므로(같은 영상을 한참 뒤에 다시 봄 등) 매 호출마다 고유한 접미사를 쓴다
+// — videoId를 그대로 키에 쓰면 같은 영상을 두 번 기록할 때 앞의 것을 덮어써버린다.
+let videoKeySeq = 0;
+function setVideo(sessionId, videoId, watchedAt, title = `제목-${videoId}`) {
+  videoKeySeq += 1;
+  return global.chrome.storage.local.set({
+    [`video__${sessionId}__${videoId}-${videoKeySeq}`]: {
+      videoId,
+      title,
+      watchedAt,
+    },
   });
-
-  it("await 없이 연달아 호출해도 큐가 직렬화해 모든 영상이 순서대로 쌓인다", async () => {
-    // 큐 직렬화가 없으면 세 호출이 같은 시점의 stale currentSession을 읽어
-    // 마지막 쓰기만 반영되는 레이스(가장 마지막 영상만 남는 손실)가 발생한다.
-    const p1 = addVideo("v1", "제목1");
-    const p2 = addVideo("v2", "제목2");
-    const p3 = addVideo("v3", "제목3");
-    await Promise.all([p1, p2, p3]);
-
-    const session = await getCurrentSession();
-    expect(session.videos.map((v) => v.videoId)).toEqual(["v1", "v2", "v3"]);
-  });
-
-  it("바로 직전 영상과 videoId가 같으면 중복 기록하지 않는다", async () => {
-    await addVideo("v1", "제목1");
-    await addVideo("v1", "제목1");
-    const session = await getCurrentSession();
-    expect(session.videos).toHaveLength(1);
-  });
-
-  it("직전이 아니라 더 이전에 봤던 영상으로 되돌아가면 다시 기록한다(알려진 동작, 08-테스트전략.md 엣지케이스)", async () => {
-    await addVideo("v1", "제목1");
-    await addVideo("v2", "제목2");
-    await addVideo("v1", "제목1"); // v1으로 복귀 — 직전(v2)과만 비교하므로 다시 기록됨
-    const session = await getCurrentSession();
-    expect(session.videos.map((v) => v.videoId)).toEqual(["v1", "v2", "v1"]);
-  });
-
-  it("중복이라 videos에는 안 쌓여도 lastWatchedAt은 갱신한다", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-    await addVideo("v1", "제목1");
-
-    vi.setSystemTime(new Date("2026-01-01T00:05:00Z"));
-    await addVideo("v1", "제목1");
-
-    expect(await getLastWatchedAt()).toBe("2026-01-01T00:05:00.000Z");
-  });
-});
+}
 
 describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
   it("currentSession이 없으면 아무것도 하지 않는다", async () => {
@@ -102,15 +76,19 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
 
   it("영상이 0개인 세션은 종료하지 않고 그대로 둔다", async () => {
     await global.chrome.storage.local.set({
-      currentSession: { sessionId: "s1", startTime: "t", videos: [] },
+      currentSession: { sessionId: "s1", startTime: "t" },
     });
     await endSession();
     expect(await getCurrentSession()).not.toBeNull();
     expect(await getAllSessions()).toEqual([]);
   });
 
-  it("영상이 있으면 sessions로 옮기고 currentSession을 비운다", async () => {
-    await addVideo("v1", "제목1");
+  it("영상이 있으면 sessions로 옮기고 currentSession·video 키·lastRecordedVideo를 비운다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      lastRecordedVideo: { videoId: "v1", sessionId: "s1" },
+    });
+    await setVideo("s1", "v1", "2026-01-01T00:01:00Z");
     await endSession();
 
     expect(await getCurrentSession()).toBeNull();
@@ -118,16 +96,129 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0].videos.map((v) => v.videoId)).toEqual(["v1"]);
     expect(sessions[0].endTime).toBeDefined();
+
+    const { lastRecordedVideo, ...rest } =
+      await global.chrome.storage.local.get(null);
+    expect(lastRecordedVideo).toBeNull();
+    expect(Object.keys(rest).some((k) => k.startsWith("video__"))).toBe(false);
   });
 
-  it("addVideo와 endSession이 뒤섞여 호출돼도 같은 큐를 공유해 순서가 보장된다", async () => {
-    const p1 = addVideo("v1", "제목1");
-    const p2 = endSession();
-    await Promise.all([p1, p2]);
+  it("영상 여러 개를 시청 순서(watchedAt)대로 정렬해 최종 videos 배열을 만든다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    // 저장 순서를 일부러 시청 순서와 다르게 넣어, endSession이 watchedAt으로
+    // 다시 정렬하는지 확인한다.
+    await setVideo("s1", "v3", "2026-01-01T00:03:00Z");
+    await setVideo("s1", "v1", "2026-01-01T00:01:00Z");
+    await setVideo("s1", "v2", "2026-01-01T00:02:00Z");
+    await endSession();
 
-    expect(await getCurrentSession()).toBeNull();
     const sessions = await getAllSessions();
-    expect(sessions[0]?.videos.map((v) => v.videoId)).toEqual(["v1"]);
+    expect(sessions[0].videos.map((v) => v.videoId)).toEqual([
+      "v1",
+      "v2",
+      "v3",
+    ]);
+  });
+
+  it("드물게 같은 videoId가 남아 있어도(경합으로 새로고침 중복 방지를 놓친 경우) 마지막으로 한 번 더 걸러낸다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    await setVideo("s1", "v1", "2026-01-01T00:01:00Z");
+    // 키 이름만 다르고(uuid 대신 접미사) videoId·watchedAt이 사실상 같은 중복 기록
+    await global.chrome.storage.local.set({
+      video__s1__dup: {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:01:01Z",
+      },
+    });
+    await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions[0].videos.map((v) => v.videoId)).toEqual(["v1"]);
+  });
+
+  it("같은 영상을 여러 탭에서 동시에 열어둬 사이에 다른 영상이 끼어들어도(정렬상 이웃이 아니어도) 중복을 잡아낸다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    // 탭 A가 v1을 기록 → 그 직후(1초 뒤) 다른 탭에서 v2를 기록 → 다시 1초 뒤 탭 B가
+    // (A와 거의 동시에 v1을 열었던) v1을 기록. 정렬하면 v1·v2·v1 순서라 "바로 이웃"
+    // 방식이면 두 v1이 서로 안 붙어 있어 중복 제거를 놓친다.
+    await setVideo("s1", "v1", "2026-01-01T00:00:00.000Z");
+    await setVideo("s1", "v2", "2026-01-01T00:00:01.000Z");
+    await global.chrome.storage.local.set({
+      video__s1__v1dup: {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:02.000Z",
+      },
+    });
+    await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions[0].videos.map((v) => v.videoId)).toEqual(["v1", "v2"]);
+  });
+
+  it("같은 영상을 한참 뒤에(임계값 밖에서) 다시 보면 별도 시청으로 계속 집계한다(A→B→A, bug-01 명시 케이스)", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    await setVideo("s1", "v1", "2026-01-01T00:00:00Z");
+    await setVideo("s1", "v2", "2026-01-01T00:00:10Z");
+    await setVideo("s1", "v1", "2026-01-01T00:05:00Z"); // 5분 뒤 재시청 — 정당한 별도 시청
+    await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions[0].videos.map((v) => v.videoId)).toEqual([
+      "v1",
+      "v2",
+      "v1",
+    ]);
+  });
+
+  it("임계값 안에서 같은 영상이 연쇄로 여러 번 감지돼도(세 탭 등) 전부 하나로 합친다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    await setVideo("s1", "v1", "2026-01-01T00:00:00.000Z");
+    await global.chrome.storage.local.set({
+      video__s1__v1b: {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:04.000Z", // 직전과 4초 차(임계값 5초 이내)
+      },
+      video__s1__v1c: {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:08.000Z", // 직전(4초)과는 4초 차, 최초(0초)와는 8초 차
+      },
+    });
+    await endSession();
+
+    // 각 인접 간격은 임계값 이내라 전부 한 시청으로 묶인다(최초 기준 누적 8초가
+    // 넘더라도, 매번 "직전 유지 항목"과 비교하는 슬라이딩 방식이라 계속 이어진다).
+    const sessions = await getAllSessions();
+    expect(sessions[0].videos.map((v) => v.videoId)).toEqual(["v1"]);
+  });
+
+  it("아주 드물게 두 탭이 동시에 다른 세션을 시작해도(세션 식별 경합) 두 세션 모두 데이터를 잃지 않고 각각 마감된다", async () => {
+    // currentSession은 둘 중 나중에 쓴 쪽(s2)만 남아있는 상황을 재현 — 그래도
+    // video__ 키는 s1 것도 s2 것도 그대로 남아 있다(영상마다 독립 키라 서로 안 지움).
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s2", startTime: "2026-01-01T00:05:00Z" },
+    });
+    await setVideo("s1", "vA", "2026-01-01T00:00:00Z");
+    await setVideo("s2", "vB", "2026-01-01T00:05:30Z");
+    await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions).toHaveLength(2);
+    const ids = sessions.flatMap((s) => s.videos.map((v) => v.videoId)).sort();
+    expect(ids).toEqual(["vA", "vB"]); // 둘 다 유실 없이 남는다
   });
 });
 
