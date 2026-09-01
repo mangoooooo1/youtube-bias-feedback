@@ -270,5 +270,10 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
     const saved = sessions.find((s) => s.sessionId === "s1");
     expect(saved.categoryDistribution).toBeDefined();
     expect(saved.review).toBeUndefined();
+
+    // 알림 대상(EXP, 베이스라인 아님)이라도 서버 전송이 실패해 오늘 리뷰를 받지 못했다면
+    // 알림을 띄우지 않는다 — 그렇지 않으면 "피드백이 업데이트됐어요" 알림만 뜨고
+    // 팝업엔 실제 리뷰 없이 "생성 중" 상태만 보이는 불일치가 생긴다.
+    expect(global.chrome.notifications.create).not.toHaveBeenCalled();
   });
 });

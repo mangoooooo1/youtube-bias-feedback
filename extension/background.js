@@ -225,7 +225,11 @@ export async function analyzeSession(session) {
   await mergeTodayReviewIntoCache(onboarding?.anonymousId, todayReview);
   console.log("[background] 오늘 리뷰 반영 완료:", todayReview);
 
-  if (eligibleForNotification) {
+  // 알림 "자격"(eligibleForNotification)은 그룹·베이스라인만으로 미리 정해지지만,
+  // 실제로 알림을 띄우는 건 todayReview가 실제로 있을 때뿐이다 — 서버 전송이
+  // 오프라인/오류로 실패해 todayReview가 null이면, 알림만 뜨고 팝업엔 "생성 중"만
+  // 보이는 불일치가 생기기 때문이다.
+  if (eligibleForNotification && todayReview) {
     showFeedbackNotification(session);
   }
 }
