@@ -3,7 +3,6 @@ import {
   endSession,
   getCurrentSession,
   getAllSessions,
-  getRecentSessions,
   getOnboarding,
   saveAnalysis,
 } from "../storage.js";
@@ -219,37 +218,6 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     expect(sessions).toHaveLength(2);
     const ids = sessions.flatMap((s) => s.videos.map((v) => v.videoId)).sort();
     expect(ids).toEqual(["vA", "vB"]); // 둘 다 유실 없이 남는다
-  });
-});
-
-describe("getRecentSessions", () => {
-  it("endTime이 없는(진행 중) 세션은 제외한다", async () => {
-    await global.chrome.storage.local.set({
-      sessions: [{ sessionId: "s1", videos: [] }],
-    });
-    expect(await getRecentSessions(7)).toEqual([]);
-  });
-
-  it("cutoff보다 오래된 세션은 제외하고, 정확히 경계인 세션은 포함한다", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 0, 10, 12, 0, 0));
-
-    // days=7 → cutoff는 오늘(1/10) 포함 7일 전 자정 = 1/4 00:00
-    await global.chrome.storage.local.set({
-      sessions: [
-        {
-          sessionId: "old",
-          endTime: new Date(2026, 0, 3, 23, 59).toISOString(),
-        },
-        {
-          sessionId: "boundary",
-          endTime: new Date(2026, 0, 4, 0, 0).toISOString(),
-        },
-      ],
-    });
-
-    const result = await getRecentSessions(7);
-    expect(result.map((s) => s.sessionId)).toEqual(["boundary"]);
   });
 });
 

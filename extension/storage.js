@@ -34,19 +34,6 @@ export async function getAllSessions() {
   return sessions ?? [];
 }
 
-export async function getRecentSessions(days = 7) {
-  const sessions = await getAllSessions();
-  const now = new Date();
-  const cutoff = new Date(
-    now.getFullYear(),
-    now.getMonth(),
-    now.getDate() - (days - 1),
-  ).getTime();
-  return sessions.filter(
-    (s) => s.endTime && new Date(s.endTime).getTime() >= cutoff,
-  );
-}
-
 export async function clearCurrentSession() {
   await chrome.storage.local.set({ currentSession: null });
 }
