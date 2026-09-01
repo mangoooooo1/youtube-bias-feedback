@@ -28,11 +28,10 @@ jobs:
         if: steps.check.outputs.changed == 'true'
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SERVER_URL: ${{ secrets.SERVER_URL }}
         run: |
-          printf "export const YOUTUBE_API_KEY = '%s';\nexport const GEMINI_API_KEY = '%s';\nexport const SERVER_URL = '%s';\n" \
-            "$YOUTUBE_API_KEY" "$GEMINI_API_KEY" "$SERVER_URL" > extension/config.js
+          printf "export const YOUTUBE_API_KEY = '%s';\nexport const SERVER_URL = '%s';\n" \
+            "$YOUTUBE_API_KEY" "$SERVER_URL" > extension/config.js
 
           node -e "
             const fs = require('fs');

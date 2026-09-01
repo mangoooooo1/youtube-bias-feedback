@@ -152,10 +152,16 @@ function buildDataForDate(allSessions, targetDate) {
     (s, sess) => s + (sess.videoCount ?? sess.videos?.length ?? 1),
     0,
   );
+  // 리뷰 텍스트는 서버가 준 이력(VL._todayReviewsByDate, boot()에서 조회)을 우선 쓴다.
+  // 로컬 세션 기록이 스토리지 clear·재설치 등으로 사라져도 서버에 남아있는 리뷰를 계속
+  // 보여줄 수 있다. 서버 조회가 안 됐거나 실패한 경우에만 로컬 세션 스냅샷으로 대체한다.
+  const serverRow = VL._todayReviewsByDate?.[sourceDateStr];
   const review =
+    serverRow?.review ||
     sourceSessions.at(-1)?.review ||
     "시청 패턴을 분석하고 있어요. 잠시 후 시청 분석이 업데이트돼요.";
-  const reviewTopic = sourceSessions.at(-1)?.reviewTopic || "";
+  const reviewTopic =
+    serverRow?.reviewTopic || sourceSessions.at(-1)?.reviewTopic || "";
   // "피드백 확인하기" 블러 해제 버튼이 어느 세션을 확인 처리할지 알아야 해서 함께 넘긴다.
   const sessionId = sourceSessions.at(-1)?.sessionId ?? null;
   // 오늘 누적 리뷰(Story 11-2)의 신선도(staleness) 판정용 — 마지막 세션 하나가 아니라
@@ -487,29 +493,89 @@ async function getPeriodReviewsCached(serverUrl, anonymousId, group) {
     : [];
 }
 
-// ── "오늘" 탭 누적 리뷰 ─────────────────────────────────────────
-// 생성은 세션-종료 트리거가 전담. 팝업은 캐시를 읽기만 하고 생성을 요청하지 않는다.
+// ── "오늘" 탭 누적 리뷰(오늘 + 과거 날짜 공용 이력) ─────────────────────────
+// 생성은 세션-종료 트리거(background.js)가 전담해 서버에 저장한다. 팝업은 그 결과를
+// 조회만 한다 — "기간별 리뷰"와 동일한 패턴: 로컬 캐시가 있고 최신이면 그걸 쓰고,
+// 없거나 오래됐으면(스토리지 clear, 재설치, 다른 기기 등 이유 불문) 서버에 다시 물어본다.
+// 이렇게 하면 "오늘"과 "과거 날짜 돌아보기"를 하나의 메커니즘으로 함께 해결한다 —
+// background.js가 세션이 끝날 때마다 이 캐시에 최신 항목 하나를 병합해 두므로(빠른 경로),
+// 로컬에 아무것도 없을 때만(새 시청 없이 캐시가 사라진 경우 등) 서버 조회가 개입한다.
 
-async function getTodayCumulativeCache() {
-  const { todayCumulativeReview } = await chrome.storage.local.get(
-    "todayCumulativeReview",
+const TODAY_REVIEWS_TIMEOUT_MS = 5000;
+
+async function fetchTodayReviews(serverUrl, anonymousId) {
+  if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    TODAY_REVIEWS_TIMEOUT_MS,
   );
-  return todayCumulativeReview ?? null;
+  try {
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/today-reviews?anonymousId=${encodeURIComponent(anonymousId)}`,
+      { signal: controller.signal },
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    return Array.isArray(json.data) ? json.data : null;
+  } catch (error) {
+    console.warn("[popup] 오늘 리뷰 조회 오류:", error.message);
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
-// 캐시의 reviewDate가 오늘이 아니거나, 오늘 세션 집합이 캐시 생성 당시보다 늘어났으면 "오래됨"으로 본다.
-// 세션 종료 직후 팝업을 열면 background.js의 비동기 생성이 아직 끝나지 않았을 수 있는데,
-// 그 짧은 간극 동안만 "오래됨"으로 잡혀 아래에서 "분석 중…" 플레이스홀더로 표시된다.
-function isTodayCumulativeStale(cache, todayStr, todaySessionIds) {
-  if (!cache || cache.reviewDate !== todayStr) return true;
-  const known = new Set(cache.sourceSessionIds || []);
-  return todaySessionIds.some((id) => !known.has(id));
+// 캐시에 "오늘" 날짜 행이 없거나, 그 행의 sessionCount가 로컬에서 알고 있는 오늘 세션
+// 개수보다 적으면(아직 반영 안 된 최신 세션이 있다는 뜻) 오래된 것으로 본다.
+function isTodayReviewsCacheStale(
+  cache,
+  anonymousId,
+  todayStr,
+  todaySessionCount,
+) {
+  if (!cache || cache.anonymousId !== anonymousId) return true;
+  const todayRow = (cache.reviews || []).find((r) => r.reviewDate === todayStr);
+  return todaySessionCount > (todayRow?.sessionCount ?? 0);
+}
+
+async function getTodayReviewsCached(
+  serverUrl,
+  anonymousId,
+  todaySessionCount,
+) {
+  const { todayReviewsCache } =
+    await chrome.storage.local.get("todayReviewsCache");
+  const todayStr = dateStr(new Date());
+
+  if (
+    !isTodayReviewsCacheStale(
+      todayReviewsCache,
+      anonymousId,
+      todayStr,
+      todaySessionCount,
+    )
+  ) {
+    return todayReviewsCache.reviews;
+  }
+
+  const fetched = await fetchTodayReviews(serverUrl, anonymousId);
+  if (fetched) {
+    await chrome.storage.local.set({
+      todayReviewsCache: { anonymousId, reviews: fetched },
+    });
+    return fetched;
+  }
+
+  // 조회 실패 — 같은 참여자의 이전 캐시가 있으면(오늘 것이 아니어도) 빈 화면보다는 낫다.
+  return todayReviewsCache?.anonymousId === anonymousId
+    ? todayReviewsCache.reviews
+    : [];
 }
 
 // 오늘 누적 리뷰의 현재 표시 상태를 판정한다. 대상이 아니면 즉시 빈 상태를 반환하고,
-// 대상이면 캐시를 읽어 최신인지만 확인한다(생성 요청은 하지 않음 — background.js가 이미 하고 있음).
-// sessionId/locked도 이 함수가 "같은 캐시 읽기 한 번"으로 함께 계산해서 반환한다.
-async function resolveTodayCumulative(eligible, todaySessionIds) {
+// 대상이면 이미 조회해 둔 이력(reviews)에서 오늘 행을 찾는다.
+async function resolveTodayCumulative(eligible, reviews, todaySessionIds) {
   if (!eligible) {
     return {
       eligible: false,
@@ -522,10 +588,10 @@ async function resolveTodayCumulative(eligible, todaySessionIds) {
   }
 
   const todayStr = dateStr(new Date());
-  const cache = await getTodayCumulativeCache();
-  const stale = isTodayCumulativeStale(cache, todayStr, todaySessionIds);
+  const todayRow = (reviews || []).find((r) => r.reviewDate === todayStr);
 
-  if (stale) {
+  // 오늘 행이 아직 없거나, 로컬에서 아는 오늘 세션 수보다 적게 반영돼 있으면 생성 중으로 본다
+  if (!todayRow || (todayRow.sessionCount ?? 0) < todaySessionIds.length) {
     return {
       eligible: true,
       generating: true,
@@ -536,17 +602,17 @@ async function resolveTodayCumulative(eligible, todaySessionIds) {
     };
   }
 
-  // sourceSessionIds는 오늘 세션을 병합한 순서 그대로라 마지막 원소가 곧 가장 최근 세션이다
-  const sessionId = cache.sourceSessionIds?.at(-1) ?? null;
-  const locked = isRealReview(cache.review)
+  // 오늘 세션들의 등록 순서 그대로라 마지막 원소가 곧 가장 최근 세션이다
+  const sessionId = todaySessionIds.at(-1) ?? null;
+  const locked = isRealReview(todayRow.review)
     ? !(await isFeedbackConfirmed(sessionId))
     : false;
 
   return {
     eligible: true,
     generating: false,
-    review: cache.review,
-    reviewTopic: cache.reviewTopic,
+    review: todayRow.review,
+    reviewTopic: todayRow.reviewTopic,
     sessionId,
     locked,
   };
@@ -915,8 +981,20 @@ async function boot() {
   let todayCumulativeEligible =
     (feedbackActive || studyEndTodayEligible) &&
     realToday.sessionIds.length > 0;
+  // 대상이 아니면 조회 자체를 하지 않는다.
+  const todayReviewsList = todayCumulativeEligible
+    ? await getTodayReviewsCached(
+        stored.serverUrl,
+        stored.anonymousId,
+        realToday.sessionIds.length,
+      )
+    : [];
+  VL._todayReviewsByDate = Object.fromEntries(
+    (todayReviewsList || []).map((r) => [r.reviewDate, r]),
+  );
   VL._todayCumulative = await resolveTodayCumulative(
     todayCumulativeEligible,
+    todayReviewsList,
     realToday.sessionIds,
   );
 
@@ -1067,8 +1145,9 @@ async function boot() {
       startTs: Date.now(),
       tabTodayClicks: 0,
       tabWeekClicks: 0,
-      // EXP 사용자가 열자마자 실제 리뷰(today 탭)를 보고 있으면 개입 전달로 간주
-      feedbackViewed: feedbackActive && isRealReview(realToday.review) ? 1 : 0,
+      // EXP 사용자가 열자마자 실제 리뷰를 보고 있으면 개입 전달로 간주
+      feedbackViewed:
+        feedbackActive && isRealReview(VL._todayCumulative.review) ? 1 : 0,
     };
     persistLivePopupEvent(popupMetrics);
 
@@ -1130,7 +1209,11 @@ async function boot() {
   let localCurrentSession = stored.currentSession || null;
   let localLastWatchedAt = stored.lastWatchedAt || null;
 
-  // sessions가 바뀌면(분석 완료, 리뷰 저장 등) 즉시 today 데이터를 갱신하고 re-render
+  // sessions가 바뀌면(분석 완료 등) 즉시 today 데이터를 갱신하고, 오늘 리뷰 캐시가
+  // 바뀌면(background.js의 세션-종료 트리거가 생성을 마친 시점) 플레이스홀더를 실제
+  // 리뷰로 교체한다. 둘 다 background.js가 거의 같은 시점에 갱신하므로 같은 이벤트
+  // 배치 안에서 함께 올 수 있어, sessions를 먼저 반영해 "로컬에서 아는 오늘 세션 수"를
+  // 최신으로 만든 뒤 오늘 리뷰 캐시를 판정한다.
   chrome.storage.onChanged.addListener(async (changes, area) => {
     if (area !== "local") return;
     if (changes.currentSession)
@@ -1138,18 +1221,54 @@ async function boot() {
     if (changes.lastWatchedAt)
       localLastWatchedAt = changes.lastWatchedAt.newValue || null;
 
-    // background.js의 세션-종료 트리거가 생성을 마치고 캐시를 갱신하면 여기서
-    // 받아 플레이스홀더를 실제 리뷰로 교체한다. 팝업은 생성을 요청하지 않고 결과만 반영한다.
-    // resolveTodayCumulative를 다시 호출해 텍스트·잠금 상태를 "같은 캐시 읽기"에서 함께
-    // 얻는다 — sessions 변경(아래 분기)이 아직 안 왔어도 이 시점의 render()가 이미 올바른
-    // 잠금 상태로 나가게 하기 위함.
-    if (changes.todayCumulativeReview && todayCumulativeEligible) {
-      const newCache = changes.todayCumulativeReview.newValue || null;
-      const todayStr = dateStr(new Date());
-      if (newCache && newCache.reviewDate === todayStr) {
+    if (changes.sessions) {
+      const updatedSessions = changes.sessions.newValue || [];
+      VL._allSessions = updatedSessions;
+      const freshToday = buildDataForDate(updatedSessions, new Date());
+      freshToday.collectingCount = localCurrentSession?.videos?.length ?? 0;
+      freshToday.collectingTimer = _computeTimerText(localLastWatchedAt);
+      // 확인(블러) 상태는 여기서 다시 계산하지 않는다 — VL._todayCumulative(아래 분기)가
+      // 유일한 소스다. sessions 변경은 도넛·영상목록 등 리뷰와 무관한 필드 갱신용.
+      VL.today = freshToday;
+
+      // 팝업을 연 채로 오늘 첫 세션이 막 끝난 경우 — boot() 시점엔 오늘 세션이 0개라
+      // 대상에서 제외됐던 상태를 여기서 한 번만 다시 판정한다. 실제 리뷰 텍스트 반영은
+      // 아래 changes.todayReviewsCache 분기(background.js가 같은 시점에 함께 갱신)가 담당한다.
+      if (!todayCumulativeEligible) {
+        const nowEligible = feedbackActive && freshToday.sessionIds.length > 0;
+        if (nowEligible) {
+          todayCumulativeEligible = true;
+          VL._todayCumulative = await resolveTodayCumulative(
+            true,
+            Object.values(VL._todayReviewsByDate || {}),
+            freshToday.sessionIds,
+          );
+        }
+      }
+
+      if (installDate) {
+        // 기간 리뷰는 세션이 갱신될 때마다 다시 조회하지 않는다 — 서버 cron이 하루/일주일에
+        // 한 번만 새로 생성하므로, boot() 시점에 캐시로 가져온 값을 그대로 재사용한다.
+        VL.weeks = buildWeeksData(
+          updatedSessions,
+          installDate,
+          cachedPeriodReviews,
+        );
+        VL.baselineH = calculateBaselineEntropy(VL.weeks);
+      }
+    }
+
+    if (changes.todayReviewsCache && todayCumulativeEligible) {
+      const newCache = changes.todayReviewsCache.newValue || null;
+      if (newCache && newCache.anonymousId === stored.anonymousId) {
+        const reviews = newCache.reviews || [];
+        VL._todayReviewsByDate = Object.fromEntries(
+          reviews.map((r) => [r.reviewDate, r]),
+        );
         VL._todayCumulative = await resolveTodayCumulative(
           true,
-          newCache.sourceSessionIds || [],
+          reviews,
+          VL.today?.sessionIds || [],
         );
         VL._todayConfirmed = !VL._todayCumulative.locked;
         if (
@@ -1159,47 +1278,12 @@ async function boot() {
         ) {
           clearUnviewedIconDot();
         }
-        popup.render();
       }
     }
 
-    if (!changes.sessions) return;
-    const updatedSessions = changes.sessions.newValue || [];
-    VL._allSessions = updatedSessions;
-    const freshToday = buildDataForDate(updatedSessions, new Date());
-    freshToday.collectingCount = localCurrentSession?.videos?.length ?? 0;
-    freshToday.collectingTimer = _computeTimerText(localLastWatchedAt);
-    // 확인(블러) 상태는 여기서 다시 계산하지 않는다 — VL._todayCumulative(위 분기)가
-    // 유일한 소스다. sessions 변경은 도넛·영상목록 등 리뷰와 무관한 필드 갱신용.
-    VL.today = freshToday;
-
-    // 팝업을 연 채로 오늘 첫 세션이 막 끝난 경우 — boot() 시점엔 오늘 세션이 0개라
-    // 대상에서 제외됐던 상태를 여기서 한 번만 다시 판정한다. 이미 대상이었다면(세션이
-    // 더 늘어난 것뿐이라면) 다시 판정하지 않는다 — resolveTodayCumulative는 이제 읽기만
-    // 하므로 재판정 자체는 안전하지만, 매 세션마다 불필요한 캐시 재조회를 피하기 위함이다.
-    // 실제 캐시 갱신 반영은 위 changes.todayCumulativeReview 리스너가 담당한다.
-    if (!todayCumulativeEligible) {
-      const nowEligible = feedbackActive && freshToday.sessionIds.length > 0;
-      if (nowEligible) {
-        todayCumulativeEligible = true;
-        VL._todayCumulative = await resolveTodayCumulative(
-          true,
-          freshToday.sessionIds,
-        );
-      }
+    if (changes.sessions || changes.todayReviewsCache) {
+      popup.render();
     }
-
-    if (installDate) {
-      // 기간 리뷰는 세션이 갱신될 때마다 다시 조회하지 않는다 — 서버 cron이 하루/일주일에
-      // 한 번만 새로 생성하므로, boot() 시점에 캐시로 가져온 값을 그대로 재사용한다.
-      VL.weeks = buildWeeksData(
-        updatedSessions,
-        installDate,
-        cachedPeriodReviews,
-      );
-      VL.baselineH = calculateBaselineEntropy(VL.weeks);
-    }
-    popup.render();
   });
 
   // 수집 중 표시 실시간 업데이트 (1초 간격) — 캐시된 로컬 변수만 참조

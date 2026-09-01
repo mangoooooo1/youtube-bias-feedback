@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach, afterAll } from "vitest";
+process.env.TZ = "Asia/Seoul";
+
+import { describe, it, expect, beforeEach, afterAll, afterEach } from "vitest";
 import request from "supertest";
 import express from "express";
 import { createRequire } from "node:module";
@@ -118,5 +120,97 @@ describe("실제 server/routes/sessions.js 라우터 배선", () => {
   it("등록되지 않은 경로는 404 — 예기치 않은 라우트가 실수로 노출되지 않았는지 확인", async () => {
     const res = await request(app).get("/api/sessions/wiring-s1/no-such-route");
     expect(res.status).toBe(404);
+  });
+});
+
+// 세션 저장 직후 "오늘" 누적 리뷰를 서버가 직접 생성해 응답에 실어 보내는지(연구 무결성
+// 점검 항목 1 후속 조치) — 자격 없는 그룹/시기에는 리뷰 텍스트 자체가 응답에 없어야 한다.
+// TODAY_REVIEW_GEMINI_API_KEY를 설정하지 않았으므로 실제 Gemini 호출 없이 폴백만 사용된다.
+// basePayload()의 endTime은 고정 과거 날짜라 "오늘" 집계 대상이 되지 않으므로, 이 describe의
+// 테스트들은 endTime을 실행 시점의 실제 "지금"으로 덮어써야 한다.
+describe("POST /api/sessions — 오늘 누적 리뷰 생성·자격 게이팅", () => {
+  afterEach(() => {
+    db.exec("DELETE FROM participants");
+  });
+
+  it("자격 있는 EXP(베이스라인 이후)는 응답에 오늘 리뷰가 실린다", async () => {
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
+    ).run("exp-eligible", "EXP", "2020-01-01T00:00:00+09:00");
+
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          anonymousId: "exp-eligible",
+          sessionId: "exp-eligible-s1",
+          endTime: new Date().toISOString(),
+        }),
+      );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.todayReview).not.toBeNull();
+    expect(typeof res.body.data.todayReview.review).toBe("string");
+    expect(res.body.data.todayReview.review.length).toBeGreaterThan(0);
+  });
+
+  it("EXP라도 베이스라인 기간 중이면 응답에 오늘 리뷰가 없다(텍스트 자체가 안 실림)", async () => {
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
+    ).run("exp-baseline", "EXP", new Date().toISOString());
+
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          anonymousId: "exp-baseline",
+          sessionId: "exp-baseline-s1",
+          endTime: new Date().toISOString(),
+        }),
+      );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.todayReview).toBeNull();
+
+    // 자격이 없을 뿐, 서버 DB에는 여전히 생성·저장은 되어 있어야 한다(항상 생성, 응답만 게이팅).
+    const row = db
+      .prepare("SELECT * FROM today_reviews WHERE anonymousId = ?")
+      .get("exp-baseline");
+    expect(row).not.toBeUndefined();
+    expect(row.review).not.toBeNull();
+  });
+
+  it("연구종료 코드 검증 전인 CON은 응답에 오늘 리뷰가 없다", async () => {
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
+    ).run("con-unverified", "CON", "2020-01-01T00:00:00+09:00");
+
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          anonymousId: "con-unverified",
+          sessionId: "con-unverified-s1",
+          endTime: new Date().toISOString(),
+        }),
+      );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.todayReview).toBeNull();
+  });
+
+  it("참여자 등록이 없는 anonymousId(온보딩 전 등)도 세션 저장은 성공하고 오늘 리뷰만 비어 있다", async () => {
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          anonymousId: "unregistered-user",
+          sessionId: "unregistered-s1",
+        }),
+      );
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.todayReview).toBeNull();
   });
 });

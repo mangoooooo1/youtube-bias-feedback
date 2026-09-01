@@ -3,10 +3,12 @@ const { db } = require("../db");
 const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const { validateSession } = require("./sessions-validate");
 const { insertSession, recordFeedbackTimestamp } = require("./sessions-store");
+const { generateAndStoreTodayReview } = require("./today-review-generate");
+const { isTodayReviewEligible } = require("./today-reviews-query");
 
 const router = express.Router();
 
-router.post("/", (req, res, next) => {
+router.post("/", async (req, res, next) => {
   const error = validateSession(req.body);
   if (error) {
     return fail(
@@ -33,7 +35,29 @@ router.post("/", (req, res, next) => {
     return next(err);
   }
 
-  return success(res);
+  // "오늘" 누적 리뷰는 그룹·자격과 무관하게 항상 다시 계산해 저장하고, 지금 이 요청자가 볼 자격이 있을 때만 응답에 싣는다.
+  let todayReview = null;
+  try {
+    const anonymousId = req.body.anonymousId;
+    const generated = await generateAndStoreTodayReview(db, {
+      anonymousId,
+      apiKey: process.env.TODAY_REVIEW_GEMINI_API_KEY,
+    });
+    if (generated) {
+      const participant = db
+        .prepare(
+          "SELECT group_code, installDate, studyEndCodeVerifiedAt FROM participants WHERE anonymousId = ?",
+        )
+        .get(anonymousId);
+      if (isTodayReviewEligible(participant)) {
+        todayReview = generated;
+      }
+    }
+  } catch (err) {
+    console.error("[sessions] 오늘 리뷰 생성 오류:", err.message);
+  }
+
+  return success(res, { todayReview });
 });
 
 // 피드백 열람/확인 시각 갱신 — 세션 생성 POST와 별도 시점에(알림 클릭, 확인 버튼 클릭 등)

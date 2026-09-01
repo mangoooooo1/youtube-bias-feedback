@@ -1,5 +1,7 @@
 // 기간 단위 리뷰 생성 파이프라인
 
+const { SENSITIVE_PATTERN } = require("./sensitive-pattern");
+
 const GEMINI_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent";
 const TIMEOUT_MS = 10000;
@@ -93,9 +95,6 @@ function llmError(failureReason, message, extra = {}) {
   err.failureReason = failureReason;
   return Object.assign(err, extra);
 }
-
-const SENSITIVE_PATTERN =
-  /(?:진보|보수)\s*(?:성향|진영|정치|이념)|좌파|우파|좌익|우익|여당|야당|정당|국민의힘|민주당|대통령|국회의원|탄핵|친일|반일|극우|극좌/;
 
 async function generatePeriodReview(prompt, apiKey) {
   const controller = new AbortController();

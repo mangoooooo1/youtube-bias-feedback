@@ -11,14 +11,7 @@ import { fetchVideoCategories } from "./pipeline/youtube.js";
 import {
   calculateDistribution,
   calculateEntropy,
-  aggregateTodayCumulative,
 } from "./pipeline/analysis.js";
-import {
-  buildTodayCumulativePrompt,
-  generateReview,
-  generateTodayFallbackReview,
-  TODAY_PROMPT_VERSION,
-} from "./pipeline/llm.js";
 import { isBaselinePeriod } from "./pipeline/baseline.js";
 import { SERVER_URL } from "./config.js";
 
@@ -201,73 +194,48 @@ export async function analyzeSession(session) {
   });
   console.log("[background] 분석 완료:", { entropy, categoryDistribution });
 
-  // 오늘 누적 리뷰 생성
-  const cumulative = await generateTodayCumulativeReview();
-
-  // 오늘 모든 세션의 categoryDistribution이 비어 있는 극히 드문 경우(YouTube 카테고리
-  // 조회가 전부 실패)에만 aggregateTodayCumulative가 null을 반환해 cumulative.ok가 false다.
-  // 이때는 Gemini를 부르지 않고 "분석 불가" 플레이스홀더로 대체한다(generateTodayFallbackReview의
-  // 빈 분포 분기 재사용) — llmStatus는 fallback으로 기록하되, 실제 LLM 실패가 아니므로
-  // failureReason은 남기지 않는다(문서화된 분류값에 없는 값을 지어내지 않기 위함).
-  const result = cumulative.ok
-    ? {
-        feedback: cumulative.review,
-        topic: cumulative.reviewTopic,
-        source: cumulative.source,
-        promptVersion: cumulative.promptVersion,
-      }
-    : generateTodayFallbackReview({ categoryDistribution: {}, videoCount: 0 });
-  const llmStatus = cumulative.ok ? cumulative.llmStatus : "fallback";
-  const failureReason = cumulative.ok ? cumulative.failureReason : null;
-  const httpStatus = cumulative.ok ? cumulative.httpStatus : null;
-  const timedOut = cumulative.ok ? cumulative.timedOut : 0;
-  const geminiMs = cumulative.ok ? cumulative.geminiMs : null;
-
-  await saveAnalysis(session.sessionId, {
-    review: result.feedback,
-    reviewTopic: result.topic,
-  });
-  console.log("[background] 리뷰 저장 완료:", result);
-
-  // 알림·전송 모두 온보딩 정보(그룹·anonymousId)가 필요해 한 번만 조회해 공유한다.
+  // 알림 자격은 리뷰 생성 결과와 무관하게(그룹·베이스라인만으로) 미리 정해진다.
+  // 이 값을 그대로 서버에 함께 보내 sessions.feedbackNotifiedAt에 기록한다.
   const onboarding = await getOnboarding();
-
-  const feedbackNotifiedAt = notifyFeedbackReady(session, onboarding)
+  const eligibleForNotification = isFeedbackNotificationEligible(
+    onboarding?.group,
+    onboarding?.installDate,
+  );
+  const feedbackNotifiedAt = eligibleForNotification
     ? new Date().toISOString()
     : null;
 
   const totalMs = Date.now() - t0;
-  await postSessionToServer(
+  const postResult = await postSessionToServer(
     session,
     categoryDistribution,
     entropy,
     videoCount,
     onboarding,
-    {
-      totalMs,
-      youtubeMs,
-      geminiMs,
-      llmStatus,
-      failureReason,
-      httpStatus,
-      timedOut,
-      feedbackNotifiedAt,
-      review: result.feedback,
-      reviewTopic: result.topic,
-      source: result.source,
-      promptVersion: result.promptVersion,
-    },
+    { totalMs, youtubeMs, feedbackNotifiedAt },
   );
+
+  const todayReview = postResult?.todayReview ?? null;
+  if (todayReview) {
+    await saveAnalysis(session.sessionId, {
+      review: todayReview.review,
+      reviewTopic: todayReview.reviewTopic,
+    });
+  }
+  await mergeTodayReviewIntoCache(onboarding?.anonymousId, todayReview);
+  console.log("[background] 오늘 리뷰 반영 완료:", todayReview);
+
+  // 알림 "자격"(eligibleForNotification)은 그룹·베이스라인만으로 미리 정해지지만,
+  // 실제로 알림을 띄우는 건 todayReview가 실제로 있을 때뿐이다 — 서버 전송이
+  // 오프라인/오류로 실패해 todayReview가 null이면, 알림만 뜨고 팝업엔 "생성 중"만
+  // 보이는 불일치가 생기기 때문이다.
+  if (eligibleForNotification && todayReview) {
+    showFeedbackNotification(session);
+  }
 }
 
-// 분석 완료 알림 + 배지 표시 (). 대상이면 true를 반환해 호출부가 feedbackNotifiedAt을 기록하게 한다.
-// notificationId로 session.sessionId를 그대로 사용 — 버튼 클릭 시 별도 매핑 없이 세션을 역추적한다.
-function notifyFeedbackReady(session, onboarding) {
-  if (
-    !isFeedbackNotificationEligible(onboarding?.group, onboarding?.installDate)
-  ) {
-    return false;
-  }
+// 버튼 클릭 시 별도 매핑 없이 세션을 역추적한다. 자격 판정은 호출부가 미리 끝내둔 상태로 호출한다.
+function showFeedbackNotification(session) {
   chrome.notifications.create(session.sessionId, {
     type: "basic",
     iconUrl: chrome.runtime.getURL("assets/icons/icon128.png"),
@@ -277,7 +245,25 @@ function notifyFeedbackReady(session, onboarding) {
   });
   // 개수 대신 있음/없음만 표시 — 정확한 미열람 개수는 연구 지표가 아니다.
   setUnviewedIconDot();
-  return true;
+}
+
+// 팝업이 읽는 "오늘 누적 리뷰 이력" 캐시
+// 방금 서버가 돌려준 오늘 행 하나만 갈아 끼운다. 자격이 없어 todayReview가 null이면 아무것도 쓰지 않는다.
+async function mergeTodayReviewIntoCache(anonymousId, todayReview) {
+  if (!anonymousId || !todayReview) return;
+  const { todayReviewsCache } =
+    await chrome.storage.local.get("todayReviewsCache");
+  const existing =
+    todayReviewsCache?.anonymousId === anonymousId
+      ? todayReviewsCache.reviews || []
+      : [];
+  const reviews = [
+    ...existing.filter((r) => r.reviewDate !== todayReview.reviewDate),
+    todayReview,
+  ];
+  await chrome.storage.local.set({
+    todayReviewsCache: { anonymousId, reviews },
+  });
 }
 
 async function postSessionToServer(
@@ -292,12 +278,12 @@ async function postSessionToServer(
     console.warn(
       "[background] SERVER_URL이 설정되지 않았습니다. config.js 설정을 확인해주세요.",
     );
-    return;
+    return null;
   }
 
   if (!onboarding?.anonymousId) {
     console.warn("[background] anonymousId 없음, 서버 전송 건너뜀");
-    return;
+    return null;
   }
 
   const cleanUrl = SERVER_URL.replace(/\/$/, "");
@@ -319,177 +305,21 @@ async function postSessionToServer(
             : undefined,
         totalMs: metrics.totalMs,
         youtubeMs: metrics.youtubeMs,
-        geminiMs: metrics.geminiMs,
-        llmStatus: metrics.llmStatus,
-        failureReason: metrics.failureReason,
-        httpStatus: metrics.httpStatus,
-        timedOut: metrics.timedOut,
         feedbackNotifiedAt: metrics.feedbackNotifiedAt,
-        review: metrics.review,
-        reviewTopic: metrics.reviewTopic,
-        source: metrics.source,
-        promptVersion: metrics.promptVersion,
       }),
     });
 
     if (!response.ok) {
       const body = await response.text();
       console.warn("[background] 서버 전송 실패:", response.status, body);
-      return;
+      return null;
     }
 
     console.log("[background] 서버 전송 완료:", session.sessionId);
+    const json = await response.json();
+    return json?.data ?? null;
   } catch (error) {
     console.warn("[background] 서버 전송 오류:", error);
-  }
-}
-
-// "오늘" 탭 누적 리뷰
-
-const TODAY_CUMULATIVE_CACHE_KEY = "todayCumulativeReview";
-
-// 세션-종료 알람이 짧은 간격으로 겹치면(이론상 거의 없음) 생성 요청이 겹쳐 들어올 수 있어
-// 방어적으로 유지한다.
-let todayCumulativeReviewInFlight = null;
-
-// 세션-종료 트리거(analyzeSession, 이슈1 1-B)가 호출한다.
-function generateTodayCumulativeReview() {
-  if (todayCumulativeReviewInFlight) return todayCumulativeReviewInFlight;
-  todayCumulativeReviewInFlight = runGenerateTodayCumulativeReview().finally(
-    () => {
-      todayCumulativeReviewInFlight = null;
-    },
-  );
-  return todayCumulativeReviewInFlight;
-}
-
-async function runGenerateTodayCumulativeReview() {
-  const sessions = await getAllSessions();
-  const aggregate = aggregateTodayCumulative(sessions);
-  if (!aggregate) return { ok: false, reason: "no_sessions" };
-
-  const prompt = buildTodayCumulativePrompt(aggregate);
-
-  let result;
-  let llmStatus = "success";
-  let failureReason = null;
-  let httpStatus = null;
-  let timedOut = 0; // SQLite INTEGER — 1/0
-  const geminiStart = Date.now();
-  try {
-    result = await generateReview(prompt, TODAY_PROMPT_VERSION);
-    console.log("[background] 오늘 누적 리뷰 생성 완료");
-  } catch (error) {
-    llmStatus = "fallback";
-    failureReason = error.failureReason || "network_error";
-    httpStatus = error.httpStatus ?? null;
-    timedOut = error.timedOut === true ? 1 : 0;
-    console.warn(
-      "[background] 오늘 누적 리뷰 생성 실패, 폴백 사용:",
-      failureReason,
-      error.message,
-    );
-    result = generateTodayFallbackReview(aggregate);
-  }
-  const geminiMs = Date.now() - geminiStart;
-
-  // 그날 몇 번째 갱신인지 관측용(더 이상 팝업의 상한 판정에는 쓰이지 않음, 1-B에서
-  // 팝업 쪽 하루 상한 로직을 제거했다 — 세션-종료 트리거는 세션 수만큼만 자연히 호출된다).
-  // 같은 날짜 캐시가 있으면 이어서 세고, 날짜가 바뀌었으면(자정 경과) 1부터 다시 센다.
-  const { [TODAY_CUMULATIVE_CACHE_KEY]: prevCache } =
-    await chrome.storage.local.get(TODAY_CUMULATIVE_CACHE_KEY);
-  const genCount =
-    prevCache?.reviewDate === aggregate.reviewDate
-      ? (prevCache.genCount ?? 0) + 1
-      : 1;
-
-  const cacheEntry = {
-    reviewDate: aggregate.reviewDate,
-    // 팝업이 "새 세션이 있는지"로 캐시 신선도를 판정할 때 쓴다
-    sourceSessionIds: aggregate.sessionIds,
-    sessionCount: aggregate.sessionCount,
-    videoCount: aggregate.videoCount,
-    categoryDistribution: aggregate.categoryDistribution,
-    entropy: aggregate.entropy,
-    review: result.feedback,
-    reviewTopic: result.topic,
-    source: result.source,
-    promptVersion: result.promptVersion,
-    llmStatus,
-    failureReason,
-    httpStatus,
-    timedOut,
-    geminiMs,
-    genCount,
-    generatedAt: new Date().toISOString(),
-  };
-  await chrome.storage.local.set({ [TODAY_CUMULATIVE_CACHE_KEY]: cacheEntry });
-  console.log("[background] 오늘 누적 리뷰 캐시 저장 완료:", cacheEntry);
-
-  const onboarding = await getOnboarding();
-  await postTodayCumulativeReviewToServer(onboarding, cacheEntry);
-
-  // analyzeSession(1-B)이 이 결과를 그대로 그 세션의 review/reviewTopic에도 저장하므로
-  // cacheEntry 전체를 반환한다 — 한 번의 생성으로 sessions 행과 today_reviews를 함께 채운다.
-  return { ok: true, ...cacheEntry };
-}
-
-// today_reviews upsert
-async function postTodayCumulativeReviewToServer(onboarding, cacheEntry) {
-  if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) {
-    console.warn(
-      "[background] SERVER_URL이 설정되지 않았습니다. 오늘 누적 리뷰 서버 전송을 건너뜁니다.",
-    );
-    return;
-  }
-
-  if (!onboarding?.anonymousId) {
-    console.warn(
-      "[background] anonymousId 없음, 오늘 누적 리뷰 서버 전송 건너뜀",
-    );
-    return;
-  }
-
-  const cleanUrl = SERVER_URL.replace(/\/$/, "");
-
-  try {
-    const response = await fetch(`${cleanUrl}/api/today-reviews`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        anonymousId: onboarding.anonymousId,
-        reviewDate: cacheEntry.reviewDate,
-        sessionCount: cacheEntry.sessionCount,
-        videoCount: cacheEntry.videoCount,
-        categoryDistribution: cacheEntry.categoryDistribution,
-        entropy: cacheEntry.entropy,
-        review: cacheEntry.review,
-        reviewTopic: cacheEntry.reviewTopic,
-        source: cacheEntry.source,
-        promptVersion: cacheEntry.promptVersion,
-        llmStatus: cacheEntry.llmStatus,
-        failureReason: cacheEntry.failureReason,
-        geminiMs: cacheEntry.geminiMs,
-        genCount: cacheEntry.genCount,
-        generatedAt: cacheEntry.generatedAt,
-      }),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      console.warn(
-        "[background] 오늘 누적 리뷰 서버 전송 실패:",
-        response.status,
-        body,
-      );
-      return;
-    }
-
-    console.log(
-      "[background] 오늘 누적 리뷰 서버 전송 완료:",
-      cacheEntry.reviewDate,
-    );
-  } catch (error) {
-    console.warn("[background] 오늘 누적 리뷰 서버 전송 오류:", error);
+    return null;
   }
 }

@@ -1,10 +1,11 @@
-import { GEMINI_API_KEY } from "../config.js";
+// "오늘" 탭 누적 리뷰 생성 파이프라인
+const { SENSITIVE_PATTERN } = require("./sensitive-pattern");
 
 const GEMINI_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 const TIMEOUT_MS = 10000;
 
-// 다양성 변화로 인정할 최소 entropy 변화량(bits) — 노이즈 무시
+// 다양성 변화로 인정할 최소 entropy 변화량(bits)
 const ENTROPY_DELTA_EPS = 0.1;
 // 단일 카테고리 편중 경고 임계 비율
 const BIAS_WARN_RATIO = 0.7;
@@ -13,9 +14,9 @@ const MIN_VIDEOS_FOR_TREND = 5;
 
 // 파일럿 완료 후 커밋 태그로 동결
 // 본조사 중에는 buildTodayCumulativePrompt 문구를 바꾸지 않고, 부득이하게 바꿀 때만 이 값을 올려 세션에 함께 저장된 값으로 처치 시점을 구분한다.
-export const TODAY_PROMPT_VERSION = "viewlens-today-mirror-v1.0";
+const TODAY_PROMPT_VERSION = "viewlens-today-mirror-v1.0";
 
-// entropy는 소수점 둘째 자리로 반올림된 값(analysis.js)이므로, 부동소수점 오차로
+// entropy는 소수점 둘째 자리로 반올림된 값이므로, 부동소수점 오차로
 // 경계(예: 정확히 0.1) 판정이 빗나가지 않도록 차이값도 같은 정밀도로 반올림
 function roundedDelta(entropy, prevEntropy) {
   return Math.round((entropy - prevEntropy) * 100) / 100;
@@ -63,10 +64,10 @@ function buildTodayTrendGuidance({
   return lines.join("\n");
 }
 
-// "오늘" 탭 누적 리뷰(Story 11-2) 프롬프트 — buildPrompt와 [피드백 원칙]·JSON 응답 형식은
+// "오늘" 탭 누적 리뷰 프롬프트 — buildPrompt와 [피드백 원칙]·JSON 응답 형식은
 // 문자 그대로 동일하게 유지하고, 근거 범위만 "이번 세션"에서 "오늘 하루 전체"로 바꾼다.
 // categoryDistribution/entropy/videoCount/videoTitles는 오늘의 여러 세션을 병합 집계한 값이다.
-export function buildTodayCumulativePrompt({
+function buildTodayCumulativePrompt({
   categoryDistribution,
   entropy,
   prevEntropy = null,
@@ -133,27 +134,13 @@ ${entropyLine}${titleLines}${trendSection}
 }
 
 // 실패 사유를 sessions.failureReason 분류값으로 태깅한 에러.
-// background.js가 이 필드(failureReason/httpStatus/timedOut)를 읽어 서버로 전송한다().
-// 분류값은 server/db.js 스키마 주석과 1:1 대응: timeout | http_error | empty_response | parse_error | network_error | policy_filtered
 function llmError(failureReason, message, extra = {}) {
   const err = new Error(message);
   err.failureReason = failureReason;
   return Object.assign(err, extra);
 }
 
-// 프롬프트 가드레일이 뚫려 정치·이념 관련 표현이 출력에 섞였을 때 잡아내는 최후 방어선.
-// LLM 판단에만 의존하지 않도록, 생성 결과를 코드가 결정론적으로 재검증한다(감지 시 폴백 전환).
-// "진보"/"보수"는 "기술의 진보", "보수 작업"처럼 정치와 무관한 의미로도 흔히 쓰여
-// 단독으로 매칭하면 정상 피드백이 오탐으로 폴백 처리된다(특히 buildTodayCumulativePrompt가 "쏠림"을
-// 묘사하도록 유도하는 문구에서 "보수적으로"가 나올 수 있음). 이념을 명시하는 단어와
-// 붙어 있을 때만 매칭해 오탐을 줄인다("정당"은 아래 목록에 이미 있어 별도 명시 불필요).
-const SENSITIVE_PATTERN =
-  /(?:진보|보수)\s*(?:성향|진영|정치|이념)|좌파|우파|좌익|우익|여당|야당|정당|국민의힘|민주당|대통령|국회의원|탄핵|친일|반일|극우|극좌/;
-
-export async function generateReview(
-  prompt,
-  promptVersion = TODAY_PROMPT_VERSION,
-) {
+async function generateTodayReview(prompt, apiKey) {
   const controller = new AbortController();
   let timedOut = false;
   const timeoutId = setTimeout(() => {
@@ -161,24 +148,85 @@ export async function generateReview(
     controller.abort();
   }, TIMEOUT_MS);
 
-  let response;
   try {
-    response = await fetch(GEMINI_API_URL, {
+    const response = await fetch(GEMINI_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-goog-api-key": GEMINI_API_KEY,
+        "x-goog-api-key": apiKey,
       },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         // "생각" 토큰 상한을 안 두면 프롬프트가 복잡할수록 thinking에 쓰는 시간이 늘어나
         // TIMEOUT_MS(10초)를 넘겨 timeout으로 폴백되는 사례를 실측으로 확인했다
-        // trend 판단은 이미 buildTodayTrendGuidance가 JS로 계산해 지시문으로 넘기므로, 모델은 문장으로 옮기는 정도만 하면 돼 깊은 추론이 필요 없다.
         generationConfig: { thinkingConfig: { thinkingBudget: 512 } },
       }),
       signal: controller.signal,
     });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error("[today-review-llm] API error body:", errorBody);
+      throw llmError("http_error", `Gemini API error: ${response.status}`, {
+        httpStatus: response.status,
+      });
+    }
+
+    let data;
+    try {
+      data = await response.json();
+    } catch (error) {
+      if (timedOut) throw error;
+      throw llmError(
+        "parse_error",
+        `응답 본문 JSON 파싱 실패: ${error.message}`,
+      );
+    }
+
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text)
+      throw llmError("empty_response", "Gemini API: 응답에 텍스트가 없습니다");
+
+    const cleaned = text
+      .trim()
+      .replace(/^```(?:json)?\n?/, "")
+      .replace(/\n?```$/, "");
+    let topic, feedback;
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        Array.isArray(parsed) ||
+        typeof parsed.topic !== "string" ||
+        typeof parsed.feedback !== "string" ||
+        parsed.topic.trim() === "" ||
+        parsed.feedback.trim() === ""
+      ) {
+        throw new Error("topic/feedback 누락, 빈 값 또는 잘못된 타입");
+      }
+      topic = parsed.topic;
+      feedback = parsed.feedback;
+    } catch (error) {
+      throw llmError("parse_error", `피드백 JSON 파싱 실패: ${error.message}`);
+    }
+
+    if (SENSITIVE_PATTERN.test(feedback) || SENSITIVE_PATTERN.test(topic)) {
+      throw llmError(
+        "policy_filtered",
+        "정치·이념 관련 표현이 감지되어 폴백으로 대체",
+      );
+    }
+
+    return {
+      topic,
+      feedback,
+      source: "llm",
+      promptVersion: TODAY_PROMPT_VERSION,
+    };
   } catch (error) {
+    // 이미 위에서 분류된 에러(failureReason 있음)는 그대로 전달한다.
+    if (error.failureReason) throw error;
     // abort는 타임아웃으로만 발생 → 실제 네트워크 장애(TypeError 등)와 구분
     if (timedOut)
       throw llmError("timeout", `Gemini API 타임아웃 (${TIMEOUT_MS}ms)`, {
@@ -186,71 +234,14 @@ export async function generateReview(
       });
     throw llmError("network_error", error.message);
   } finally {
-    // 헤더 수신 후에는 타임아웃 해제 — 본문 읽기가 abort로 끊기지 않도록
+    // 본문 읽기(response.text/json)까지 끝난 뒤에만 타임아웃을 해제한다 — 헤더 수신 직후
+    // clearTimeout하면 본문 전송이 멈춘 연결에서 response.json()이 무기한 대기하게 된다.
     clearTimeout(timeoutId);
   }
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    console.error("[llm] API error body:", errorBody);
-    // httpStatus 병기 — 429 쿼터 vs 5xx 장애 구분 ( 분석용)
-    throw llmError("http_error", `Gemini API error: ${response.status}`, {
-      httpStatus: response.status,
-    });
-  }
-
-  let data;
-  try {
-    data = await response.json();
-  } catch (error) {
-    throw llmError("parse_error", `응답 본문 JSON 파싱 실패: ${error.message}`);
-  }
-
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text)
-    throw llmError("empty_response", "Gemini API: 응답에 텍스트가 없습니다");
-
-  const cleaned = text
-    .trim()
-    .replace(/^```(?:json)?\n?/, "")
-    .replace(/\n?```$/, "");
-  // topic/feedback은 세션 기록(연구 데이터)에 그대로 저장되므로, 배열·누락·빈 문자열 같은
-  // 형식 이상은 "성공"으로 취급하지 않고 여기서 걸러 결정론적 폴백으로 넘긴다.
-  let topic, feedback;
-  try {
-    const parsed = JSON.parse(cleaned);
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      Array.isArray(parsed) ||
-      typeof parsed.topic !== "string" ||
-      typeof parsed.feedback !== "string" ||
-      parsed.topic.trim() === "" ||
-      parsed.feedback.trim() === ""
-    ) {
-      throw new Error("topic/feedback 누락, 빈 값 또는 잘못된 타입");
-    }
-    topic = parsed.topic;
-    feedback = parsed.feedback;
-  } catch (error) {
-    throw llmError("parse_error", `피드백 JSON 파싱 실패: ${error.message}`);
-  }
-
-  // 가드레일이 뚫려 정치·이념 표현이 출력에 섞였는지 코드가 한 번 더 검증(파싱과 분리 —
-  // 감지 시 parse_error가 아니라 policy_filtered로 정확히 분류되어야 별도 집계가 가능하다)
-  if (SENSITIVE_PATTERN.test(feedback) || SENSITIVE_PATTERN.test(topic)) {
-    throw llmError(
-      "policy_filtered",
-      "정치·이념 관련 표현이 감지되어 폴백으로 대체",
-    );
-  }
-
-  return { topic, feedback, source: "llm", promptVersion };
 }
 
 // "오늘" 누적 리뷰의 폴백
-// 세션 종료마다 오늘 누적을 재계산하는 유일한 경로라 "오늘은"/"직전 시청일" 프레이밍으로 통일한다("이번 세션" 전용 폴백은 더 이상 없음).
-export function generateTodayFallbackReview({
+function generateTodayFallbackReview({
   categoryDistribution,
   entropy,
   prevEntropy = null,
@@ -316,3 +307,10 @@ export function generateTodayFallbackReview({
     promptVersion: TODAY_PROMPT_VERSION,
   };
 }
+
+module.exports = {
+  TODAY_PROMPT_VERSION,
+  buildTodayCumulativePrompt,
+  generateTodayReview,
+  generateTodayFallbackReview,
+};
