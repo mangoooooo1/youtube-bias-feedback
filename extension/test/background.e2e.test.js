@@ -215,7 +215,19 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
 
     const { sessions } = await global.chrome.storage.local.get("sessions");
     const saved = sessions.find((s) => s.sessionId === "s1");
+    // 리뷰(피드백)는 자격이 없어 비어 있지만, 시청 데이터 자체(연구 데이터의 핵심)는
+    // 대조군도 실험군과 동일하게 수집된다 — "피드백 미노출"과 "데이터 미수집"은 별개다
+    expect(saved.categoryDistribution).toEqual({ 음악: 1 });
+    expect(saved.entropy).toBe(0);
     expect(saved.review).toBeUndefined();
+
+    expect(calls.sessions).toHaveLength(1);
+    expect(calls.sessions[0]).toMatchObject({
+      anonymousId: "a1",
+      sessionId: "s1",
+      entropy: 0,
+    });
+    expect(calls.sessions[0].categoryDistribution).toEqual({ 음악: 1 });
 
     const { todayReviewsCache } =
       await global.chrome.storage.local.get("todayReviewsCache");
