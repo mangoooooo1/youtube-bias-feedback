@@ -82,8 +82,9 @@ function aggregateTodayCumulative({ sessions, titles = [], now = new Date() }) {
     .filter(Boolean);
   const sessionIds = todaySessions.map((s) => s.sessionId);
 
+  // "!==" 대신 "<"로 과거 날짜만 남긴다.
   const priorSessions = analyzed
-    .filter((s) => kstDateStr(new Date(s.endTime)) !== today)
+    .filter((s) => kstDateStr(new Date(s.endTime)) < today)
     .sort((a, b) => new Date(b.endTime) - new Date(a.endTime));
 
   let prevEntropy = null;

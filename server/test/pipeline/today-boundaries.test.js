@@ -149,6 +149,64 @@ describe("aggregateTodayCumulative", () => {
     expect(result.prevEntropy).toBe(1);
   });
 
+  it("단말 시계가 앞서 있어 미래 날짜 세션이 섞여도 prevEntropy에 반영하지 않는다", () => {
+    const result = aggregateTodayCumulative({
+      sessions: [
+        // 어제 — 진짜 직전 시청일(entropy=1)
+        session({
+          sessionId: "s-yesterday",
+          endTime: "2026-03-09T20:00:00+09:00",
+          categoryDistribution: { 게임: 0.5, 교육: 0.5 },
+          videoCount: 4,
+        }),
+        session({
+          sessionId: "s-today",
+          endTime: "2026-03-10T09:00:00+09:00",
+          categoryDistribution: { 스포츠: 1 },
+          videoCount: 2,
+        }),
+        // 단말 시계 오류로 미래로 찍힌 세션(entropy=0) — 내림차순 정렬이면 최상단에 온다
+        session({
+          sessionId: "s-future-clock-skew",
+          endTime: "2026-03-15T09:00:00+09:00",
+          categoryDistribution: { 음악: 1 },
+          videoCount: 1,
+        }),
+      ],
+      titles: [],
+      now: new Date("2026-03-10T12:00:00+09:00"),
+    });
+    expect(result.prevEntropy).toBe(1);
+  });
+
+  it("파싱 불가한 endTime을 가진 세션은 직전 시청일 계산에서 제외한다", () => {
+    const result = aggregateTodayCumulative({
+      sessions: [
+        session({
+          sessionId: "s-yesterday",
+          endTime: "2026-03-09T20:00:00+09:00",
+          categoryDistribution: { 게임: 1 },
+          videoCount: 1,
+        }),
+        session({
+          sessionId: "s-bad-endtime",
+          endTime: "not-a-date",
+          categoryDistribution: { 음악: 1 },
+          videoCount: 1,
+        }),
+        session({
+          sessionId: "s-today",
+          endTime: "2026-03-10T09:00:00+09:00",
+          categoryDistribution: { 스포츠: 1 },
+          videoCount: 2,
+        }),
+      ],
+      titles: [],
+      now: new Date("2026-03-10T12:00:00+09:00"),
+    });
+    expect(result.prevEntropy).toBe(0);
+  });
+
   it("titles가 없어도(빈 배열) 집계가 동작한다", () => {
     const result = aggregateTodayCumulative({
       sessions: [
