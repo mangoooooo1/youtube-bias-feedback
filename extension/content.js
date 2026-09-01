@@ -53,6 +53,7 @@ function waitForTitle(prevTitle, maxRetries = 10, interval = 200) {
 // 서비스 워커 수면과 무관하게 storage에 직접 기록
 let writeQueue = Promise.resolve();
 
+// 유튜브 탭을 여러 개 동시에 열어두면 탭마다 완전히 독립된 콘텐츠 스크립트 인스턴스가 돌아서 큐만으로는 탭 간 경합을 못 막는다.
 function recordVideo(videoId, title) {
   writeQueue = writeQueue.then(async () => {
     // 확장을 리로드/업데이트하면 이미 열려있던 유튜브 탭의 content script는 페이지를
@@ -67,26 +68,38 @@ function recordVideo(videoId, title) {
 
     try {
       const now = new Date().toISOString();
-      const { currentSession, anonymousId, serverUrl } =
+      const { currentSession, lastRecordedVideo, anonymousId, serverUrl } =
         await chrome.storage.local.get([
           "currentSession",
+          "lastRecordedVideo",
           "anonymousId",
           "serverUrl",
         ]);
 
+      // 새로고침(F5)으로 같은 영상이 다시 감지되는 경우를 막는다.
       const session = currentSession ?? {
         sessionId: String(Date.now()),
         startTime: now,
-        videos: [],
       };
+      if (
+        lastRecordedVideo?.videoId === videoId &&
+        lastRecordedVideo?.sessionId === session.sessionId
+      ) {
+        return;
+      }
 
-      await chrome.storage.local.set({ lastWatchedAt: now });
-
-      const lastSaved = session.videos.at(-1);
-      if (lastSaved?.videoId === videoId) return;
-
-      session.videos.push({ videoId, title, watchedAt: now });
-      await chrome.storage.local.set({ currentSession: session });
+      const videoKey = `video__${session.sessionId}__${crypto.randomUUID()}`;
+      await chrome.storage.local.set({
+        lastWatchedAt: now,
+        currentSession: {
+          ...session,
+          // 화면의 "N개 수집 중" 표시용 참고치일 뿐 저장 근거로는 쓰이지 않는다 —
+          // 탭 경합으로 순간적으로 1 어긋나도(드묾) 실제 데이터에는 영향이 없다.
+          videoCount: (session.videoCount ?? 0) + 1,
+        },
+        lastRecordedVideo: { videoId, sessionId: session.sessionId },
+        [videoKey]: { videoId, title, watchedAt: now },
+      });
       console.log("[content] recorded:", { videoId, title });
 
       // 서버에 즉시 전송

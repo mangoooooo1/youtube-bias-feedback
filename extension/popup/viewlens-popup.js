@@ -950,7 +950,8 @@ async function boot() {
   const darkMode = !!stored.dark;
 
   // Inject real data into VL globals before popup renders
-  const collectingCount = stored.currentSession?.videos?.length ?? 0;
+  // videoCount는 참고치일 뿐, 실제 저장된 영상 데이터는 세션 종료 시 항상 정확히 합쳐진다.
+  const collectingCount = stored.currentSession?.videoCount ?? 0;
   VL._allSessions = sessions;
   VL._installDate = installDate;
   VL._lastWatchedAt = stored.lastWatchedAt || null;
@@ -1225,7 +1226,7 @@ async function boot() {
       const updatedSessions = changes.sessions.newValue || [];
       VL._allSessions = updatedSessions;
       const freshToday = buildDataForDate(updatedSessions, new Date());
-      freshToday.collectingCount = localCurrentSession?.videos?.length ?? 0;
+      freshToday.collectingCount = localCurrentSession?.videoCount ?? 0;
       freshToday.collectingTimer = _computeTimerText(localLastWatchedAt);
       // 확인(블러) 상태는 여기서 다시 계산하지 않는다 — VL._todayCumulative(아래 분기)가
       // 유일한 소스다. sessions 변경은 도넛·영상목록 등 리뷰와 무관한 필드 갱신용.
@@ -1295,7 +1296,7 @@ async function boot() {
     // dwellMs 스냅샷 갱신 — close write가 잘려도 최근값(±1초)이 보존됨
     if (popupMetrics) persistLivePopupEvent(popupMetrics);
 
-    const count = localCurrentSession?.videos?.length ?? 0;
+    const count = localCurrentSession?.videoCount ?? 0;
     const timerText = _computeTimerText(localLastWatchedAt);
     const isNowCollecting = count > 0 || !!timerText;
 
