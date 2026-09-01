@@ -1,6 +1,8 @@
 let queue = Promise.resolve();
 
-const NEAR_SIMULTANEOUS_MS = 5000;
+// 같은 영상이 이 값 안에 다시 감지되면 "같은 시청"으로 보고 합친다.
+// 10초는 비동기 storage 왕복 시간차보다는 넉넉하고, 사람이 같은 영상을 일부러 다시 재생하는 데 걸리는 시간보다는 짧게 잡은 값이다.
+const NEAR_SIMULTANEOUS_MS = 10000;
 
 // videos는 watchedAt 오름차순으로 정렬된 상태로 들어온다고 가정한다.
 function dedupeNearSimultaneous(videos) {

@@ -189,7 +189,7 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
       video__s1__v1b: {
         videoId: "v1",
         title: "제목-v1",
-        watchedAt: "2026-01-01T00:00:04.000Z", // 직전과 4초 차(임계값 5초 이내)
+        watchedAt: "2026-01-01T00:00:04.000Z", // 직전과 4초 차(임계값 10초 이내)
       },
       video__s1__v1c: {
         videoId: "v1",
