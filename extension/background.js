@@ -97,6 +97,9 @@ chrome.storage.local.set({ serverUrl: SERVER_URL });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== ALARM_NAME) return;
+  // 이번 세션 종료 감지보다 먼저 돌려야, 방금 끝난 세션이 아직 syncedToServer 필드조차
+  // 없는 상태로 이 틱에서 중복 시도되지 않는다(다음 틱부터 재시도 대상이 됨).
+  retryUnsyncedSessions();
   checkSessionTimeout();
 });
 
@@ -170,13 +173,29 @@ export async function analyzeSession(session) {
   const entropy = calculateEntropy(categoryDistribution);
   const videoCount = session.videos.length;
 
+  // syncedToServer를 false로 명시해둬야, 곧이어 서버 전송이 오프라인/오류로 실패했을 때
+  // retryUnsyncedSessions()가 이 세션을 재시도 대상으로 찾아낼 수 있다(이 필드가 아예
+  // 없는 - 이 기능이 생기기 전에 이미 분석됐던 - 세션과 구분하기 위한 값이다).
   await saveAnalysis(session.sessionId, {
     categoryDistribution,
     entropy,
     videoCount,
+    syncedToServer: false,
   });
   console.log("[background] 분석 완료:", { entropy, categoryDistribution });
 
+  const totalMs = Date.now() - t0;
+  await syncSessionToServer(
+    { ...session, categoryDistribution, entropy, videoCount },
+    { totalMs, youtubeMs },
+  );
+}
+
+// 세션 분석 결과를 서버로 보내고, 응답에 따라 오늘 리뷰 반영·알림까지 처리한다.
+// analyzeSession(최초 전송)과 retryUnsyncedSessions(재시도)가 이 함수를 공유한다 —
+// 최초 시도가 오프라인/서버 오류로 실패해도 syncedToServer가 false로 남기 때문에,
+// pendingPopupEvents 큐(팝업 이벤트용)와 같은 취지로 다음 1분 알람 틱마다 다시 시도된다.
+async function syncSessionToServer(session, metrics = {}) {
   // 알림 자격은 리뷰 생성 결과와 무관하게(그룹·베이스라인만으로) 미리 정해진다.
   // 이 값을 그대로 서버에 함께 보내 sessions.feedbackNotifiedAt에 기록한다.
   const onboarding = await getOnboarding();
@@ -188,15 +207,25 @@ export async function analyzeSession(session) {
     ? new Date().toISOString()
     : null;
 
-  const totalMs = Date.now() - t0;
   const postResult = await postSessionToServer(
     session,
-    categoryDistribution,
-    entropy,
-    videoCount,
+    session.categoryDistribution,
+    session.entropy,
+    session.videoCount,
     onboarding,
-    { totalMs, youtubeMs, feedbackNotifiedAt },
+    { ...metrics, feedbackNotifiedAt },
   );
+
+  // 이전 시도가 서버엔 이미 저장됐지만(중복 세션 오류) 그 응답만 못 받아 실패로 남았던
+  // 경우다 — 다시 보낼 필요는 없으니 재시도 대상에서만 제외한다.
+  if (postResult === "DUPLICATE") {
+    await saveAnalysis(session.sessionId, { syncedToServer: true });
+    return;
+  }
+  // 이번에도 실패 — syncedToServer는 false로 남아 다음 알람 틱에서 다시 시도된다.
+  if (postResult === null) return;
+
+  await saveAnalysis(session.sessionId, { syncedToServer: true });
 
   const todayReview = postResult?.todayReview ?? null;
   if (todayReview) {
@@ -214,6 +243,21 @@ export async function analyzeSession(session) {
   // 보이는 불일치가 생기기 때문이다.
   if (eligibleForNotification && todayReview) {
     showFeedbackNotification(session);
+  }
+}
+
+// 1분마다 도는 알람에서 checkSessionTimeout과 함께 호출된다. 세션 종료 시점에
+// 오프라인/서버 오류로 서버 전송이 실패해 syncedToServer가 false로 남은 세션을 다시
+// 보낸다 — 서버 장애·일시적 오프라인으로 인한 연구 데이터 유실을 막는 유일한 재시도
+// 경로다(연구 무결성 점검 항목 "서버 장애 대비 로컬 큐잉/재시도" 후속 조치).
+export async function retryUnsyncedSessions() {
+  const sessions = await getAllSessions();
+  const unsynced = sessions.filter(
+    (s) => s.categoryDistribution && s.syncedToServer === false,
+  );
+  for (const session of unsynced) {
+    // 재시도라 최초 지연시간(totalMs/youtubeMs)은 더 이상 의미가 없어 보내지 않는다.
+    await syncSessionToServer(session);
   }
 }
 
@@ -295,7 +339,9 @@ async function postSessionToServer(
     if (!response.ok) {
       const body = await response.text();
       console.warn("[background] 서버 전송 실패:", response.status, body);
-      return null;
+      // 409(중복 세션) — 이전 시도가 서버엔 이미 반영됐지만 응답만 못 받았던 경우다.
+      // 호출부(syncSessionToServer)가 재전송 없이 재시도 목록에서만 빼도록 구분해 알려준다.
+      return response.status === 409 ? "DUPLICATE" : null;
     }
 
     console.log("[background] 서버 전송 완료:", session.sessionId);

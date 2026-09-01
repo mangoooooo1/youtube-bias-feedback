@@ -270,10 +270,194 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
     const saved = sessions.find((s) => s.sessionId === "s1");
     expect(saved.categoryDistribution).toBeDefined();
     expect(saved.review).toBeUndefined();
+    // 재시도 큐(retryUnsyncedSessions)가 이 세션을 찾아낼 수 있어야 하므로 false로
+    // 명시돼 있어야 한다(필드 자체가 없는 것과는 구분).
+    expect(saved.syncedToServer).toBe(false);
 
     // 알림 대상(EXP, 베이스라인 아님)이라도 서버 전송이 실패해 오늘 리뷰를 받지 못했다면
     // 알림을 띄우지 않는다 — 그렇지 않으면 "피드백이 업데이트됐어요" 알림만 뜨고
     // 팝업엔 실제 리뷰 없이 "생성 중" 상태만 보이는 불일치가 생긴다.
     expect(global.chrome.notifications.create).not.toHaveBeenCalled();
+  });
+});
+
+// 서버 장애 대비 로컬 큐잉/재시도 로직 (데이터 유실 방지).
+// analyzeSession의 최초 전송이 실패해도 세션은 syncedToServer:false로 로컬에 남고,
+// retryUnsyncedSessions(1분 알람에서 checkSessionTimeout과 함께 호출됨)가 이를 찾아 재전송
+describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", () => {
+  it("최초 서버 전송이 실패해도, 재시도에서 성공하면 리뷰 반영과 알림까지 완료된다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { sessions: [] };
+    let sessionAttempt = 0;
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.includes("googleapis.com/youtube/v3/videos")) {
+        const idsParam = new URL(href).searchParams.get("id");
+        const ids = idsParam ? idsParam.split(",") : [];
+        return {
+          ok: true,
+          json: async () => ({
+            items: ids.map((id) => ({ id, snippet: { categoryId: "10" } })),
+          }),
+        };
+      }
+      if (href.endsWith("/api/sessions")) {
+        calls.sessions.push(JSON.parse(options.body));
+        sessionAttempt++;
+        if (sessionAttempt === 1) {
+          throw new TypeError("network down"); // 최초 시도: 오프라인
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: {
+              todayReview: {
+                reviewDate: "2026-01-10",
+                review: "오늘은 음악 영상 위주로 보셨네요.",
+                reviewTopic: "음악",
+                source: "llm",
+                promptVersion: "viewlens-today-mirror-v1.0",
+              },
+            },
+          }),
+        };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
+          endTime: FIXED_NOW.toISOString(),
+          videos: [{ videoId: "v1", title: "노래 모음" }],
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+
+    await mod.analyzeSession({
+      sessionId: "s1",
+      videos: [{ videoId: "v1", title: "노래 모음" }],
+    });
+
+    // 최초 시도는 오프라인으로 실패 — 아직 미동기화 상태, 알림도 없다.
+    let { sessions } = await global.chrome.storage.local.get("sessions");
+    let saved = sessions.find((s) => s.sessionId === "s1");
+    expect(saved.syncedToServer).toBe(false);
+    expect(saved.review).toBeUndefined();
+    expect(global.chrome.notifications.create).not.toHaveBeenCalled();
+
+    // 1분 알람 틱마다 도는 재시도 — 이번엔 서버가 정상 응답한다.
+    await mod.retryUnsyncedSessions();
+
+    ({ sessions } = await global.chrome.storage.local.get("sessions"));
+    saved = sessions.find((s) => s.sessionId === "s1");
+    expect(saved.syncedToServer).toBe(true);
+    expect(saved.review).toBe("오늘은 음악 영상 위주로 보셨네요.");
+
+    const { todayReviewsCache } =
+      await global.chrome.storage.local.get("todayReviewsCache");
+    expect(todayReviewsCache.reviews).toEqual([
+      expect.objectContaining({ reviewDate: "2026-01-10" }),
+    ]);
+
+    expect(global.chrome.notifications.create).toHaveBeenCalledTimes(1);
+    // 재시도는 유튜브 카테고리 조회를 다시 하지 않는다 — /api/sessions만 두 번 호출된다.
+    expect(calls.sessions).toHaveLength(2);
+  });
+
+  it("재시도 중 서버가 409(중복 세션)를 반환하면 재전송 없이 동기화 완료로 처리한다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { sessions: [] };
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.endsWith("/api/sessions")) {
+        calls.sessions.push(JSON.parse(options.body));
+        return { ok: false, status: 409, text: async () => "duplicate" };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
+          endTime: FIXED_NOW.toISOString(),
+          videos: [{ videoId: "v1", title: "노래 모음" }],
+          categoryDistribution: { 음악: 1 },
+          entropy: 0,
+          videoCount: 1,
+          syncedToServer: false,
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsyncedSessions();
+
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    const saved = sessions.find((s) => s.sessionId === "s1");
+    // 서버엔 이미 반영돼 있던 것(중복 오류)이므로, 다시 보내지 않고 동기화 완료로 처리한다.
+    expect(saved.syncedToServer).toBe(true);
+    expect(saved.review).toBeUndefined();
+    expect(calls.sessions).toHaveLength(1);
+  });
+
+  it("이미 동기화됐거나(true) 이 기능 이전에 만들어져 필드 자체가 없는 세션은 건드리지 않는다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { sessions: [] };
+    global.fetch = vi.fn(async (url) => {
+      calls.sessions.push(String(url));
+      return {
+        ok: true,
+        json: async () => ({ success: true, data: { todayReview: null } }),
+      };
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s-already-synced",
+          categoryDistribution: { 음악: 1 },
+          entropy: 0,
+          videoCount: 1,
+          syncedToServer: true,
+        },
+        {
+          // syncedToServer 필드 자체가 없음 — 이 재시도 기능이 생기기 전에 이미
+          // 분석·전송됐던(혹은 실패했던) 레거시 세션. 일괄 재전송 대상이 아니다.
+          sessionId: "s-legacy",
+          categoryDistribution: { 음악: 1 },
+          entropy: 0,
+          videoCount: 1,
+        },
+        {
+          // 아직 분석 자체가 끝나지 않은 세션(categoryDistribution 없음).
+          sessionId: "s-not-analyzed-yet",
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsyncedSessions();
+
+    expect(calls.sessions).toHaveLength(0);
   });
 });
