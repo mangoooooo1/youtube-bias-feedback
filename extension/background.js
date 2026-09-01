@@ -5,6 +5,8 @@ import {
   getAllSessions,
   saveAnalysis,
   getOnboarding,
+  getUnsentVideoEvents,
+  markVideoEventSent,
 } from "./storage.js";
 import { fetchVideoCategories } from "./pipeline/youtube.js";
 import {
@@ -17,11 +19,8 @@ import { SERVER_URL } from "./config.js";
 const ALARM_NAME = "SESSION_TIMEOUT_CHECK";
 const TIMEOUT_MS = 10 * 60 * 1000;
 
-// 분석 완료 알림 대상 판정 (10-8). EXP 그룹이면서 베이스라인 기간(설치 후 14일)이
-// 끝난 경우에만 알림·배지를 노출한다 — 판정 로직을 이 한 곳에 모아둬 알림·배지·서버
-// 코드는 건드릴 필요가 없게 한다.
-// extension/popup/viewlens-data.js의 GROUPS 중 feedback:true인 그룹(EXP/TEST-EXP)과
-// 반드시 동일하게 유지해야 한다 — background.js는 popup 쪽 데이터 파일을 import할 수 없어(모듈 경계) 중복 정의한다.
+// 분석 완료 알림 대상 판정. EXP 그룹이면서 베이스라인 기간(설치 후 14일)이
+// 끝난 경우에만 알림·배지를 노출한다.
 const FEEDBACK_ELIGIBLE_GROUPS = new Set(["EXP", "TEST-EXP"]);
 
 // TEST-EXP(연구자 모드)는 "모든 화면을 미리 볼 수 있다"는 설계 의도(GROUPS 주석 참고)가 있어,
@@ -100,6 +99,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   // 이번 세션 종료 감지보다 먼저 돌려야, 방금 끝난 세션이 아직 syncedToServer 필드조차
   // 없는 상태로 이 틱에서 중복 시도되지 않는다(다음 틱부터 재시도 대상이 됨).
   retryUnsyncedSessions();
+  retryUnsentVideoEvents();
   checkSessionTimeout();
 });
 
@@ -258,6 +258,47 @@ export async function retryUnsyncedSessions() {
   for (const session of unsynced) {
     // 재시도라 최초 지연시간(totalMs/youtubeMs)은 더 이상 의미가 없어 보내지 않는다.
     await syncSessionToServer(session);
+  }
+}
+
+// content.js가 영상 한 편을 볼 때마다 즉시 시도하는 /api/video-events 전송은 실패하면
+// 그 자리에서 조용히 버려졌다(연구 무결성 점검: fire-and-forget이라 재시도가 전혀 없었음).
+// 1분마다 도는 알람에서 checkSessionTimeout·retryUnsyncedSessions와 함께 호출돼,
+// 아직 sent:true가 안 된 영상 이벤트를 찾아 다시 보낸다.
+export async function retryUnsentVideoEvents() {
+  const onboarding = await getOnboarding();
+  if (!onboarding?.anonymousId) return;
+
+  const events = await getUnsentVideoEvents();
+  for (const event of events) {
+    const ok = await postVideoEventToServer(onboarding.anonymousId, event);
+    if (ok) await markVideoEventSent(event);
+  }
+}
+
+async function postVideoEventToServer(anonymousId, event) {
+  if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) return false;
+
+  const cleanUrl = SERVER_URL.replace(/\/$/, "");
+  try {
+    const response = await fetch(`${cleanUrl}/api/video-events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        anonymousId,
+        videoId: event.videoId,
+        title: event.title ?? null,
+        watchedAt: event.watchedAt,
+        sessionId: event.sessionId,
+      }),
+    });
+    if (!response.ok) {
+      console.warn("[background] 영상 이벤트 재전송 실패:", response.status);
+    }
+    return response.ok;
+  } catch (error) {
+    console.warn("[background] 영상 이벤트 재전송 오류:", error);
+    return false;
   }
 }
 

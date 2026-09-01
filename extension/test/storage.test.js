@@ -5,6 +5,8 @@ import {
   getAllSessions,
   getOnboarding,
   saveAnalysis,
+  getUnsentVideoEvents,
+  markVideoEventSent,
 } from "../storage.js";
 
 // 프로젝트에 chrome.storage.local 목이 없어 이번에 처음 만든다.
@@ -321,5 +323,130 @@ describe("getOnboarding", () => {
       group: "EXP",
       installDate: "2026-01-01T00:00:00Z",
     });
+  });
+});
+
+// 연구 무결성 점검: content.js의 /api/video-events 즉시 전송이 실패하면 sent:false로
+// 남는다. background.js의 재시도 큐가 이 두 함수로 그 상태를 읽고 갱신한다.
+describe("getUnsentVideoEvents / markVideoEventSent", () => {
+  it("세션 종료 전(video__ 키)의 미전송 영상을 찾아낸다", async () => {
+    await global.chrome.storage.local.set({
+      "video__s1__v1-1": {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: false,
+      },
+    });
+
+    const events = await getUnsentVideoEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      location: "live",
+      sessionId: "s1",
+      videoId: "v1",
+    });
+  });
+
+  it("sent:true인 영상(세션 종료 전)은 대상에서 제외한다", async () => {
+    await global.chrome.storage.local.set({
+      "video__s1__v1-1": {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: true,
+      },
+    });
+
+    expect(await getUnsentVideoEvents()).toEqual([]);
+  });
+
+  it("세션 종료 후(sessions[].videos)의 미전송 영상도 찾아낸다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [
+            { videoId: "v1", title: "제목-v1", watchedAt: "t1", sent: true },
+            { videoId: "v2", title: "제목-v2", watchedAt: "t2", sent: false },
+          ],
+        },
+      ],
+    });
+
+    const events = await getUnsentVideoEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      location: "session",
+      sessionId: "s1",
+      videoId: "v2",
+    });
+  });
+
+  it("markVideoEventSent(live)는 video__ 키를 sent:true로 갱신한다", async () => {
+    await global.chrome.storage.local.set({
+      "video__s1__v1-1": {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: false,
+      },
+    });
+    const [event] = await getUnsentVideoEvents();
+
+    await markVideoEventSent(event);
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__v1-1"].sent).toBe(true);
+  });
+
+  it("markVideoEventSent(session)는 sessions[].videos 안의 해당 영상만 sent:true로 갱신한다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [
+            { videoId: "v1", title: "제목-v1", watchedAt: "t1", sent: true },
+            { videoId: "v2", title: "제목-v2", watchedAt: "t2", sent: false },
+          ],
+        },
+      ],
+    });
+    const [event] = await getUnsentVideoEvents();
+
+    await markVideoEventSent(event);
+
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    const videos = sessions[0].videos;
+    expect(videos.find((v) => v.videoId === "v1").sent).toBe(true);
+    expect(videos.find((v) => v.videoId === "v2").sent).toBe(true);
+  });
+});
+
+describe("endSession — sent 플래그를 세션 종료 이후에도 보존한다", () => {
+  it("전송 성공/실패 여부(sent)를 videos 배열로 그대로 옮긴다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    await global.chrome.storage.local.set({
+      video__s1__v1: {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: true,
+      },
+      video__s1__v2: {
+        videoId: "v2",
+        title: "제목-v2",
+        watchedAt: "2026-01-01T00:01:00Z",
+        sent: false,
+      },
+    });
+    await endSession();
+
+    const sessions = await getAllSessions();
+    const videos = sessions[0].videos;
+    expect(videos.find((v) => v.videoId === "v1").sent).toBe(true);
+    expect(videos.find((v) => v.videoId === "v2").sent).toBe(false);
   });
 });

@@ -303,3 +303,80 @@ describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 �
     expect(storage.dump().currentSession.videoCount).toBe(1);
   });
 });
+
+// 연구 무결성 점검: /api/video-events 즉시 전송이 fire-and-forget이라 실패해도 조용히
+// 버려지던 문제. 이제 성공 여부를 sent 플래그로 남겨, background.js의 재시도 큐
+// (retryUnsentVideoEvents)가 실패분을 찾아낼 수 있게 한다.
+describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플래그로 남긴다", () => {
+  let recordVideoFactory;
+
+  beforeAll(() => {
+    recordVideoFactory = loadRecordVideoFactory();
+  });
+
+  function makeTabWithFetch(sharedStorage, fetchMock) {
+    const chromeMock = {
+      runtime: { id: "fake-extension-id" },
+      storage: { local: sharedStorage },
+    };
+    const consoleMock = { log: () => {}, warn: () => {} };
+    return recordVideoFactory(chromeMock, fetchMock, consoleMock);
+  }
+
+  it("서버가 200을 반환하면 해당 영상 키를 sent:true로 갱신한다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    const recordVideo = makeTabWithFetch(storage, () =>
+      Promise.resolve({ ok: true }),
+    );
+
+    await recordVideo("v1", "영상1");
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    const videos = collectVideos(storage.dump(), "s1");
+    expect(videos).toHaveLength(1);
+    expect(videos[0].sent).toBe(true);
+  });
+
+  it("서버가 오류 응답을 반환하면 sent:false로 남아 재시도 큐의 대상이 된다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    const recordVideo = makeTabWithFetch(storage, () =>
+      Promise.resolve({ ok: false, status: 500 }),
+    );
+
+    await recordVideo("v1", "영상1");
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    const videos = collectVideos(storage.dump(), "s1");
+    expect(videos).toHaveLength(1);
+    expect(videos[0].sent).toBe(false);
+  });
+
+  it("네트워크 오류로 fetch 자체가 실패해도 예외 없이 sent:false로 남는다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    const recordVideo = makeTabWithFetch(storage, () =>
+      Promise.reject(new TypeError("network down")),
+    );
+
+    await recordVideo("v1", "영상1");
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    const videos = collectVideos(storage.dump(), "s1");
+    expect(videos).toHaveLength(1);
+    expect(videos[0].sent).toBe(false);
+  });
+});

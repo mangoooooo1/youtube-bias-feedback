@@ -461,3 +461,154 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
     expect(calls.sessions).toHaveLength(0);
   });
 });
+
+// 연구 무결성 점검: content.js의 /api/video-events 즉시 전송은 fire-and-forget이라
+// 실패해도 그 자리에서 조용히 버려졌다. retryUnsentVideoEvents(1분 알람에서
+// checkSessionTimeout·retryUnsyncedSessions와 함께 호출됨)가 sent:true가 안 된 영상
+// 이벤트를 세션 종료 전(video__ 키)·후(sessions[].videos) 가리지 않고 찾아 재전송한다.
+describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재시도 큐", () => {
+  it("세션 종료 전(video__ 키)에 남은 미전송 영상을 재전송하고 sent:true로 표시한다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { videoEvents: [] };
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.endsWith("/api/video-events")) {
+        calls.videoEvents.push(JSON.parse(options.body));
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      currentSession: { sessionId: "s1", startTime: "2026-01-10T11:00:00Z" },
+      "video__s1__uuid1": {
+        videoId: "v1",
+        title: "노래 모음",
+        watchedAt: "2026-01-10T11:00:00Z",
+        sent: false, // 최초 즉시 전송(content.js)이 실패해 남은 상태
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentVideoEvents();
+
+    expect(calls.videoEvents).toHaveLength(1);
+    expect(calls.videoEvents[0]).toMatchObject({
+      anonymousId: "a1",
+      videoId: "v1",
+      sessionId: "s1",
+    });
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__uuid1"].sent).toBe(true);
+  });
+
+  it("세션 종료 후(sessions[].videos)에 남은 미전송 영상도 재전송하고 sent:true로 표시한다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { videoEvents: [] };
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.endsWith("/api/video-events")) {
+        calls.videoEvents.push(JSON.parse(options.body));
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: "2026-01-10T11:00:00Z",
+          endTime: "2026-01-10T11:20:00Z",
+          videos: [
+            {
+              videoId: "v1",
+              title: "노래 모음",
+              watchedAt: "2026-01-10T11:00:00Z",
+              sent: true, // 이미 성공 — 건드리면 안 됨
+            },
+            {
+              videoId: "v2",
+              title: "게임 하이라이트",
+              watchedAt: "2026-01-10T11:10:00Z",
+              sent: false, // 세션이 끝날 때까지 전송이 안 됐던 영상
+            },
+          ],
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentVideoEvents();
+
+    // 이미 sent:true인 v1은 다시 보내지 않는다.
+    expect(calls.videoEvents).toHaveLength(1);
+    expect(calls.videoEvents[0]).toMatchObject({
+      anonymousId: "a1",
+      videoId: "v2",
+      sessionId: "s1",
+    });
+
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    const videos = sessions[0].videos;
+    expect(videos.find((v) => v.videoId === "v1").sent).toBe(true);
+    expect(videos.find((v) => v.videoId === "v2").sent).toBe(true);
+  });
+
+  it("재전송도 실패하면 sent:false로 남겨 다음 알람 틱에서 다시 시도할 수 있게 한다", async () => {
+    global.chrome = createChromeMock();
+    global.fetch = vi.fn().mockRejectedValue(new TypeError("network down"));
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      "video__s1__uuid1": {
+        videoId: "v1",
+        title: "노래 모음",
+        watchedAt: "2026-01-10T11:00:00Z",
+        sent: false,
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentVideoEvents();
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__uuid1"].sent).toBe(false);
+  });
+
+  it("anonymousId가 없으면(온보딩 전) 아무것도 시도하지 않는다", async () => {
+    global.chrome = createChromeMock();
+    const calls = [];
+    global.fetch = vi.fn(async (url) => {
+      calls.push(String(url));
+      return { ok: true, json: async () => ({ success: true }) };
+    });
+
+    await global.chrome.storage.local.set({
+      "video__s1__uuid1": {
+        videoId: "v1",
+        title: "노래 모음",
+        watchedAt: "2026-01-10T11:00:00Z",
+        sent: false,
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentVideoEvents();
+
+    expect(calls).toHaveLength(0);
+  });
+});
