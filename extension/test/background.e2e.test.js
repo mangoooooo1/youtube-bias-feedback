@@ -460,6 +460,78 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
 
     expect(calls.sessions).toHaveLength(0);
   });
+
+  // 알람 리스너는 retryUnsyncedSessions/retryUnsentVideoEvents/checkSessionTimeout을
+  // await 없이 나란히 호출한다 — 즉 같은 세션을 두 경로가 "동시에" 다시 시도할 수 있다
+  // (예: checkSessionTimeout이 막 끝낸 세션을, 같은 틱의 retryUnsyncedSessions가 곧바로
+  // 집는 경우). 이 테스트는 그 경합을 재현해, 서버의 409(중복 세션) 응답 덕분에 알림이
+  // 두 번 뜨거나 오늘 리뷰 캐시가 잘못 반영되지 않음을 확인한다.
+  it("같은 세션을 두 경로가 동시에 재시도해도(경합) 알림은 한 번만 뜬다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { sessions: [] };
+    let sessionAttempt = 0;
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.endsWith("/api/sessions")) {
+        calls.sessions.push(JSON.parse(options.body));
+        sessionAttempt++;
+        // 첫 요청이 서버에 실제로 먼저 도착해 저장을 마쳤다고 가정 — 두 번째는 UNIQUE
+        // 제약(sessionId)에 걸려 409를 받는다(실제 동시 요청에서 서버가 보이는 동작).
+        if (sessionAttempt === 1) {
+          return {
+            ok: true,
+            json: async () => ({
+              success: true,
+              data: {
+                todayReview: {
+                  reviewDate: "2026-01-10",
+                  review: "오늘은 음악 영상 위주로 보셨네요.",
+                  reviewTopic: "음악",
+                  source: "llm",
+                  promptVersion: "viewlens-today-mirror-v1.0",
+                },
+              },
+            }),
+          };
+        }
+        return { ok: false, status: 409, text: async () => "duplicate" };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
+          endTime: FIXED_NOW.toISOString(),
+          videos: [{ videoId: "v1", title: "노래 모음" }],
+          categoryDistribution: { 음악: 1 },
+          entropy: 0,
+          videoCount: 1,
+          syncedToServer: false,
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    // 알람 리스너와 동일하게 await 없이 나란히 호출해 실제 경합 타이밍을 재현한다.
+    await Promise.all([mod.retryUnsyncedSessions(), mod.retryUnsyncedSessions()]);
+
+    expect(calls.sessions).toHaveLength(2);
+    // 승자(200)든 패자(409)든 최종적으로 동기화 완료 상태로 수렴한다.
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    expect(sessions.find((s) => s.sessionId === "s1").syncedToServer).toBe(
+      true,
+    );
+    // 알림은 승자 쪽 한 번만 뜬다 — 패자는 "DUPLICATE"를 보고 즉시 반환하므로
+    // showFeedbackNotification을 다시 호출하지 않는다.
+    expect(global.chrome.notifications.create).toHaveBeenCalledTimes(1);
+  });
 });
 
 // 연구 무결성 점검: content.js의 /api/video-events 즉시 전송은 fire-and-forget이라
@@ -489,6 +561,7 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
         title: "노래 모음",
         watchedAt: "2026-01-10T11:00:00Z",
         sent: false, // 최초 즉시 전송(content.js)이 실패해 남은 상태
+        eventId: "uuid1", // content.js가 최초 시도 때 발급해둔 멱등 키
       },
     });
 
@@ -501,6 +574,8 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
       anonymousId: "a1",
       videoId: "v1",
       sessionId: "s1",
+      // 최초 시도와 같은 eventId를 재전송해야 서버가 OR IGNORE로 중복을 걸러낸다.
+      eventId: "uuid1",
     });
 
     const all = await global.chrome.storage.local.get(null);

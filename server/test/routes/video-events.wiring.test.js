@@ -108,4 +108,33 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
     );
     expect(res.status).toBe(404);
   });
+
+  it("같은 eventId로 재전송해도 한 행만 남는다(OR IGNORE 멱등성) — 확장의 재시도 큐가 이미 성공한 전송을 다시 보내는 상황", async () => {
+    await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ eventId: "wiring-evt-1" }));
+    const res = await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ eventId: "wiring-evt-1", title: "다른 제목" }));
+
+    expect(res.status).toBe(200);
+    const rows = db
+      .prepare("SELECT * FROM video_events WHERE eventId = ?")
+      .all("wiring-evt-1");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].title).toBe("테스트 영상"); // 재전송 값이 아니라 최초 값 유지
+  });
+
+  it("eventId 없는 구버전 요청은 dedup 없이 매번 새 행으로 저장된다", async () => {
+    const payload = basePayload();
+    delete payload.eventId;
+
+    await request(app).post("/api/video-events").send(payload);
+    await request(app).post("/api/video-events").send(payload);
+
+    const rows = db
+      .prepare("SELECT * FROM video_events WHERE anonymousId = ?")
+      .all("wiring-user");
+    expect(rows).toHaveLength(2);
+  });
 });

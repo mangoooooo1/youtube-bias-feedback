@@ -379,4 +379,25 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
     expect(videos).toHaveLength(1);
     expect(videos[0].sent).toBe(false);
   });
+
+  it("서버가 멱등 처리(OR IGNORE)할 수 있도록, 로컬에 저장한 eventId와 서버로 보낸 eventId가 같다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    let sentBody = null;
+    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+      sentBody = JSON.parse(options.body);
+      return Promise.resolve({ ok: true });
+    });
+
+    await recordVideo("v1", "영상1");
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    const videos = collectVideos(storage.dump(), "s1");
+    expect(videos[0].eventId).toEqual(expect.any(String));
+    expect(sentBody.eventId).toBe(videos[0].eventId);
+  });
 });

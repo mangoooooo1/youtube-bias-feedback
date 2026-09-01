@@ -88,7 +88,9 @@ function recordVideo(videoId, title) {
         return;
       }
 
-      const videoKey = `video__${session.sessionId}__${crypto.randomUUID()}`;
+      // uuid를 videoKey와 eventId 양쪽에 재사용한다.
+      const eventId = crypto.randomUUID();
+      const videoKey = `video__${session.sessionId}__${eventId}`;
       // sent:false로 시작
       // 아래 전송이 실패하면 이 값이 그대로 남아, background.js의
       // 1분 재시도 큐(retryUnsentVideoEvents)가 나중에 다시 보낼 대상을 찾아낼 수 있다.
@@ -101,7 +103,7 @@ function recordVideo(videoId, title) {
           videoCount: (session.videoCount ?? 0) + 1,
         },
         lastRecordedVideo: { videoId, sessionId: session.sessionId },
-        [videoKey]: { videoId, title, watchedAt: now, sent: false },
+        [videoKey]: { videoId, title, watchedAt: now, sent: false, eventId },
       });
       console.log("[content] recorded:", { videoId, title });
 
@@ -117,12 +119,19 @@ function recordVideo(videoId, title) {
             title: title ?? null,
             watchedAt: now,
             sessionId: session.sessionId,
+            eventId,
           }),
         })
           .then((response) => {
             if (response.ok && chrome.runtime?.id) {
               chrome.storage.local.set({
-                [videoKey]: { videoId, title, watchedAt: now, sent: true },
+                [videoKey]: {
+                  videoId,
+                  title,
+                  watchedAt: now,
+                  sent: true,
+                  eventId,
+                },
               });
             }
           })

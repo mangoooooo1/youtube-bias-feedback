@@ -68,14 +68,16 @@ function buildClosedSession(sessionId, videos, startTime, endTime) {
     sessionId,
     startTime: startTime ?? deduped[0].watchedAt,
     endTime,
-    // sent(서버 /api/video-events 전송 성공 여부)를 그대로 들고 간다.
-    // 세션이 끝나면 video__ 키 자체가 사라지므로, 아직 전송 못 한 영상의 재시도 대상 여부를
-    // getUnsentVideoEvents()가 sessions[].videos에서도 판단할 수 있어야 한다.
-    videos: deduped.map(({ videoId, title, watchedAt, sent }) => ({
+    // sent(서버 /api/video-events 전송 성공 여부)와 eventId(서버 멱등 키)를 그대로
+    // 들고 간다. 세션이 끝나면 video__ 키 자체가 사라지므로, 아직 전송 못 한 영상의
+    // 재시도 대상 여부를 getUnsentVideoEvents()가 sessions[].videos에서도 판단할 수
+    // 있어야 하고, 재시도 시에도 같은 eventId를 다시 보내야 서버가 중복을 걸러낸다.
+    videos: deduped.map(({ videoId, title, watchedAt, sent, eventId }) => ({
       videoId,
       title,
       watchedAt,
       sent,
+      eventId,
     })),
   };
 }
@@ -166,6 +168,9 @@ export async function getUnsentVideoEvents() {
       videoId: v.videoId,
       title: v.title,
       watchedAt: v.watchedAt,
+      // 이 기능 이전에 기록된 항목엔 eventId가 없다(undefined) — 그대로 서버에 보내면
+      // 멱등 dedup만 생략되고 나머지 동작은 그대로다(하위호환).
+      eventId: v.eventId,
     }));
 
   const fromSessions = (all.sessions ?? []).flatMap((session) =>
@@ -177,6 +182,7 @@ export async function getUnsentVideoEvents() {
         videoId: v.videoId,
         title: v.title,
         watchedAt: v.watchedAt,
+        eventId: v.eventId,
       })),
   );
 

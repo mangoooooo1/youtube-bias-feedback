@@ -96,8 +96,11 @@ chrome.storage.local.set({ serverUrl: SERVER_URL });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== ALARM_NAME) return;
-  // 이번 세션 종료 감지보다 먼저 돌려야, 방금 끝난 세션이 아직 syncedToServer 필드조차
-  // 없는 상태로 이 틱에서 중복 시도되지 않는다(다음 틱부터 재시도 대상이 됨).
+  // 셋 다 await 없이 실행하므로 서로 순서가 보장되지 않는다 — 예를 들어
+  // checkSessionTimeout이 세션을 막 끝낸 직후 같은 세션을 retryUnsyncedSessions가
+  // 이 틱에서 곧바로 다시 집어도(혹은 그 반대여도) 안전하다: 서버가 세션은 409(중복
+  // 세션), 영상은 eventId 기반 OR IGNORE로 멱등 처리하므로 중복 전송이 일어나도
+  // 여분의 요청 하나로 끝나고 데이터가 중복 저장되거나 알림이 두 번 뜨지 않는다.
   retryUnsyncedSessions();
   retryUnsentVideoEvents();
   checkSessionTimeout();
@@ -290,6 +293,8 @@ async function postVideoEventToServer(anonymousId, event) {
         title: event.title ?? null,
         watchedAt: event.watchedAt,
         sessionId: event.sessionId,
+        // 같은 eventId로 재전송되면 서버가 INSERT OR IGNORE로 걸러내 이미 성공했던 전송을 다시 보내도 중복 행이 남지 않는다.
+        eventId: event.eventId,
       }),
     });
     if (!response.ok) {

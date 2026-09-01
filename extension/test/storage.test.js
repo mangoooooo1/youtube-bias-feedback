@@ -329,13 +329,14 @@ describe("getOnboarding", () => {
 // 연구 무결성 점검: content.js의 /api/video-events 즉시 전송이 실패하면 sent:false로
 // 남는다. background.js의 재시도 큐가 이 두 함수로 그 상태를 읽고 갱신한다.
 describe("getUnsentVideoEvents / markVideoEventSent", () => {
-  it("세션 종료 전(video__ 키)의 미전송 영상을 찾아낸다", async () => {
+  it("세션 종료 전(video__ 키)의 미전송 영상을 찾아낸다(eventId 포함)", async () => {
     await global.chrome.storage.local.set({
       "video__s1__v1-1": {
         videoId: "v1",
         title: "제목-v1",
         watchedAt: "2026-01-01T00:00:00Z",
         sent: false,
+        eventId: "v1-1",
       },
     });
 
@@ -345,6 +346,8 @@ describe("getUnsentVideoEvents / markVideoEventSent", () => {
       location: "live",
       sessionId: "s1",
       videoId: "v1",
+      // 재전송 시 서버의 OR IGNORE 멱등 처리를 타려면 같은 eventId를 그대로 들고 있어야 한다.
+      eventId: "v1-1",
     });
   });
 
@@ -423,7 +426,7 @@ describe("getUnsentVideoEvents / markVideoEventSent", () => {
   });
 });
 
-describe("endSession — sent 플래그를 세션 종료 이후에도 보존한다", () => {
+describe("endSession — sent·eventId를 세션 종료 이후에도 보존한다", () => {
   it("전송 성공/실패 여부(sent)를 videos 배열로 그대로 옮긴다", async () => {
     await global.chrome.storage.local.set({
       currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
@@ -448,5 +451,24 @@ describe("endSession — sent 플래그를 세션 종료 이후에도 보존한�
     const videos = sessions[0].videos;
     expect(videos.find((v) => v.videoId === "v1").sent).toBe(true);
     expect(videos.find((v) => v.videoId === "v2").sent).toBe(false);
+  });
+
+  it("eventId(서버 멱등 키)도 그대로 옮긴다 — 세션 종료 후 재시도해도 같은 eventId로 나가야 한다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    await global.chrome.storage.local.set({
+      video__s1__v1: {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: false,
+        eventId: "evt-v1",
+      },
+    });
+    await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions[0].videos[0].eventId).toBe("evt-v1");
   });
 });
