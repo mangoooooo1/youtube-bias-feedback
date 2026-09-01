@@ -1,195 +1,167 @@
 process.env.TZ = "Asia/Seoul";
 
-import { describe, it, expect, afterEach, vi } from "vitest";
-import { aggregateTodayCumulative as aggregateTodayCumulativeClient } from "../../../extension/pipeline/analysis.js";
+import { describe, it, expect } from "vitest";
 import { aggregateTodayCumulative } from "../../pipeline/today-boundaries.js";
 
-// 클라이언트 형태(세션에 videos 배열이 내장됨)의 세션 하나를 만든다.
-function clientSession({
-  sessionId,
-  endTime,
-  categoryDistribution,
-  videoCount,
-  videoTitles = [],
-}) {
-  return {
-    sessionId,
-    endTime,
-    categoryDistribution,
-    videoCount,
-    videos: videoTitles.map((title, i) => ({
-      videoId: `${sessionId}-v${i}`,
-      title,
-      watchedAt: endTime,
-    })),
-  };
+// 이 파일은 원래 extension/pipeline/analysis.js에서 확장 프로그램이 로컬로 집계하던
+// "오늘 하루" 로직을 서버로 이식한 것이다(연구 무결성 점검 항목 1 후속 조치, Stage 2a).
+// 확장 프로그램 쪽 원본은 Stage 2c에서 완전히 제거됐으므로(더 이상 클라이언트가 집계하지
+// 않음), 지금부터는 서버 버전 단독으로 집계 로직을 검증한다(이식 당시의 동치성은 git
+// 이력의 이전 버전에 남아 있다).
+function session({ sessionId, endTime, categoryDistribution, videoCount }) {
+  return { sessionId, endTime, categoryDistribution, videoCount };
 }
 
-// 클라이언트 형태 세션 배열 → 서버 형태 입력({ sessions, titles })으로 변환.
-// video_events는 sessions와 별도 테이블이라 서버 버전은 이렇게 나눠 받는다.
-function toServerInput(clientSessions) {
-  const sessions = clientSessions.map(
-    ({ sessionId, endTime, categoryDistribution, videoCount }) => ({
-      sessionId,
-      endTime,
-      categoryDistribution,
-      videoCount,
-    }),
-  );
-  const titles = clientSessions.flatMap((s) =>
-    (s.videos || []).map((v) => ({ title: v.title, watchedAt: v.watchedAt })),
-  );
-  return { sessions, titles };
-}
-
-// videoTitles는 top-10만 잘라 프롬프트에 쓰이는 참고 정보라 순서 자체엔 의미가 없다
-// (서버는 DB 조회 순서, 클라이언트는 세션 배열 순서로 서로 다르게 나열될 수 있음) —
-// 핵심 비교 대상인 분포·엔트로피·videoCount에 영향이 없으므로 정렬해서 비교한다.
-function normalize(result) {
-  if (!result) return result;
-  return {
-    ...result,
-    videoTitles: [...result.videoTitles].sort(),
-    sessionIds: [...result.sessionIds].sort(),
-  };
-}
-
-afterEach(() => {
-  vi.useRealTimers();
-});
-
-describe("today-boundaries.aggregateTodayCumulative ↔ extension/pipeline/analysis.js 동치성", () => {
-  it("오늘 세션이 없으면 둘 다 null을 반환한다", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-10T10:00:00+09:00"));
-
-    const sessions = [
-      clientSession({
-        sessionId: "s-yesterday",
-        endTime: "2026-03-09T20:00:00+09:00",
-        categoryDistribution: { 음악: 1 },
-        videoCount: 3,
-      }),
-    ];
-
-    expect(aggregateTodayCumulativeClient(sessions)).toBeNull();
-    expect(
-      aggregateTodayCumulative({ ...toServerInput(sessions), now: new Date() }),
-    ).toBeNull();
+describe("aggregateTodayCumulative", () => {
+  it("오늘 세션이 없으면 null을 반환한다", () => {
+    const result = aggregateTodayCumulative({
+      sessions: [
+        session({
+          sessionId: "s-yesterday",
+          endTime: "2026-03-09T20:00:00+09:00",
+          categoryDistribution: { 음악: 1 },
+          videoCount: 3,
+        }),
+      ],
+      titles: [],
+      now: new Date("2026-03-10T10:00:00+09:00"),
+    });
+    expect(result).toBeNull();
   });
 
-  it("오늘 세션 여러 개를 videoCount 가중으로 합치고, 직전 시청일(어제) entropy를 함께 계산한다", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-10T22:00:00+09:00"));
-
-    const sessions = [
-      clientSession({
-        sessionId: "s-yesterday",
-        endTime: "2026-03-09T20:00:00+09:00",
-        categoryDistribution: { 음악: 1 },
-        videoCount: 4,
-        videoTitles: ["어제 영상 A"],
-      }),
-      clientSession({
-        sessionId: "s-today-1",
-        endTime: "2026-03-10T10:00:00+09:00",
-        categoryDistribution: { 게임: 0.5, 음악: 0.5 },
-        videoCount: 2,
-        videoTitles: ["오늘 영상 A", "오늘 영상 B"],
-      }),
-      clientSession({
-        sessionId: "s-today-2",
-        endTime: "2026-03-10T21:00:00+09:00",
-        categoryDistribution: { 교육: 1 },
-        videoCount: 3,
-        videoTitles: ["오늘 영상 C"],
-      }),
-    ];
-
-    const clientResult = aggregateTodayCumulativeClient(sessions);
-    const serverResult = aggregateTodayCumulative({
-      ...toServerInput(sessions),
-      now: new Date(),
+  it("categoryDistribution이 없거나 빈 세션은 집계에서 제외한다", () => {
+    const result = aggregateTodayCumulative({
+      sessions: [
+        session({
+          sessionId: "s1",
+          endTime: "2026-03-10T09:00:00+09:00",
+          categoryDistribution: {},
+          videoCount: 3,
+        }),
+        session({
+          sessionId: "s2",
+          endTime: "2026-03-10T10:00:00+09:00",
+          categoryDistribution: null,
+          videoCount: 1,
+        }),
+      ],
+      titles: [],
+      now: new Date("2026-03-10T20:00:00+09:00"),
     });
-
-    expect(clientResult).not.toBeNull();
-    const a = normalize(clientResult);
-    const b = normalize(serverResult);
-
-    expect(b.reviewDate).toBe(a.reviewDate);
-    expect(b.videoCount).toBe(a.videoCount);
-    expect(b.sessionCount).toBe(a.sessionCount);
-    expect(b.entropy).toBe(a.entropy);
-    expect(b.prevEntropy).toBe(a.prevEntropy);
-    expect(b.sessionIds).toEqual(a.sessionIds);
-    expect(b.videoTitles).toEqual(a.videoTitles);
-    for (const key of new Set([
-      ...Object.keys(a.categoryDistribution),
-      ...Object.keys(b.categoryDistribution),
-    ])) {
-      expect(b.categoryDistribution[key] ?? 0).toBeCloseTo(
-        a.categoryDistribution[key] ?? 0,
-        9,
-      );
-    }
+    expect(result).toBeNull();
   });
 
-  it("직전 시청일 데이터가 전혀 없으면 prevEntropy가 둘 다 null이다", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-10T12:00:00+09:00"));
-
-    const sessions = [
-      clientSession({
-        sessionId: "s-today",
-        endTime: "2026-03-10T11:00:00+09:00",
-        categoryDistribution: { 스포츠: 1 },
-        videoCount: 2,
-      }),
-    ];
-
-    const clientResult = aggregateTodayCumulativeClient(sessions);
-    const serverResult = aggregateTodayCumulative({
-      ...toServerInput(sessions),
-      now: new Date(),
+  it("오늘 세션 여러 개를 videoCount 가중 평균으로 병합한다", () => {
+    const result = aggregateTodayCumulative({
+      sessions: [
+        session({
+          sessionId: "s-today-1",
+          endTime: "2026-03-10T10:00:00+09:00",
+          categoryDistribution: { 음악: 1 },
+          videoCount: 1,
+        }),
+        session({
+          sessionId: "s-today-2",
+          endTime: "2026-03-10T21:00:00+09:00",
+          categoryDistribution: { 게임: 1 },
+          videoCount: 3,
+        }),
+      ],
+      titles: [
+        { title: "음악 영상", watchedAt: "2026-03-10T10:00:00+09:00" },
+        { title: "게임 영상", watchedAt: "2026-03-10T21:00:00+09:00" },
+      ],
+      now: new Date("2026-03-10T22:00:00+09:00"),
     });
 
-    expect(clientResult.prevEntropy).toBeNull();
-    expect(serverResult.prevEntropy).toBeNull();
+    expect(result.reviewDate).toBe("2026-03-10");
+    // 가중 평균: 음악 1*(1/4) + 게임 1*(3/4)
+    expect(result.categoryDistribution).toEqual({ 음악: 0.25, 게임: 0.75 });
+    expect(result.entropy).toBe(0.81);
+    expect(result.videoCount).toBe(4);
+    expect(result.sessionCount).toBe(2);
+    expect(result.sessionIds).toEqual(["s-today-1", "s-today-2"]);
+    expect(result.videoTitles).toEqual(["음악 영상", "게임 영상"]);
+  });
+
+  it("오늘 날짜가 아닌 영상 제목은 videoTitles에서 제외한다", () => {
+    const result = aggregateTodayCumulative({
+      sessions: [
+        session({
+          sessionId: "s-today",
+          endTime: "2026-03-10T10:00:00+09:00",
+          categoryDistribution: { 음악: 1 },
+          videoCount: 1,
+        }),
+      ],
+      titles: [
+        { title: "어제 영상", watchedAt: "2026-03-09T20:00:00+09:00" },
+        { title: "오늘 영상", watchedAt: "2026-03-10T10:00:00+09:00" },
+      ],
+      now: new Date("2026-03-10T20:00:00+09:00"),
+    });
+    expect(result.videoTitles).toEqual(["오늘 영상"]);
+  });
+
+  it("직전 시청일이 없으면 prevEntropy는 null이다", () => {
+    const result = aggregateTodayCumulative({
+      sessions: [
+        session({
+          sessionId: "s-today",
+          endTime: "2026-03-10T11:00:00+09:00",
+          categoryDistribution: { 스포츠: 1 },
+          videoCount: 2,
+        }),
+      ],
+      titles: [],
+      now: new Date("2026-03-10T12:00:00+09:00"),
+    });
+    expect(result.prevEntropy).toBeNull();
   });
 
   it("가장 최근 직전 날짜만 prevEntropy에 반영한다(더 오래된 과거 세션은 제외)", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-10T12:00:00+09:00"));
-
-    const sessions = [
-      clientSession({
-        sessionId: "s-2-days-ago",
-        endTime: "2026-03-08T20:00:00+09:00",
-        categoryDistribution: { 음악: 1 },
-        videoCount: 10,
-      }),
-      clientSession({
-        sessionId: "s-yesterday",
-        endTime: "2026-03-09T20:00:00+09:00",
-        categoryDistribution: { 게임: 0.5, 교육: 0.5 },
-        videoCount: 4,
-      }),
-      clientSession({
-        sessionId: "s-today",
-        endTime: "2026-03-10T09:00:00+09:00",
-        categoryDistribution: { 스포츠: 1 },
-        videoCount: 2,
-      }),
-    ];
-
-    const clientResult = aggregateTodayCumulativeClient(sessions);
-    const serverResult = aggregateTodayCumulative({
-      ...toServerInput(sessions),
-      now: new Date(),
+    const result = aggregateTodayCumulative({
+      sessions: [
+        // 2일 전 — 오늘 대비 더 오래된 날짜(음악 단독, entropy=0)
+        session({
+          sessionId: "s-2-days-ago",
+          endTime: "2026-03-08T20:00:00+09:00",
+          categoryDistribution: { 음악: 1 },
+          videoCount: 10,
+        }),
+        // 어제 — 가장 최근 이전 시청일(게임/교육 반반, entropy=1)
+        session({
+          sessionId: "s-yesterday",
+          endTime: "2026-03-09T20:00:00+09:00",
+          categoryDistribution: { 게임: 0.5, 교육: 0.5 },
+          videoCount: 4,
+        }),
+        session({
+          sessionId: "s-today",
+          endTime: "2026-03-10T09:00:00+09:00",
+          categoryDistribution: { 스포츠: 1 },
+          videoCount: 2,
+        }),
+      ],
+      titles: [],
+      now: new Date("2026-03-10T12:00:00+09:00"),
     });
+    expect(result.prevEntropy).toBe(1);
+  });
 
-    // 어제(게임/교육 반반, entropy=1)여야지 2일 전(음악 단독, entropy=0)이면 안 된다
-    expect(clientResult.prevEntropy).toBe(1);
-    expect(serverResult.prevEntropy).toBe(1);
+  it("titles가 없어도(빈 배열) 집계가 동작한다", () => {
+    const result = aggregateTodayCumulative({
+      sessions: [
+        session({
+          sessionId: "s1",
+          endTime: "2026-03-10T09:00:00+09:00",
+          categoryDistribution: { 음악: 1 },
+          videoCount: 2,
+        }),
+      ],
+      now: new Date("2026-03-10T20:00:00+09:00"),
+    });
+    expect(result.videoCount).toBe(2);
+    expect(result.videoTitles).toEqual([]);
   });
 });
