@@ -1145,8 +1145,9 @@ async function boot() {
       startTs: Date.now(),
       tabTodayClicks: 0,
       tabWeekClicks: 0,
-      // EXP 사용자가 열자마자 실제 리뷰(today 탭)를 보고 있으면 개입 전달로 간주
-      feedbackViewed: feedbackActive && isRealReview(realToday.review) ? 1 : 0,
+      // EXP 사용자가 열자마자 실제 리뷰를 보고 있으면 개입 전달로 간주
+      feedbackViewed:
+        feedbackActive && isRealReview(VL._todayCumulative.review) ? 1 : 0,
     };
     persistLivePopupEvent(popupMetrics);
 
