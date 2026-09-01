@@ -2,7 +2,7 @@
 
 const { fail, ERROR_CODES } = require("./responseHandler");
 
-/** 순수 판정 함수 — Express 없이 단위 테스트 가능. true면 허용, false면 한도 초과. */
+/** 순수 판정 함수(true면 허용, false면 한도 초과) */
 function checkRateLimit(state, key, now, windowMs, max) {
   const entry = state.get(key);
   if (!entry || now >= entry.resetAt) {
@@ -23,7 +23,7 @@ function clientKey(req) {
   return req.headers["x-real-ip"] || req.ip;
 }
 
-/** windowMs 동안 클라이언트(IP)당 최대 max회까지만 허용하는 Express 미들웨어를 만든다. */
+/** windowMs 동안 클라이언트(IP)당 최대 max회까지만 허용하는 미들웨어 */
 function rateLimiter({ windowMs, max, now = Date.now }) {
   const state = new Map();
   return (req, res, next) => {

@@ -141,7 +141,7 @@ function bindOnboarding(root, onSubmit) {
         : null;
       modal.remove();
       if (!recovered) {
-        // 서버에 등록 이력이 없거나(경쟁 상태 등) 오프라인 — 조용히 신규 등록으로 폴백(6절).
+        // 서버에 등록 이력이 없거나(경쟁 상태 등) 오프라인(조용히 신규 등록으로 폴백)
         onSubmit({ group, code });
         return;
       }
@@ -152,7 +152,8 @@ function bindOnboarding(root, onSubmit) {
   function showErr(msg) {
     errEl.textContent = msg;
     errEl.style.display = "block";
-    input.style.boxShadow = "var(--vl-shadow-inset), 0 0 0 1.5px var(--vl-warn)";
+    input.style.boxShadow =
+      "var(--vl-shadow-inset), 0 0 0 1.5px var(--vl-warn)";
   }
   input.addEventListener("input", () => {
     errEl.style.display = "none";
