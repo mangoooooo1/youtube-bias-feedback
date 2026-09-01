@@ -148,9 +148,8 @@ async function generateTodayReview(prompt, apiKey) {
     controller.abort();
   }, TIMEOUT_MS);
 
-  let response;
   try {
-    response = await fetch(GEMINI_API_URL, {
+    const response = await fetch(GEMINI_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -164,72 +163,81 @@ async function generateTodayReview(prompt, apiKey) {
       }),
       signal: controller.signal,
     });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error("[today-review-llm] API error body:", errorBody);
+      throw llmError("http_error", `Gemini API error: ${response.status}`, {
+        httpStatus: response.status,
+      });
+    }
+
+    let data;
+    try {
+      data = await response.json();
+    } catch (error) {
+      if (timedOut) throw error;
+      throw llmError(
+        "parse_error",
+        `응답 본문 JSON 파싱 실패: ${error.message}`,
+      );
+    }
+
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text)
+      throw llmError("empty_response", "Gemini API: 응답에 텍스트가 없습니다");
+
+    const cleaned = text
+      .trim()
+      .replace(/^```(?:json)?\n?/, "")
+      .replace(/\n?```$/, "");
+    let topic, feedback;
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        Array.isArray(parsed) ||
+        typeof parsed.topic !== "string" ||
+        typeof parsed.feedback !== "string" ||
+        parsed.topic.trim() === "" ||
+        parsed.feedback.trim() === ""
+      ) {
+        throw new Error("topic/feedback 누락, 빈 값 또는 잘못된 타입");
+      }
+      topic = parsed.topic;
+      feedback = parsed.feedback;
+    } catch (error) {
+      throw llmError("parse_error", `피드백 JSON 파싱 실패: ${error.message}`);
+    }
+
+    if (SENSITIVE_PATTERN.test(feedback) || SENSITIVE_PATTERN.test(topic)) {
+      throw llmError(
+        "policy_filtered",
+        "정치·이념 관련 표현이 감지되어 폴백으로 대체",
+      );
+    }
+
+    return {
+      topic,
+      feedback,
+      source: "llm",
+      promptVersion: TODAY_PROMPT_VERSION,
+    };
   } catch (error) {
+    // 이미 위에서 분류된 에러(failureReason 있음)는 그대로 전달한다.
+    if (error.failureReason) throw error;
+    // abort는 타임아웃으로만 발생 → 실제 네트워크 장애(TypeError 등)와 구분
     if (timedOut)
       throw llmError("timeout", `Gemini API 타임아웃 (${TIMEOUT_MS}ms)`, {
         timedOut: true,
       });
     throw llmError("network_error", error.message);
   } finally {
+    // 본문 읽기(response.text/json)까지 끝난 뒤에만 타임아웃을 해제한다 — 헤더 수신 직후
+    // clearTimeout하면 본문 전송이 멈춘 연결에서 response.json()이 무기한 대기하게 된다.
     clearTimeout(timeoutId);
   }
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    console.error("[today-review-llm] API error body:", errorBody);
-    throw llmError("http_error", `Gemini API error: ${response.status}`, {
-      httpStatus: response.status,
-    });
-  }
-
-  let data;
-  try {
-    data = await response.json();
-  } catch (error) {
-    throw llmError("parse_error", `응답 본문 JSON 파싱 실패: ${error.message}`);
-  }
-
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text)
-    throw llmError("empty_response", "Gemini API: 응답에 텍스트가 없습니다");
-
-  const cleaned = text
-    .trim()
-    .replace(/^```(?:json)?\n?/, "")
-    .replace(/\n?```$/, "");
-  let topic, feedback;
-  try {
-    const parsed = JSON.parse(cleaned);
-    if (
-      !parsed ||
-      typeof parsed !== "object" ||
-      Array.isArray(parsed) ||
-      typeof parsed.topic !== "string" ||
-      typeof parsed.feedback !== "string" ||
-      parsed.topic.trim() === "" ||
-      parsed.feedback.trim() === ""
-    ) {
-      throw new Error("topic/feedback 누락, 빈 값 또는 잘못된 타입");
-    }
-    topic = parsed.topic;
-    feedback = parsed.feedback;
-  } catch (error) {
-    throw llmError("parse_error", `피드백 JSON 파싱 실패: ${error.message}`);
-  }
-
-  if (SENSITIVE_PATTERN.test(feedback) || SENSITIVE_PATTERN.test(topic)) {
-    throw llmError(
-      "policy_filtered",
-      "정치·이념 관련 표현이 감지되어 폴백으로 대체",
-    );
-  }
-
-  return {
-    topic,
-    feedback,
-    source: "llm",
-    promptVersion: TODAY_PROMPT_VERSION,
-  };
 }
 
 // "오늘" 누적 리뷰의 폴백
