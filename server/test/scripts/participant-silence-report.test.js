@@ -5,6 +5,7 @@ import {
   run,
   evaluateParticipantSilence,
   collectParticipantActivity,
+  parseThresholdArg,
   DEFAULT_THRESHOLD_DAYS,
 } from "../../scripts/participant-silence-report.js";
 
@@ -287,5 +288,31 @@ describe("run", () => {
     const result = run(db, { now, thresholdDays: 3 });
 
     expect(result).toEqual({ flaggedCount: 0, checkedCount: 0 });
+  });
+});
+
+describe("parseThresholdArg — CLI 인수 검증", () => {
+  it("인수가 없으면 기본값을 쓴다", () => {
+    expect(parseThresholdArg(undefined)).toBe(DEFAULT_THRESHOLD_DAYS);
+  });
+
+  it("양의 정수 인수를 그대로 쓴다", () => {
+    expect(parseThresholdArg("5")).toBe(5);
+  });
+
+  it("빈 문자열은 거부한다(Number('')는 0이라 Number.isFinite만으로는 안 걸러짐)", () => {
+    expect(() => parseThresholdArg("")).toThrow();
+  });
+
+  it("0은 거부한다(daysSinceActivity >= 0은 거의 항상 참이라 전원 결측 오판정으로 이어짐)", () => {
+    expect(() => parseThresholdArg("0")).toThrow();
+  });
+
+  it("음수는 거부한다", () => {
+    expect(() => parseThresholdArg("-1")).toThrow();
+  });
+
+  it("숫자가 아닌 문자열은 거부한다", () => {
+    expect(() => parseThresholdArg("abc")).toThrow();
   });
 });

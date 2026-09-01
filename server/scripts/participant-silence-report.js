@@ -143,11 +143,28 @@ function run(
   return { flaggedCount: flagged.length, checkedCount: rows.length };
 }
 
+/**
+ * 인수가 없으면 기본값을 쓰고, 있으면 0보다 큰 유한수인지 검증한다.
+ * 빈 문자열은 Number("") === 0이라 Number.isFinite만으로는 걸러지지 않아 별도로 막는다.
+ */
+function parseThresholdArg(rawArg) {
+  if (rawArg === undefined) return DEFAULT_THRESHOLD_DAYS;
+  const parsed = Number(rawArg);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`임계값_일수는 0보다 큰 숫자여야 합니다: "${rawArg}"`);
+  }
+  return parsed;
+}
+
 async function main() {
-  const thresholdArg = Number(process.argv[2]);
-  const thresholdDays = Number.isFinite(thresholdArg)
-    ? thresholdArg
-    : DEFAULT_THRESHOLD_DAYS;
+  let thresholdDays;
+  try {
+    thresholdDays = parseThresholdArg(process.argv[2]);
+  } catch (err) {
+    console.error(`[participant-silence] ${err.message}`);
+    process.exitCode = 1;
+    return;
+  }
 
   const { db } = require("../db");
   let result;
@@ -183,5 +200,6 @@ module.exports = {
   run,
   evaluateParticipantSilence,
   collectParticipantActivity,
+  parseThresholdArg,
   DEFAULT_THRESHOLD_DAYS,
 };
