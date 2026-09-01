@@ -16,19 +16,11 @@
  *   node server/scripts/check-duplicate-participants.js
  */
 const path = require("path");
-const crypto = require("crypto");
 
 // cron·수동 실행 모두에서 server/.env를 명시적으로 불러온다 (backup-db.js와 동일 이유)
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
-function fingerprint(value) {
-  if (!value) return "(none)";
-  return crypto
-    .createHash("sha256")
-    .update(String(value))
-    .digest("hex")
-    .slice(0, 10);
-}
+const { fingerprint } = require("./fingerprint");
 
 function run(db) {
   const duplicates = db
