@@ -125,6 +125,38 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
     expect(rows[0].title).toBe("테스트 영상"); // 재전송 값이 아니라 최초 값 유지
   });
 
+  it("entryHost/entryPath/navigationTrigger가 오면 referrerType/relatedTrigger로 분류돼 저장된다", async () => {
+    const res = await request(app).post("/api/video-events").send(
+      basePayload({
+        entryHost: "www.youtube.com",
+        entryPath: "/watch",
+        navigationTrigger: "interaction",
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare("SELECT * FROM video_events WHERE videoId = ?")
+      .get("wiring-v1");
+    expect(row.entryHost).toBe("www.youtube.com");
+    expect(row.entryPath).toBe("/watch");
+    expect(row.referrerType).toBe("related");
+    expect(row.relatedTrigger).toBe("click");
+  });
+
+  it("entryHost/entryPath 미전송(구버전 확장)이면 referrerType은 unknown, relatedTrigger는 null로 저장된다", async () => {
+    const res = await request(app).post("/api/video-events").send(basePayload());
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare("SELECT * FROM video_events WHERE videoId = ?")
+      .get("wiring-v1");
+    expect(row.entryHost).toBeNull();
+    expect(row.entryPath).toBeNull();
+    expect(row.referrerType).toBe("unknown");
+    expect(row.relatedTrigger).toBeNull();
+  });
+
   it("eventId 없는 구버전 요청은 dedup 없이 매번 새 행으로 저장된다", async () => {
     const payload = basePayload();
     delete payload.eventId;

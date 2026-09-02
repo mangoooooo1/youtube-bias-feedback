@@ -2,12 +2,15 @@ const express = require("express");
 const { db } = require("../db");
 const { success, fail } = require("../middleware/responseHandler");
 const { validateVideoEvent } = require("./video-events-validate");
+const { classifyReferrerType } = require("./video-events-classify");
 
 const router = express.Router();
 
 const insertEvent = db.prepare(`
-  INSERT OR IGNORE INTO video_events (eventId, anonymousId, videoId, title, watchedAt, sessionId)
-  VALUES (@eventId, @anonymousId, @videoId, @title, @watchedAt, @sessionId)
+  INSERT OR IGNORE INTO video_events
+    (eventId, anonymousId, videoId, title, watchedAt, sessionId, entryHost, entryPath, referrerType, relatedTrigger)
+  VALUES
+    (@eventId, @anonymousId, @videoId, @title, @watchedAt, @sessionId, @entryHost, @entryPath, @referrerType, @relatedTrigger)
 `);
 
 router.post("/", (req, res, next) => {
@@ -22,8 +25,25 @@ router.post("/", (req, res, next) => {
     );
   }
 
-  const { anonymousId, videoId, watchedAt, title, sessionId, eventId } =
-    req.body;
+  const {
+    anonymousId,
+    videoId,
+    watchedAt,
+    title,
+    sessionId,
+    eventId,
+    entryHost,
+    entryPath,
+    navigationTrigger,
+  } = req.body;
+
+  // referrerType/relatedTrigger는 요청 body로 직접 받지 않고,
+  // 원시 신호로부터 서버가 매번 다시 계산한다.
+  const { referrerType, relatedTrigger } = classifyReferrerType(
+    entryHost ?? null,
+    entryPath ?? null,
+    navigationTrigger ?? null,
+  );
 
   try {
     insertEvent.run({
@@ -33,6 +53,10 @@ router.post("/", (req, res, next) => {
       title: title ?? null,
       watchedAt,
       sessionId: sessionId ?? null,
+      entryHost: entryHost ?? null,
+      entryPath: entryPath ?? null,
+      referrerType,
+      relatedTrigger,
     });
   } catch (err) {
     return next(err);

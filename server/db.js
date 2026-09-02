@@ -92,6 +92,15 @@ function initializeDB() {
       watchedAt   TEXT    NOT NULL,
       -- 이 영상이 속한 세션의 sessions.sessionId
       sessionId   TEXT,
+      -- 유입 경로 판별용 원시 신호(확장이 캡처한 직전 페이지 도메인·경로, 쿼리스트링 제외).
+      -- 분류 규칙(video-events-classify.js)이 나중에 바뀌어도 재분류할 수 있도록 원본을 남겨둔다.
+      entryHost      TEXT,
+      entryPath      TEXT,
+      -- entryHost/entryPath/navigationTrigger로부터 서버가 분류한 결과
+      referrerType   TEXT,  -- 'direct_search' | 'home_feed' | 'related' | 'external' | 'unknown'
+      -- referrerType='related'일 때만 의미 있음(그 외엔 NULL) — 자동재생(ended)/사용자 조작(click·keydown) 구분,
+      -- 판단 근거가 부족하면 'unknown'
+      relatedTrigger TEXT,  -- 'autoplay' | 'click' | 'unknown' | NULL
       createdAt   TEXT    DEFAULT (datetime('now'))
     );
 
