@@ -68,10 +68,16 @@ function buildClosedSession(sessionId, videos, startTime, endTime) {
     sessionId,
     startTime: startTime ?? deduped[0].watchedAt,
     endTime,
-    videos: deduped.map(({ videoId, title, watchedAt }) => ({
+    // sent(서버 /api/video-events 전송 성공 여부)와 eventId(서버 멱등 키)를 그대로
+    // 들고 간다. 세션이 끝나면 video__ 키 자체가 사라지므로, 아직 전송 못 한 영상의
+    // 재시도 대상 여부를 getUnsentVideoEvents()가 sessions[].videos에서도 판단할 수
+    // 있어야 하고, 재시도 시에도 같은 eventId를 다시 보내야 서버가 중복을 걸러낸다.
+    videos: deduped.map(({ videoId, title, watchedAt, sent, eventId }) => ({
       videoId,
       title,
       watchedAt,
+      sent,
+      eventId,
     })),
   };
 }
@@ -145,6 +151,72 @@ async function _endSession() {
 export async function getLastWatchedAt() {
   const { lastWatchedAt } = await chrome.storage.local.get("lastWatchedAt");
   return lastWatchedAt ?? null;
+}
+
+// content.js의 즉시 전송(/api/video-events)이 실패해도 조용히 버리지 않도록, sent:false로 명시된 영상만 모은다.
+export async function getUnsentVideoEvents() {
+  const all = await chrome.storage.local.get(null);
+
+  const fromLive = Object.entries(all)
+    .filter(([key, v]) => key.startsWith("video__") && v?.sent === false)
+    .map(([key, v]) => ({
+      location: "live",
+      key,
+      sessionId: sessionIdOf(key),
+      videoId: v.videoId,
+      title: v.title,
+      watchedAt: v.watchedAt,
+      eventId: v.eventId,
+    }));
+
+  const fromSessions = (all.sessions ?? []).flatMap((session) =>
+    (session.videos ?? [])
+      .filter((v) => v.sent === false)
+      .map((v) => ({
+        location: "session",
+        sessionId: session.sessionId,
+        videoId: v.videoId,
+        title: v.title,
+        watchedAt: v.watchedAt,
+        eventId: v.eventId,
+      })),
+  );
+
+  return [...fromLive, ...fromSessions];
+}
+
+// getUnsentVideoEvents()가 돌려준 항목 하나를 서버 전송 성공 후 sent:true로 표시한다.
+// sessions 배열 갱신은 saveAnalysis/endSession과 마찬가지로 queue를 거쳐 직렬화한다.
+export function markVideoEventSent(event) {
+  queue = queue.then(() => _markVideoEventSent(event));
+  return queue;
+}
+
+async function _markVideoEventSent(event) {
+  if (event.location === "live") {
+    const { [event.key]: existing } = await chrome.storage.local.get(event.key);
+    // 이미 세션 종료로 sessions[]로 옮겨졌거나(키 삭제) 다른 재시도가 먼저 표시한 경우.
+    if (!existing) return;
+    await chrome.storage.local.set({
+      [event.key]: { ...existing, sent: true },
+    });
+    return;
+  }
+
+  const { sessions } = await chrome.storage.local.get("sessions");
+  if (!sessions) return;
+  const updatedSessions = sessions.map((session) => {
+    if (session.sessionId !== event.sessionId) return session;
+    return {
+      ...session,
+      videos: (session.videos ?? []).map((v) =>
+        v.videoId === event.videoId && v.watchedAt === event.watchedAt
+          ? { ...v, sent: true }
+          : v,
+      ),
+    };
+  });
+  await chrome.storage.local.set({ sessions: updatedSessions });
 }
 
 // --- 온보딩 ---

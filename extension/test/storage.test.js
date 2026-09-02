@@ -5,6 +5,8 @@ import {
   getAllSessions,
   getOnboarding,
   saveAnalysis,
+  getUnsentVideoEvents,
+  markVideoEventSent,
 } from "../storage.js";
 
 // 프로젝트에 chrome.storage.local 목이 없어 이번에 처음 만든다.
@@ -321,5 +323,170 @@ describe("getOnboarding", () => {
       group: "EXP",
       installDate: "2026-01-01T00:00:00Z",
     });
+  });
+});
+
+// 연구 무결성 점검: content.js의 /api/video-events 즉시 전송이 실패하면 sent:false로
+// 남는다. background.js의 재시도 큐가 이 두 함수로 그 상태를 읽고 갱신한다.
+describe("getUnsentVideoEvents / markVideoEventSent", () => {
+  it("세션 종료 전(video__ 키)의 미전송 영상을 찾아낸다(eventId 포함)", async () => {
+    await global.chrome.storage.local.set({
+      "video__s1__v1-1": {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: false,
+        eventId: "v1-1",
+      },
+    });
+
+    const events = await getUnsentVideoEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      location: "live",
+      sessionId: "s1",
+      videoId: "v1",
+      // 재전송 시 서버의 OR IGNORE 멱등 처리를 타려면 같은 eventId를 그대로 들고 있어야 한다.
+      eventId: "v1-1",
+    });
+  });
+
+  it("sent:true인 영상(세션 종료 전)은 대상에서 제외한다", async () => {
+    await global.chrome.storage.local.set({
+      "video__s1__v1-1": {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: true,
+      },
+    });
+
+    expect(await getUnsentVideoEvents()).toEqual([]);
+  });
+
+  it("sent 필드 자체가 없는(이 기능 이전에 기록된) 레거시 영상(video__ 키)은 재전송 대상에서 제외한다", async () => {
+    // 구버전 content.js는 sent를 아예 기록하지 않았고, fire-and-forget이라 대부분
+    // 이미 서버 전송에 성공한 상태다. !== true로 판정하면 이런 레거시 항목까지
+    // "미전송"으로 오판해 eventId도 없이 재전송 → video_events에 영구 중복이 쌓인다.
+    await global.chrome.storage.local.set({
+      "video__s1__legacy": {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        // sent 필드 없음
+      },
+    });
+
+    expect(await getUnsentVideoEvents()).toEqual([]);
+  });
+
+  it("세션 종료 후(sessions[].videos)의 미전송 영상도 찾아낸다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [
+            { videoId: "v1", title: "제목-v1", watchedAt: "t1", sent: true },
+            { videoId: "v2", title: "제목-v2", watchedAt: "t2", sent: false },
+            // sent 필드 자체가 없는 레거시 영상 — 재전송 대상이 아니다.
+            { videoId: "v3", title: "제목-v3", watchedAt: "t3" },
+          ],
+        },
+      ],
+    });
+
+    const events = await getUnsentVideoEvents();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      location: "session",
+      sessionId: "s1",
+      videoId: "v2",
+    });
+  });
+
+  it("markVideoEventSent(live)는 video__ 키를 sent:true로 갱신한다", async () => {
+    await global.chrome.storage.local.set({
+      "video__s1__v1-1": {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: false,
+      },
+    });
+    const [event] = await getUnsentVideoEvents();
+
+    await markVideoEventSent(event);
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__v1-1"].sent).toBe(true);
+  });
+
+  it("markVideoEventSent(session)는 sessions[].videos 안의 해당 영상만 sent:true로 갱신한다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [
+            { videoId: "v1", title: "제목-v1", watchedAt: "t1", sent: true },
+            { videoId: "v2", title: "제목-v2", watchedAt: "t2", sent: false },
+          ],
+        },
+      ],
+    });
+    const [event] = await getUnsentVideoEvents();
+
+    await markVideoEventSent(event);
+
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    const videos = sessions[0].videos;
+    expect(videos.find((v) => v.videoId === "v1").sent).toBe(true);
+    expect(videos.find((v) => v.videoId === "v2").sent).toBe(true);
+  });
+});
+
+describe("endSession — sent·eventId를 세션 종료 이후에도 보존한다", () => {
+  it("전송 성공/실패 여부(sent)를 videos 배열로 그대로 옮긴다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    await global.chrome.storage.local.set({
+      video__s1__v1: {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: true,
+      },
+      video__s1__v2: {
+        videoId: "v2",
+        title: "제목-v2",
+        watchedAt: "2026-01-01T00:01:00Z",
+        sent: false,
+      },
+    });
+    await endSession();
+
+    const sessions = await getAllSessions();
+    const videos = sessions[0].videos;
+    expect(videos.find((v) => v.videoId === "v1").sent).toBe(true);
+    expect(videos.find((v) => v.videoId === "v2").sent).toBe(false);
+  });
+
+  it("eventId(서버 멱등 키)도 그대로 옮긴다 — 세션 종료 후 재시도해도 같은 eventId로 나가야 한다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    await global.chrome.storage.local.set({
+      video__s1__v1: {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: false,
+        eventId: "evt-v1",
+      },
+    });
+    await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions[0].videos[0].eventId).toBe("evt-v1");
   });
 });

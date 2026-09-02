@@ -270,10 +270,457 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
     const saved = sessions.find((s) => s.sessionId === "s1");
     expect(saved.categoryDistribution).toBeDefined();
     expect(saved.review).toBeUndefined();
+    // 재시도 큐(retryUnsyncedSessions)가 이 세션을 찾아낼 수 있어야 하므로 false로
+    // 명시돼 있어야 한다(필드 자체가 없는 것과는 구분).
+    expect(saved.syncedToServer).toBe(false);
 
     // 알림 대상(EXP, 베이스라인 아님)이라도 서버 전송이 실패해 오늘 리뷰를 받지 못했다면
     // 알림을 띄우지 않는다 — 그렇지 않으면 "피드백이 업데이트됐어요" 알림만 뜨고
     // 팝업엔 실제 리뷰 없이 "생성 중" 상태만 보이는 불일치가 생긴다.
     expect(global.chrome.notifications.create).not.toHaveBeenCalled();
+  });
+});
+
+// 서버 장애 대비 로컬 큐잉/재시도 로직 (데이터 유실 방지).
+// analyzeSession의 최초 전송이 실패해도 세션은 syncedToServer:false로 로컬에 남고,
+// retryUnsyncedSessions(1분 알람에서 checkSessionTimeout과 함께 호출됨)가 이를 찾아 재전송
+describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", () => {
+  it("최초 서버 전송이 실패해도, 재시도에서 성공하면 리뷰 반영과 알림까지 완료된다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { sessions: [] };
+    let sessionAttempt = 0;
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.includes("googleapis.com/youtube/v3/videos")) {
+        const idsParam = new URL(href).searchParams.get("id");
+        const ids = idsParam ? idsParam.split(",") : [];
+        return {
+          ok: true,
+          json: async () => ({
+            items: ids.map((id) => ({ id, snippet: { categoryId: "10" } })),
+          }),
+        };
+      }
+      if (href.endsWith("/api/sessions")) {
+        calls.sessions.push(JSON.parse(options.body));
+        sessionAttempt++;
+        if (sessionAttempt === 1) {
+          throw new TypeError("network down"); // 최초 시도: 오프라인
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            data: {
+              todayReview: {
+                reviewDate: "2026-01-10",
+                review: "오늘은 음악 영상 위주로 보셨네요.",
+                reviewTopic: "음악",
+                source: "llm",
+                promptVersion: "viewlens-today-mirror-v1.0",
+              },
+            },
+          }),
+        };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
+          endTime: FIXED_NOW.toISOString(),
+          videos: [{ videoId: "v1", title: "노래 모음" }],
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+
+    await mod.analyzeSession({
+      sessionId: "s1",
+      videos: [{ videoId: "v1", title: "노래 모음" }],
+    });
+
+    // 최초 시도는 오프라인으로 실패 — 아직 미동기화 상태, 알림도 없다.
+    let { sessions } = await global.chrome.storage.local.get("sessions");
+    let saved = sessions.find((s) => s.sessionId === "s1");
+    expect(saved.syncedToServer).toBe(false);
+    expect(saved.review).toBeUndefined();
+    expect(global.chrome.notifications.create).not.toHaveBeenCalled();
+
+    // 1분 알람 틱마다 도는 재시도 — 이번엔 서버가 정상 응답한다.
+    await mod.retryUnsyncedSessions();
+
+    ({ sessions } = await global.chrome.storage.local.get("sessions"));
+    saved = sessions.find((s) => s.sessionId === "s1");
+    expect(saved.syncedToServer).toBe(true);
+    expect(saved.review).toBe("오늘은 음악 영상 위주로 보셨네요.");
+
+    const { todayReviewsCache } =
+      await global.chrome.storage.local.get("todayReviewsCache");
+    expect(todayReviewsCache.reviews).toEqual([
+      expect.objectContaining({ reviewDate: "2026-01-10" }),
+    ]);
+
+    expect(global.chrome.notifications.create).toHaveBeenCalledTimes(1);
+    // 재시도는 유튜브 카테고리 조회를 다시 하지 않는다 — /api/sessions만 두 번 호출된다.
+    expect(calls.sessions).toHaveLength(2);
+  });
+
+  it("재시도 중 서버가 409(중복 세션)를 반환하면 재전송 없이 동기화 완료로 처리한다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { sessions: [] };
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.endsWith("/api/sessions")) {
+        calls.sessions.push(JSON.parse(options.body));
+        return { ok: false, status: 409, text: async () => "duplicate" };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
+          endTime: FIXED_NOW.toISOString(),
+          videos: [{ videoId: "v1", title: "노래 모음" }],
+          categoryDistribution: { 음악: 1 },
+          entropy: 0,
+          videoCount: 1,
+          syncedToServer: false,
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsyncedSessions();
+
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    const saved = sessions.find((s) => s.sessionId === "s1");
+    // 서버엔 이미 반영돼 있던 것(중복 오류)이므로, 다시 보내지 않고 동기화 완료로 처리한다.
+    expect(saved.syncedToServer).toBe(true);
+    expect(saved.review).toBeUndefined();
+    expect(calls.sessions).toHaveLength(1);
+  });
+
+  it("이미 동기화됐거나(true) 이 기능 이전에 만들어져 필드 자체가 없는 세션은 건드리지 않는다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { sessions: [] };
+    global.fetch = vi.fn(async (url) => {
+      calls.sessions.push(String(url));
+      return {
+        ok: true,
+        json: async () => ({ success: true, data: { todayReview: null } }),
+      };
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s-already-synced",
+          categoryDistribution: { 음악: 1 },
+          entropy: 0,
+          videoCount: 1,
+          syncedToServer: true,
+        },
+        {
+          // syncedToServer 필드 자체가 없음 — 이 재시도 기능이 생기기 전에 이미
+          // 분석·전송됐던(혹은 실패했던) 레거시 세션. 일괄 재전송 대상이 아니다.
+          sessionId: "s-legacy",
+          categoryDistribution: { 음악: 1 },
+          entropy: 0,
+          videoCount: 1,
+        },
+        {
+          // 아직 분석 자체가 끝나지 않은 세션(categoryDistribution 없음).
+          sessionId: "s-not-analyzed-yet",
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsyncedSessions();
+
+    expect(calls.sessions).toHaveLength(0);
+  });
+
+  // 알람 리스너는 retryUnsyncedSessions/retryUnsentVideoEvents/checkSessionTimeout을
+  // await 없이 나란히 호출한다 — 즉 같은 세션을 두 경로가 "동시에" 다시 시도할 수 있다
+  // (예: checkSessionTimeout이 막 끝낸 세션을, 같은 틱의 retryUnsyncedSessions가 곧바로
+  // 집는 경우). 이 테스트는 그 경합을 재현해, 서버의 409(중복 세션) 응답 덕분에 알림이
+  // 두 번 뜨거나 오늘 리뷰 캐시가 잘못 반영되지 않음을 확인한다.
+  it("같은 세션을 두 경로가 동시에 재시도해도(경합) 알림은 한 번만 뜬다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { sessions: [] };
+    let sessionAttempt = 0;
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.endsWith("/api/sessions")) {
+        calls.sessions.push(JSON.parse(options.body));
+        sessionAttempt++;
+        // 첫 요청이 서버에 실제로 먼저 도착해 저장을 마쳤다고 가정 — 두 번째는 UNIQUE
+        // 제약(sessionId)에 걸려 409를 받는다(실제 동시 요청에서 서버가 보이는 동작).
+        if (sessionAttempt === 1) {
+          return {
+            ok: true,
+            json: async () => ({
+              success: true,
+              data: {
+                todayReview: {
+                  reviewDate: "2026-01-10",
+                  review: "오늘은 음악 영상 위주로 보셨네요.",
+                  reviewTopic: "음악",
+                  source: "llm",
+                  promptVersion: "viewlens-today-mirror-v1.0",
+                },
+              },
+            }),
+          };
+        }
+        return { ok: false, status: 409, text: async () => "duplicate" };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
+          endTime: FIXED_NOW.toISOString(),
+          videos: [{ videoId: "v1", title: "노래 모음" }],
+          categoryDistribution: { 음악: 1 },
+          entropy: 0,
+          videoCount: 1,
+          syncedToServer: false,
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    // 알람 리스너와 동일하게 await 없이 나란히 호출해 실제 경합 타이밍을 재현한다.
+    await Promise.all([mod.retryUnsyncedSessions(), mod.retryUnsyncedSessions()]);
+
+    expect(calls.sessions).toHaveLength(2);
+    // 승자(200)든 패자(409)든 최종적으로 동기화 완료 상태로 수렴한다.
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    expect(sessions.find((s) => s.sessionId === "s1").syncedToServer).toBe(
+      true,
+    );
+    // 알림은 승자 쪽 한 번만 뜬다 — 패자는 "DUPLICATE"를 보고 즉시 반환하므로
+    // showFeedbackNotification을 다시 호출하지 않는다.
+    expect(global.chrome.notifications.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 연구 무결성 점검: content.js의 /api/video-events 즉시 전송은 fire-and-forget이라
+// 실패해도 그 자리에서 조용히 버려졌다. retryUnsentVideoEvents(1분 알람에서
+// checkSessionTimeout·retryUnsyncedSessions와 함께 호출됨)가 sent:true가 안 된 영상
+// 이벤트를 세션 종료 전(video__ 키)·후(sessions[].videos) 가리지 않고 찾아 재전송한다.
+describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재시도 큐", () => {
+  it("세션 종료 전(video__ 키)에 남은 미전송 영상을 재전송하고 sent:true로 표시한다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { videoEvents: [] };
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.endsWith("/api/video-events")) {
+        calls.videoEvents.push(JSON.parse(options.body));
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      currentSession: { sessionId: "s1", startTime: "2026-01-10T11:00:00Z" },
+      "video__s1__uuid1": {
+        videoId: "v1",
+        title: "노래 모음",
+        watchedAt: "2026-01-10T11:00:00Z",
+        sent: false, // 최초 즉시 전송(content.js)이 실패해 남은 상태
+        eventId: "uuid1", // content.js가 최초 시도 때 발급해둔 멱등 키
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentVideoEvents();
+
+    expect(calls.videoEvents).toHaveLength(1);
+    expect(calls.videoEvents[0]).toMatchObject({
+      anonymousId: "a1",
+      videoId: "v1",
+      sessionId: "s1",
+      // 최초 시도와 같은 eventId를 재전송해야 서버가 OR IGNORE로 중복을 걸러낸다.
+      eventId: "uuid1",
+    });
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__uuid1"].sent).toBe(true);
+  });
+
+  it("세션 종료 후(sessions[].videos)에 남은 미전송 영상도 재전송하고 sent:true로 표시한다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { videoEvents: [] };
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.endsWith("/api/video-events")) {
+        calls.videoEvents.push(JSON.parse(options.body));
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: "2026-01-10T11:00:00Z",
+          endTime: "2026-01-10T11:20:00Z",
+          videos: [
+            {
+              videoId: "v1",
+              title: "노래 모음",
+              watchedAt: "2026-01-10T11:00:00Z",
+              sent: true, // 이미 성공 — 건드리면 안 됨
+            },
+            {
+              videoId: "v2",
+              title: "게임 하이라이트",
+              watchedAt: "2026-01-10T11:10:00Z",
+              sent: false, // 세션이 끝날 때까지 전송이 안 됐던 영상
+            },
+          ],
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentVideoEvents();
+
+    // 이미 sent:true인 v1은 다시 보내지 않는다.
+    expect(calls.videoEvents).toHaveLength(1);
+    expect(calls.videoEvents[0]).toMatchObject({
+      anonymousId: "a1",
+      videoId: "v2",
+      sessionId: "s1",
+    });
+
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    const videos = sessions[0].videos;
+    expect(videos.find((v) => v.videoId === "v1").sent).toBe(true);
+    expect(videos.find((v) => v.videoId === "v2").sent).toBe(true);
+  });
+
+  it("재전송도 실패하면 sent:false로 남겨 다음 알람 틱에서 다시 시도할 수 있게 한다", async () => {
+    global.chrome = createChromeMock();
+    global.fetch = vi.fn().mockRejectedValue(new TypeError("network down"));
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      "video__s1__uuid1": {
+        videoId: "v1",
+        title: "노래 모음",
+        watchedAt: "2026-01-10T11:00:00Z",
+        sent: false,
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentVideoEvents();
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__uuid1"].sent).toBe(false);
+  });
+
+  it("anonymousId가 없으면(온보딩 전) 아무것도 시도하지 않는다", async () => {
+    global.chrome = createChromeMock();
+    const calls = [];
+    global.fetch = vi.fn(async (url) => {
+      calls.push(String(url));
+      return { ok: true, json: async () => ({ success: true }) };
+    });
+
+    await global.chrome.storage.local.set({
+      "video__s1__uuid1": {
+        videoId: "v1",
+        title: "노래 모음",
+        watchedAt: "2026-01-10T11:00:00Z",
+        sent: false,
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentVideoEvents();
+
+    expect(calls).toHaveLength(0);
+  });
+
+  it("sent 필드 자체가 없는 레거시 영상은 재전송하지 않는다(확장 업데이트 직후 대량 중복 방지)", async () => {
+    global.chrome = createChromeMock();
+    const calls = [];
+    global.fetch = vi.fn(async (url) => {
+      calls.push(String(url));
+      return { ok: true, json: async () => ({ success: true }) };
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      // 이 재시도 큐가 생기기 전(구버전 content.js)에 기록된 영상 — sent 필드가 없다.
+      // 대부분 이미 서버 전송에 성공한 상태라, 이걸 재전송하면 eventId도 없어
+      // video_events에 영구 중복 행이 쌓인다.
+      "video__s1__legacy": {
+        videoId: "v1",
+        title: "노래 모음",
+        watchedAt: "2026-01-10T11:00:00Z",
+      },
+      sessions: [
+        {
+          sessionId: "s2",
+          videos: [
+            { videoId: "v2", title: "게임", watchedAt: "2026-01-10T12:00:00Z" },
+          ],
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentVideoEvents();
+
+    expect(calls).toHaveLength(0);
   });
 });

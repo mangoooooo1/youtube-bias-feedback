@@ -6,8 +6,8 @@ const { validateVideoEvent } = require("./video-events-validate");
 const router = express.Router();
 
 const insertEvent = db.prepare(`
-  INSERT INTO video_events (anonymousId, videoId, title, watchedAt, sessionId)
-  VALUES (@anonymousId, @videoId, @title, @watchedAt, @sessionId)
+  INSERT OR IGNORE INTO video_events (eventId, anonymousId, videoId, title, watchedAt, sessionId)
+  VALUES (@eventId, @anonymousId, @videoId, @title, @watchedAt, @sessionId)
 `);
 
 router.post("/", (req, res, next) => {
@@ -22,10 +22,12 @@ router.post("/", (req, res, next) => {
     );
   }
 
-  const { anonymousId, videoId, watchedAt, title, sessionId } = req.body;
+  const { anonymousId, videoId, watchedAt, title, sessionId, eventId } =
+    req.body;
 
   try {
     insertEvent.run({
+      eventId: eventId ?? null,
       anonymousId,
       videoId,
       title: title ?? null,

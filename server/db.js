@@ -85,11 +85,12 @@ function initializeDB() {
 
     CREATE TABLE IF NOT EXISTS video_events (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      eventId     TEXT,     -- 영상 기록 1건당 1회 발급하는 멱등 키 (재전송 중복 방지). UNIQUE는 별도 인덱스로 아래에서 건다
       anonymousId TEXT    NOT NULL,
       videoId     TEXT    NOT NULL,
       title       TEXT,
       watchedAt   TEXT    NOT NULL,
-      -- 이 영상이 속한 세션의 sessions.sessionId 
+      -- 이 영상이 속한 세션의 sessions.sessionId
       sessionId   TEXT,
       createdAt   TEXT    DEFAULT (datetime('now'))
     );
@@ -190,6 +191,13 @@ function initializeDB() {
   addColumn("popup_events", "eventId", "TEXT");
   db.exec(
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_popup_events_eventId ON popup_events(eventId)",
+  );
+
+  // video_events.eventId
+  // 확장 프로그램의 재시도 큐 같은 영상 기록을 다시 보낼 수 있어 popup_events와 동일한 멱등 키 패턴을 적용한다.
+  addColumn("video_events", "eventId", "TEXT");
+  db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_video_events_eventId ON video_events(eventId)",
   );
 }
 

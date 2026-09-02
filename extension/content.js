@@ -88,7 +88,12 @@ function recordVideo(videoId, title) {
         return;
       }
 
-      const videoKey = `video__${session.sessionId}__${crypto.randomUUID()}`;
+      // uuid를 videoKey와 eventId 양쪽에 재사용한다.
+      const eventId = crypto.randomUUID();
+      const videoKey = `video__${session.sessionId}__${eventId}`;
+      // sent:false로 시작
+      // 아래 전송이 실패하면 이 값이 그대로 남아, background.js의
+      // 1분 재시도 큐(retryUnsentVideoEvents)가 나중에 다시 보낼 대상을 찾아낼 수 있다.
       await chrome.storage.local.set({
         lastWatchedAt: now,
         currentSession: {
@@ -98,11 +103,12 @@ function recordVideo(videoId, title) {
           videoCount: (session.videoCount ?? 0) + 1,
         },
         lastRecordedVideo: { videoId, sessionId: session.sessionId },
-        [videoKey]: { videoId, title, watchedAt: now },
+        [videoKey]: { videoId, title, watchedAt: now, sent: false, eventId },
       });
       console.log("[content] recorded:", { videoId, title });
 
       // 서버에 즉시 전송
+      // 성공(200)했을 때만 sent:true로 갱신한다. 실패해도 여기서 다시 시도하지 않는다.
       if (anonymousId && serverUrl && !serverUrl.startsWith("YOUR_")) {
         fetch(`${serverUrl.replace(/\/$/, "")}/api/video-events`, {
           method: "POST",
@@ -113,8 +119,23 @@ function recordVideo(videoId, title) {
             title: title ?? null,
             watchedAt: now,
             sessionId: session.sessionId,
+            eventId,
           }),
-        }).catch(() => {});
+        })
+          .then((response) => {
+            if (response.ok && chrome.runtime?.id) {
+              chrome.storage.local.set({
+                [videoKey]: {
+                  videoId,
+                  title,
+                  watchedAt: now,
+                  sent: true,
+                  eventId,
+                },
+              });
+            }
+          })
+          .catch(() => {});
       }
     } catch (error) {
       // 컨텍스트가 호출 도중 무효화된 경우 등 — 조용히 삼키지 않고 원인을 남긴다.
