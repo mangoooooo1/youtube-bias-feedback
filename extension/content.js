@@ -17,6 +17,18 @@ function extractVideoId(url) {
   }
 }
 
+// 직전 페이지 URL에서 쿼리스트링(검색어 등)을 뺀 도메인·경로만 뽑아낸다.
+// 파싱 실패(값이 없거나 URL 형식이 아닌 경우)는 null로 처리한다.
+function parseEntryLocation(href) {
+  if (!href) return { entryHost: null, entryPath: null };
+  try {
+    const parsed = new URL(href);
+    return { entryHost: parsed.hostname, entryPath: parsed.pathname };
+  } catch {
+    return { entryHost: null, entryPath: null };
+  }
+}
+
 function parseTitle() {
   const raw = document.title;
   if (!raw) return null;
@@ -54,7 +66,7 @@ function waitForTitle(prevTitle, maxRetries = 10, interval = 200) {
 let writeQueue = Promise.resolve();
 
 // 유튜브 탭을 여러 개 동시에 열어두면 탭마다 완전히 독립된 콘텐츠 스크립트 인스턴스가 돌아서 큐만으로는 탭 간 경합을 못 막는다.
-function recordVideo(videoId, title) {
+function recordVideo(videoId, title, entryHost, entryPath) {
   writeQueue = writeQueue.then(async () => {
     // 확장을 리로드/업데이트하면 이미 열려있던 유튜브 탭의 content script는 페이지를
     // 새로고침하기 전까지 무효화된 컨텍스트로 남는다 — 이 상태에서 chrome.* 호출은 전부
@@ -103,7 +115,15 @@ function recordVideo(videoId, title) {
           videoCount: (session.videoCount ?? 0) + 1,
         },
         lastRecordedVideo: { videoId, sessionId: session.sessionId },
-        [videoKey]: { videoId, title, watchedAt: now, sent: false, eventId },
+        [videoKey]: {
+          videoId,
+          title,
+          watchedAt: now,
+          sent: false,
+          eventId,
+          entryHost,
+          entryPath,
+        },
       });
       console.log("[content] recorded:", { videoId, title });
 
@@ -120,6 +140,8 @@ function recordVideo(videoId, title) {
             watchedAt: now,
             sessionId: session.sessionId,
             eventId,
+            entryHost,
+            entryPath,
           }),
         })
           .then((response) => {
@@ -131,6 +153,8 @@ function recordVideo(videoId, title) {
                   watchedAt: now,
                   sent: true,
                   eventId,
+                  entryHost,
+                  entryPath,
                 },
               });
             }
@@ -148,11 +172,16 @@ function recordVideo(videoId, title) {
 let lastVideoId = null;
 // waitForTitle의 staleness 비교 기준(새 title을 실제로 확보했을 때만 갱신)
 let lastTitle = null;
+// 탭이 처음 열릴 때는 document.referrer로 시작하고, 이후로는 SPA 내부 이동(yt-navigate-finish)마다
+// 직접 갱신한다. document.referrer는 이 최초 진입 시점 이후로는 절대 바뀌지 않기 때문이다.
+let previousLocationHref = document.referrer || null;
 
 async function handleVideoChange() {
   const videoId = extractVideoId(location.href);
 
   if (!videoId) {
+    // watch/shorts가 아닌 페이지(홈, 검색결과 등)도 다음 영상의 "직전 페이지"가 될 수 있으므로 갱신한다.
+    previousLocationHref = location.href;
     lastVideoId = null;
     lastTitle = null;
     return;
@@ -160,13 +189,18 @@ async function handleVideoChange() {
 
   if (videoId === lastVideoId) return;
 
+  // previousLocationHref를 이번 영상의 location.href로 덮어쓰기 전에 먼저 읽어야
+  // "이 영상 직전 페이지가 어디였는지"를 알 수 있다.
+  const { entryHost, entryPath } = parseEntryLocation(previousLocationHref);
+  previousLocationHref = location.href;
+
   lastVideoId = videoId;
 
   const title = await waitForTitle(lastTitle);
   if (title) lastTitle = title;
   console.log("[content] video detected:", { videoId, title });
 
-  await recordVideo(videoId, title);
+  await recordVideo(videoId, title, entryHost, entryPath);
 }
 
 handleVideoChange();
