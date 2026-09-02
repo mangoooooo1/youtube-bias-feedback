@@ -153,14 +153,12 @@ export async function getLastWatchedAt() {
   return lastWatchedAt ?? null;
 }
 
-// content.js의 즉시 전송(/api/video-events)이 실패해도 조용히 버리지 않도록, 세션 종료
-// 전(video__ 키)이든 후(sessions[].videos)든 아직 sent:true가 안 된 영상을 전부 모은다.
-// background.js의 재시도 큐(연구 무결성 점검: 서버 장애 대비 로컬 큐잉/재시도)가 사용한다.
+// content.js의 즉시 전송(/api/video-events)이 실패해도 조용히 버리지 않도록, sent:false로 명시된 영상만 모은다.
 export async function getUnsentVideoEvents() {
   const all = await chrome.storage.local.get(null);
 
   const fromLive = Object.entries(all)
-    .filter(([key, v]) => key.startsWith("video__") && v?.sent !== true)
+    .filter(([key, v]) => key.startsWith("video__") && v?.sent === false)
     .map(([key, v]) => ({
       location: "live",
       key,
@@ -168,14 +166,12 @@ export async function getUnsentVideoEvents() {
       videoId: v.videoId,
       title: v.title,
       watchedAt: v.watchedAt,
-      // 이 기능 이전에 기록된 항목엔 eventId가 없다(undefined) — 그대로 서버에 보내면
-      // 멱등 dedup만 생략되고 나머지 동작은 그대로다(하위호환).
       eventId: v.eventId,
     }));
 
   const fromSessions = (all.sessions ?? []).flatMap((session) =>
     (session.videos ?? [])
-      .filter((v) => v.sent !== true)
+      .filter((v) => v.sent === false)
       .map((v) => ({
         location: "session",
         sessionId: session.sessionId,

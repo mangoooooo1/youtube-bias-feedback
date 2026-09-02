@@ -364,6 +364,22 @@ describe("getUnsentVideoEvents / markVideoEventSent", () => {
     expect(await getUnsentVideoEvents()).toEqual([]);
   });
 
+  it("sent 필드 자체가 없는(이 기능 이전에 기록된) 레거시 영상(video__ 키)은 재전송 대상에서 제외한다", async () => {
+    // 구버전 content.js는 sent를 아예 기록하지 않았고, fire-and-forget이라 대부분
+    // 이미 서버 전송에 성공한 상태다. !== true로 판정하면 이런 레거시 항목까지
+    // "미전송"으로 오판해 eventId도 없이 재전송 → video_events에 영구 중복이 쌓인다.
+    await global.chrome.storage.local.set({
+      "video__s1__legacy": {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        // sent 필드 없음
+      },
+    });
+
+    expect(await getUnsentVideoEvents()).toEqual([]);
+  });
+
   it("세션 종료 후(sessions[].videos)의 미전송 영상도 찾아낸다", async () => {
     await global.chrome.storage.local.set({
       sessions: [
@@ -372,6 +388,8 @@ describe("getUnsentVideoEvents / markVideoEventSent", () => {
           videos: [
             { videoId: "v1", title: "제목-v1", watchedAt: "t1", sent: true },
             { videoId: "v2", title: "제목-v2", watchedAt: "t2", sent: false },
+            // sent 필드 자체가 없는 레거시 영상 — 재전송 대상이 아니다.
+            { videoId: "v3", title: "제목-v3", watchedAt: "t3" },
           ],
         },
       ],

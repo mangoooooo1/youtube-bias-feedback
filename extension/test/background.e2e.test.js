@@ -686,4 +686,41 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
 
     expect(calls).toHaveLength(0);
   });
+
+  it("sent 필드 자체가 없는 레거시 영상은 재전송하지 않는다(확장 업데이트 직후 대량 중복 방지)", async () => {
+    global.chrome = createChromeMock();
+    const calls = [];
+    global.fetch = vi.fn(async (url) => {
+      calls.push(String(url));
+      return { ok: true, json: async () => ({ success: true }) };
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      // 이 재시도 큐가 생기기 전(구버전 content.js)에 기록된 영상 — sent 필드가 없다.
+      // 대부분 이미 서버 전송에 성공한 상태라, 이걸 재전송하면 eventId도 없어
+      // video_events에 영구 중복 행이 쌓인다.
+      "video__s1__legacy": {
+        videoId: "v1",
+        title: "노래 모음",
+        watchedAt: "2026-01-10T11:00:00Z",
+      },
+      sessions: [
+        {
+          sessionId: "s2",
+          videos: [
+            { videoId: "v2", title: "게임", watchedAt: "2026-01-10T12:00:00Z" },
+          ],
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentVideoEvents();
+
+    expect(calls).toHaveLength(0);
+  });
 });
