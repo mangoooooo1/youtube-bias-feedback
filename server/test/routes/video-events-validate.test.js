@@ -150,6 +150,90 @@ describe("validateVideoEvent — eventId (옵션 필드, 멱등 키·하위호�
   });
 });
 
+describe("validateVideoEvent — entryHost (옵션 필드, 유입 경로 판별용)", () => {
+  it.each([undefined, null])("%s이면 통과한다(referrer 없음 등)", (value) => {
+    expect(validateVideoEvent(basePayload({ entryHost: value }))).toBeNull();
+  });
+
+  it("빈 문자열이면 거부한다", () => {
+    expect(validateVideoEvent(basePayload({ entryHost: "" }))).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "entryHost",
+    });
+  });
+
+  it("문자열이 아니면(숫자) 거부한다", () => {
+    expect(validateVideoEvent(basePayload({ entryHost: 123 }))).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "entryHost",
+    });
+  });
+
+  it("유효한 문자열이면 통과한다", () => {
+    expect(
+      validateVideoEvent(basePayload({ entryHost: "www.youtube.com" })),
+    ).toBeNull();
+  });
+});
+
+describe("validateVideoEvent — entryPath (옵션 필드, 유입 경로 판별용)", () => {
+  it.each([undefined, null])("%s이면 통과한다(referrer 없음 등)", (value) => {
+    expect(validateVideoEvent(basePayload({ entryPath: value }))).toBeNull();
+  });
+
+  it("빈 문자열이면 거부한다", () => {
+    expect(validateVideoEvent(basePayload({ entryPath: "" }))).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "entryPath",
+    });
+  });
+
+  it("문자열이 아니면(숫자) 거부한다", () => {
+    expect(validateVideoEvent(basePayload({ entryPath: 123 }))).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "entryPath",
+    });
+  });
+
+  it("유효한 문자열이면 통과한다", () => {
+    expect(
+      validateVideoEvent(basePayload({ entryPath: "/watch" })),
+    ).toBeNull();
+  });
+});
+
+describe("validateVideoEvent — navigationTrigger (옵션 필드, 정해진 값만 허용)", () => {
+  it.each([undefined, null])("%s이면 통과한다(알 수 없음)", (value) => {
+    expect(
+      validateVideoEvent(basePayload({ navigationTrigger: value })),
+    ).toBeNull();
+  });
+
+  it.each(["ended", "interaction"])("%s이면 통과한다", (value) => {
+    expect(
+      validateVideoEvent(basePayload({ navigationTrigger: value })),
+    ).toBeNull();
+  });
+
+  it("정해지지 않은 문자열이면 거부한다", () => {
+    expect(
+      validateVideoEvent(basePayload({ navigationTrigger: "autoplay" })),
+    ).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "navigationTrigger",
+    });
+  });
+
+  it("문자열이 아니면(숫자) 거부한다", () => {
+    expect(
+      validateVideoEvent(basePayload({ navigationTrigger: 1 })),
+    ).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "navigationTrigger",
+    });
+  });
+});
+
 describe("validateVideoEvent — title (옵션, 검증 대상 아님)", () => {
   it("title이 없어도 통과한다", () => {
     const payload = basePayload();
