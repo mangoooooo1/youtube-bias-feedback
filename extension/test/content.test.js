@@ -120,7 +120,7 @@ describe("content.js parseTitle", () => {
 // recordVideo를 호출하면" 두 writeQueue가 서로를 모른 채 같은 저장소를 놓고 경합해
 // 한쪽의 기록이 사라지는지를 재현한다(연구 무결성 점검 항목 3).
 const RECORD_VIDEO_DECL =
-  /let writeQueue = Promise\.resolve\(\);[\s\S]*?\nfunction recordVideo\(videoId, title, entryHost, entryPath\) \{[\s\S]*?\n\}/;
+  /let writeQueue = Promise\.resolve\(\);[\s\S]*?\nfunction recordVideo\(videoId, title, entryHost, entryPath, navigationTrigger\) \{[\s\S]*?\n\}/;
 
 // recordVideo는 전역 chrome/fetch/console을 참조한다. 매개변수로 감싸서 넘기면 그 이름들이
 // 지역 바인딩으로 가려지므로, 이 팩토리를 두 번 호출하는 것만으로 "서로 다른 탭 = 서로 다른

@@ -66,7 +66,7 @@ function waitForTitle(prevTitle, maxRetries = 10, interval = 200) {
 let writeQueue = Promise.resolve();
 
 // 유튜브 탭을 여러 개 동시에 열어두면 탭마다 완전히 독립된 콘텐츠 스크립트 인스턴스가 돌아서 큐만으로는 탭 간 경합을 못 막는다.
-function recordVideo(videoId, title, entryHost, entryPath) {
+function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger) {
   writeQueue = writeQueue.then(async () => {
     // 확장을 리로드/업데이트하면 이미 열려있던 유튜브 탭의 content script는 페이지를
     // 새로고침하기 전까지 무효화된 컨텍스트로 남는다 — 이 상태에서 chrome.* 호출은 전부
@@ -123,6 +123,7 @@ function recordVideo(videoId, title, entryHost, entryPath) {
           eventId,
           entryHost,
           entryPath,
+          navigationTrigger,
         },
       });
       console.log("[content] recorded:", { videoId, title });
@@ -142,6 +143,7 @@ function recordVideo(videoId, title, entryHost, entryPath) {
             eventId,
             entryHost,
             entryPath,
+            navigationTrigger,
           }),
         })
           .then((response) => {
@@ -155,6 +157,7 @@ function recordVideo(videoId, title, entryHost, entryPath) {
                   eventId,
                   entryHost,
                   entryPath,
+                  navigationTrigger,
                 },
               });
             }
@@ -176,6 +179,44 @@ let lastTitle = null;
 // 직접 갱신한다. document.referrer는 이 최초 진입 시점 이후로는 절대 바뀌지 않기 때문이다.
 let previousLocationHref = document.referrer || null;
 
+// 자동재생 vs 관련영상 클릭 구분
+let lastEndedAt = null;
+let lastInteractionAt = null;
+// 유튜브 자동재생 카운트다운이 약 8초라 여유를 두고 12초로 잡는다.
+const NAV_TRIGGER_WINDOW_MS = 12000;
+
+// ended는 버블링되지 않는 이벤트라 document에서 잡으려면 캡처 단계(3번째 인자 true)에서 들어야 한다.
+// <video> 엘리먼트가 SPA 이동으로 교체돼도 캡처 리스너는 다시 붙일 필요가 없다.
+document.addEventListener(
+  "ended",
+  () => {
+    lastEndedAt = Date.now();
+  },
+  true,
+);
+document.addEventListener("click", () => {
+  lastInteractionAt = Date.now();
+});
+document.addEventListener("keydown", () => {
+  lastInteractionAt = Date.now();
+});
+
+// 이동 직전 두 시각(lastEndedAt, lastInteractionAt) 중 "지금과 더 가까운 쪽"을 원인으로 추정한다.
+// 둘 다 NAV_TRIGGER_WINDOW_MS보다 오래됐으면(혹은 아예 없었으면) 알 수 없음(null)으로 남긴다.
+function classifyNavigationTrigger(now) {
+  const endedDelta = lastEndedAt === null ? Infinity : now - lastEndedAt;
+  const interactionDelta =
+    lastInteractionAt === null ? Infinity : now - lastInteractionAt;
+
+  if (
+    endedDelta > NAV_TRIGGER_WINDOW_MS &&
+    interactionDelta > NAV_TRIGGER_WINDOW_MS
+  ) {
+    return null;
+  }
+  return endedDelta <= interactionDelta ? "ended" : "interaction";
+}
+
 async function handleVideoChange() {
   const videoId = extractVideoId(location.href);
 
@@ -192,6 +233,7 @@ async function handleVideoChange() {
   // previousLocationHref를 이번 영상의 location.href로 덮어쓰기 전에 먼저 읽어야
   // "이 영상 직전 페이지가 어디였는지"를 알 수 있다.
   const { entryHost, entryPath } = parseEntryLocation(previousLocationHref);
+  const navigationTrigger = classifyNavigationTrigger(Date.now());
   previousLocationHref = location.href;
 
   lastVideoId = videoId;
@@ -200,7 +242,7 @@ async function handleVideoChange() {
   if (title) lastTitle = title;
   console.log("[content] video detected:", { videoId, title });
 
-  await recordVideo(videoId, title, entryHost, entryPath);
+  await recordVideo(videoId, title, entryHost, entryPath, navigationTrigger);
 }
 
 handleVideoChange();
