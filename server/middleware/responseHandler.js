@@ -27,7 +27,8 @@ function success(res, data = null, message = "ok") {
  * @param {number} [status=500] - HTTP 상태 코드
  * @param {string} [code=ERROR_CODES.INTERNAL_SERVER_ERROR] - 에러 식별 코드
  * @param {string} [message="서버 오류가 발생했습니다."] - 에러 메시지
- * @param {*} [detail=null] - 에러 상세 정보 (development 환경에서만 응답에 포함)
+ * @param {*} [detail=null] - 에러 상세 정보 (production 이외 환경에서는 응답에 포함 — NODE_ENV가
+ *   'development'가 아니어도, test·미설정 등 'production'만 아니면 그대로 노출됨에 유의)
  * @returns {import("express").Response} JSON 본문이 담긴 res 객체
  */
 function fail(
