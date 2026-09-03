@@ -3,8 +3,9 @@
 const { fail, ERROR_CODES } = require("./responseHandler");
 
 /**
- * 주어진 key가 windowMs 시간 동안 max회를 초과했는지 판정하는 순수 함수
- * Express 객체에 의존하지 않아 단위 테스트가 쉽다.
+ * 주어진 key가 windowMs 시간 동안 max회를 초과했는지 판정하고, 그 결과에 맞춰 state를
+ * 갱신한다. state.set()과 entry.count 증가로 인자로 받은 state를
+ * 직접 변경(mutate)한다. Express 객체에 의존하지 않아 단위 테스트가 쉽다.
  * @param {Map<string, {count: number, resetAt: number}>} state - 클라이언트별 요청 카운트 저장소
  * @param {string} key - 클라이언트 식별 키 (보통 IP)
  * @param {number} now - 현재 시각(ms)
