@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -35,6 +35,36 @@ function loadParseTitle() {
   }
   const factory = new Function("document", `${match[0]}\nreturn parseTitle();`);
   return (title) => factory({ title });
+}
+
+// classifyNavigationTrigger()는 모듈 스코프 변수(lastEndedAt/lastInteractionAt)를 직접
+// 읽고 쓰므로, 함수 본문만 떼어내면 그 변수들이 없어 참조 에러가 난다. 선언부까지 함께
+// 추출하고, 테스트에서 그 변수들을 직접 조작할 수 있게 setter를 얹어 반환한다.
+const NAV_TRIGGER_DECL =
+  /let lastEndedAt = null;[\s\S]*?\nfunction classifyNavigationTrigger\(now\) \{[\s\S]*?\n\}/;
+
+function loadClassifyNavigationTrigger() {
+  const raw = readFileSync(CONTENT_PATH, "utf8");
+  const match = raw.match(NAV_TRIGGER_DECL);
+  if (!match) {
+    throw new Error(
+      "classifyNavigationTrigger 관련 코드를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  // 추출된 구간에 document.addEventListener("ended"/"click"/"keydown", ...) 등록도
+  // 함께 포함돼 있다 — 실제 이벤트 발생은 이 테스트의 관심사가 아니므로 no-op으로 흘려보낸다.
+  const factory = new Function(
+    "document",
+    `
+    ${match[0]}
+    return {
+      classify: classifyNavigationTrigger,
+      setEndedAt: (t) => { lastEndedAt = t; },
+      setInteractionAt: (t) => { lastInteractionAt = t; },
+    };
+  `,
+  );
+  return factory({ addEventListener: () => {} });
 }
 
 describe("content.js extractVideoId", () => {
@@ -81,6 +111,58 @@ describe("content.js extractVideoId", () => {
   });
 });
 
+// server/routes/video-events-classify.js와 동일한 YOUTUBE_HOSTS 목록 선언까지 포함해서 추출해야
+// parseEntryLocation 내부에서 참조하는 상수가 존재한다.
+const PARSE_ENTRY_LOCATION_DECL =
+  /const YOUTUBE_HOSTS = new Set\(\[[\s\S]*?\nfunction parseEntryLocation\(href\) \{[\s\S]*?\n\}/;
+
+function loadParseEntryLocation() {
+  const raw = readFileSync(CONTENT_PATH, "utf8");
+  const match = raw.match(PARSE_ENTRY_LOCATION_DECL);
+  if (!match) {
+    throw new Error(
+      "parseEntryLocation 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  return new Function(`${match[0]}\nreturn parseEntryLocation;`)();
+}
+
+describe("content.js parseEntryLocation", () => {
+  let parseEntryLocation;
+
+  beforeAll(() => {
+    parseEntryLocation = loadParseEntryLocation();
+  });
+
+  it("href가 없으면 entryHost/entryPath 모두 null을 반환한다", () => {
+    expect(parseEntryLocation(null)).toEqual({
+      entryHost: null,
+      entryPath: null,
+    });
+  });
+
+  it("유튜브 내부 URL이면 도메인과 경로를 모두 반환한다", () => {
+    expect(
+      parseEntryLocation("https://www.youtube.com/watch?v=abc123"),
+    ).toEqual({ entryHost: "www.youtube.com", entryPath: "/watch" });
+  });
+
+  // 외부 사이트의 경로는 사용자명 등 직접 식별 정보를 담을 수 있어
+  // 도메인만 남기고 경로는 애초에 수집하지 않아야 한다는 지적의 회귀 테스트.
+  it("외부 URL이면 도메인만 반환하고 경로는 null로 비운다(개인 식별 정보 유출 방지)", () => {
+    expect(
+      parseEntryLocation("https://twitter.com/janedoe123/status/12345"),
+    ).toEqual({ entryHost: "twitter.com", entryPath: null });
+  });
+
+  it("파싱 불가능한 값이면 entryHost/entryPath 모두 null을 반환한다", () => {
+    expect(parseEntryLocation("이건 URL이 아님")).toEqual({
+      entryHost: null,
+      entryPath: null,
+    });
+  });
+});
+
 describe("content.js parseTitle", () => {
   let parseTitle;
 
@@ -113,6 +195,56 @@ describe("content.js parseTitle", () => {
   });
 });
 
+describe("content.js classifyNavigationTrigger", () => {
+  let trigger;
+
+  beforeEach(() => {
+    trigger = loadClassifyNavigationTrigger();
+  });
+
+  it("ended 신호가 최근이면 'ended'를 반환한다", () => {
+    trigger.setEndedAt(1000);
+    expect(trigger.classify(1500)).toBe("ended");
+  });
+
+  it("interaction 신호가 최근이면 'interaction'을 반환한다", () => {
+    trigger.setInteractionAt(1000);
+    expect(trigger.classify(1500)).toBe("interaction");
+  });
+
+  it("둘 다 없으면 알 수 없음(null)을 반환한다", () => {
+    expect(trigger.classify(1500)).toBeNull();
+  });
+
+  it("둘 다 창(NAV_TRIGGER_WINDOW_MS)보다 오래됐으면 알 수 없음(null)을 반환한다", () => {
+    trigger.setEndedAt(0);
+    trigger.setInteractionAt(0);
+    expect(trigger.classify(20000)).toBeNull();
+  });
+
+  it("더 최근에 일어난 쪽을 원인으로 고른다", () => {
+    trigger.setEndedAt(1000);
+    trigger.setInteractionAt(1400); // interaction이 더 최근
+    expect(trigger.classify(1500)).toBe("interaction");
+  });
+
+  // 판정에 쓴 신호가 지워지지 않아, 신호 없이(뒤로가기 등)
+  // 일어나는 다음 이동이 이미 써먹은 신호를 재사용해 잘못 분류되던 문제의 회귀 테스트.
+  it("한 번 판정에 쓴 ended 신호는 다음 판정에 재사용되지 않는다", () => {
+    trigger.setEndedAt(1000);
+    expect(trigger.classify(1500)).toBe("ended"); // 1차 판정(자동재생 이동)
+
+    // 새 신호 없이(예: 뒤로가기로 인한 popstate) 같은 창 안에서 다시 판정
+    expect(trigger.classify(3000)).toBeNull();
+  });
+
+  it("한 번 판정에 쓴 interaction 신호도 다음 판정에 재사용되지 않는다", () => {
+    trigger.setInteractionAt(1000);
+    expect(trigger.classify(1500)).toBe("interaction");
+    expect(trigger.classify(3000)).toBeNull();
+  });
+});
+
 // recordVideo는 chrome.storage.local이라는 "탭 간에 공유되는" 저장소를 읽고(get) 고쳐서(modify)
 // 다시 쓰는(set) 패턴이다. writeQueue는 같은 탭 안에서 recordVideo가 연달아 호출될 때만
 // 순서를 보장한다 — 콘텐츠 스크립트는 유튜브 탭마다 완전히 독립된 실행 환경이라, 탭이
@@ -120,7 +252,7 @@ describe("content.js parseTitle", () => {
 // recordVideo를 호출하면" 두 writeQueue가 서로를 모른 채 같은 저장소를 놓고 경합해
 // 한쪽의 기록이 사라지는지를 재현한다(연구 무결성 점검 항목 3).
 const RECORD_VIDEO_DECL =
-  /let writeQueue = Promise\.resolve\(\);[\s\S]*?\nfunction recordVideo\(videoId, title\) \{[\s\S]*?\n\}/;
+  /let writeQueue = Promise\.resolve\(\);[\s\S]*?\nfunction recordVideo\(videoId, title, entryHost, entryPath, navigationTrigger\) \{[\s\S]*?\n\}/;
 
 // recordVideo는 전역 chrome/fetch/console을 참조한다. 매개변수로 감싸서 넘기면 그 이름들이
 // 지역 바인딩으로 가려지므로, 이 팩토리를 두 번 호출하는 것만으로 "서로 다른 탭 = 서로 다른

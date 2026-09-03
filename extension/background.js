@@ -295,6 +295,9 @@ async function postVideoEventToServer(anonymousId, event) {
         sessionId: event.sessionId,
         // 같은 eventId로 재전송되면 서버가 INSERT OR IGNORE로 걸러내 이미 성공했던 전송을 다시 보내도 중복 행이 남지 않는다.
         eventId: event.eventId,
+        entryHost: event.entryHost,
+        entryPath: event.entryPath,
+        navigationTrigger: event.navigationTrigger,
       }),
     });
     if (!response.ok) {

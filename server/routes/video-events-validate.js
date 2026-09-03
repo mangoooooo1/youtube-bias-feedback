@@ -42,6 +42,40 @@ function validateVideoEvent(body) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "eventId" };
   }
 
+  // 유입 경로 판별용 원시 신호
+  // 확장 쪽에서 이전 URL을 못 구했을 수도 있어 sessionId/eventId와 마찬가지로 미전송(null)을 허용한다.
+  const { entryHost } = body;
+  if (
+    entryHost !== undefined &&
+    entryHost !== null &&
+    (typeof entryHost !== "string" || entryHost.trim() === "")
+  ) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "entryHost" };
+  }
+
+  const { entryPath } = body;
+  if (
+    entryPath !== undefined &&
+    entryPath !== null &&
+    (typeof entryPath !== "string" || entryPath.trim() === "")
+  ) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "entryPath" };
+  }
+
+  // 자동재생/사용자 조작 구분 신호 — content.js가 판단 못 하면 null(알 수 없음)로 보낸다.
+  // 자유 문자열이 아니라 정해진 값만 허용해, 서버의 분류 로직이 처리 못 할 값이 들어오는 걸 막는다.
+  const { navigationTrigger } = body;
+  if (
+    navigationTrigger !== undefined &&
+    navigationTrigger !== null &&
+    !["ended", "interaction"].includes(navigationTrigger)
+  ) {
+    return {
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "navigationTrigger",
+    };
+  }
+
   return null;
 }
 

@@ -72,13 +72,27 @@ function buildClosedSession(sessionId, videos, startTime, endTime) {
     // 들고 간다. 세션이 끝나면 video__ 키 자체가 사라지므로, 아직 전송 못 한 영상의
     // 재시도 대상 여부를 getUnsentVideoEvents()가 sessions[].videos에서도 판단할 수
     // 있어야 하고, 재시도 시에도 같은 eventId를 다시 보내야 서버가 중복을 걸러낸다.
-    videos: deduped.map(({ videoId, title, watchedAt, sent, eventId }) => ({
-      videoId,
-      title,
-      watchedAt,
-      sent,
-      eventId,
-    })),
+    videos: deduped.map(
+      ({
+        videoId,
+        title,
+        watchedAt,
+        sent,
+        eventId,
+        entryHost,
+        entryPath,
+        navigationTrigger,
+      }) => ({
+        videoId,
+        title,
+        watchedAt,
+        sent,
+        eventId,
+        entryHost,
+        entryPath,
+        navigationTrigger,
+      }),
+    ),
   };
 }
 
@@ -167,6 +181,9 @@ export async function getUnsentVideoEvents() {
       title: v.title,
       watchedAt: v.watchedAt,
       eventId: v.eventId,
+      entryHost: v.entryHost,
+      entryPath: v.entryPath,
+      navigationTrigger: v.navigationTrigger,
     }));
 
   const fromSessions = (all.sessions ?? []).flatMap((session) =>
@@ -179,6 +196,9 @@ export async function getUnsentVideoEvents() {
         title: v.title,
         watchedAt: v.watchedAt,
         eventId: v.eventId,
+        entryHost: v.entryHost,
+        entryPath: v.entryPath,
+        navigationTrigger: v.navigationTrigger,
       })),
   );
 
