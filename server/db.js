@@ -83,6 +83,8 @@ function initializeDB() {
       createdAt       TEXT    DEFAULT (datetime('now'))
     );
 
+    -- entryHost/entryPath/referrerType/relatedTrigger는 addColumn 없이 여기(CREATE TABLE)에만 반영돼 있다.
+    -- 먼저 백업한 뒤 삭제하고(server/scripts/backup-db.js), 재기동으로 새 스키마가 생성되게 할 것.
     CREATE TABLE IF NOT EXISTS video_events (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       eventId     TEXT,     -- 영상 기록 1건당 1회 발급하는 멱등 키 (재전송 중복 방지). UNIQUE는 별도 인덱스로 아래에서 건다
