@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -35,6 +35,36 @@ function loadParseTitle() {
   }
   const factory = new Function("document", `${match[0]}\nreturn parseTitle();`);
   return (title) => factory({ title });
+}
+
+// classifyNavigationTrigger()는 모듈 스코프 변수(lastEndedAt/lastInteractionAt)를 직접
+// 읽고 쓰므로, 함수 본문만 떼어내면 그 변수들이 없어 참조 에러가 난다. 선언부까지 함께
+// 추출하고, 테스트에서 그 변수들을 직접 조작할 수 있게 setter를 얹어 반환한다.
+const NAV_TRIGGER_DECL =
+  /let lastEndedAt = null;[\s\S]*?\nfunction classifyNavigationTrigger\(now\) \{[\s\S]*?\n\}/;
+
+function loadClassifyNavigationTrigger() {
+  const raw = readFileSync(CONTENT_PATH, "utf8");
+  const match = raw.match(NAV_TRIGGER_DECL);
+  if (!match) {
+    throw new Error(
+      "classifyNavigationTrigger 관련 코드를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  // 추출된 구간에 document.addEventListener("ended"/"click"/"keydown", ...) 등록도
+  // 함께 포함돼 있다 — 실제 이벤트 발생은 이 테스트의 관심사가 아니므로 no-op으로 흘려보낸다.
+  const factory = new Function(
+    "document",
+    `
+    ${match[0]}
+    return {
+      classify: classifyNavigationTrigger,
+      setEndedAt: (t) => { lastEndedAt = t; },
+      setInteractionAt: (t) => { lastInteractionAt = t; },
+    };
+  `,
+  );
+  return factory({ addEventListener: () => {} });
 }
 
 describe("content.js extractVideoId", () => {
@@ -110,6 +140,56 @@ describe("content.js parseTitle", () => {
 
   it("공백만 있는 제목은 trim 후 빈 문자열이 되어 null을 반환한다", () => {
     expect(parseTitle("   ")).toBeNull();
+  });
+});
+
+describe("content.js classifyNavigationTrigger", () => {
+  let trigger;
+
+  beforeEach(() => {
+    trigger = loadClassifyNavigationTrigger();
+  });
+
+  it("ended 신호가 최근이면 'ended'를 반환한다", () => {
+    trigger.setEndedAt(1000);
+    expect(trigger.classify(1500)).toBe("ended");
+  });
+
+  it("interaction 신호가 최근이면 'interaction'을 반환한다", () => {
+    trigger.setInteractionAt(1000);
+    expect(trigger.classify(1500)).toBe("interaction");
+  });
+
+  it("둘 다 없으면 알 수 없음(null)을 반환한다", () => {
+    expect(trigger.classify(1500)).toBeNull();
+  });
+
+  it("둘 다 창(NAV_TRIGGER_WINDOW_MS)보다 오래됐으면 알 수 없음(null)을 반환한다", () => {
+    trigger.setEndedAt(0);
+    trigger.setInteractionAt(0);
+    expect(trigger.classify(20000)).toBeNull();
+  });
+
+  it("더 최근에 일어난 쪽을 원인으로 고른다", () => {
+    trigger.setEndedAt(1000);
+    trigger.setInteractionAt(1400); // interaction이 더 최근
+    expect(trigger.classify(1500)).toBe("interaction");
+  });
+
+  // 코드래빗 리뷰(2026-09-03) — 판정에 쓴 신호가 지워지지 않아, 신호 없이(뒤로가기 등)
+  // 일어나는 다음 이동이 이미 써먹은 신호를 재사용해 잘못 분류되던 문제의 회귀 테스트.
+  it("한 번 판정에 쓴 ended 신호는 다음 판정에 재사용되지 않는다", () => {
+    trigger.setEndedAt(1000);
+    expect(trigger.classify(1500)).toBe("ended"); // 1차 판정(자동재생 이동)
+
+    // 새 신호 없이(예: 뒤로가기로 인한 popstate) 같은 창 안에서 다시 판정
+    expect(trigger.classify(3000)).toBeNull();
+  });
+
+  it("한 번 판정에 쓴 interaction 신호도 다음 판정에 재사용되지 않는다", () => {
+    trigger.setInteractionAt(1000);
+    expect(trigger.classify(1500)).toBe("interaction");
+    expect(trigger.classify(3000)).toBeNull();
   });
 });
 

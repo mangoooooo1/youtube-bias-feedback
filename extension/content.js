@@ -208,6 +208,11 @@ function classifyNavigationTrigger(now) {
   const interactionDelta =
     lastInteractionAt === null ? Infinity : now - lastInteractionAt;
 
+  // 이번 판정에 쓴 신호는 여기서 바로 지운다 — 안 그러면 신호 없이(뒤로가기 등) 일어나는
+  // 다음 이동이 이미 써먹은 오래된 신호를 다시 주워 잘못 분류된다.
+  lastEndedAt = null;
+  lastInteractionAt = null;
+
   if (
     endedDelta > NAV_TRIGGER_WINDOW_MS &&
     interactionDelta > NAV_TRIGGER_WINDOW_MS
