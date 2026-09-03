@@ -20,9 +20,14 @@ describe("classifyReferrerType — 외부 유입", () => {
     ).toEqual({ referrerType: "external", relatedTrigger: null });
   });
 
-  it("entryPath는 있는데 entryHost가 없으면 external로 본다(도메인 불명은 유튜브로 보지 않음)", () => {
+});
+
+describe("classifyReferrerType — entryPath는 있는데 entryHost가 없는 경우", () => {
+  // video-events-validate.js는 entryHost/entryPath를 독립된 옵션 필드로 허용하므로
+  // 이런 조합도 여기까지 들어올 수 있다 — "외부에서 왔다"고 단정할 근거가 없으니 unknown이어야 한다.
+  it("external이 아니라 unknown을 반환한다(도메인을 몰라 외부 여부를 판단할 수 없음)", () => {
     expect(classifyReferrerType(null, "/some-path", null)).toEqual({
-      referrerType: "external",
+      referrerType: "unknown",
       relatedTrigger: null,
     });
   });

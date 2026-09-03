@@ -14,9 +14,16 @@ function classifyReferrerType(entryHost, entryPath, navigationTrigger) {
     return { referrerType: "unknown", relatedTrigger: null };
   }
 
-  // SPA 내부 이동은 항상 유튜브 도메인 안에서만 일어나므로, 도메인이 다르면(혹은 없으면)
+  // entryHost가 없으면 "외부에서 왔다"고 단정할 근거가 없다.
+  // content.js는 entryHost/entryPath를 항상 같이 보내지만, video-events-validate.js는 이 둘을 독립된 옵션 필드로 허용하므로
+  // entryPath만 있고 entryHost가 빠진 요청도 여기까지 들어올 수 있다. 판단 불가는 unknown으로.
+  if (!entryHost) {
+    return { referrerType: "unknown", relatedTrigger: null };
+  }
+
+  // SPA 내부 이동은 항상 유튜브 도메인 안에서만 일어나므로, 도메인이 다르면
   // 이 값은 탭이 처음 열릴 때의 document.referrer에서 온 것
-  if (!entryHost || !YOUTUBE_HOSTS.has(entryHost)) {
+  if (!YOUTUBE_HOSTS.has(entryHost)) {
     return { referrerType: "external", relatedTrigger: null };
   }
 
