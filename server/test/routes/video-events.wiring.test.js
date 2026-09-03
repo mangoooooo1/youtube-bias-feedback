@@ -75,9 +75,9 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
     const res = await request(app).post("/api/video-events").send(payload);
     expect(res.status).toBe(400);
     expect(res.body.code).toBe("MISSING_REQUIRED_FIELD");
-    expect(
-      db.prepare("SELECT COUNT(*) AS c FROM video_events").get().c,
-    ).toBe(0);
+    expect(db.prepare("SELECT COUNT(*) AS c FROM video_events").get().c).toBe(
+      0,
+    );
   });
 
   it("POST /api/video-events — sessionId 미전송(구버전 확장)이면 null로 저장된다", async () => {
@@ -103,9 +103,7 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
   });
 
   it("등록되지 않은 경로는 404 — 예기치 않은 라우트가 실수로 노출되지 않았는지 확인", async () => {
-    const res = await request(app).get(
-      "/api/video-events/no-such-route",
-    );
+    const res = await request(app).get("/api/video-events/no-such-route");
     expect(res.status).toBe(404);
   });
 
@@ -126,13 +124,15 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
   });
 
   it("entryHost/entryPath/navigationTrigger가 오면 referrerType/relatedTrigger로 분류돼 저장된다", async () => {
-    const res = await request(app).post("/api/video-events").send(
-      basePayload({
-        entryHost: "www.youtube.com",
-        entryPath: "/watch",
-        navigationTrigger: "interaction",
-      }),
-    );
+    const res = await request(app)
+      .post("/api/video-events")
+      .send(
+        basePayload({
+          entryHost: "www.youtube.com",
+          entryPath: "/watch",
+          navigationTrigger: "interaction",
+        }),
+      );
     expect(res.status).toBe(200);
 
     const row = db
@@ -144,8 +144,31 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
     expect(row.relatedTrigger).toBe("click");
   });
 
+  // 외부 사이트의 경로는 사용자명 등 직접 식별 정보를 담을 수 있어, 클라이언트가
+  // 어떤 이유로든(구버전 확장 등) 여전히 보내오더라도 서버가 저장 직전에 걸러내야 한다는 지적의 회귀 테스트.
+  it("외부 유입(entryHost가 유튜브가 아님)이면 entryHost는 저장하되 entryPath는 저장하지 않는다", async () => {
+    const res = await request(app)
+      .post("/api/video-events")
+      .send(
+        basePayload({
+          entryHost: "twitter.com",
+          entryPath: "/janedoe123/status/12345",
+        }),
+      );
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare("SELECT * FROM video_events WHERE videoId = ?")
+      .get("wiring-v1");
+    expect(row.entryHost).toBe("twitter.com");
+    expect(row.entryPath).toBeNull();
+    expect(row.referrerType).toBe("external");
+  });
+
   it("entryHost/entryPath 미전송(구버전 확장)이면 referrerType은 unknown, relatedTrigger는 null로 저장된다", async () => {
-    const res = await request(app).post("/api/video-events").send(basePayload());
+    const res = await request(app)
+      .post("/api/video-events")
+      .send(basePayload());
     expect(res.status).toBe(200);
 
     const row = db

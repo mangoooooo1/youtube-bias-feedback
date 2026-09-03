@@ -111,6 +111,58 @@ describe("content.js extractVideoId", () => {
   });
 });
 
+// server/routes/video-events-classify.js와 동일한 YOUTUBE_HOSTS 목록 선언까지 포함해서 추출해야
+// parseEntryLocation 내부에서 참조하는 상수가 존재한다.
+const PARSE_ENTRY_LOCATION_DECL =
+  /const YOUTUBE_HOSTS = new Set\(\[[\s\S]*?\nfunction parseEntryLocation\(href\) \{[\s\S]*?\n\}/;
+
+function loadParseEntryLocation() {
+  const raw = readFileSync(CONTENT_PATH, "utf8");
+  const match = raw.match(PARSE_ENTRY_LOCATION_DECL);
+  if (!match) {
+    throw new Error(
+      "parseEntryLocation 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  return new Function(`${match[0]}\nreturn parseEntryLocation;`)();
+}
+
+describe("content.js parseEntryLocation", () => {
+  let parseEntryLocation;
+
+  beforeAll(() => {
+    parseEntryLocation = loadParseEntryLocation();
+  });
+
+  it("href가 없으면 entryHost/entryPath 모두 null을 반환한다", () => {
+    expect(parseEntryLocation(null)).toEqual({
+      entryHost: null,
+      entryPath: null,
+    });
+  });
+
+  it("유튜브 내부 URL이면 도메인과 경로를 모두 반환한다", () => {
+    expect(
+      parseEntryLocation("https://www.youtube.com/watch?v=abc123"),
+    ).toEqual({ entryHost: "www.youtube.com", entryPath: "/watch" });
+  });
+
+  // 외부 사이트의 경로는 사용자명 등 직접 식별 정보를 담을 수 있어
+  // 도메인만 남기고 경로는 애초에 수집하지 않아야 한다는 지적의 회귀 테스트.
+  it("외부 URL이면 도메인만 반환하고 경로는 null로 비운다(개인 식별 정보 유출 방지)", () => {
+    expect(
+      parseEntryLocation("https://twitter.com/janedoe123/status/12345"),
+    ).toEqual({ entryHost: "twitter.com", entryPath: null });
+  });
+
+  it("파싱 불가능한 값이면 entryHost/entryPath 모두 null을 반환한다", () => {
+    expect(parseEntryLocation("이건 URL이 아님")).toEqual({
+      entryHost: null,
+      entryPath: null,
+    });
+  });
+});
+
 describe("content.js parseTitle", () => {
   let parseTitle;
 
@@ -176,7 +228,7 @@ describe("content.js classifyNavigationTrigger", () => {
     expect(trigger.classify(1500)).toBe("interaction");
   });
 
-  // 코드래빗 리뷰(2026-09-03) — 판정에 쓴 신호가 지워지지 않아, 신호 없이(뒤로가기 등)
+  // 판정에 쓴 신호가 지워지지 않아, 신호 없이(뒤로가기 등)
   // 일어나는 다음 이동이 이미 써먹은 신호를 재사용해 잘못 분류되던 문제의 회귀 테스트.
   it("한 번 판정에 쓴 ended 신호는 다음 판정에 재사용되지 않는다", () => {
     trigger.setEndedAt(1000);

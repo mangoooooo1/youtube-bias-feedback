@@ -17,13 +17,27 @@ function extractVideoId(url) {
   }
 }
 
-// 직전 페이지 URL에서 쿼리스트링(검색어 등)을 뺀 도메인·경로만 뽑아낸다.
-// 파싱 실패(값이 없거나 URL 형식이 아닌 경우)는 null로 처리한다.
+// server/routes/video-events-classify.js의 YOUTUBE_HOSTS와 동일한 목록
+// 확장(브라우저)과 서버(Node)가 서로 다른 런타임이라 모듈을 공유할 수 없어 부득이 중복 정의한다. 바뀌면 양쪽 다 갱신할 것.
+const YOUTUBE_HOSTS = new Set([
+  "www.youtube.com",
+  "youtube.com",
+  "m.youtube.com",
+  "music.youtube.com",
+]);
+
+// 직전 페이지 URL에서 도메인·경로를 뽑아낸다. 경로는 유튜브 내부 페이지일 때만 담는다.
+// 유튜브 URL 구조(/watch, /results 등)엔 개인 식별 정보가 없지만, 외부 사이트의 경로는 사용자명·계정ID 등을 그대로 담고 있을 수 있어 애초에 보내지 않는다.
+// 외부 유입 여부 판별에는 도메인만 있으면 충분하고 경로 내용은 쓰이지 않는다.
+// 파싱 실패(값이 없거나 URL 형식이 아닌 경우)는 둘 다 null로 처리한다.
 function parseEntryLocation(href) {
   if (!href) return { entryHost: null, entryPath: null };
   try {
     const parsed = new URL(href);
-    return { entryHost: parsed.hostname, entryPath: parsed.pathname };
+    const entryPath = YOUTUBE_HOSTS.has(parsed.hostname)
+      ? parsed.pathname
+      : null;
+    return { entryHost: parsed.hostname, entryPath };
   } catch {
     return { entryHost: null, entryPath: null };
   }
