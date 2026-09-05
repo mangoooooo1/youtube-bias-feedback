@@ -53,6 +53,18 @@ export const SERVER_URL = "YOUR_SERVER_URL_HERE"; // 백엔드 서버 주소
 cd server
 cp .env.example .env
 npm install
+```
+
+`server/.env`를 열어 최소 다음 두 값을 채웁니다(둘 다 `extension/config.js`가 아니라
+**서버** 쪽 파일입니다.
+
+- `DB_ENCRYPTION_KEY` — 비어 있으면 서버가 기동 즉시 에러를 내고 멈춥니다(임의의 문자열로 충분).
+- `YOUTUBE_API_KEY` — 비어 있어도 서버는 정상적으로 뜨지만, `video_metadata` 캐시 조회를
+  조용히 건너뛰어 새로 보는 영상마다 `categoryDistribution`이 `{}`, `entropy`가 `0`으로
+  저장됩니다(에러가 나지 않아 눈치채기 어렵습니다). 카테고리 다양성 기능을 로컬에서
+  확인하려면 실제 YouTube Data API v3 키를 채워야 합니다.
+
+```bash
 npm run dev
 ```
 
