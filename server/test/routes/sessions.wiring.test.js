@@ -90,12 +90,16 @@ describe("실제 server/routes/sessions.js 라우터 배선", () => {
     expect(db.prepare("SELECT COUNT(*) AS c FROM sessions").get().c).toBe(0);
   });
 
-  it("POST /api/sessions — 중복 sessionId는 409 (unique 제약 에러 처리가 실제로 연결돼 있는지)", async () => {
-    await request(app).post("/api/sessions").send(basePayload());
+  it("POST /api/sessions — 중복 sessionId는 409이지만, 최초 요청 때 이미 저장된 categoryDistribution/entropy를 응답에 함께 돌려준다", async () => {
+    const first = await request(app).post("/api/sessions").send(basePayload());
     const res = await request(app).post("/api/sessions").send(basePayload());
 
     expect(res.status).toBe(409);
     expect(res.body.code).toBe("DUPLICATE_SESSION");
+    expect(res.body.data.categoryDistribution).toEqual(
+      first.body.data.categoryDistribution,
+    );
+    expect(res.body.data.entropy).toBe(first.body.data.entropy);
   });
 
   it("PATCH /api/sessions/:sessionId/feedback-viewed — 실제 파일에 라우트가 등록돼 응답한다", async () => {

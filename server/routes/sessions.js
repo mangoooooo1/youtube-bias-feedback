@@ -48,13 +48,30 @@ router.post("/", async (req, res, next) => {
     });
   } catch (err) {
     if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
-      return fail(
-        res,
-        409,
-        ERROR_CODES.DUPLICATE_SESSION,
-        "이미 존재하는 세션입니다.",
-        req.body.sessionId,
-      );
+      // 최초 요청이 서버엔 이미 반영됐지만 응답만 못 받아 재시도가 여기 도달한 경우다.
+      // fail()의 detail은 production에서 항상 null로 마스킹돼(민감정보 노출 방지) 여기엔
+      // 못 쓰므로, 이 라우트만 직접 응답을 구성해 이미 저장된 categoryDistribution/entropy를
+      // 함께 돌려준다. 그래야 클라이언트가 이번에도 로컬 카테고리 그래프를 채울 수 있다.
+      const existing = db
+        .prepare(
+          "SELECT categoryDistribution, entropy FROM sessions WHERE sessionId = ?",
+        )
+        .get(req.body.sessionId);
+      return res.status(409).json({
+        success: false,
+        message: "이미 존재하는 세션입니다.",
+        code: ERROR_CODES.DUPLICATE_SESSION,
+        detail:
+          process.env.NODE_ENV === "production" ? null : req.body.sessionId,
+        data: existing
+          ? {
+              categoryDistribution: existing.categoryDistribution
+                ? JSON.parse(existing.categoryDistribution)
+                : null,
+              entropy: existing.entropy,
+            }
+          : null,
+      });
     }
     return next(err);
   }

@@ -201,12 +201,16 @@ async function syncSessionToServer(session, metrics = {}) {
     },
   );
 
-  // 이전 시도가 서버엔 이미 저장됐지만(중복 세션 오류) 그 응답만 못 받아 실패로 남았던 경우
-  // 다시 보낼 필요는 없으니 재시도 대상에서만 제외한다.
-  // 다만 서버가 계산한 categoryDistribution/entropy는 이 응답에 실려 오지 않으므로 이 세션의 로컬 카테고리 그래프는 채워지지 않는다.
-  // 서버에 저장된 연구 데이터 자체는 최초 성공한 요청 때 이미 정확하게 반영돼 있으므로 영향받지 않는다.
-  if (postResult === "DUPLICATE") {
-    await saveAnalysis(session.sessionId, { syncedToServer: true });
+  // 이전 시도가 서버엔 이미 저장됐지만(중복 세션 오류) 그 응답만 못 받아 실패로 남았던 경우이다.
+  // 다시 보낼 필요는 없으니 재시도 대상에서만 제외한다. 서버가 409 응답에
+  // 이미 저장된 categoryDistribution/entropy를 함께 실어 보내주므로, 이번에도 로컬
+  // 카테고리 그래프를 채울 수 있다.
+  if (postResult?.duplicate) {
+    await saveAnalysis(session.sessionId, {
+      categoryDistribution: postResult.categoryDistribution,
+      entropy: postResult.entropy,
+      syncedToServer: true,
+    });
     return;
   }
   // 이번에도 실패 — syncedToServer는 false로 남아 다음 알람 틱에서 다시 시도된다.
@@ -375,8 +379,21 @@ async function postSessionToServer(
       const body = await response.text();
       console.warn("[background] 서버 전송 실패:", response.status, body);
       // 409(중복 세션) — 이전 시도가 서버엔 이미 반영됐지만 응답만 못 받았던 경우다.
-      // 호출부(syncSessionToServer)가 재전송 없이 재시도 목록에서만 빼도록 구분해 알려준다.
-      return response.status === 409 ? "DUPLICATE" : null;
+      // 서버가 이미 저장된 categoryDistribution/entropy를 본문에 실어 보내므로 함께 꺼내 돌려준다.
+      if (response.status === 409) {
+        let data = null;
+        try {
+          data = JSON.parse(body)?.data ?? null;
+        } catch {
+          data = null;
+        }
+        return {
+          duplicate: true,
+          categoryDistribution: data?.categoryDistribution ?? null,
+          entropy: data?.entropy ?? null,
+        };
+      }
+      return null;
     }
 
     console.log("[background] 서버 전송 완료:", session.sessionId);

@@ -367,14 +367,22 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
     expect(calls.sessions).toHaveLength(2);
   });
 
-  it("재시도 중 서버가 409(중복 세션)를 반환하면 재전송 없이 동기화 완료로 처리한다", async () => {
+  it("재시도 중 서버가 409(중복 세션)를 반환하면 재전송 없이 동기화 완료로 처리하고, 서버가 돌려준 categoryDistribution/entropy로 로컬 그래프를 채운다", async () => {
     global.chrome = createChromeMock();
     const calls = { sessions: [] };
     global.fetch = vi.fn(async (url, options = {}) => {
       const href = String(url);
       if (href.endsWith("/api/sessions")) {
         calls.sessions.push(JSON.parse(options.body));
-        return { ok: false, status: 409, text: async () => "duplicate" };
+        return {
+          ok: false,
+          status: 409,
+          text: async () =>
+            JSON.stringify({
+              success: false,
+              data: { categoryDistribution: { 음악: 1 }, entropy: 0 },
+            }),
+        };
       }
       throw new Error(`예상치 못한 fetch 호출: ${href}`);
     });
@@ -407,11 +415,10 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
     // 서버엔 이미 반영돼 있던 것(중복 오류)이므로, 다시 보내지 않고 동기화 완료로 처리한다.
     expect(saved.syncedToServer).toBe(true);
     expect(saved.review).toBeUndefined();
-    // 409 응답엔 categoryDistribution/entropy가 실려 오지 않는다(서버가 본문 없이 409만
-    // 반환) — 이 세션의 로컬 카테고리 그래프는 채워지지 않은 채로 남는 게 현재 설계의
-    // 알려진 트레이드오프다. 서버에 저장된 연구 데이터 자체(sessions.categoryDistribution)는
-    // 최초 성공한 요청 때 이미 정확히 반영돼 있어 영향받지 않는다.
-    expect(saved.categoryDistribution).toBeUndefined();
+    // 409 응답에 실려온 categoryDistribution/entropy로 로컬 카테고리 그래프가 채워진다
+    // (코드리뷰 반영 전에는 이 값이 비어있는 게 알려진 트레이드오프였다).
+    expect(saved.categoryDistribution).toEqual({ 음악: 1 });
+    expect(saved.entropy).toBe(0);
     expect(calls.sessions).toHaveLength(1);
   });
 
@@ -519,7 +526,10 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
     vi.resetModules();
     const mod = await import("../background.js");
     // 알람 리스너와 동일하게 await 없이 나란히 호출해 실제 경합 타이밍을 재현한다.
-    await Promise.all([mod.retryUnsyncedSessions(), mod.retryUnsyncedSessions()]);
+    await Promise.all([
+      mod.retryUnsyncedSessions(),
+      mod.retryUnsyncedSessions(),
+    ]);
 
     expect(calls.sessions).toHaveLength(2);
     // 승자(200)든 패자(409)든 최종적으로 동기화 완료 상태로 수렴한다.
@@ -555,7 +565,7 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
       group: "EXP",
       installDate: new Date(2025, 0, 1).toISOString(),
       currentSession: { sessionId: "s1", startTime: "2026-01-10T11:00:00Z" },
-      "video__s1__uuid1": {
+      video__s1__uuid1: {
         videoId: "v1",
         title: "노래 모음",
         watchedAt: "2026-01-10T11:00:00Z",
@@ -646,7 +656,7 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
       anonymousId: "a1",
       group: "EXP",
       installDate: new Date(2025, 0, 1).toISOString(),
-      "video__s1__uuid1": {
+      video__s1__uuid1: {
         videoId: "v1",
         title: "노래 모음",
         watchedAt: "2026-01-10T11:00:00Z",
@@ -671,7 +681,7 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
     });
 
     await global.chrome.storage.local.set({
-      "video__s1__uuid1": {
+      video__s1__uuid1: {
         videoId: "v1",
         title: "노래 모음",
         watchedAt: "2026-01-10T11:00:00Z",
@@ -701,7 +711,7 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
       // 이 재시도 큐가 생기기 전(구버전 content.js)에 기록된 영상 — sent 필드가 없다.
       // 대부분 이미 서버 전송에 성공한 상태라, 이걸 재전송하면 eventId도 없어
       // video_events에 영구 중복 행이 쌓인다.
-      "video__s1__legacy": {
+      video__s1__legacy: {
         videoId: "v1",
         title: "노래 모음",
         watchedAt: "2026-01-10T11:00:00Z",
