@@ -30,6 +30,26 @@ db.pragma("synchronous = NORMAL");
 db.pragma("foreign_keys = ON");
 
 function initializeDB() {
+  try {
+    execSchema();
+  } catch (err) {
+    // 이 저장소는 addColumn()으로 기존 DB를 소급 마이그레이션하는 대신, 스키마 변경마다
+    // DB 파일을 백업 후 삭제하고 재기동해 새로 만드는 것을 전제로 한다. 그 사전 절차를 잊고 예전
+    // 스키마 그대로인 DB 위에 새 코드를 올리면 "no such column" 같은 낯선 에러로 여기서
+    // 죽는다 — 원인과 해야 할 일을 바로 알 수 있도록 메시지를 덧붙여 다시 던진다.
+    if (/no such column|no such table/i.test(err.message)) {
+      throw new Error(
+        `DB 스키마 초기화 실패(${err.message}). 기존 DB 파일이 최신 스키마와 맞지 않을 ` +
+          `수 있다 — 배포 전 서버의 server/youtube_bias.db(+.db-wal/.db-shm)를 ` +
+          `node server/scripts/backup-db.js로 백업한 뒤 삭제하고 재기동할 것.`,
+        { cause: err },
+      );
+    }
+    throw err;
+  }
+}
+
+function execSchema() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id                   INTEGER PRIMARY KEY AUTOINCREMENT,
