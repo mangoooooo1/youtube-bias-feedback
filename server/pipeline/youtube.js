@@ -1,5 +1,9 @@
 // 서버 측 YouTube Data API v3 호출
 // video_metadata/channel_metadata 캐시 미스를 채우기 위한 순수 조회 모듈
+//
+// description(영상)/keywords(채널)는 원문 보관 전용이다.
+// 결측률·콘텐츠 무관 노이즈가 커 LLM 프롬프트·사용자 응답 등 실시간 기능에 절대 반영하지 않는다.
+// 이 두 필드를 읽어 새 기능에 쓰는 PR을 리뷰할 때는 이 정책이 바뀐 근거(재검증 결과 등)가 있는지 반드시 확인할 것.
 const VIDEOS_API_URL = "https://www.googleapis.com/youtube/v3/videos";
 const CHANNELS_API_URL = "https://www.googleapis.com/youtube/v3/channels";
 // id 파라미터 1회 요청당 최대 개수(YouTube Data API 제약). 쿼터 비용은 이 개수와
