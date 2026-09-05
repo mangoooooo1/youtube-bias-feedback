@@ -106,6 +106,45 @@ function initializeDB() {
       createdAt   TEXT    DEFAULT (datetime('now'))
     );
 
+    -- YouTube 영상·채널 메타데이터 캐시
+    --
+    -- video_events.videoId -> video_metadata.videoId 는 DB 레벨 FK가 없다. video_events는
+    -- 최초 CREATE TABLE(위)에서 이미 FK 없이 만들어진 기존 컬럼이라, addColumn() 패턴으로는
+    -- 여기에 FK를 소급 적용할 수 없다(SQLite는 테이블 재생성 없이 기존 컬럼에 제약을 추가하는
+    -- 방법을 제공하지 않는다). video_events.sessionId에 FK를 걸지 않기로 한 선례와 같은 이유로,
+    -- 이 참조는 애플리케이션 코드에서 삽입 순서(video_metadata 확인·삽입 -> video_events 삽입)만
+    -- 보장하는 느슨한 참조로 둔다.
+    --
+    -- 반면 channel_metadata/video_metadata는 이번에 함께 신설되는 테이블이라 소급 적용 제약이
+    -- 없으므로, video_metadata.channelId -> channel_metadata.channelId는 실제 FK로 강제한다.
+    -- FK 참조 대상은 참조하는 쪽보다 먼저 생성돼야 하므로 channel_metadata를 먼저 정의한다.
+    CREATE TABLE IF NOT EXISTS channel_metadata (
+      channelId       TEXT PRIMARY KEY,
+      channelTitle    TEXT,
+      subscriberCount INTEGER,
+      videoCount      INTEGER,
+      -- 정렬 정규화 적용한 JSON 배열 문자열
+      topicCategories TEXT,
+      -- 원문 보관 전용 — tags와 동일 계열 위험(결측·SEO 나열)으로 실시간 기능(LLM 프롬프트 등)에는 미반영
+      keywords        TEXT,
+      createdAt       TEXT    DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS video_metadata (
+      videoId         TEXT PRIMARY KEY,
+      categoryId      TEXT,
+      title           TEXT,
+      -- 영상 총 길이(초). 쇼츠(<=60초) 여부 이진 판별 용도로만 사용
+      durationSeconds INTEGER,
+      -- 최초 수집 시점 스냅샷(시계열 갱신 없음) — "시청 당시 노출된 맥락"이 분석 대상이므로 고정.
+      viewCount       INTEGER,
+      channelId       TEXT,
+      -- 원문 보관 전용 — 장르별 가치 편차가 커 실시간 기능(LLM 프롬프트 등)에는 미반영
+      description     TEXT,
+      createdAt       TEXT    DEFAULT (datetime('now')),
+      FOREIGN KEY (channelId) REFERENCES channel_metadata(channelId)
+    );
+
     CREATE TABLE IF NOT EXISTS issued_codes (
       code       TEXT PRIMARY KEY,
       group_code TEXT NOT NULL,
