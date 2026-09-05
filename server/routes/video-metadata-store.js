@@ -118,8 +118,25 @@ async function ensureVideoMetadata(db, videoIds, apiKey) {
   }
 }
 
+// videoIds 순서·중복(재시청)을 그대로 유지한 채 categoryId 배열로 변환한다.
+// calculateDistribution이 다양성 계산 시 영상 개수(재시청 포함)로 가중하므로, 중복을 제거하면 안 된다.
+// 캐시에 없거나 categoryId 자체가 null인 영상은 null로 남기고, calculateDistribution이 null을 걸러낸다.
+function getCategoryIdsForVideos(db, videoIds) {
+  const uniqueIds = [...new Set(videoIds)];
+  if (uniqueIds.length === 0) return [];
+  const placeholders = uniqueIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT videoId, categoryId FROM video_metadata WHERE videoId IN (${placeholders})`,
+    )
+    .all(...uniqueIds);
+  const categoryById = new Map(rows.map((r) => [r.videoId, r.categoryId]));
+  return videoIds.map((id) => categoryById.get(id) ?? null);
+}
+
 module.exports = {
   ensureVideoMetadata,
+  getCategoryIdsForVideos,
   findMissingVideoIds,
   findMissingChannelIds,
   upsertChannelMetadata,

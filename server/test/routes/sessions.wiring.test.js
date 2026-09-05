@@ -1,6 +1,14 @@
 process.env.TZ = "Asia/Seoul";
 
-import { describe, it, expect, beforeEach, afterAll, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterAll,
+  afterEach,
+  vi,
+} from "vitest";
 import request from "supertest";
 import express from "express";
 import { createRequire } from "node:module";
@@ -55,8 +63,7 @@ function basePayload(overrides = {}) {
     startTime: "2026-08-13T09:00:00+09:00",
     endTime: "2026-08-13T09:10:00+09:00",
     videoCount: 2,
-    categoryDistribution: { 게임: 1 },
-    entropy: 0,
+    videoIds: ["v1", "v2"],
     ...overrides,
   };
 }
@@ -128,9 +135,38 @@ describe("실제 server/routes/sessions.js 라우터 배선", () => {
 // TODAY_REVIEW_GEMINI_API_KEY를 설정하지 않았으므로 실제 Gemini 호출 없이 폴백만 사용된다.
 // basePayload()의 endTime은 고정 과거 날짜라 "오늘" 집계 대상이 되지 않으므로, 이 describe의
 // 테스트들은 endTime을 실행 시점의 실제 "지금"으로 덮어써야 한다.
+//
+// "오늘" 집계(aggregateTodayCumulative)는 categoryDistribution이 비어 있는 세션을 걸러낸다.
+// categoryDistribution은 이제 서버가 video_metadata를 통해 계산하므로(전면 이관), 이 describe
+// 안에서만 YOUTUBE_API_KEY와 global.fetch를 스텁해 v1/v2가 실제로 카테고리를 갖도록 만든다.
 describe("POST /api/sessions — 오늘 누적 리뷰 생성·자격 게이팅", () => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.YOUTUBE_API_KEY;
+
+  beforeEach(() => {
+    process.env.YOUTUBE_API_KEY = "wiring-test-key";
+    global.fetch = vi.fn((url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/videos")) {
+        const ids = parsed.searchParams.get("id").split(",");
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: ids.map((id) => ({
+              id,
+              snippet: { categoryId: "20", title: id },
+            })),
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ items: [] }) });
+    });
+  });
+
   afterEach(() => {
     db.exec("DELETE FROM participants");
+    global.fetch = originalFetch;
+    process.env.YOUTUBE_API_KEY = originalApiKey;
   });
 
   it("자격 있는 EXP(베이스라인 이후)는 응답에 오늘 리뷰가 실린다", async () => {

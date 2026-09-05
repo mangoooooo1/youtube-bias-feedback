@@ -5,6 +5,14 @@ const { validateSession } = require("./sessions-validate");
 const { insertSession, recordFeedbackTimestamp } = require("./sessions-store");
 const { generateAndStoreTodayReview } = require("./today-review-generate");
 const { isTodayReviewEligible } = require("./today-reviews-query");
+const {
+  ensureVideoMetadata,
+  getCategoryIdsForVideos,
+} = require("./video-metadata-store");
+const {
+  calculateDistribution,
+  calculateEntropy,
+} = require("../pipeline/category-diversity");
 
 const router = express.Router();
 
@@ -20,8 +28,24 @@ router.post("/", async (req, res, next) => {
     );
   }
 
+  // categoryId 조회·다양성 계산은 이제 서버 책임이다.
+  // 클라이언트는 이 세션에서 시청한 videoId 목록(중복 포함)만 보낸다.
+  const { videoIds } = req.body;
+  const youtubeStart = Date.now();
+  await ensureVideoMetadata(db, videoIds, process.env.YOUTUBE_API_KEY);
+  const categoryIds = getCategoryIdsForVideos(db, videoIds);
+  const categoryDistribution = calculateDistribution(categoryIds);
+  const entropy = calculateEntropy(categoryDistribution);
+  // youtubeMs는 더 이상 클라이언트가 측정해 보내지 않는다.
+  const youtubeMs = Date.now() - youtubeStart;
+
   try {
-    insertSession(db, req.body);
+    insertSession(db, {
+      ...req.body,
+      categoryDistribution,
+      entropy,
+      youtubeMs,
+    });
   } catch (err) {
     if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
       return fail(
@@ -57,7 +81,8 @@ router.post("/", async (req, res, next) => {
     console.error("[sessions] 오늘 리뷰 생성 오류:", err.message);
   }
 
-  return success(res, { todayReview });
+  // categoryDistribution/entropy를 응답에 실어 돌려준다.
+  return success(res, { todayReview, categoryDistribution, entropy });
 });
 
 // 피드백 열람/확인 시각 갱신 — 세션 생성 POST와 별도 시점에(알림 클릭, 확인 버튼 클릭 등)
