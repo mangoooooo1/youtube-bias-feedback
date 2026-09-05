@@ -34,11 +34,10 @@ cd youtube-bias-feedback
 cp extension/config.example.js extension/config.js
 ```
 
-`extension/config.js`를 열어 API 키를 입력합니다.
+`extension/config.js`를 열어 서버 주소를 입력합니다. YouTube Data API 조회와 Gemini
+피드백 생성은 모두 서버가 직접 처리하므로, 확장 프로그램에는 API 키가 필요 없습니다.
 
 ```js
-export const YOUTUBE_API_KEY = "YOUR_YOUTUBE_API_KEY_HERE"; // YouTube Data API v3
-export const GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"; // Gemini API
 export const SERVER_URL = "YOUR_SERVER_URL_HERE"; // 백엔드 서버 주소
 ```
 

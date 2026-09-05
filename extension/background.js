@@ -8,11 +8,6 @@ import {
   getUnsentVideoEvents,
   markVideoEventSent,
 } from "./storage.js";
-import { fetchVideoCategories } from "./pipeline/youtube.js";
-import {
-  calculateDistribution,
-  calculateEntropy,
-} from "./pipeline/analysis.js";
 import { isBaselinePeriod } from "./pipeline/baseline.js";
 import { SERVER_URL } from "./config.js";
 
@@ -163,35 +158,21 @@ async function checkSessionTimeout() {
 }
 
 export async function analyzeSession(session) {
-  // 지연시간 측정 — 세션 종료 후 처리 파이프라인 전체를 t0로 감싼다.
+  // 여기서는 videoCount만 먼저 로컬에 기록해 "세션 종료, 서버 응답 대기" 상태를 표시한다.
+  // categoryDistribution/entropy는 서버 응답을 받은 뒤(syncSessionToServer)에야 채워진다.
   const t0 = Date.now();
-  const videoIds = session.videos.map((v) => v.videoId);
-
-  const ytStart = Date.now();
-  const categoryMap = await fetchVideoCategories(videoIds);
-  const youtubeMs = Date.now() - ytStart;
-  const categoryIds = videoIds.map((id) => categoryMap[id]);
-
-  const categoryDistribution = calculateDistribution(categoryIds);
-  const entropy = calculateEntropy(categoryDistribution);
   const videoCount = session.videos.length;
 
   // syncedToServer를 false로 명시해둬야, 곧이어 서버 전송이 오프라인/오류로 실패했을 때
   // retryUnsyncedSessions()가 이 세션을 재시도 대상으로 찾아낼 수 있다(이 필드가 아예
   // 없는 - 이 기능이 생기기 전에 이미 분석됐던 - 세션과 구분하기 위한 값이다).
   await saveAnalysis(session.sessionId, {
-    categoryDistribution,
-    entropy,
     videoCount,
     syncedToServer: false,
   });
-  console.log("[background] 분석 완료:", { entropy, categoryDistribution });
 
   const totalMs = Date.now() - t0;
-  await syncSessionToServer(
-    { ...session, categoryDistribution, entropy, videoCount },
-    { totalMs, youtubeMs },
-  );
+  await syncSessionToServer({ ...session, videoCount }, { totalMs });
 }
 
 // 세션 분석 결과를 서버로 보내고, 응답에 따라 오늘 리뷰 반영·알림까지 처리한다.
@@ -212,15 +193,18 @@ async function syncSessionToServer(session, metrics = {}) {
 
   const postResult = await postSessionToServer(
     session,
-    session.categoryDistribution,
-    session.entropy,
     session.videoCount,
     onboarding,
-    { ...metrics, feedbackNotifiedAt },
+    {
+      ...metrics,
+      feedbackNotifiedAt,
+    },
   );
 
-  // 이전 시도가 서버엔 이미 저장됐지만(중복 세션 오류) 그 응답만 못 받아 실패로 남았던
-  // 경우다 — 다시 보낼 필요는 없으니 재시도 대상에서만 제외한다.
+  // 이전 시도가 서버엔 이미 저장됐지만(중복 세션 오류) 그 응답만 못 받아 실패로 남았던 경우
+  // 다시 보낼 필요는 없으니 재시도 대상에서만 제외한다.
+  // 다만 서버가 계산한 categoryDistribution/entropy는 이 응답에 실려 오지 않으므로 이 세션의 로컬 카테고리 그래프는 채워지지 않는다.
+  // 서버에 저장된 연구 데이터 자체는 최초 성공한 요청 때 이미 정확하게 반영돼 있으므로 영향받지 않는다.
   if (postResult === "DUPLICATE") {
     await saveAnalysis(session.sessionId, { syncedToServer: true });
     return;
@@ -228,7 +212,12 @@ async function syncSessionToServer(session, metrics = {}) {
   // 이번에도 실패 — syncedToServer는 false로 남아 다음 알람 틱에서 다시 시도된다.
   if (postResult === null) return;
 
-  await saveAnalysis(session.sessionId, { syncedToServer: true });
+  // 서버가 이번 응답으로 돌려준 categoryDistribution/entropy를 이제야 로컬에 채운다.
+  await saveAnalysis(session.sessionId, {
+    categoryDistribution: postResult.categoryDistribution,
+    entropy: postResult.entropy,
+    syncedToServer: true,
+  });
 
   const todayReview = postResult?.todayReview ?? null;
   if (todayReview) {
@@ -255,11 +244,13 @@ async function syncSessionToServer(session, metrics = {}) {
 // 경로다(연구 무결성 점검 항목 "서버 장애 대비 로컬 큐잉/재시도" 후속 조치).
 export async function retryUnsyncedSessions() {
   const sessions = await getAllSessions();
-  const unsynced = sessions.filter(
-    (s) => s.categoryDistribution && s.syncedToServer === false,
-  );
+  // categoryDistribution 유무는 더 이상 이 필터에 쓰지 않는다.
+  // 이제 그 값은 서버 응답을 받아야만 채워지므로, 최초 시도가 오프라인으로 실패한 세션은
+  // categoryDistribution이 없는 상태로 재시도 대상이 돼야 한다. syncedToServer:false만이
+  // "전송 대기"를 나타내는 유일한 신호다.
+  const unsynced = sessions.filter((s) => s.syncedToServer === false);
   for (const session of unsynced) {
-    // 재시도라 최초 지연시간(totalMs/youtubeMs)은 더 이상 의미가 없어 보내지 않는다.
+    // 재시도라 최초 지연시간(totalMs)은 더 이상 의미가 없어 보내지 않는다.
     await syncSessionToServer(session);
   }
 }
@@ -344,8 +335,6 @@ async function mergeTodayReviewIntoCache(anonymousId, todayReview) {
 
 async function postSessionToServer(
   session,
-  categoryDistribution,
-  entropy,
   videoCount,
   onboarding,
   metrics = {},
@@ -362,6 +351,8 @@ async function postSessionToServer(
     return null;
   }
 
+  // categoryId 조회는 서버가 하므로, 이 세션에서 시청한 videoId 목록
+  const videoIds = session.videos.map((v) => v.videoId);
   const cleanUrl = SERVER_URL.replace(/\/$/, "");
 
   try {
@@ -374,13 +365,8 @@ async function postSessionToServer(
         startTime: session.startTime,
         endTime: session.endTime,
         videoCount,
-        categoryDistribution,
-        entropy:
-          typeof entropy === "number" && Number.isFinite(entropy)
-            ? entropy
-            : undefined,
+        videoIds,
         totalMs: metrics.totalMs,
-        youtubeMs: metrics.youtubeMs,
         feedbackNotifiedAt: metrics.feedbackNotifiedAt,
       }),
     });

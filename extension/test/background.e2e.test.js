@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-// E2E: 시청 감지 이후 단계 — 세션 분석 → 카테고리 조회 → 서버 전송(세션 저장 + 오늘 리뷰
-// 생성을 서버가 한 번에 처리) → 응답 반영(로컬 저장·캐시) → 알림
+// E2E: 시청 감지 이후 단계 — 세션 분석 → 서버 전송(videoId 목록만 보내면 서버가
+// categoryId 조회·다양성 계산·세션 저장·오늘 리뷰 생성을 한 번에 처리) → 응답 반영
+// (로컬 저장·캐시) → 알림
 // background.js는 manifest.json에서 type:module로 선언된 서비스워커라 export를 붙여도
 // 실제 확장 동작에 영향이 없다. 모듈 최상단이 chrome.alarms.create 등 부작용을 즉시 실행하므로,
 // 매 테스트마다 chrome 목을 새로 세팅한 뒤 vi.resetModules()로 모듈을 새로 import한다
@@ -11,12 +12,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // 복사해 SERVER_URL이 "YOUR_SERVER_URL_HERE" placeholder로 남는다. background.js는 이
 // placeholder를 보면 postSessionToServer를 조용히 건너뛰므로, 로컬에서만 우연히 통과하고
 // CI에서는 항상 실패하는 결과가 났었다. 테스트가 로컬 파일 상태에 좌우되지 않도록 고정값으로 목킹한다.
-// GEMINI_API_KEY는 더 이상 확장 프로그램에 없다 — "오늘 리뷰" 생성은 서버가 직접 한다
-// (연구 무결성 점검 항목 1 후속 조치: 확장 프로그램 파일을 열어보면 키가 그대로 노출되는
-// 문제가 있었다).
+// GEMINI_API_KEY·YOUTUBE_API_KEY 둘 다 더 이상 확장 프로그램에 없다 — "오늘 리뷰" 생성과
+// categoryId 조회를 전부 서버가 직접 한다(연구 무결성 점검 항목 1 후속 조치: 확장 프로그램
+// 파일을 열어보면 키가 그대로 노출되는 문제가 있었다).
 vi.mock("../config.js", () => ({
   SERVER_URL: "http://localhost:3000",
-  YOUTUBE_API_KEY: "test-youtube-key",
 }));
 
 function createChromeMock() {
@@ -61,34 +61,28 @@ function createChromeMock() {
   };
 }
 
-// videoId → 유튜브 카테고리 조회, 서버 전송(sessions) — 2곳으로 나가는 fetch를 URL로
-// 구분해 응답한다. sessions 응답의 data.todayReview가 곧 "서버가 생성해 돌려준 오늘 리뷰"다
-// (더 이상 확장 프로그램이 Gemini를 직접 부르지 않는다).
-function createFetchMock({ todayReview }) {
+// 서버 전송(sessions)만 나간다 — categoryId 조회는 서버 안에서 일어나므로 확장은
+// googleapis를 직접 호출하지 않는다. sessions 응답의 data.categoryDistribution/entropy가
+// 곧 "서버가 videoId 목록으로 계산해 돌려준 다양성 결과"이고, data.todayReview가 "서버가
+// 생성해 돌려준 오늘 리뷰"다.
+function createFetchMock({
+  todayReview,
+  categoryDistribution = { 음악: 1 },
+  entropy = 0,
+}) {
   const calls = { sessions: [] };
 
   const fetchMock = vi.fn(async (url, options = {}) => {
     const href = String(url);
 
-    if (href.includes("googleapis.com/youtube/v3/videos")) {
-      const idsParam = new URL(href).searchParams.get("id");
-      const ids = idsParam ? idsParam.split(",") : [];
-      return {
-        ok: true,
-        json: async () => ({
-          items: ids.map((id) => ({
-            id,
-            snippet: { categoryId: "10" }, // 음악
-          })),
-        }),
-      };
-    }
-
     if (href.endsWith("/api/sessions")) {
       calls.sessions.push(JSON.parse(options.body));
       return {
         ok: true,
-        json: async () => ({ success: true, data: { todayReview } }),
+        json: async () => ({
+          success: true,
+          data: { todayReview, categoryDistribution, entropy },
+        }),
       };
     }
 
@@ -118,7 +112,7 @@ afterEach(() => {
 });
 
 describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", () => {
-  it("성공 경로: 카테고리 조회 → 서버 전송 → 응답의 오늘 리뷰를 로컬에 반영 → 알림까지 전부 맞물려 동작한다", async () => {
+  it("성공 경로: 서버 전송 → 응답의 카테고리 분포·오늘 리뷰를 로컬에 반영 → 알림까지 전부 맞물려 동작한다", async () => {
     global.chrome = createChromeMock();
     const { fetchMock, calls } = createFetchMock({
       todayReview: {
@@ -173,17 +167,18 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
     // 3) 알림 대상(EXP, 베이스라인 아님)이라 실제로 알림이 떴는지
     expect(global.chrome.notifications.create).toHaveBeenCalledTimes(1);
 
-    // 4) 서버로 전송된 세션 데이터에 더 이상 review/llmStatus 등을 직접 계산해 보내지 않는지
-    // (서버가 저장 직후 자체적으로 today_reviews를 생성하므로, 클라이언트는 원시 분석
-    // 결과와 타이밍 지표만 보낸다)
+    // 4) 서버로 전송된 세션 데이터는 categoryId 조회·다양성 계산에 필요한 videoId
+    // 목록과 타이밍 지표만 담는다 — categoryDistribution/entropy는 이제 서버가 계산해
+    // 응답으로 돌려주는 값이므로, 클라이언트가 직접 계산해 요청 본문에 실어 보내지 않는다.
     expect(calls.sessions).toHaveLength(1);
     expect(calls.sessions[0]).toMatchObject({
       anonymousId: "a1",
       sessionId: "s1",
-      entropy: 0,
+      videoIds: ["v1"],
       feedbackNotifiedAt: expect.any(String),
     });
-    expect(calls.sessions[0].categoryDistribution).toEqual({ 음악: 1 });
+    expect(calls.sessions[0]).not.toHaveProperty("categoryDistribution");
+    expect(calls.sessions[0]).not.toHaveProperty("entropy");
     expect(calls.sessions[0]).not.toHaveProperty("review");
     expect(calls.sessions[0]).not.toHaveProperty("llmStatus");
   });
@@ -225,9 +220,10 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
     expect(calls.sessions[0]).toMatchObject({
       anonymousId: "a1",
       sessionId: "s1",
-      entropy: 0,
+      videoIds: ["v1"],
     });
-    expect(calls.sessions[0].categoryDistribution).toEqual({ 음악: 1 });
+    expect(calls.sessions[0]).not.toHaveProperty("categoryDistribution");
+    expect(calls.sessions[0]).not.toHaveProperty("entropy");
 
     const { todayReviewsCache } =
       await global.chrome.storage.local.get("todayReviewsCache");
@@ -257,8 +253,8 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
     });
 
     const analyzeSession = await loadAnalyzeSession();
-    // 카테고리 조회(fetch)도 같이 실패하지만, analyzeSession 자체가 예외를 던지진 않는다
-    // (fetchVideoCategories 내부에서 개별 실패를 흡수하는 기존 동작 — youtube.js 영역).
+    // fetch 자체가 실패해도 analyzeSession은 예외를 던지지 않는다(postSessionToServer가
+    // 네트워크 오류를 흡수해 null을 반환).
     await expect(
       analyzeSession({
         sessionId: "s1",
@@ -268,7 +264,12 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
 
     const { sessions } = await global.chrome.storage.local.get("sessions");
     const saved = sessions.find((s) => s.sessionId === "s1");
-    expect(saved.categoryDistribution).toBeDefined();
+    // categoryDistribution/entropy는 서버 응답에서만 채워진다(전면 이관 이후 동작) —
+    // 이번 요청 자체가 실패했으므로 아직 값이 없다. 이전(클라이언트가 직접 계산하던
+    // 시절)에는 오프라인이어도 로컬 계산 결과가 즉시 채워졌지만, 이제는 서버 응답을
+    // 받기 전까지 팝업의 카테고리 그래프가 이 세션에 대해 비어 있다 — 재시도가 성공하면
+    // 채워진다(아래 retryUnsyncedSessions 스위트 참고).
+    expect(saved.categoryDistribution).toBeUndefined();
     expect(saved.review).toBeUndefined();
     // 재시도 큐(retryUnsyncedSessions)가 이 세션을 찾아낼 수 있어야 하므로 false로
     // 명시돼 있어야 한다(필드 자체가 없는 것과는 구분).
@@ -291,16 +292,6 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
     let sessionAttempt = 0;
     global.fetch = vi.fn(async (url, options = {}) => {
       const href = String(url);
-      if (href.includes("googleapis.com/youtube/v3/videos")) {
-        const idsParam = new URL(href).searchParams.get("id");
-        const ids = idsParam ? idsParam.split(",") : [];
-        return {
-          ok: true,
-          json: async () => ({
-            items: ids.map((id) => ({ id, snippet: { categoryId: "10" } })),
-          }),
-        };
-      }
       if (href.endsWith("/api/sessions")) {
         calls.sessions.push(JSON.parse(options.body));
         sessionAttempt++;
@@ -312,6 +303,8 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
           json: async () => ({
             success: true,
             data: {
+              categoryDistribution: { 음악: 1 },
+              entropy: 0,
               todayReview: {
                 reviewDate: "2026-01-10",
                 review: "오늘은 음악 영상 위주로 보셨네요.",
@@ -370,7 +363,7 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
     ]);
 
     expect(global.chrome.notifications.create).toHaveBeenCalledTimes(1);
-    // 재시도는 유튜브 카테고리 조회를 다시 하지 않는다 — /api/sessions만 두 번 호출된다.
+    // 최초 시도(오프라인 실패) + 재시도(성공) — /api/sessions만 두 번 호출된다.
     expect(calls.sessions).toHaveLength(2);
   });
 
@@ -396,8 +389,9 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
           startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
           endTime: FIXED_NOW.toISOString(),
           videos: [{ videoId: "v1", title: "노래 모음" }],
-          categoryDistribution: { 음악: 1 },
-          entropy: 0,
+          // 최초 시도가 이미 서버에 저장까지는 됐지만 응답을 못 받아 실패로 남았던
+          // 상황을 재현한다 — categoryDistribution/entropy는 서버 응답에서만 채워지므로
+          // (전면 이관 이후), 이 시점엔 아직 로컬에 없는 게 정상이다.
           videoCount: 1,
           syncedToServer: false,
         },
@@ -413,6 +407,11 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
     // 서버엔 이미 반영돼 있던 것(중복 오류)이므로, 다시 보내지 않고 동기화 완료로 처리한다.
     expect(saved.syncedToServer).toBe(true);
     expect(saved.review).toBeUndefined();
+    // 409 응답엔 categoryDistribution/entropy가 실려 오지 않는다(서버가 본문 없이 409만
+    // 반환) — 이 세션의 로컬 카테고리 그래프는 채워지지 않은 채로 남는 게 현재 설계의
+    // 알려진 트레이드오프다. 서버에 저장된 연구 데이터 자체(sessions.categoryDistribution)는
+    // 최초 성공한 요청 때 이미 정확히 반영돼 있어 영향받지 않는다.
+    expect(saved.categoryDistribution).toBeUndefined();
     expect(calls.sessions).toHaveLength(1);
   });
 
