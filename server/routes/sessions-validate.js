@@ -19,6 +19,9 @@ const FAILURE_REASONS = [
 // 피드백 텍스트 출처: llm.js generateReview/generateFallbackReview의 source와 1:1 대응
 const SOURCES = ["llm", "fallback"];
 
+// videoIds 개수 상한
+const MAX_VIDEO_IDS = 500;
+
 function validateSession(body) {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "body" };
@@ -58,6 +61,9 @@ function validateSession(body) {
   // 이 세션에서 시청한 videoId 목록만 보낸다.
   if (!Array.isArray(videoIds)) {
     return { code: ERROR_CODES.MISSING_REQUIRED_FIELD, field: "videoIds" };
+  }
+  if (videoIds.length > MAX_VIDEO_IDS) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "videoIds" };
   }
   if (videoIds.some((id) => typeof id !== "string" || id.trim() === "")) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "videoIds" };
