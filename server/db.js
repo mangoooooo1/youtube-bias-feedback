@@ -83,8 +83,6 @@ function initializeDB() {
       createdAt       TEXT    DEFAULT (datetime('now'))
     );
 
-    -- entryHost/entryPath/referrerType/relatedTrigger는 addColumn 없이 여기(CREATE TABLE)에만 반영돼 있다.
-    -- 먼저 백업한 뒤 삭제하고(server/scripts/backup-db.js), 재기동으로 새 스키마가 생성되게 할 것.
     CREATE TABLE IF NOT EXISTS video_events (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       eventId     TEXT,     -- 영상 기록 1건당 1회 발급하는 멱등 키 (재전송 중복 방지). UNIQUE는 별도 인덱스로 아래에서 건다
@@ -105,6 +103,8 @@ function initializeDB() {
       relatedTrigger TEXT,  -- 'autoplay' | 'click' | 'unknown' | NULL
       createdAt   TEXT    DEFAULT (datetime('now'))
     );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_video_events_eventId ON video_events(eventId);
 
     -- YouTube 영상·채널 메타데이터 캐시
     --
@@ -164,6 +164,8 @@ function initializeDB() {
       createdAt      TEXT    DEFAULT (datetime('now'))
     );
 
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_popup_events_eventId ON popup_events(eventId);
+
     -- 기간(일차·주차) 단위 리뷰 — 완료된 기간 전체를 요약하는 서버 배치(cron)
     -- 생성 리뷰. sessions/video_events를 그때그때 집계해 만들며, 세션 리뷰(sessions.review)와는
     -- 별도 파이프라인(서버 cron vs 클라이언트 세션-종료 트리거)에서 독립적으로 생성·저장된다.
@@ -219,36 +221,6 @@ function initializeDB() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_today_reviews_participant_date
       ON today_reviews(anonymousId, reviewDate);
   `);
-
-  // 이미 만들어진 DB 파일(로컬 개발용·이미 배포된 서버)에는 CREATE TABLE IF NOT EXISTS가
-  // no-op이라 새 컬럼이 반영되지 않는다 — Story 10-6에서 처음 이 문제가 실제로 발생해(로컬
-  // 서버 기동 시 "no column named feedbackNotifiedAt" 에러 재현 확인) addColumn 패턴을 도입
-  addColumn("sessions", "feedbackNotifiedAt", "TEXT");
-  addColumn("sessions", "feedbackViewedAt", "TEXT");
-  addColumn("sessions", "feedbackConfirmedAt", "TEXT");
-  addColumn("sessions", "review", "TEXT");
-  addColumn("sessions", "reviewTopic", "TEXT");
-  addColumn("sessions", "source", "TEXT");
-  addColumn("sessions", "promptVersion", "TEXT");
-  addColumn("participants", "studyEndModalShownAt", "TEXT");
-  addColumn("participants", "studyEndReviewViewedAt", "TEXT");
-  addColumn("participants", "studyEndCodeVerifiedAt", "TEXT");
-  addColumn("video_events", "sessionId", "TEXT");
-
-  // popup_events.eventId도 같은 이유로 addColumn 필요. UNIQUE는 ALTER TABLE ADD COLUMN이
-  // 만들 수 없으므로(SQLite 제약) 컬럼 추가 후 별도 유니크 인덱스로 건다 — 신규/기존 DB 모두
-  // IF NOT EXISTS라 안전하게 반복 실행된다.
-  addColumn("popup_events", "eventId", "TEXT");
-  db.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_popup_events_eventId ON popup_events(eventId)",
-  );
-
-  // video_events.eventId
-  // 확장 프로그램의 재시도 큐 같은 영상 기록을 다시 보낼 수 있어 popup_events와 동일한 멱등 키 패턴을 적용한다.
-  addColumn("video_events", "eventId", "TEXT");
-  db.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_video_events_eventId ON video_events(eventId)",
-  );
 }
 
 // 이미 컬럼이 있으면(신규 DB) 조용히 넘어가고, 없으면(기존 DB) 추가한다.
