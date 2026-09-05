@@ -121,18 +121,18 @@ describe("fetchVideoMetadata", () => {
     expect(new URL(url).searchParams.get("id")).toBe("dup");
   });
 
-  it("HTTP 오류 응답이면 요청한 모든 videoId를 null로 반환한다", async () => {
+  it("HTTP 오류 응답이면 청크 전체가 결과 맵에서 빠진다(재시도 대상 — 확정 결측과 구분)", async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 403 });
 
     const result = await fetchVideoMetadata(["v1", "v2"], "test-key");
-    expect(result).toEqual({ v1: null, v2: null });
+    expect(result).toEqual({});
   });
 
-  it("네트워크 오류(fetch reject)면 요청한 모든 videoId를 null로 반환한다", async () => {
+  it("네트워크 오류(fetch reject)면 청크 전체가 결과 맵에서 빠진다(재시도 대상)", async () => {
     global.fetch = vi.fn().mockRejectedValue(new TypeError("network down"));
 
     const result = await fetchVideoMetadata(["v1"], "test-key");
-    expect(result).toEqual({ v1: null });
+    expect(result).toEqual({});
   });
 });
 
@@ -210,5 +210,12 @@ describe("fetchChannelMetadata", () => {
 
     const result = await fetchChannelMetadata(["nope"], "test-key");
     expect(result).toEqual({ nope: null });
+  });
+
+  it("청크 전체 호출이 실패하면 결과 맵에서 빠진다(재시도 대상 — 확정 결측과 구분)", async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 });
+
+    const result = await fetchChannelMetadata(["chan1"], "test-key");
+    expect(result).toEqual({});
   });
 });

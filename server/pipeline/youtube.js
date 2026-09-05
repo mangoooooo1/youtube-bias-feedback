@@ -67,10 +67,11 @@ async function fetchVideoChunk(videoIds, apiKey) {
     key: apiKey,
   });
   const data = await fetchJson(VIDEOS_API_URL, params);
-  const result = nullMap(videoIds);
-  if (!data) return result;
+  // 청크 전체 호출이 실패하면(네트워크 오류/쿼터 초과 등) 빈 객체를 반환한다.
+  if (!data) return {};
 
-  // 삭제/비공개 영상은 items에 아예 나오지 않는다. nullMap 기본값이 그대로 유지된다.
+  // 응답은 성공했지만 삭제/비공개라 items에 없는 영상은 확정적으로 결측(null)이다.
+  const result = nullMap(videoIds);
   for (const item of data.items ?? []) {
     result[item.id] = {
       categoryId: item.snippet?.categoryId ?? null,
@@ -96,9 +97,10 @@ async function fetchChannelChunk(channelIds, apiKey) {
     key: apiKey,
   });
   const data = await fetchJson(CHANNELS_API_URL, params);
-  const result = nullMap(channelIds);
-  if (!data) return result;
+  // videos.list와 동일한 이유로, 청크 전체 실패 시 빈 객체를 반환한다(위 fetchVideoChunk 주석 참고).
+  if (!data) return {};
 
+  const result = nullMap(channelIds);
   for (const item of data.items ?? []) {
     result[item.id] = {
       channelTitle: item.snippet?.title ?? null,
@@ -123,6 +125,8 @@ async function fetchChannelChunk(channelIds, apiKey) {
 }
 
 // videoId -> { categoryId, title, durationSeconds, viewCount, channelId, description } | null
+// (null = 확인 결과 존재하지 않는 영상). 청크 전체 호출이 실패한 videoId는 결과 맵에
+// 키 자체가 없다 — 호출부가 이 경우를 재시도 대상으로 구분해야 한다.
 async function fetchVideoMetadata(videoIds, apiKey) {
   const uniqueIds = [...new Set(videoIds)];
   const results = {};
@@ -133,6 +137,8 @@ async function fetchVideoMetadata(videoIds, apiKey) {
 }
 
 // channelId -> { channelTitle, subscriberCount, videoCount, topicCategories, keywords } | null
+// (null = 확인 결과 존재하지 않는 채널). 청크 전체 호출이 실패한 channelId는 결과 맵에
+// 키 자체가 없다 — 호출부가 이 경우를 재시도 대상으로 구분해야 한다.
 async function fetchChannelMetadata(channelIds, apiKey) {
   const uniqueIds = [...new Set(channelIds)];
   const results = {};
