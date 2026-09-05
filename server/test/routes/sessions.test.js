@@ -142,6 +142,7 @@ function basePayload(overrides = {}) {
     startTime: "2026-08-13T09:00:00+09:00",
     endTime: "2026-08-13T09:10:00+09:00",
     videoCount: 3,
+    videoIds: ["v1", "v2", "v3"],
     categoryDistribution: { 게임: 0.6, 뉴스: 0.4 },
     entropy: 0.97,
     ...overrides,
@@ -196,6 +197,7 @@ describe("POST /api/sessions", () => {
       sessionId: "s2",
       startTime: "2026-08-13T09:00:00+09:00",
       endTime: "2026-08-13T09:10:00+09:00",
+      videoIds: [],
     });
 
     const row = db

@@ -9,8 +9,7 @@ function basePayload(overrides = {}) {
     startTime: "2026-08-13T09:00:00+09:00",
     endTime: "2026-08-13T09:10:00+09:00",
     videoCount: 3,
-    categoryDistribution: { 게임: 0.6, 뉴스: 0.4 },
-    entropy: 0.97,
+    videoIds: ["v1", "v2", "v3"],
     totalMs: 1200,
     youtubeMs: 300,
     geminiMs: 850,
@@ -47,13 +46,14 @@ describe("validateSession — 잘못된 형태의 body", () => {
 });
 
 describe("validateSession — 필수 필드", () => {
-  it("최소 필수 필드(anonymousId/sessionId/startTime/endTime)만 있어도 통과한다", () => {
+  it("최소 필수 필드(anonymousId/sessionId/startTime/endTime/videoIds)만 있어도 통과한다", () => {
     expect(
       validateSession({
         anonymousId: "exp-user",
         sessionId: "s1",
         startTime: "2026-08-13T09:00:00+09:00",
         endTime: "2026-08-13T09:10:00+09:00",
+        videoIds: [],
       }),
     ).toBeNull();
   });
@@ -161,21 +161,7 @@ describe("validateSession — 날짜/숫자 형식", () => {
     });
   });
 
-  it("entropy가 0이면 통과한다(경계값)", () => {
-    expect(validateSession(basePayload({ entropy: 0 }))).toBeNull();
-  });
-
-  it.each([-0.01, NaN, Infinity, "0.5"])(
-    "entropy가 %p이면 거부한다",
-    (entropy) => {
-      expect(validateSession(basePayload({ entropy }))).toEqual({
-        code: ERROR_CODES.INVALID_FIELD_VALUE,
-        field: "entropy",
-      });
-    },
-  );
-
-  it.each(["totalMs", "youtubeMs", "geminiMs"])(
+  it.each(["totalMs", "geminiMs"])(
     "%s가 음수면 거부한다(지연시간 필드)",
     (field) => {
       expect(validateSession(basePayload({ [field]: -1 }))).toEqual({
@@ -185,12 +171,74 @@ describe("validateSession — 날짜/숫자 형식", () => {
     },
   );
 
-  it.each(["totalMs", "youtubeMs", "geminiMs"])(
+  it.each(["totalMs", "geminiMs"])(
     "%s가 null이면 허용한다(구버전 확장 하위호환)",
     (field) => {
       expect(validateSession(basePayload({ [field]: null }))).toBeNull();
     },
   );
+
+  it("youtubeMs는 더 이상 검증하지 않는다(categoryId 조회가 서버로 이관돼 서버가 직접 측정)", () => {
+    expect(validateSession(basePayload({ youtubeMs: -1 }))).toBeNull();
+  });
+});
+
+describe("validateSession — videoIds", () => {
+  it("videoIds가 없으면 MISSING_REQUIRED_FIELD로 거부한다", () => {
+    const payload = basePayload();
+    delete payload.videoIds;
+    expect(validateSession(payload)).toEqual({
+      code: ERROR_CODES.MISSING_REQUIRED_FIELD,
+      field: "videoIds",
+    });
+  });
+
+  it("videoIds가 배열이 아니면 MISSING_REQUIRED_FIELD로 거부한다", () => {
+    expect(validateSession(basePayload({ videoIds: "v1" }))).toEqual({
+      code: ERROR_CODES.MISSING_REQUIRED_FIELD,
+      field: "videoIds",
+    });
+  });
+
+  it("빈 배열이면 통과한다(시청 영상이 0개인 경계값)", () => {
+    expect(validateSession(basePayload({ videoIds: [] }))).toBeNull();
+  });
+
+  it("videoIds 안에 재시청으로 인한 중복이 있어도 통과한다", () => {
+    expect(
+      validateSession(basePayload({ videoIds: ["v1", "v1", "v2"] })),
+    ).toBeNull();
+  });
+
+  it.each([
+    { label: "숫자 원소", videoIds: [1, 2] },
+    { label: "null 원소", videoIds: [null] },
+    { label: "빈 문자열 원소", videoIds: [""] },
+    { label: "공백뿐인 문자열 원소", videoIds: [" "] },
+  ])(
+    "videoIds에 $label이 있으면 INVALID_FIELD_VALUE로 거부한다",
+    ({ videoIds }) => {
+      expect(validateSession(basePayload({ videoIds }))).toEqual({
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "videoIds",
+      });
+    },
+  );
+
+  // /api/sessions는 인증·rateLimiter가 없어, 개수 제한이 없으면
+  // 한 요청이 YouTube API를 수백 번 순차 호출하게 만들 수 있다(DoS/쿼터 낭비 벡터).
+  it("videoIds가 500개를 넘으면 INVALID_FIELD_VALUE로 거부한다", () => {
+    const videoIds = Array.from({ length: 501 }, (_, i) => `v${i}`);
+    expect(validateSession(basePayload({ videoIds }))).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "videoIds",
+    });
+  });
+
+  it("videoIds가 정확히 500개면 통과한다(경계값)", () => {
+    const videoIds = Array.from({ length: 500 }, (_, i) => `v${i}`);
+    expect(validateSession(basePayload({ videoIds }))).toBeNull();
+  });
 });
 
 describe("validateSession — LLM 폴백 로깅 분류값", () => {

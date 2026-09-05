@@ -1,6 +1,14 @@
 process.env.TZ = "Asia/Seoul";
 
-import { describe, it, expect, beforeEach, afterAll, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterAll,
+  afterEach,
+  vi,
+} from "vitest";
 import request from "supertest";
 import express from "express";
 import { createRequire } from "node:module";
@@ -55,8 +63,7 @@ function basePayload(overrides = {}) {
     startTime: "2026-08-13T09:00:00+09:00",
     endTime: "2026-08-13T09:10:00+09:00",
     videoCount: 2,
-    categoryDistribution: { 게임: 1 },
-    entropy: 0,
+    videoIds: ["v1", "v2"],
     ...overrides,
   };
 }
@@ -83,12 +90,16 @@ describe("실제 server/routes/sessions.js 라우터 배선", () => {
     expect(db.prepare("SELECT COUNT(*) AS c FROM sessions").get().c).toBe(0);
   });
 
-  it("POST /api/sessions — 중복 sessionId는 409 (unique 제약 에러 처리가 실제로 연결돼 있는지)", async () => {
-    await request(app).post("/api/sessions").send(basePayload());
+  it("POST /api/sessions — 중복 sessionId는 409이지만, 최초 요청 때 이미 저장된 categoryDistribution/entropy를 응답에 함께 돌려준다", async () => {
+    const first = await request(app).post("/api/sessions").send(basePayload());
     const res = await request(app).post("/api/sessions").send(basePayload());
 
     expect(res.status).toBe(409);
     expect(res.body.code).toBe("DUPLICATE_SESSION");
+    expect(res.body.data.categoryDistribution).toEqual(
+      first.body.data.categoryDistribution,
+    );
+    expect(res.body.data.entropy).toBe(first.body.data.entropy);
   });
 
   it("PATCH /api/sessions/:sessionId/feedback-viewed — 실제 파일에 라우트가 등록돼 응답한다", async () => {
@@ -123,14 +134,117 @@ describe("실제 server/routes/sessions.js 라우터 배선", () => {
   });
 });
 
+// YouTube API 실패로 categoryId를 확인 못 했을 때 {}·0(확정된 빈 값)
+// 대신 null(미확정)을 저장하고, 원인이 해소된 뒤 재시도(409 경로)에서 실제로 갱신되는지 검증
+describe("POST /api/sessions — categoryDistribution 미확정(null) 처리 및 재시도 갱신", () => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.YOUTUBE_API_KEY;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    process.env.YOUTUBE_API_KEY = originalApiKey;
+  });
+
+  it("YOUTUBE_API_KEY가 없으면 categoryDistribution/entropy를 {}·0이 아니라 null로 저장한다", async () => {
+    delete process.env.YOUTUBE_API_KEY;
+    global.fetch = vi.fn(); // ensureVideoMetadata가 apiKey 없어 no-op
+
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(basePayload({ sessionId: "null-analysis-s1" }));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.categoryDistribution).toBeNull();
+    expect(res.body.data.entropy).toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
+
+    const row = db
+      .prepare(
+        "SELECT categoryDistribution, entropy FROM sessions WHERE sessionId = ?",
+      )
+      .get("null-analysis-s1");
+    expect(row.categoryDistribution).toBeNull();
+    expect(row.entropy).toBeNull();
+  });
+
+  it("최초 시도가 미확정(null)으로 저장된 뒤, 재시도 시 API가 정상 응답하면 저장된 값을 갱신한다", async () => {
+    delete process.env.YOUTUBE_API_KEY;
+    const payload = basePayload({ sessionId: "heals-on-retry-s1" });
+
+    const first = await request(app).post("/api/sessions").send(payload);
+    expect(first.body.data.categoryDistribution).toBeNull();
+
+    // 원인(API 키 미설정)이 해소됐다고 가정. 정상 응답한다.
+    process.env.YOUTUBE_API_KEY = "now-configured";
+    global.fetch = vi.fn((url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/videos")) {
+        const ids = parsed.searchParams.get("id").split(",");
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: ids.map((id) => ({
+              id,
+              snippet: { categoryId: "20", title: id },
+            })),
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ items: [] }) });
+    });
+
+    const retry = await request(app).post("/api/sessions").send(payload);
+    expect(retry.status).toBe(409);
+    expect(retry.body.data.categoryDistribution).toEqual({ 게임: 1 });
+    expect(retry.body.data.entropy).toBe(0);
+
+    const row = db
+      .prepare(
+        "SELECT categoryDistribution, entropy FROM sessions WHERE sessionId = ?",
+      )
+      .get("heals-on-retry-s1");
+    expect(JSON.parse(row.categoryDistribution)).toEqual({ 게임: 1 });
+    expect(row.entropy).toBe(0);
+  });
+});
+
 // 세션 저장 직후 "오늘" 누적 리뷰를 서버가 직접 생성해 응답에 실어 보내는지(연구 무결성
 // 점검 항목 1 후속 조치) — 자격 없는 그룹/시기에는 리뷰 텍스트 자체가 응답에 없어야 한다.
 // TODAY_REVIEW_GEMINI_API_KEY를 설정하지 않았으므로 실제 Gemini 호출 없이 폴백만 사용된다.
 // basePayload()의 endTime은 고정 과거 날짜라 "오늘" 집계 대상이 되지 않으므로, 이 describe의
 // 테스트들은 endTime을 실행 시점의 실제 "지금"으로 덮어써야 한다.
+//
+// "오늘" 집계(aggregateTodayCumulative)는 categoryDistribution이 비어 있는 세션을 걸러낸다.
+// categoryDistribution은 이제 서버가 video_metadata를 통해 계산하므로(전면 이관), 이 describe
+// 안에서만 YOUTUBE_API_KEY와 global.fetch를 스텁해 v1/v2가 실제로 카테고리를 갖도록 만든다.
 describe("POST /api/sessions — 오늘 누적 리뷰 생성·자격 게이팅", () => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.YOUTUBE_API_KEY;
+
+  beforeEach(() => {
+    process.env.YOUTUBE_API_KEY = "wiring-test-key";
+    global.fetch = vi.fn((url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/videos")) {
+        const ids = parsed.searchParams.get("id").split(",");
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: ids.map((id) => ({
+              id,
+              snippet: { categoryId: "20", title: id },
+            })),
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ items: [] }) });
+    });
+  });
+
   afterEach(() => {
     db.exec("DELETE FROM participants");
+    global.fetch = originalFetch;
+    process.env.YOUTUBE_API_KEY = originalApiKey;
   });
 
   it("자격 있는 EXP(베이스라인 이후)는 응답에 오늘 리뷰가 실린다", async () => {

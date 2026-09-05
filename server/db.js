@@ -30,6 +30,26 @@ db.pragma("synchronous = NORMAL");
 db.pragma("foreign_keys = ON");
 
 function initializeDB() {
+  try {
+    execSchema();
+  } catch (err) {
+    // 이 저장소는 addColumn()으로 기존 DB를 소급 마이그레이션하는 대신, 스키마 변경마다
+    // DB 파일을 백업 후 삭제하고 재기동해 새로 만드는 것을 전제로 한다. 그 사전 절차를 잊고 예전
+    // 스키마 그대로인 DB 위에 새 코드를 올리면 "no such column" 같은 낯선 에러로 여기서
+    // 죽는다 — 원인과 해야 할 일을 바로 알 수 있도록 메시지를 덧붙여 다시 던진다.
+    if (/no such column|no such table/i.test(err.message)) {
+      throw new Error(
+        `DB 스키마 초기화 실패(${err.message}). 기존 DB 파일이 최신 스키마와 맞지 않을 ` +
+          `수 있다 — 배포 전 서버의 server/youtube_bias.db(+.db-wal/.db-shm)를 ` +
+          `node server/scripts/backup-db.js로 백업한 뒤 삭제하고 재기동할 것.`,
+        { cause: err },
+      );
+    }
+    throw err;
+  }
+}
+
+function execSchema() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,8 +103,6 @@ function initializeDB() {
       createdAt       TEXT    DEFAULT (datetime('now'))
     );
 
-    -- entryHost/entryPath/referrerType/relatedTrigger는 addColumn 없이 여기(CREATE TABLE)에만 반영돼 있다.
-    -- 먼저 백업한 뒤 삭제하고(server/scripts/backup-db.js), 재기동으로 새 스키마가 생성되게 할 것.
     CREATE TABLE IF NOT EXISTS video_events (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
       eventId     TEXT,     -- 영상 기록 1건당 1회 발급하는 멱등 키 (재전송 중복 방지). UNIQUE는 별도 인덱스로 아래에서 건다
@@ -106,6 +124,47 @@ function initializeDB() {
       createdAt   TEXT    DEFAULT (datetime('now'))
     );
 
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_video_events_eventId ON video_events(eventId);
+
+    -- YouTube 영상·채널 메타데이터 캐시
+    --
+    -- video_events.videoId -> video_metadata.videoId 는 DB 레벨 FK가 없다. video_events는
+    -- 최초 CREATE TABLE(위)에서 이미 FK 없이 만들어진 기존 컬럼이라, addColumn() 패턴으로는
+    -- 여기에 FK를 소급 적용할 수 없다(SQLite는 테이블 재생성 없이 기존 컬럼에 제약을 추가하는
+    -- 방법을 제공하지 않는다). video_events.sessionId에 FK를 걸지 않기로 한 선례와 같은 이유로,
+    -- 이 참조는 애플리케이션 코드에서 삽입 순서(video_metadata 확인·삽입 -> video_events 삽입)만
+    -- 보장하는 느슨한 참조로 둔다.
+    --
+    -- 반면 channel_metadata/video_metadata는 이번에 함께 신설되는 테이블이라 소급 적용 제약이
+    -- 없으므로, video_metadata.channelId -> channel_metadata.channelId는 실제 FK로 강제한다.
+    -- FK 참조 대상은 참조하는 쪽보다 먼저 생성돼야 하므로 channel_metadata를 먼저 정의한다.
+    CREATE TABLE IF NOT EXISTS channel_metadata (
+      channelId       TEXT PRIMARY KEY,
+      channelTitle    TEXT,
+      subscriberCount INTEGER,
+      videoCount      INTEGER,
+      -- 정렬 정규화 적용한 JSON 배열 문자열
+      topicCategories TEXT,
+      -- 원문 보관 전용 — tags와 동일 계열 위험(결측·SEO 나열)으로 실시간 기능(LLM 프롬프트 등)에는 미반영
+      keywords        TEXT,
+      createdAt       TEXT    DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS video_metadata (
+      videoId         TEXT PRIMARY KEY,
+      categoryId      TEXT,
+      title           TEXT,
+      -- 영상 총 길이(초). 쇼츠(<=60초) 여부 이진 판별 용도로만 사용
+      durationSeconds INTEGER,
+      -- 최초 수집 시점 스냅샷(시계열 갱신 없음) — "시청 당시 노출된 맥락"이 분석 대상이므로 고정.
+      viewCount       INTEGER,
+      channelId       TEXT,
+      -- 원문 보관 전용 — 장르별 가치 편차가 커 실시간 기능(LLM 프롬프트 등)에는 미반영
+      description     TEXT,
+      createdAt       TEXT    DEFAULT (datetime('now')),
+      FOREIGN KEY (channelId) REFERENCES channel_metadata(channelId)
+    );
+
     CREATE TABLE IF NOT EXISTS issued_codes (
       code       TEXT PRIMARY KEY,
       group_code TEXT NOT NULL,
@@ -124,6 +183,8 @@ function initializeDB() {
       openedAt       TEXT,     -- 팝업 오픈 시각 (engagement 최근성 분석용)
       createdAt      TEXT    DEFAULT (datetime('now'))
     );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_popup_events_eventId ON popup_events(eventId);
 
     -- 기간(일차·주차) 단위 리뷰 — 완료된 기간 전체를 요약하는 서버 배치(cron)
     -- 생성 리뷰. sessions/video_events를 그때그때 집계해 만들며, 세션 리뷰(sessions.review)와는
@@ -180,36 +241,6 @@ function initializeDB() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_today_reviews_participant_date
       ON today_reviews(anonymousId, reviewDate);
   `);
-
-  // 이미 만들어진 DB 파일(로컬 개발용·이미 배포된 서버)에는 CREATE TABLE IF NOT EXISTS가
-  // no-op이라 새 컬럼이 반영되지 않는다 — Story 10-6에서 처음 이 문제가 실제로 발생해(로컬
-  // 서버 기동 시 "no column named feedbackNotifiedAt" 에러 재현 확인) addColumn 패턴을 도입
-  addColumn("sessions", "feedbackNotifiedAt", "TEXT");
-  addColumn("sessions", "feedbackViewedAt", "TEXT");
-  addColumn("sessions", "feedbackConfirmedAt", "TEXT");
-  addColumn("sessions", "review", "TEXT");
-  addColumn("sessions", "reviewTopic", "TEXT");
-  addColumn("sessions", "source", "TEXT");
-  addColumn("sessions", "promptVersion", "TEXT");
-  addColumn("participants", "studyEndModalShownAt", "TEXT");
-  addColumn("participants", "studyEndReviewViewedAt", "TEXT");
-  addColumn("participants", "studyEndCodeVerifiedAt", "TEXT");
-  addColumn("video_events", "sessionId", "TEXT");
-
-  // popup_events.eventId도 같은 이유로 addColumn 필요. UNIQUE는 ALTER TABLE ADD COLUMN이
-  // 만들 수 없으므로(SQLite 제약) 컬럼 추가 후 별도 유니크 인덱스로 건다 — 신규/기존 DB 모두
-  // IF NOT EXISTS라 안전하게 반복 실행된다.
-  addColumn("popup_events", "eventId", "TEXT");
-  db.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_popup_events_eventId ON popup_events(eventId)",
-  );
-
-  // video_events.eventId
-  // 확장 프로그램의 재시도 큐 같은 영상 기록을 다시 보낼 수 있어 popup_events와 동일한 멱등 키 패턴을 적용한다.
-  addColumn("video_events", "eventId", "TEXT");
-  db.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_video_events_eventId ON video_events(eventId)",
-  );
 }
 
 // 이미 컬럼이 있으면(신규 DB) 조용히 넘어가고, 없으면(기존 DB) 추가한다.

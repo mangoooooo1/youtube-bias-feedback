@@ -3,7 +3,7 @@
 const { ERROR_CODES } = require("../middleware/responseHandler");
 
 //  지연시간 필드: 확장이 측정해 전송. 선택 항목이며, 있으면 음수 아닌 정수여야 한다.
-const LATENCY_FIELDS = ["totalMs", "youtubeMs", "geminiMs"];
+const LATENCY_FIELDS = ["totalMs", "geminiMs"];
 
 //  LLM 폴백 로깅:  확장의 실패 분류값
 const LLM_STATUSES = ["success", "fallback"];
@@ -19,12 +19,15 @@ const FAILURE_REASONS = [
 // 피드백 텍스트 출처: llm.js generateReview/generateFallbackReview의 source와 1:1 대응
 const SOURCES = ["llm", "fallback"];
 
+// videoIds 개수 상한
+const MAX_VIDEO_IDS = 500;
+
 function validateSession(body) {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "body" };
   }
 
-  const { startTime, endTime, videoCount, entropy } = body;
+  const { startTime, endTime, videoCount, videoIds } = body;
 
   // 문자열 타입까지 요구
   // 빈 문자열은 허용하지 않는다. (빈 문자열은 Date.parse에서 NaN으로 처리됨)
@@ -54,11 +57,16 @@ function validateSession(body) {
   ) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "videoCount" };
   }
-  if (
-    entropy !== undefined &&
-    (typeof entropy !== "number" || !Number.isFinite(entropy) || entropy < 0)
-  ) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "entropy" };
+  // categoryId 조회·entropy 계산은 서버가 직접 하므로, 클라이언트는 entropy/categoryDistribution 대신
+  // 이 세션에서 시청한 videoId 목록만 보낸다.
+  if (!Array.isArray(videoIds)) {
+    return { code: ERROR_CODES.MISSING_REQUIRED_FIELD, field: "videoIds" };
+  }
+  if (videoIds.length > MAX_VIDEO_IDS) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "videoIds" };
+  }
+  if (videoIds.some((id) => typeof id !== "string" || id.trim() === "")) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "videoIds" };
   }
   for (const field of LATENCY_FIELDS) {
     const value = body[field];
