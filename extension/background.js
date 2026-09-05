@@ -203,13 +203,17 @@ async function syncSessionToServer(session, metrics = {}) {
 
   // 이전 시도가 서버엔 이미 저장됐지만(중복 세션 오류) 그 응답만 못 받아 실패로 남았던 경우이다.
   // 다시 보낼 필요는 없으니 재시도 대상에서만 제외한다. 서버가 409 응답에
-  // 이미 저장된 categoryDistribution/entropy를 함께 실어 보내주므로, 이번에도 로컬
-  // 카테고리 그래프를 채울 수 있다.
+  // 이미 저장된 categoryDistribution/entropy를 함께 실어 보내주므로, 이번에도 로컬 카테고리 그래프를 채울 수 있다.
+  //
+  // categoryDistribution이 null이면 syncedToServer를 true로 확정하지 않는다.
+  // {}·0처럼 확정값으로 저장해두면 원인이 나중에 풀려도 다시 채울 방법이 없기 때문이다.
+  // false로 남겨두면 다음 알람 틱마다 retryUnsyncedSessions가 계속 재시도하다가, 서버가 실제로
+  // 분석을 끝내는 순간 자연스럽게 채워지고 그때 동기화 완료로 표시된다.
   if (postResult?.duplicate) {
     await saveAnalysis(session.sessionId, {
       categoryDistribution: postResult.categoryDistribution,
       entropy: postResult.entropy,
-      syncedToServer: true,
+      syncedToServer: postResult.categoryDistribution !== null,
     });
     return;
   }
@@ -220,7 +224,7 @@ async function syncSessionToServer(session, metrics = {}) {
   await saveAnalysis(session.sessionId, {
     categoryDistribution: postResult.categoryDistribution,
     entropy: postResult.entropy,
-    syncedToServer: true,
+    syncedToServer: postResult.categoryDistribution !== null,
   });
 
   const todayReview = postResult?.todayReview ?? null;

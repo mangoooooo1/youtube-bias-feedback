@@ -8,6 +8,7 @@ const { isTodayReviewEligible } = require("./today-reviews-query");
 const {
   ensureVideoMetadata,
   getCategoryIdsForVideos,
+  findMissingVideoIds,
 } = require("./video-metadata-store");
 const {
   calculateDistribution,
@@ -33,9 +34,20 @@ router.post("/", async (req, res, next) => {
   const { videoIds } = req.body;
   const youtubeStart = Date.now();
   await ensureVideoMetadata(db, videoIds, process.env.YOUTUBE_API_KEY);
-  const categoryIds = getCategoryIdsForVideos(db, videoIds);
-  const categoryDistribution = calculateDistribution(categoryIds);
-  const entropy = calculateEntropy(categoryDistribution);
+  // YOUTUBE_API_KEY 미설정·일시적 API 장애 등으로 일부 videoId가 끝내 캐시되지
+  // 못했으면(ensureVideoMetadata가 건너뛰었거나 청크 전체가 실패한 경우), 이 시점엔
+  // 다양성을 확정하지 않는다. {}·0으로 저장해버리면 "확인해봤더니 카테고리가 없음"과
+  // "확인 자체를 못함"이 구분되지 않고, insertSession은 UPSERT가 아니라서 원인이
+  // 나중에 해소돼도 갱신할 방법이 없어 잘못된 값이 영구히 남는다.
+  const unresolvedVideoIds = findMissingVideoIds(db, videoIds);
+  const categoryDistribution =
+    unresolvedVideoIds.length === 0
+      ? calculateDistribution(getCategoryIdsForVideos(db, videoIds))
+      : null;
+  const entropy =
+    categoryDistribution !== null
+      ? calculateEntropy(categoryDistribution)
+      : null;
   // youtubeMs는 더 이상 클라이언트가 측정해 보내지 않는다.
   const youtubeMs = Date.now() - youtubeStart;
 
@@ -57,20 +69,40 @@ router.post("/", async (req, res, next) => {
           "SELECT categoryDistribution, entropy FROM sessions WHERE sessionId = ?",
         )
         .get(req.body.sessionId);
+      const existingDistribution = existing?.categoryDistribution
+        ? JSON.parse(existing.categoryDistribution)
+        : null;
+
+      // 이번 재시도에서 새로 계산이 완료됐는데(categoryDistribution !== null) 기존
+      // 저장값은 아직 미확정(null)이었다면, 최초 실패 원인이 해소된 것이므로 지금
+      // 갱신한다. insertSession이 못 하는 갱신을 여기서 대신 한다.
+      if (categoryDistribution !== null && existingDistribution === null) {
+        db.prepare(
+          "UPDATE sessions SET categoryDistribution = ?, entropy = ? WHERE sessionId = ?",
+        ).run(
+          JSON.stringify(categoryDistribution),
+          entropy,
+          req.body.sessionId,
+        );
+      }
+
+      const responseDistribution =
+        categoryDistribution !== null
+          ? categoryDistribution
+          : existingDistribution;
+      const responseEntropy =
+        categoryDistribution !== null ? entropy : (existing?.entropy ?? null);
+
       return res.status(409).json({
         success: false,
         message: "이미 존재하는 세션입니다.",
         code: ERROR_CODES.DUPLICATE_SESSION,
         detail:
           process.env.NODE_ENV === "production" ? null : req.body.sessionId,
-        data: existing
-          ? {
-              categoryDistribution: existing.categoryDistribution
-                ? JSON.parse(existing.categoryDistribution)
-                : null,
-              entropy: existing.entropy,
-            }
-          : null,
+        data: {
+          categoryDistribution: responseDistribution,
+          entropy: responseEntropy,
+        },
       });
     }
     return next(err);

@@ -134,6 +134,80 @@ describe("실제 server/routes/sessions.js 라우터 배선", () => {
   });
 });
 
+// YouTube API 실패로 categoryId를 확인 못 했을 때 {}·0(확정된 빈 값)
+// 대신 null(미확정)을 저장하고, 원인이 해소된 뒤 재시도(409 경로)에서 실제로 갱신되는지 검증
+describe("POST /api/sessions — categoryDistribution 미확정(null) 처리 및 재시도 갱신", () => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.YOUTUBE_API_KEY;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    process.env.YOUTUBE_API_KEY = originalApiKey;
+  });
+
+  it("YOUTUBE_API_KEY가 없으면 categoryDistribution/entropy를 {}·0이 아니라 null로 저장한다", async () => {
+    delete process.env.YOUTUBE_API_KEY;
+    global.fetch = vi.fn(); // ensureVideoMetadata가 apiKey 없어 no-op
+
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(basePayload({ sessionId: "null-analysis-s1" }));
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.categoryDistribution).toBeNull();
+    expect(res.body.data.entropy).toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
+
+    const row = db
+      .prepare(
+        "SELECT categoryDistribution, entropy FROM sessions WHERE sessionId = ?",
+      )
+      .get("null-analysis-s1");
+    expect(row.categoryDistribution).toBeNull();
+    expect(row.entropy).toBeNull();
+  });
+
+  it("최초 시도가 미확정(null)으로 저장된 뒤, 재시도 시 API가 정상 응답하면 저장된 값을 갱신한다", async () => {
+    delete process.env.YOUTUBE_API_KEY;
+    const payload = basePayload({ sessionId: "heals-on-retry-s1" });
+
+    const first = await request(app).post("/api/sessions").send(payload);
+    expect(first.body.data.categoryDistribution).toBeNull();
+
+    // 원인(API 키 미설정)이 해소됐다고 가정. 정상 응답한다.
+    process.env.YOUTUBE_API_KEY = "now-configured";
+    global.fetch = vi.fn((url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/videos")) {
+        const ids = parsed.searchParams.get("id").split(",");
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: ids.map((id) => ({
+              id,
+              snippet: { categoryId: "20", title: id },
+            })),
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ items: [] }) });
+    });
+
+    const retry = await request(app).post("/api/sessions").send(payload);
+    expect(retry.status).toBe(409);
+    expect(retry.body.data.categoryDistribution).toEqual({ 게임: 1 });
+    expect(retry.body.data.entropy).toBe(0);
+
+    const row = db
+      .prepare(
+        "SELECT categoryDistribution, entropy FROM sessions WHERE sessionId = ?",
+      )
+      .get("heals-on-retry-s1");
+    expect(JSON.parse(row.categoryDistribution)).toEqual({ 게임: 1 });
+    expect(row.entropy).toBe(0);
+  });
+});
+
 // 세션 저장 직후 "오늘" 누적 리뷰를 서버가 직접 생성해 응답에 실어 보내는지(연구 무결성
 // 점검 항목 1 후속 조치) — 자격 없는 그룹/시기에는 리뷰 텍스트 자체가 응답에 없어야 한다.
 // TODAY_REVIEW_GEMINI_API_KEY를 설정하지 않았으므로 실제 Gemini 호출 없이 폴백만 사용된다.

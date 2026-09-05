@@ -280,6 +280,46 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
     // 팝업엔 실제 리뷰 없이 "생성 중" 상태만 보이는 불일치가 생긴다.
     expect(global.chrome.notifications.create).not.toHaveBeenCalled();
   });
+
+  // 서버가 200을 반환해도 YouTube API 실패 등으로 categoryDistribution을
+  // 아직 확정 못 했으면(null) syncedToServer를 true로 확정하지 않는다. {}·0처럼 확정값으로
+  // 저장해버리면 원인이 나중에 풀려도 다시 채울 방법이 없기 때문이다.
+  it("서버가 200을 반환해도 categoryDistribution이 null(분석 미완료)이면 동기화 완료로 확정하지 않는다", async () => {
+    global.chrome = createChromeMock();
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: { categoryDistribution: null, entropy: null, todayReview: null },
+      }),
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
+          endTime: FIXED_NOW.toISOString(),
+          videos: [{ videoId: "v1", title: "노래 모음" }],
+        },
+      ],
+    });
+
+    const analyzeSession = await loadAnalyzeSession();
+    await analyzeSession({
+      sessionId: "s1",
+      videos: [{ videoId: "v1", title: "노래 모음" }],
+    });
+
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    const saved = sessions.find((s) => s.sessionId === "s1");
+    expect(saved.categoryDistribution).toBeNull();
+    // 요청 자체는 성공했지만(200) 분석이 미완료라 재시도 큐가 계속 집어가야 한다.
+    expect(saved.syncedToServer).toBe(false);
+  });
 });
 
 // 서버 장애 대비 로컬 큐잉/재시도 로직 (데이터 유실 방지).
@@ -489,6 +529,8 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
             json: async () => ({
               success: true,
               data: {
+                categoryDistribution: { 음악: 1 },
+                entropy: 0,
                 todayReview: {
                   reviewDate: "2026-01-10",
                   review: "오늘은 음악 영상 위주로 보셨네요.",
@@ -500,7 +542,17 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
             }),
           };
         }
-        return { ok: false, status: 409, text: async () => "duplicate" };
+        // 실제 서버는 409에도 이미 저장된 categoryDistribution/entropy를 본문에 함께
+        // 돌려준다(승자 요청이 방금 계산해 저장한 값과 같다) — 빈 문자열이 아니다.
+        return {
+          ok: false,
+          status: 409,
+          text: async () =>
+            JSON.stringify({
+              success: false,
+              data: { categoryDistribution: { 음악: 1 }, entropy: 0 },
+            }),
+        };
       }
       throw new Error(`예상치 못한 fetch 호출: ${href}`);
     });
