@@ -99,6 +99,12 @@ function _popupHeader(groupCfg, day, { participantCode, studyEnded } = {}) {
   </div>`;
 }
 
+/**
+ * 상단 탭 바(하루/기간별)를 그린다. 밑줄은 버튼이 각자 켜고 끄지 않고 공유 인디케이터
+ * 하나(#vl-tab-indicator)가 움직이며, 실제 슬라이딩 애니메이션은 _switchTab에서 처리한다.
+ * @param {string} activeTab - 현재 활성 탭 id
+ * @param {boolean} [needsConfirmNudge] - true면 "오늘" 탭에 미확인 피드백 점을 표시
+ */
 function _tabs(activeTab, needsConfirmNudge = false) {
   const list = [
     { id: "today", label: "하루 돌아보기" },
@@ -112,18 +118,31 @@ function _tabs(activeTab, needsConfirmNudge = false) {
             : "기간별 돌아보기",
     },
   ];
-  return `<div style="display:flex;gap:4px;padding:10px 16px 0;background:var(--vl-card)">
+  const activeIndex = Math.max(
+    0,
+    list.findIndex((t) => t.id === activeTab),
+  );
+  // 트랙(#vl-tab-indicator 감싸는 div)은 버튼과 같은 좌우 16px 안쪽 영역에 맞춰야
+  // 하므로 부모 padding(16px)만큼 인셋한다. 너비/이동 거리도 버튼 사이 4px gap을
+  // 포함해 계산해야 트랙이 버튼 폭보다 넓어지거나 위치가 밀리지 않는다.
+  const TAB_GAP = 4;
+  const totalGapPx = (list.length - 1) * TAB_GAP;
+  const indicatorWidth = `calc((100% - ${totalGapPx}px) / ${list.length})`;
+  const indicatorTranslate = `calc(${activeIndex} * 100% + ${activeIndex * TAB_GAP}px)`;
+  return `<div style="position:relative;display:flex;gap:${TAB_GAP}px;padding:10px 16px 0;background:var(--vl-card)">
     ${list
       .map((t) => {
         const on = t.id === activeTab;
-        // 오늘 탭에 미확인 피드백이 있는데 지금 다른 탭을 보고 있으면 살짝 깜빡이는 점으로 알린다.
         const nudge =
           t.id === "today" && !on && needsConfirmNudge
             ? `<span style="display:inline-block;width:6px;height:6px;margin-left:5px;border-radius:50%;background:var(--vl-accent);vertical-align:middle;animation:vlBlink 1.4s ease-in-out infinite"></span>`
             : "";
-        return `<button data-tab="${t.id}" class="vl-press" style="flex:1;padding:9px 6px 11px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-3);font-weight:700;color:${on ? "var(--vl-accent)" : "var(--vl-ink-3)"};border-bottom:2px solid ${on ? "var(--vl-accent)" : "transparent"};transition:color .15s,transform .1s ease,filter .15s ease">${t.label}${nudge}</button>`;
+        return `<button data-tab="${t.id}" class="vl-press" style="flex:1;padding:9px 6px 11px;border:none;border-bottom:2px solid transparent;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-3);font-weight:700;color:${on ? "var(--vl-accent)" : "var(--vl-ink-3)"};transition:color .15s,transform .1s ease,filter .15s ease">${t.label}${nudge}</button>`;
       })
       .join("")}
+    <div style="position:absolute;left:16px;right:16px;bottom:0;height:2px;pointer-events:none">
+      <div id="vl-tab-indicator" style="width:${indicatorWidth};height:100%;background:var(--vl-accent);border-radius:2px;transform:translateX(${indicatorTranslate})"></div>
+    </div>
   </div>`;
 }
 
@@ -212,6 +231,35 @@ class ViewLensPopup {
     );
   }
 
+  /**
+   * 탭을 전환한다. render()가 매번 DOM을 통째로 새로 그려 CSS transition이 재생되지
+   * 않으므로, FLIP 기법으로 직접 애니메이션한다: 이전 인디케이터 위치를 잰 뒤 새로
+   * 렌더된 인디케이터를 그 위치로 순간이동시키고, 다음 프레임에 실제 위치로 되돌린다.
+   * @param {string} tabId - 전환할 탭 id
+   */
+  _switchTab(tabId) {
+    const oldIndicator = this.container.querySelector("#vl-tab-indicator");
+    const oldRect = oldIndicator ? oldIndicator.getBoundingClientRect() : null;
+
+    this._tab = tabId;
+    this.render();
+
+    const newIndicator = this.container.querySelector("#vl-tab-indicator");
+    if (!oldRect || !newIndicator) return;
+    const newRect = newIndicator.getBoundingClientRect();
+    const deltaX = oldRect.left - newRect.left;
+    if (Math.abs(deltaX) < 0.5) return;
+
+    const finalTransform = newIndicator.style.transform;
+    newIndicator.style.transition = "none";
+    newIndicator.style.transform = `${finalTransform} translateX(${deltaX}px)`;
+    void newIndicator.offsetWidth;
+    requestAnimationFrame(() => {
+      newIndicator.style.transition = "transform .25s cubic-bezier(.3,.8,.4,1)";
+      newIndicator.style.transform = finalTransform;
+    });
+  }
+
   render() {
     if (!this._onboarded || !this._group) {
       this._renderOnboarding();
@@ -294,6 +342,56 @@ class ViewLensPopup {
     </div>`;
 
     this._bind(groupCfg, currentWeek);
+    this._animateCharts();
+  }
+
+  /**
+   * 도넛·스택 바·추이선 등, render()마다 새로 마운트돼 transition이 저절로 재생되지
+   * 않는 차트들을 한 번에 트리거한다(더블 rAF로 다음 프레임에 목표 상태로 바꿈).
+   * 도넛 가운데 퍼센트 카운트업도 같은 타이밍에 함께 진행한다.
+   */
+  _animateCharts() {
+    const segs = this.container.querySelectorAll(".vl-donut-seg");
+    const catRows = this.container.querySelectorAll(".vl-cat-row");
+    const stackSegs = this.container.querySelectorAll(".vl-stack-seg");
+    const trendLineMask = this.container.querySelector(".vl-trend-line-mask");
+    if (
+      segs.length > 0 ||
+      catRows.length > 0 ||
+      stackSegs.length > 0 ||
+      trendLineMask
+    ) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          segs.forEach((el) => {
+            el.setAttribute("stroke-dasharray", el.dataset.finalDash);
+          });
+          catRows.forEach((el) => {
+            el.style.opacity = "1";
+            el.style.transform = "translateX(0)";
+          });
+          stackSegs.forEach((el) => {
+            el.style.transform = "scaleX(1)";
+          });
+          if (trendLineMask) {
+            trendLineMask.style.strokeDashoffset = "0";
+          }
+        });
+      });
+    }
+    const countEl = this.container.querySelector(".vl-donut-count");
+    if (countEl) {
+      const target = Number(countEl.dataset.target || 0);
+      const duration = 900; // vlDonut()의 drawMs(링 스윕 총 재생 시간)와 맞춘다
+      const start = performance.now();
+      const step = (now) => {
+        const t = Math.min(1, (now - start) / duration);
+        const eased = 1 - Math.pow(1 - t, 3);
+        countEl.textContent = `${Math.round(target * eased)}%`;
+        if (t < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }
   }
 
   _renderOnboarding() {
@@ -312,6 +410,35 @@ class ViewLensPopup {
   }
 
   _bind(groupCfg, currentWeek) {
+    // 영상 목록 페이지네이션(10개 초과 시만 렌더) — 카드가 여러 개 뜰 수 있어 전부 순회.
+    this.container.querySelectorAll(".vl-vid-pager").forEach((pager) => {
+      const scroller = pager.querySelector(".vl-vid-scroll");
+      const label = pager.querySelector(".vl-vid-page-label");
+      const prevBtn = pager.querySelector(".vl-vid-prev");
+      const nextBtn = pager.querySelector(".vl-vid-next");
+      const total = Number(pager.dataset.pages || 1);
+      if (!scroller || !label || !prevBtn || !nextBtn) return;
+      const updateLabel = () => {
+        const width = scroller.clientWidth || 1;
+        const page = Math.min(
+          total,
+          Math.max(1, Math.round(scroller.scrollLeft / width) + 1),
+        );
+        label.textContent = `${page}/${total}`;
+      };
+      let scrollTimer = null;
+      scroller.addEventListener("scroll", () => {
+        clearTimeout(scrollTimer);
+        scrollTimer = setTimeout(updateLabel, 80);
+      });
+      prevBtn.addEventListener("click", () => {
+        scroller.scrollBy({ left: -scroller.clientWidth, behavior: "smooth" });
+      });
+      nextBtn.addEventListener("click", () => {
+        scroller.scrollBy({ left: scroller.clientWidth, behavior: "smooth" });
+      });
+    });
+
     // Tabs
     if (
       this._isFeedbackActive(groupCfg) ||
@@ -319,8 +446,7 @@ class ViewLensPopup {
     ) {
       this.container.querySelectorAll("[data-tab]").forEach((btn) => {
         btn.addEventListener("click", () => {
-          this._tab = btn.dataset.tab;
-          this.render();
+          this._switchTab(btn.dataset.tab);
         });
       });
     }
