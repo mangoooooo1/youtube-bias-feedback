@@ -739,7 +739,11 @@ async function validateStudyEndCode(code) {
 window.validateStudyEndCode = validateStudyEndCode;
 
 // ── 팝업 상호작용 마이크로 로그 ────────────────────────────────────────
-// 수집: openedAt, dwellMs, tabTodayClicks, tabWeekClicks, feedbackViewed.
+// 수집: openedAt, dwellMs, tabTodayClicks, tabWeekClicks, todayFeedbackViewed, periodFeedbackViewed.
+// todayFeedbackViewed: "오늘" 카드는 블러로 가려져 있다가 "피드백 확인하기" 클릭으로만 해제된 클릭 시점
+// periodFeedbackViewed: "주차별" 탭은 블러가 없어 탭을 여는 순간 내용이 바로 보이지만, 클릭 직후
+// 바로 다른 곳으로 이동하는 경우까지 열람으로 세지 않도록 PERIOD_FEEDBACK_VIEW_THRESHOLD_MS만큼
+// 탭에 머물렀을 때만 확정한다(아래 setInterval).
 // 전송 경로 1(기본)
 // 팝업 close 시점의 fetch는 teardown에 끊길 수 있어 신뢰하지 않는다.
 // 대신 세션 중 livePopupEvent 슬롯을 상호작용·1초 간격으로 계속 갱신해 최신 스냅샷을 남기고,
@@ -833,6 +837,9 @@ async function handleFeedbackConfirmClick(popup, sessionId) {
   postFeedbackConfirmed(sessionId);
 }
 
+// 주차별 탭에 머문 시간이 이 값 이상이어야 periodFeedbackViewed를 확정
+const PERIOD_FEEDBACK_VIEW_THRESHOLD_MS = 2000;
+
 function buildPopupEventPayload(m) {
   return {
     eventId: m.eventId,
@@ -840,7 +847,8 @@ function buildPopupEventPayload(m) {
     dwellMs: Math.max(0, Date.now() - m.startTs),
     tabTodayClicks: m.tabTodayClicks,
     tabWeekClicks: m.tabWeekClicks,
-    feedbackViewed: m.feedbackViewed,
+    todayFeedbackViewed: m.todayFeedbackViewed,
+    periodFeedbackViewed: m.periodFeedbackViewed,
     openedAt: m.openedAt,
   };
 }
@@ -1175,9 +1183,16 @@ async function boot() {
       startTs: Date.now(),
       tabTodayClicks: 0,
       tabWeekClicks: 0,
-      // EXP 사용자가 열자마자 실제 리뷰를 보고 있으면 개입 전달로 간주
-      feedbackViewed:
-        feedbackActive && isRealReview(VL._todayCumulative.review) ? 1 : 0,
+      // 열자마자 이미 확인된(블러 없는) 실제 리뷰가 보이고 있으면 그 자체로 열람.
+      // 블러가 남아있는 경우엔 여기서 0으로 두고, "피드백 확인하기" 클릭 시점에 1로 갱신한다.
+      todayFeedbackViewed:
+        feedbackActive &&
+        isRealReview(VL._todayCumulative.review) &&
+        !VL._todayCumulative.locked
+          ? 1
+          : 0,
+      periodFeedbackViewed: 0,
+      periodTabMs: 0,
     };
     persistLivePopupEvent(popupMetrics);
 
@@ -1190,7 +1205,8 @@ async function boot() {
           popupMetrics.tabTodayClicks++;
         } else if (tabBtn.dataset.tab === "feedback") {
           popupMetrics.tabWeekClicks++;
-          popupMetrics.feedbackViewed = 1; // 주차별 피드백 탭 열람 = 개입 전달
+          // periodFeedbackViewed는 여기서 바로 세우지 않는다.
+          // 실제 열람 판정은 아래 setInterval이 체류시간으로 확정한다.
         }
         persistLivePopupEvent(popupMetrics);
         return;
@@ -1199,6 +1215,8 @@ async function boot() {
       const confirmBtn =
         e.target.closest && e.target.closest("#vl-feedback-confirm-btn");
       if (confirmBtn) {
+        popupMetrics.todayFeedbackViewed = 1;
+        persistLivePopupEvent(popupMetrics);
         handleFeedbackConfirmClick(popup, confirmBtn.dataset.sessionId);
         return;
       }
@@ -1323,8 +1341,18 @@ async function boot() {
   setInterval(() => {
     VL._lastWatchedAt = localLastWatchedAt;
 
-    // dwellMs 스냅샷 갱신. close write가 잘려도 최근값(±1초)이 보존됨
-    if (popupMetrics) persistLivePopupEvent(popupMetrics);
+    if (popupMetrics) {
+      // 주차별 탭에 머문 누적 시간이 임계값을 넘어야만 실제 열람으로 확정
+      // 탭을 열자마자 바로 다른 곳으로 이동한 경우(오클릭 등)를 걸러내기 위함.
+      if (popup._tab === "feedback" && !popupMetrics.periodFeedbackViewed) {
+        popupMetrics.periodTabMs += 1000;
+        if (popupMetrics.periodTabMs >= PERIOD_FEEDBACK_VIEW_THRESHOLD_MS) {
+          popupMetrics.periodFeedbackViewed = 1;
+        }
+      }
+      // dwellMs 스냅샷 갱신. close write가 잘려도 최근값(±1초)이 보존됨
+      persistLivePopupEvent(popupMetrics);
+    }
 
     const count = localCurrentSession?.videoCount ?? 0;
     const timerText = _computeTimerText(localLastWatchedAt);
