@@ -114,8 +114,12 @@ function topKey(sess) {
   return top ? toVlKey(top[0]) : "etc";
 }
 
-// 영상별 실제 카테고리는 로컬에 저장돼 있지 않아서(세션 단위 categoryDistribution만 있음),
-// 목록에 표시하는 카테고리는 그 영상이 속한 세션의 대표 카테고리(topKey)로 근사한다.
+/**
+ * 세션들의 영상을 하나의 목록으로 펼친다. 영상별 실제 카테고리는 로컬에 없어서
+ * (세션 단위 categoryDistribution만 있음) 그 세션의 대표 카테고리(topKey)로 근사한다.
+ * @param {Array<object>} sessions - 대상 세션 목록
+ * @returns {Array<{title: string, cat: string, videoId: (string|null)}>}
+ */
 function listSessionVideos(sessions) {
   return sessions.flatMap((sess) => {
     const cat = topKey(sess);
@@ -190,16 +194,7 @@ function buildDataForDate(allSessions, targetDate) {
   // 오늘 전체 세션 id 목록이 필요하다.
   const sessionIds = sourceSessions.map((s) => s.sessionId);
 
-  const videos = sourceSessions
-    .flatMap((sess) => {
-      const cat = topKey(sess);
-      return (sess.videos || []).map((v) => ({
-        title: v.title,
-        cat,
-        videoId: v.videoId || null,
-      }));
-    })
-    .slice(0, 9);
+  const videos = listSessionVideos(sourceSessions);
 
   // Previous available day entropy
   const prevSessions = allSessions
@@ -215,6 +210,8 @@ function buildDataForDate(allSessions, targetDate) {
 
   let prevEntropy = 0;
   let prevDateLabel = "—";
+  let hasPrevData = false;
+  let prevIsYesterday = false;
   if (prevSessions.length > 0) {
     const prevDate = new Date(prevSessions[0].endTime);
     const prevDateStr = dateStr(prevDate);
@@ -224,6 +221,9 @@ function buildDataForDate(allSessions, targetDate) {
     const prevDist = mergeDist(prevDay);
     prevEntropy = VL.entropy(VL.dist(prevDist));
     prevDateLabel = koreanShortDate(prevDate);
+    hasPrevData = true;
+    // 직전 기록이 항상 어제는 아니므로(며칠 공백 가능) 실제로 어제인지 확인한다.
+    prevIsYesterday = prevDateStr === dateStr(addDaysKst(sourceDate, -1));
   }
 
   return {
@@ -233,6 +233,8 @@ function buildDataForDate(allSessions, targetDate) {
     dist: distArr,
     prevEntropy,
     prevDateLabel,
+    hasPrevData,
+    prevIsYesterday,
     videos,
     review,
     reviewTopic,
@@ -267,6 +269,16 @@ function findUnrevealedPastDate(
 
 // ── Build VL.weeks ────────────────────────────────────────────────────────────
 
+/**
+ * 설치일 기준 기간(구간/주차)별 요약 데이터를 만든다.
+ * daily는 로컬 세션 데이터가 있을 때만 채워지고, 서버 스냅샷만 있으면(재설치 등) null로
+ * 남겨 "일별 데이터 없음"을 그대로 알린다 — 기록이 없는 날은 0이 아니라 배열에서 제외해
+ * "값이 0"과 "기록 없음"을 구분한다.
+ * @param {Array<object>} allSessions - 전체 세션 목록
+ * @param {string} installDate - ISO 설치일
+ * @param {Array<object>} [periodReviews] - 서버가 생성해 둔 기간 리뷰 목록
+ * @returns {Array<object>} 기간별 데이터 배열(entropy·dist·daily 등 포함)
+ */
 function buildWeeksData(allSessions, installDate, periodReviews = []) {
   const analyzedSessions = allSessions.filter(
     (s) =>
@@ -301,28 +313,6 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
     const reviewRow = reviewsByIndex.get(w) || null;
     const useServerSnapshot = weekSessions.length === 0 && !!reviewRow;
 
-    // Daily entropy (기간 내 일수만큼 — 0 if no data that day)
-    const daily = [];
-    if (useServerSnapshot) {
-      // period_reviews는 기간 집계값만 저장하고 일별 값은 없다 — 없는 값을 0으로 채우면
-      // "다양성이 0"으로 오인될 수 있어, 기존 screenFeedback의 "데이터 부족 시 같은 값을
-      // 반복해 평평한 선으로 표시" 관례를 따라 기간 엔트로피를 일수만큼 반복한다.
-      for (let d = 0; d < VL.DAYS_PER_PERIOD; d++) {
-        daily.push(reviewRow.entropy ?? 0);
-      }
-    } else {
-      for (let d = 0; d < VL.DAYS_PER_PERIOD; d++) {
-        const dayKey = dayFromInstall(installDate, startOffset + d);
-        const daySess = weekSessions.filter(
-          (s) => dateStr(new Date(s.endTime)) === dayKey,
-        );
-        const dayDist = mergeDist(daySess);
-        const dayDistArr =
-          Object.keys(dayDist).length > 0 ? VL.dist(dayDist) : [];
-        daily.push(dayDistArr.length > 0 ? VL.entropy(dayDistArr) : 0);
-      }
-    }
-
     // Weekly aggregate
     const weekDistArr = useServerSnapshot
       ? vlDistFromCategoryDistribution(
@@ -339,6 +329,31 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
     const mdLabel = (ymd) =>
       `${Number(ymd.slice(5, 7))}/${Number(ymd.slice(8, 10))}`;
     const range = `${mdLabel(weekStart)} – ${mdLabel(weekEnd)}`;
+
+    const daily = useServerSnapshot
+      ? null
+      : Array.from({ length: VL.DAYS_PER_PERIOD }, (_, d) => {
+          const dayKey = dayFromInstall(installDate, startOffset + d);
+          const daySess = weekSessions.filter(
+            (s) => dateStr(new Date(s.endTime)) === dayKey,
+          );
+          if (daySess.length === 0) return null;
+          const dayDist = mergeDist(daySess);
+          const dayDistArr =
+            Object.keys(dayDist).length > 0 ? VL.dist(dayDist) : [];
+          if (dayDistArr.length === 0) return null;
+          const videoCount = daySess.reduce(
+            (s, sess) => s + (sess.videoCount ?? sess.videos?.length ?? 1),
+            0,
+          );
+          return {
+            dateStr: dayKey,
+            label: mdLabel(dayKey),
+            entropy: VL.entropy(dayDistArr),
+            videoCount,
+            categoryCount: dayDistArr.length,
+          };
+        }).filter(Boolean);
 
     // Review: 서버가 생성한 기간 리뷰
     const periodEnded = weekEnd < dateStr(new Date());
@@ -375,20 +390,6 @@ function buildWeeksData(allSessions, installDate, periodReviews = []) {
     wk.entropy = VL.entropy(wk.dist);
   });
   return weeks;
-}
-
-// 베이스라인 기준 엔트로피(VL.baselineH) — 이후 주차들과 비교하는 기준값이다.
-// 베이스라인 주차(1·2주차, weeks[0]/weeks[1])의 "주간 엔트로피"를 단순 평균한다.
-// 처음엔 두 주의 세션을 하나의 분포로 합쳐서 계산했으나, 그러면 두 주가 서로 다른
-// 카테고리 위주였을 때(예: 1주차 게임·음악 / 2주차 교육·과학) 등장 카테고리 수 자체가
-// 늘어나 개별 주차 어느 쪽보다도 높은 엔트로피가 나와, 이후 "1주치" 값과 비교할 때
-// 기준이 구조적으로 불리하게(항상 더 높게) 잡히는 문제가 있었다. 평균은 이후 주차와
-// 똑같이 "1주치 엔트로피" 단위로 맞춰 비교가 공정하다.
-function calculateBaselineEntropy(weeks) {
-  const baselineWeeks = weeks.filter((w) => w.isBaseline && w.sessionCount > 0);
-  if (baselineWeeks.length === 0) return 0;
-  const sum = baselineWeeks.reduce((s, w) => s + w.entropy, 0);
-  return sum / baselineWeeks.length;
 }
 
 // ── Token application ─────────────────────────────────────────────────────────
@@ -1070,7 +1071,6 @@ async function boot() {
 
   if (installDate) {
     VL.weeks = buildWeeksData(sessions, installDate, cachedPeriodReviews);
-    VL.baselineH = calculateBaselineEntropy(VL.weeks);
   }
 
   // Apply theme tokens
@@ -1277,7 +1277,6 @@ async function boot() {
           installDate,
           cachedPeriodReviews,
         );
-        VL.baselineH = calculateBaselineEntropy(VL.weeks);
       }
     }
 
