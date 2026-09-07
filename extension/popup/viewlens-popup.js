@@ -1185,8 +1185,12 @@ async function boot() {
       tabWeekClicks: 0,
       // 열자마자 이미 확인된(블러 없는) 실제 리뷰가 보이고 있으면 그 자체로 열람.
       // 블러가 남아있는 경우엔 여기서 0으로 두고, "피드백 확인하기" 클릭 시점에 1로 갱신한다.
+      // feedbackActive가 아니라 generating으로 게이팅: 대조군은 연구 종료 후
+      // (studyEndTodayEligible) feedbackActive 없이도 오늘 리뷰가 조회·표시되므로,
+      // 그 케이스도 놓치지 않기 위함. eligible이 아니면 review가 null이라 isRealReview가
+      // 어차피 false가 되므로 feedbackActive로 따로 막을 필요가 없다.
       todayFeedbackViewed:
-        feedbackActive &&
+        !VL._todayCumulative.generating &&
         isRealReview(VL._todayCumulative.review) &&
         !VL._todayCumulative.locked
           ? 1
