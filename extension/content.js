@@ -200,14 +200,14 @@ let lastTitle = null;
 // 직접 갱신한다. document.referrer는 이 최초 진입 시점 이후로는 절대 바뀌지 않기 때문이다.
 let previousLocationHref = document.referrer || null;
 
-// 자동재생 vs 관련영상 클릭 구분
+// 자동재생 종료 vs 관련영상 클릭 구분용 상태
 let lastEndedAt = null;
 let lastInteractionAt = null;
-// 유튜브 자동재생 카운트다운이 약 8초라 여유를 두고 12초로 잡는다.
+// 자동재생 카운트다운(~8초)보다 여유를 둔 판정 창
 const NAV_TRIGGER_WINDOW_MS = 12000;
 
-// ended는 버블링되지 않는 이벤트라 document에서 잡으려면 캡처 단계(3번째 인자 true)에서 들어야 한다.
-// <video> 엘리먼트가 SPA 이동으로 교체돼도 캡처 리스너는 다시 붙일 필요가 없다.
+// ended는 버블링되지 않아 캡처 단계(3번째 인자 true)에서 등록해야 잡힌다.
+// SPA 이동으로 <video>가 교체돼도 캡처 리스너는 재등록할 필요 없다.
 document.addEventListener(
   "ended",
   () => {
@@ -222,15 +222,18 @@ document.addEventListener("keydown", () => {
   lastInteractionAt = Date.now();
 });
 
-// 이동 직전 두 시각(lastEndedAt, lastInteractionAt) 중 "지금과 더 가까운 쪽"을 원인으로 추정한다.
-// 둘 다 NAV_TRIGGER_WINDOW_MS보다 오래됐으면(혹은 아예 없었으면) 알 수 없음(null)으로 남긴다.
+/**
+ * 영상 전환 직전 lastEndedAt/lastInteractionAt 중 더 최근 신호를 전환 원인으로 추정한다.
+ * 판정에 쓴 신호는 즉시 초기화해 다음 전환이 오래된 신호를 재사용하지 않게 한다.
+ *
+ * @param {number} now - 판정 시각(Date.now())
+ * @returns {"ended"|"interaction"|null} 둘 다 판정 창 밖이거나 없으면 null
+ */
 function classifyNavigationTrigger(now) {
   const endedDelta = lastEndedAt === null ? Infinity : now - lastEndedAt;
   const interactionDelta =
     lastInteractionAt === null ? Infinity : now - lastInteractionAt;
 
-  // 이번 판정에 쓴 신호는 여기서 바로 지운다. 안 그러면 신호 없이(뒤로가기 등) 일어나는
-  // 다음 이동이 이미 써먹은 오래된 신호를 다시 주워 잘못 분류된다.
   lastEndedAt = null;
   lastInteractionAt = null;
 
