@@ -46,6 +46,38 @@ function isTestGroup(group) {
 
 const H_MAX = 3.17;
 
+/**
+ * 다양성 등급(편중/보통/다양) 경계 — H_MAX 대비 정확히 1/3, 2/3 지점.
+ * [편중/보통 경계, 보통/다양 경계]. 바꾸면 viewlens-screens.js의 DIVERSITY_TIP 문구도 같이 수정.
+ */
+const DIVERSITY_BAND_RATIOS = [1 / 3, 2 / 3];
+
+/**
+ * entropy를 편중/보통/다양 3단계 등급으로 분류한다.
+ * 원값을 그대로 보여주지 않는 이유: entropy는 "100%가 뭔지" 답할 수 없는 임의 숫자라,
+ * 등급만 노출하고 절대적 기준은 참여자 자신의 과거 기간과의 비교로만 답한다.
+ * @param {number} h - Shannon entropy 값
+ * @returns {{label: string, tone: "warn"|"neutral"|"good"}}
+ */
+function diversityLabel(h) {
+  const r = H_MAX > 0 ? h / H_MAX : 0;
+  if (r < DIVERSITY_BAND_RATIOS[0]) return { label: "편중", tone: "warn" };
+  if (r < DIVERSITY_BAND_RATIOS[1]) return { label: "보통", tone: "neutral" };
+  return { label: "다양", tone: "good" };
+}
+
+/**
+ * 직전 대비 변화량을 %p(H_MAX 대비 비율의 차이) 단위로 반환한다.
+ * 비율(%)이 아니라 %p라서 from이 0이어도 항상 정의되고, 값은 -100~100 사이로 묶인다.
+ * @param {number} from - 이전 entropy
+ * @param {number} to - 현재 entropy
+ * @returns {number} %p 단위 변화량
+ */
+function diversityDeltaPct(from, to) {
+  if (H_MAX <= 0) return 0;
+  return Math.round(((to - from) / H_MAX) * 100);
+}
+
 const today = {
   dateLabel: "6월 7일 토요일",
   videoCount: 14,
@@ -60,6 +92,8 @@ const today = {
   }),
   prevEntropy: 1.72,
   prevDateLabel: "6월 5일",
+  hasPrevData: true,
+  prevIsYesterday: false,
   videos: [
     { title: "2024 LCK 서머 결승 풀 하이라이트", cat: "game" },
     { title: "발로란트 신규 요원 200% 활용 공략", cat: "game" },
@@ -91,7 +125,15 @@ const weeks = [
       sci: 0.05,
       edu: 0.03,
     }),
-    daily: [1.55, 1.8, 1.68, 2.02, 1.74, 1.96, 1.88],
+    daily: [
+      { dateStr: "2024-06-01", label: "6/1", entropy: 1.55, videoCount: 9, categoryCount: 3 },
+      { dateStr: "2024-06-02", label: "6/2", entropy: 1.8, videoCount: 12, categoryCount: 3 },
+      { dateStr: "2024-06-03", label: "6/3", entropy: 1.68, videoCount: 8, categoryCount: 3 },
+      { dateStr: "2024-06-04", label: "6/4", entropy: 2.02, videoCount: 14, categoryCount: 4 },
+      { dateStr: "2024-06-05", label: "6/5", entropy: 1.74, videoCount: 10, categoryCount: 3 },
+      { dateStr: "2024-06-06", label: "6/6", entropy: 1.96, videoCount: 13, categoryCount: 4 },
+      { dateStr: "2024-06-07", label: "6/7", entropy: 1.88, videoCount: 12, categoryCount: 4 },
+    ],
     review:
       "첫 주 동안의 시청 습관을 기준선으로 담아 두었어요. 게임이 절반 가까이를 차지했지만, 이건 평가가 아니라 출발점이에요. 다음 주부터 어떤 변화가 생기는지 저와 함께 천천히 지켜봐요.",
   },
@@ -110,7 +152,15 @@ const weeks = [
       news: 0.1,
       ent: 0.09,
     }),
-    daily: [1.98, 2.21, 2.34, 2.18, 2.46, 2.4, 2.55],
+    daily: [
+      { dateStr: "2024-06-08", label: "6/8", entropy: 1.98, videoCount: 10, categoryCount: 4 },
+      { dateStr: "2024-06-09", label: "6/9", entropy: 2.21, videoCount: 11, categoryCount: 4 },
+      { dateStr: "2024-06-10", label: "6/10", entropy: 2.34, videoCount: 9, categoryCount: 5 },
+      { dateStr: "2024-06-11", label: "6/11", entropy: 2.18, videoCount: 8, categoryCount: 4 },
+      { dateStr: "2024-06-12", label: "6/12", entropy: 2.46, videoCount: 12, categoryCount: 5 },
+      { dateStr: "2024-06-13", label: "6/13", entropy: 2.4, videoCount: 10, categoryCount: 5 },
+      { dateStr: "2024-06-14", label: "6/14", entropy: 2.55, videoCount: 11, categoryCount: 5 },
+    ],
     review:
       "베이스라인 기간의 두 번째 주예요. 교육과 과학·기술 영상이 조금 늘었지만, 이 시기는 평가가 아니라 계속 기준선을 담아 두는 과정이에요.",
   },
@@ -129,7 +179,15 @@ const weeks = [
       news: 0.12,
       ent: 0.1,
     }),
-    daily: [2.41, 2.58, 2.52, 2.71, 2.63, 2.78, 2.69],
+    daily: [
+      { dateStr: "2024-06-15", label: "6/15", entropy: 2.41, videoCount: 9, categoryCount: 5 },
+      { dateStr: "2024-06-16", label: "6/16", entropy: 2.58, videoCount: 11, categoryCount: 5 },
+      { dateStr: "2024-06-17", label: "6/17", entropy: 2.52, videoCount: 8, categoryCount: 5 },
+      { dateStr: "2024-06-18", label: "6/18", entropy: 2.71, videoCount: 12, categoryCount: 6 },
+      { dateStr: "2024-06-19", label: "6/19", entropy: 2.63, videoCount: 10, categoryCount: 5 },
+      { dateStr: "2024-06-20", label: "6/20", entropy: 2.78, videoCount: 10, categoryCount: 6 },
+      { dateStr: "2024-06-21", label: "6/21", entropy: 2.69, videoCount: 9, categoryCount: 6 },
+    ],
     review:
       "3주 동안 정말 꾸준히 해오셨어요. 시청 다양성이 기준선보다 눈에 띄게 높아졌고, 어느 한 카테고리에 치우치지 않는 균형이 보여요. 지금의 리듬을 가볍게 이어가시면 충분해요.",
   },
@@ -137,15 +195,6 @@ const weeks = [
 weeks.forEach((w) => {
   w.entropy = entropy(w.dist);
 });
-// 베이스라인 기준 엔트로피 — 베이스라인 주차(1·2주차)의 "주간 엔트로피"를 단순 평균한다.
-// viewlens-popup.js의 calculateBaselineEntropy와 같은 규칙을 목업 데이터에도 적용해,
-// Studio 프리뷰가 실제 계산과 동일한 값을 보여주게 한다. (분포를 합쳐서 계산하면 서로
-// 다른 카테고리 위주인 두 주가 합쳐질 때 카테고리 수 자체가 늘어 개별 주차보다 높은
-// 값이 나와, 이후 "1주치" 값과 비교하기엔 기준이 불공정해진다 — 그래서 평균을 쓴다.)
-const baselineWeeks = weeks.filter((w) => w.isBaseline);
-const baselineH =
-  baselineWeeks.reduce((s, w) => s + w.entropy, 0) / baselineWeeks.length;
-
 // 파일럿 검증용으로 6일로 단축(베이스라인 2일 + 일반 2일×2)
 const TOTAL_DAYS = 6;
 // 탭을 며칠 단위로 나눌지 — 평소 운영값은 7(주 단위), 파일럿 기간엔 2일 단위로 여러 날짜에
@@ -265,9 +314,11 @@ window.VL = {
   dist,
   entropy,
   H_MAX,
+  DIVERSITY_BAND_RATIOS,
+  diversityLabel,
+  diversityDeltaPct,
   today,
   weeks,
-  baselineH,
   TIMELINE,
   TOTAL_DAYS,
   DAYS_PER_PERIOD,
