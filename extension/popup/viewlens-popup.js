@@ -739,7 +739,11 @@ async function validateStudyEndCode(code) {
 window.validateStudyEndCode = validateStudyEndCode;
 
 // ── 팝업 상호작용 마이크로 로그 ────────────────────────────────────────
-// 수집: openedAt, dwellMs, tabTodayClicks, tabWeekClicks, feedbackViewed.
+// 수집: openedAt, dwellMs, tabTodayClicks, tabWeekClicks, todayFeedbackViewed, periodFeedbackViewed.
+// todayFeedbackViewed: "오늘" 카드는 블러로 가려져 있다가 "피드백 확인하기" 클릭으로만 해제된 클릭 시점
+// periodFeedbackViewed: "주차별" 탭은 블러가 없어 탭을 여는 순간 내용이 바로 보이지만, 클릭 직후
+// 바로 다른 곳으로 이동하는 경우까지 열람으로 세지 않도록 PERIOD_FEEDBACK_VIEW_THRESHOLD_MS만큼
+// 탭에 머물렀을 때만 확정한다(아래 setInterval).
 // 전송 경로 1(기본)
 // 팝업 close 시점의 fetch는 teardown에 끊길 수 있어 신뢰하지 않는다.
 // 대신 세션 중 livePopupEvent 슬롯을 상호작용·1초 간격으로 계속 갱신해 최신 스냅샷을 남기고,
@@ -833,6 +837,26 @@ async function handleFeedbackConfirmClick(popup, sessionId) {
   postFeedbackConfirmed(sessionId);
 }
 
+// 주차별 탭에 머문 시간이 이 값 이상이어야 periodFeedbackViewed를 확정
+const PERIOD_FEEDBACK_VIEW_THRESHOLD_MS = 2000;
+
+// m.feedbackTabEnteredAt(현재 연속 체류가 시작된 실제 시각)과 지금 시각의 차이를
+// periodTabMs에 누적하고, 마커를 지금 시각으로 당겨서 중복 계산 없이 반복 호출 가능하게 한다.
+// setInterval의 고정 tick 주기가 아니라 실제 경과 시간을 쓰므로, 탭 진입 직후 tick이
+// 곧바로 도는 경우에도 그 순간까지의 실제 체류 시간만 인정된다.
+function accruePeriodFeedbackDwell(m) {
+  if (!m.feedbackTabEnteredAt) return;
+  const now = Date.now();
+  m.periodTabMs += now - m.feedbackTabEnteredAt;
+  m.feedbackTabEnteredAt = now;
+  if (
+    !m.periodFeedbackViewed &&
+    m.periodTabMs >= PERIOD_FEEDBACK_VIEW_THRESHOLD_MS
+  ) {
+    m.periodFeedbackViewed = 1;
+  }
+}
+
 function buildPopupEventPayload(m) {
   return {
     eventId: m.eventId,
@@ -840,12 +864,13 @@ function buildPopupEventPayload(m) {
     dwellMs: Math.max(0, Date.now() - m.startTs),
     tabTodayClicks: m.tabTodayClicks,
     tabWeekClicks: m.tabWeekClicks,
-    feedbackViewed: m.feedbackViewed,
+    todayFeedbackViewed: m.todayFeedbackViewed,
+    periodFeedbackViewed: m.periodFeedbackViewed,
     openedAt: m.openedAt,
   };
 }
 
-// teardown 대비 — 현재 세션 스냅샷을 live 슬롯에 기록(fire-and-forget)
+// teardown 대비. 현재 세션 스냅샷을 live 슬롯에 기록
 function persistLivePopupEvent(m) {
   chrome.storage.local.set({ livePopupEvent: buildPopupEventPayload(m) });
 }
@@ -880,8 +905,10 @@ async function postPopupEvent(serverUrl, event) {
   }
 }
 
-// 이전 팝업의 잔여 이벤트를 확정 큐로 승격하고 live 슬롯을 비운다.
-// 현재 세션이 live 슬롯을 새로 쓰기 전에 완료해야 하므로 반드시 await 한다.
+/**
+ * 이전 팝업이 남긴 live 슬롯 이벤트를 확정 큐(pendingPopupEvents)로 승격하고 live 슬롯을 비운다.
+ * 현재 세션이 live 슬롯을 새로 쓰기 전에 끝나야 하므로 호출부에서 반드시 await 해야 한다.
+ */
 async function drainPreviousPopupEvents() {
   const { pendingPopupEvents = [], livePopupEvent = null } =
     await chrome.storage.local.get(["pendingPopupEvents", "livePopupEvent"]);
@@ -893,7 +920,12 @@ async function drainPreviousPopupEvents() {
   });
 }
 
-// 확정 큐를 서버로 전송 — 실패분만 큐에 남겨 다음 open에서 재시도(렌더 블로킹 없이 백그라운드).
+/**
+ * 확정 큐(pendingPopupEvents)를 서버로 순서대로 전송한다. 실패한 항목부터는 중단하고
+ * 큐에 남겨 다음 팝업 open 때 재시도한다. 렌더를 막지 않도록 백그라운드로 호출된다.
+ *
+ * @param {string} serverUrl
+ */
 async function flushPendingPopupEvents(serverUrl) {
   const { pendingPopupEvents = [] } = await chrome.storage.local.get([
     "pendingPopupEvents",
@@ -952,7 +984,7 @@ async function boot() {
   }
 
   // 온보딩은 됐지만 서버 등록이 확인되지 않은 경우 재시도(등록 누락 복구).
-  // 팝업 렌더링을 막지 않도록 await 없이 백그라운드로 실행 — 실패 시 다음 boot에서 다시 재시도된다.
+  // 팝업 렌더링을 막지 않도록 await 없이 백그라운드로 실행. 실패 시 다음 boot에서 다시 재시도된다.
   if (
     stored.group &&
     stored.anonymousId &&
@@ -985,7 +1017,7 @@ async function boot() {
   VL.today = realToday;
 
   // 그룹 설정(EXP)만이 아니라 베이스라인 기간(14일 미만) 여부도 함께 봐야
-  // "지금 실제로 피드백이 노출되는 상태"를 정확히 반영한다 — ViewLensPopup._isFeedbackActive와 동일 규칙
+  // "지금 실제로 피드백이 노출되는 상태"를 정확히 반영한다. ViewLensPopup._isFeedbackActive와 동일 규칙
   // (TEST-EXP 예외 포함).
   const feedbackActive =
     !!VL.GROUPS[stored.group]?.feedback &&
@@ -1157,33 +1189,54 @@ async function boot() {
   if (stored.group && stored.anonymousId) {
     // 이전 팝업의 잔여 이벤트를 확정 큐로 승격(현재 세션이 live 슬롯을 새로 쓰기 전에 완료).
     await drainPreviousPopupEvents();
-    // 큐 전송은 백그라운드 — 렌더/상호작용을 막지 않음. 실패분은 큐에 남아 다음 open에서 재시도.
+    // 큐 전송은 백그라운드: 렌더/상호작용을 막지 않음. 실패분은 큐에 남아 다음 open에서 재시도.
     flushPendingPopupEvents(stored.serverUrl);
 
     popupMetrics = {
       anonymousId: stored.anonymousId,
-      // 팝업 오픈당 1회 발급 — 재전송돼도 서버가 이 id로 중복을 무시(멱등)
+      // 팝업 오픈당 1회 발급. 재전송돼도 서버가 이 id로 중복을 무시(멱등)
       eventId: crypto.randomUUID(),
       openedAt: new Date().toISOString(),
       startTs: Date.now(),
       tabTodayClicks: 0,
       tabWeekClicks: 0,
-      // EXP 사용자가 열자마자 실제 리뷰를 보고 있으면 개입 전달로 간주
-      feedbackViewed:
-        feedbackActive && isRealReview(VL._todayCumulative.review) ? 1 : 0,
+      // 열자마자 이미 확인된(블러 없는) 실제 리뷰가 보이고 있으면 그 자체로 열람.
+      // 블러가 남아있는 경우엔 여기서 0으로 두고, "피드백 확인하기" 클릭 시점에 1로 갱신한다.
+      // feedbackActive가 아니라 generating으로 게이팅: 대조군은 연구 종료 후
+      // (studyEndTodayEligible) feedbackActive 없이도 오늘 리뷰가 조회·표시되므로,
+      // 그 케이스도 놓치지 않기 위함. eligible이 아니면 review가 null이라 isRealReview가
+      // 어차피 false가 되므로 feedbackActive로 따로 막을 필요가 없다.
+      todayFeedbackViewed:
+        !VL._todayCumulative.generating &&
+        isRealReview(VL._todayCumulative.review) &&
+        !VL._todayCumulative.locked
+          ? 1
+          : 0,
+      periodFeedbackViewed: 0,
+      periodTabMs: 0,
+      // 주차별 탭에 현재 연속으로 머무는 중이면 그 시작 시각, 아니면 null.
+      // 팝업은 항상 "오늘" 탭으로 열리므로 초기값은 null.
+      feedbackTabEnteredAt: null,
     };
     persistLivePopupEvent(popupMetrics);
 
-    // 탭 클릭 계측 + 피드백 확인 버튼 — popEl은 re-render(innerHTML 교체) 후에도 유지되므로
-    // 위임 리스너로 한 번만 바인딩
+    // 탭 클릭 계측 + 피드백 확인 버튼
+    // popEl은 re-render(innerHTML 교체) 후에도 유지되므로 위임 리스너로 한 번만 바인딩
     popEl.addEventListener("click", (e) => {
       const tabBtn = e.target.closest && e.target.closest("[data-tab]");
       if (tabBtn) {
         if (tabBtn.dataset.tab === "today") {
           popupMetrics.tabTodayClicks++;
+          // 주차별 탭을 벗어나는 시점. 지금까지의 연속 체류를 확정하고 마커를 지운다.
+          accruePeriodFeedbackDwell(popupMetrics);
+          popupMetrics.feedbackTabEnteredAt = null;
         } else if (tabBtn.dataset.tab === "feedback") {
           popupMetrics.tabWeekClicks++;
-          popupMetrics.feedbackViewed = 1; // 주차별 피드백 탭 열람 = 개입 전달
+          // 실제 열람 판정(periodFeedbackViewed)은 체류시간 기준으로 아래에서 확정한다.
+          // 이미 연속 체류 중이면(중복 클릭 등) 시작 시각을 되돌리지 않는다.
+          if (!popupMetrics.feedbackTabEnteredAt) {
+            popupMetrics.feedbackTabEnteredAt = Date.now();
+          }
         }
         persistLivePopupEvent(popupMetrics);
         return;
@@ -1192,6 +1245,8 @@ async function boot() {
       const confirmBtn =
         e.target.closest && e.target.closest("#vl-feedback-confirm-btn");
       if (confirmBtn) {
+        popupMetrics.todayFeedbackViewed = 1;
+        persistLivePopupEvent(popupMetrics);
         handleFeedbackConfirmClick(popup, confirmBtn.dataset.sessionId);
         return;
       }
@@ -1215,10 +1270,15 @@ async function boot() {
       }
     });
 
-    // 팝업 종료 감지 — dwellMs 최종 반영(단일 set, teardown에 상대적으로 안전) +
-    // sendBeacon 백업 전송(전송 경로 2) 동시 시도. 최종 쓰기가 잘려도 세션 중 스냅샷이
-    // 남아 다음 boot에서 승격되므로, sendBeacon이 실패해도 데이터가 사라지지 않는다.
+    /**
+     * 팝업 종료 감지 시 호출. live 슬롯에 dwellMs 최종 스냅샷을 반영(단일 set, teardown에
+     * 상대적으로 안전)하고 sendBeacon 백업 전송(전송 경로 2)을 동시에 시도한다. 최종 쓰기가
+     * 잘려도 세션 중 스냅샷이 다음 boot에서 승격되므로, sendBeacon이 실패해도 데이터는 남는다.
+     */
     const finalizePopupMetrics = () => {
+      // 주차별 탭에 머문 채로 팝업이 닫히는 경우, 마지막 setInterval tick 이후의
+      // 짧은 잔여 체류시간까지 마저 반영한다.
+      accruePeriodFeedbackDwell(popupMetrics);
       persistLivePopupEvent(popupMetrics);
       sendPopupEventBeacon(stored.serverUrl, popupMetrics);
     };
@@ -1314,8 +1374,13 @@ async function boot() {
   setInterval(() => {
     VL._lastWatchedAt = localLastWatchedAt;
 
-    // dwellMs 스냅샷 갱신 — close write가 잘려도 최근값(±1초)이 보존됨
-    if (popupMetrics) persistLivePopupEvent(popupMetrics);
+    if (popupMetrics) {
+      // 주차별 탭에 머문 실제 경과 시간을 갱신. tick 횟수가 아니라 feedbackTabEnteredAt과의
+      // 실제 시간차를 쓰므로, 탭 진입 직후 tick이 곧바로 돌아도 그만큼만 인정된다.
+      accruePeriodFeedbackDwell(popupMetrics);
+      // dwellMs 스냅샷 갱신. close write가 잘려도 최근값(±1초)이 보존됨
+      persistLivePopupEvent(popupMetrics);
+    }
 
     const count = localCurrentSession?.videoCount ?? 0;
     const timerText = _computeTimerText(localLastWatchedAt);

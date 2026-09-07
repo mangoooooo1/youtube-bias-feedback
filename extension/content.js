@@ -1,3 +1,4 @@
+// URL에서 유튜브 영상 ID를 추출한다(/watch?v=, /shorts/ 형식만 지원, 그 외는 null).
 function extractVideoId(url) {
   try {
     const parsed = new URL(url);
@@ -18,7 +19,7 @@ function extractVideoId(url) {
 }
 
 // server/routes/video-events-classify.js의 YOUTUBE_HOSTS와 동일한 목록
-// 확장(브라우저)과 서버(Node)가 서로 다른 런타임이라 모듈을 공유할 수 없어 부득이 중복 정의한다. 바뀌면 양쪽 다 갱신할 것.
+// 확장(브라우저)과 서버(Node)가 서로 다른 런타임이라 모듈을 공유할 수 없어 중복 정의한다. 바뀌면 양쪽 다 갱신할 것.
 const YOUTUBE_HOSTS = new Set([
   "www.youtube.com",
   "youtube.com",
@@ -26,10 +27,18 @@ const YOUTUBE_HOSTS = new Set([
   "music.youtube.com",
 ]);
 
-// 직전 페이지 URL에서 도메인·경로를 뽑아낸다. 경로는 유튜브 내부 페이지일 때만 담는다.
-// 유튜브 URL 구조(/watch, /results 등)엔 개인 식별 정보가 없지만, 외부 사이트의 경로는 사용자명·계정ID 등을 그대로 담고 있을 수 있어 애초에 보내지 않는다.
-// 외부 유입 여부 판별에는 도메인만 있으면 충분하고 경로 내용은 쓰이지 않는다.
-// 파싱 실패(값이 없거나 URL 형식이 아닌 경우)는 둘 다 null로 처리한다.
+/**
+ * 직전 페이지 URL에서 도메인·경로를 뽑아낸다. 경로는 유튜브 내부 페이지일 때만 담는다.
+ * 외부 사이트의 경로는 사용자명·계정ID 등을 그대로 담고 있을 수 있어 애초에 보내지 않는다.
+ * 유튜브 경로 중에도 채널(/@handle, /channel/UCxxx) 등 식별 정보를 담는 경우가 있으므로,
+ * 최종적으로 어떤 경로를 저장할지는 서버가 referrerType 분류 결과로 다시 한번 걸러낸다
+ * (server/routes/video-events.js의 SAFE_ENTRY_PATH_REFERRER_TYPES 화이트리스트).
+ * 외부 유입 여부 판별에는 도메인만 있으면 충분하고 경로 내용은 쓰이지 않는다.
+ * 파싱 실패(값이 없거나 URL 형식이 아닌 경우)는 둘 다 null로 처리한다.
+ *
+ * @param {string|null} href - 직전 페이지의 URL(예: document.referrer 또는 이전 location.href)
+ * @returns {{ entryHost: string|null, entryPath: string|null }}
+ */
 function parseEntryLocation(href) {
   if (!href) return { entryHost: null, entryPath: null };
   try {
@@ -193,14 +202,14 @@ let lastTitle = null;
 // 직접 갱신한다. document.referrer는 이 최초 진입 시점 이후로는 절대 바뀌지 않기 때문이다.
 let previousLocationHref = document.referrer || null;
 
-// 자동재생 vs 관련영상 클릭 구분
+// 자동재생 종료 vs 관련영상 클릭 구분용 상태
 let lastEndedAt = null;
 let lastInteractionAt = null;
-// 유튜브 자동재생 카운트다운이 약 8초라 여유를 두고 12초로 잡는다.
+// 자동재생 카운트다운(~8초)보다 여유를 둔 판정 창
 const NAV_TRIGGER_WINDOW_MS = 12000;
 
-// ended는 버블링되지 않는 이벤트라 document에서 잡으려면 캡처 단계(3번째 인자 true)에서 들어야 한다.
-// <video> 엘리먼트가 SPA 이동으로 교체돼도 캡처 리스너는 다시 붙일 필요가 없다.
+// ended는 버블링되지 않아 캡처 단계(3번째 인자 true)에서 등록해야 잡힌다.
+// SPA 이동으로 <video>가 교체돼도 캡처 리스너는 재등록할 필요 없다.
 document.addEventListener(
   "ended",
   () => {
@@ -215,15 +224,18 @@ document.addEventListener("keydown", () => {
   lastInteractionAt = Date.now();
 });
 
-// 이동 직전 두 시각(lastEndedAt, lastInteractionAt) 중 "지금과 더 가까운 쪽"을 원인으로 추정한다.
-// 둘 다 NAV_TRIGGER_WINDOW_MS보다 오래됐으면(혹은 아예 없었으면) 알 수 없음(null)으로 남긴다.
+/**
+ * 영상 전환 직전 lastEndedAt/lastInteractionAt 중 더 최근 신호를 전환 원인으로 추정한다.
+ * 판정에 쓴 신호는 즉시 초기화해 다음 전환이 오래된 신호를 재사용하지 않게 한다.
+ *
+ * @param {number} now - 판정 시각(Date.now())
+ * @returns {"ended"|"interaction"|null} 둘 다 판정 창 밖이거나 없으면 null
+ */
 function classifyNavigationTrigger(now) {
   const endedDelta = lastEndedAt === null ? Infinity : now - lastEndedAt;
   const interactionDelta =
     lastInteractionAt === null ? Infinity : now - lastInteractionAt;
 
-  // 이번 판정에 쓴 신호는 여기서 바로 지운다. 안 그러면 신호 없이(뒤로가기 등) 일어나는
-  // 다음 이동이 이미 써먹은 오래된 신호를 다시 주워 잘못 분류된다.
   lastEndedAt = null;
   lastInteractionAt = null;
 

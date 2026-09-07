@@ -5,12 +5,15 @@ const { ERROR_CODES } = require("../middleware/responseHandler");
 // 값이 있으면 음수 아닌 정수여야 하는 필드 (미전송 시 null)
 const COUNT_FIELDS = ["dwellMs", "tabTodayClicks", "tabWeekClicks"];
 
+// 값이 있으면 0 또는 1이어야 하는 필드 (미전송 시 null)
+const BOOLEAN_FIELDS = ["todayFeedbackViewed", "periodFeedbackViewed"];
+
 function validatePopupEvent(body) {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "body" };
   }
 
-  const { anonymousId, feedbackViewed, openedAt } = body;
+  const { anonymousId, openedAt } = body;
 
   if (typeof anonymousId !== "string" || !anonymousId.trim()) {
     return { code: ERROR_CODES.MISSING_REQUIRED_FIELD, field: "anonymousId" };
@@ -25,13 +28,11 @@ function validatePopupEvent(body) {
       return { code: ERROR_CODES.INVALID_FIELD_VALUE, field };
     }
   }
-  if (
-    feedbackViewed !== undefined &&
-    feedbackViewed !== null &&
-    feedbackViewed !== 0 &&
-    feedbackViewed !== 1
-  ) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "feedbackViewed" };
+  for (const field of BOOLEAN_FIELDS) {
+    const value = body[field];
+    if (value !== undefined && value !== null && value !== 0 && value !== 1) {
+      return { code: ERROR_CODES.INVALID_FIELD_VALUE, field };
+    }
   }
   if (
     openedAt !== undefined &&
@@ -44,4 +45,4 @@ function validatePopupEvent(body) {
   return null;
 }
 
-module.exports = { validatePopupEvent, COUNT_FIELDS };
+module.exports = { validatePopupEvent, COUNT_FIELDS, BOOLEAN_FIELDS };
