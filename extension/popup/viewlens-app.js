@@ -122,7 +122,14 @@ function _tabs(activeTab, needsConfirmNudge = false) {
     0,
     list.findIndex((t) => t.id === activeTab),
   );
-  return `<div style="position:relative;display:flex;gap:4px;padding:10px 16px 0;background:var(--vl-card)">
+  // 트랙(#vl-tab-indicator 감싸는 div)은 버튼과 같은 좌우 16px 안쪽 영역에 맞춰야
+  // 하므로 부모 padding(16px)만큼 인셋한다. 너비/이동 거리도 버튼 사이 4px gap을
+  // 포함해 계산해야 트랙이 버튼 폭보다 넓어지거나 위치가 밀리지 않는다.
+  const TAB_GAP = 4;
+  const totalGapPx = (list.length - 1) * TAB_GAP;
+  const indicatorWidth = `calc((100% - ${totalGapPx}px) / ${list.length})`;
+  const indicatorTranslate = `calc(${activeIndex} * 100% + ${activeIndex * TAB_GAP}px)`;
+  return `<div style="position:relative;display:flex;gap:${TAB_GAP}px;padding:10px 16px 0;background:var(--vl-card)">
     ${list
       .map((t) => {
         const on = t.id === activeTab;
@@ -133,8 +140,8 @@ function _tabs(activeTab, needsConfirmNudge = false) {
         return `<button data-tab="${t.id}" class="vl-press" style="flex:1;padding:9px 6px 11px;border:none;border-bottom:2px solid transparent;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-3);font-weight:700;color:${on ? "var(--vl-accent)" : "var(--vl-ink-3)"};transition:color .15s,transform .1s ease,filter .15s ease">${t.label}${nudge}</button>`;
       })
       .join("")}
-    <div style="position:absolute;left:0;right:0;bottom:0;height:2px;pointer-events:none">
-      <div id="vl-tab-indicator" style="width:${100 / list.length}%;height:100%;background:var(--vl-accent);border-radius:2px;transform:translateX(${activeIndex * 100}%)"></div>
+    <div style="position:absolute;left:16px;right:16px;bottom:0;height:2px;pointer-events:none">
+      <div id="vl-tab-indicator" style="width:${indicatorWidth};height:100%;background:var(--vl-accent);border-radius:2px;transform:translateX(${indicatorTranslate})"></div>
     </div>
   </div>`;
 }
