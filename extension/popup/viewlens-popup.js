@@ -845,7 +845,7 @@ function buildPopupEventPayload(m) {
   };
 }
 
-// teardown 대비 — 현재 세션 스냅샷을 live 슬롯에 기록(fire-and-forget)
+// teardown 대비. 현재 세션 스냅샷을 live 슬롯에 기록
 function persistLivePopupEvent(m) {
   chrome.storage.local.set({ livePopupEvent: buildPopupEventPayload(m) });
 }
@@ -880,8 +880,10 @@ async function postPopupEvent(serverUrl, event) {
   }
 }
 
-// 이전 팝업의 잔여 이벤트를 확정 큐로 승격하고 live 슬롯을 비운다.
-// 현재 세션이 live 슬롯을 새로 쓰기 전에 완료해야 하므로 반드시 await 한다.
+/**
+ * 이전 팝업이 남긴 live 슬롯 이벤트를 확정 큐(pendingPopupEvents)로 승격하고 live 슬롯을 비운다.
+ * 현재 세션이 live 슬롯을 새로 쓰기 전에 끝나야 하므로 호출부에서 반드시 await 해야 한다.
+ */
 async function drainPreviousPopupEvents() {
   const { pendingPopupEvents = [], livePopupEvent = null } =
     await chrome.storage.local.get(["pendingPopupEvents", "livePopupEvent"]);
@@ -893,7 +895,12 @@ async function drainPreviousPopupEvents() {
   });
 }
 
-// 확정 큐를 서버로 전송 — 실패분만 큐에 남겨 다음 open에서 재시도(렌더 블로킹 없이 백그라운드).
+/**
+ * 확정 큐(pendingPopupEvents)를 서버로 순서대로 전송한다. 실패한 항목부터는 중단하고
+ * 큐에 남겨 다음 팝업 open 때 재시도한다. 렌더를 막지 않도록 백그라운드로 호출된다.
+ *
+ * @param {string} serverUrl
+ */
 async function flushPendingPopupEvents(serverUrl) {
   const { pendingPopupEvents = [] } = await chrome.storage.local.get([
     "pendingPopupEvents",
@@ -952,7 +959,7 @@ async function boot() {
   }
 
   // 온보딩은 됐지만 서버 등록이 확인되지 않은 경우 재시도(등록 누락 복구).
-  // 팝업 렌더링을 막지 않도록 await 없이 백그라운드로 실행 — 실패 시 다음 boot에서 다시 재시도된다.
+  // 팝업 렌더링을 막지 않도록 await 없이 백그라운드로 실행. 실패 시 다음 boot에서 다시 재시도된다.
   if (
     stored.group &&
     stored.anonymousId &&
@@ -985,7 +992,7 @@ async function boot() {
   VL.today = realToday;
 
   // 그룹 설정(EXP)만이 아니라 베이스라인 기간(14일 미만) 여부도 함께 봐야
-  // "지금 실제로 피드백이 노출되는 상태"를 정확히 반영한다 — ViewLensPopup._isFeedbackActive와 동일 규칙
+  // "지금 실제로 피드백이 노출되는 상태"를 정확히 반영한다. ViewLensPopup._isFeedbackActive와 동일 규칙
   // (TEST-EXP 예외 포함).
   const feedbackActive =
     !!VL.GROUPS[stored.group]?.feedback &&
@@ -1157,12 +1164,12 @@ async function boot() {
   if (stored.group && stored.anonymousId) {
     // 이전 팝업의 잔여 이벤트를 확정 큐로 승격(현재 세션이 live 슬롯을 새로 쓰기 전에 완료).
     await drainPreviousPopupEvents();
-    // 큐 전송은 백그라운드 — 렌더/상호작용을 막지 않음. 실패분은 큐에 남아 다음 open에서 재시도.
+    // 큐 전송은 백그라운드: 렌더/상호작용을 막지 않음. 실패분은 큐에 남아 다음 open에서 재시도.
     flushPendingPopupEvents(stored.serverUrl);
 
     popupMetrics = {
       anonymousId: stored.anonymousId,
-      // 팝업 오픈당 1회 발급 — 재전송돼도 서버가 이 id로 중복을 무시(멱등)
+      // 팝업 오픈당 1회 발급. 재전송돼도 서버가 이 id로 중복을 무시(멱등)
       eventId: crypto.randomUUID(),
       openedAt: new Date().toISOString(),
       startTs: Date.now(),
@@ -1174,8 +1181,8 @@ async function boot() {
     };
     persistLivePopupEvent(popupMetrics);
 
-    // 탭 클릭 계측 + 피드백 확인 버튼 — popEl은 re-render(innerHTML 교체) 후에도 유지되므로
-    // 위임 리스너로 한 번만 바인딩
+    // 탭 클릭 계측 + 피드백 확인 버튼
+    // popEl은 re-render(innerHTML 교체) 후에도 유지되므로 위임 리스너로 한 번만 바인딩
     popEl.addEventListener("click", (e) => {
       const tabBtn = e.target.closest && e.target.closest("[data-tab]");
       if (tabBtn) {
@@ -1215,9 +1222,11 @@ async function boot() {
       }
     });
 
-    // 팝업 종료 감지 — dwellMs 최종 반영(단일 set, teardown에 상대적으로 안전) +
-    // sendBeacon 백업 전송(전송 경로 2) 동시 시도. 최종 쓰기가 잘려도 세션 중 스냅샷이
-    // 남아 다음 boot에서 승격되므로, sendBeacon이 실패해도 데이터가 사라지지 않는다.
+    /**
+     * 팝업 종료 감지 시 호출. live 슬롯에 dwellMs 최종 스냅샷을 반영(단일 set, teardown에
+     * 상대적으로 안전)하고 sendBeacon 백업 전송(전송 경로 2)을 동시에 시도한다. 최종 쓰기가
+     * 잘려도 세션 중 스냅샷이 다음 boot에서 승격되므로, sendBeacon이 실패해도 데이터는 남는다.
+     */
     const finalizePopupMetrics = () => {
       persistLivePopupEvent(popupMetrics);
       sendPopupEventBeacon(stored.serverUrl, popupMetrics);
@@ -1314,7 +1323,7 @@ async function boot() {
   setInterval(() => {
     VL._lastWatchedAt = localLastWatchedAt;
 
-    // dwellMs 스냅샷 갱신 — close write가 잘려도 최근값(±1초)이 보존됨
+    // dwellMs 스냅샷 갱신. close write가 잘려도 최근값(±1초)이 보존됨
     if (popupMetrics) persistLivePopupEvent(popupMetrics);
 
     const count = localCurrentSession?.videoCount ?? 0;
