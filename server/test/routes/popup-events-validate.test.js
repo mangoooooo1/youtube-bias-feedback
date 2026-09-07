@@ -9,7 +9,8 @@ function basePayload(overrides = {}) {
     dwellMs: 4200,
     tabTodayClicks: 2,
     tabWeekClicks: 1,
-    feedbackViewed: 1,
+    todayFeedbackViewed: 1,
+    periodFeedbackViewed: 1,
     openedAt: "2026-08-13T10:00:00+09:00",
     ...overrides,
   };
@@ -104,21 +105,34 @@ describe("validatePopupEvent — 카운트 필드 (dwellMs/tabTodayClicks/tabWee
   );
 });
 
-describe("validatePopupEvent — feedbackViewed", () => {
-  it.each([undefined, null])("%s이면 통과한다(하위호환)", (value) => {
-    expect(validatePopupEvent(basePayload({ feedbackViewed: value }))).toBeNull();
-  });
+describe("validatePopupEvent — todayFeedbackViewed/periodFeedbackViewed", () => {
+  it.each(["todayFeedbackViewed", "periodFeedbackViewed"])(
+    "%s는 undefined/null이면 통과한다(하위호환)",
+    (field) => {
+      expect(validatePopupEvent(basePayload({ [field]: undefined }))).toBeNull();
+      expect(validatePopupEvent(basePayload({ [field]: null }))).toBeNull();
+    },
+  );
 
-  it.each([0, 1])("%i는 허용한다", (value) => {
-    expect(validatePopupEvent(basePayload({ feedbackViewed: value }))).toBeNull();
-  });
+  it.each(["todayFeedbackViewed", "periodFeedbackViewed"])(
+    "%s는 0/1을 허용한다",
+    (field) => {
+      expect(validatePopupEvent(basePayload({ [field]: 0 }))).toBeNull();
+      expect(validatePopupEvent(basePayload({ [field]: 1 }))).toBeNull();
+    },
+  );
 
-  it.each([2, -1, true, "1"])("%p는 거부한다(0/1 외 값)", (value) => {
-    expect(validatePopupEvent(basePayload({ feedbackViewed: value }))).toEqual({
-      code: ERROR_CODES.INVALID_FIELD_VALUE,
-      field: "feedbackViewed",
-    });
-  });
+  it.each(["todayFeedbackViewed", "periodFeedbackViewed"])(
+    "%s는 0/1 외 값을 거부한다",
+    (field) => {
+      for (const value of [2, -1, true, "1"]) {
+        expect(validatePopupEvent(basePayload({ [field]: value }))).toEqual({
+          code: ERROR_CODES.INVALID_FIELD_VALUE,
+          field,
+        });
+      }
+    },
+  );
 });
 
 describe("validatePopupEvent — openedAt", () => {
