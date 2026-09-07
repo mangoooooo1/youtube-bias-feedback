@@ -50,7 +50,8 @@ function basePayload(overrides = {}) {
     dwellMs: 1200,
     tabTodayClicks: 1,
     tabWeekClicks: 0,
-    feedbackViewed: 1,
+    todayFeedbackViewed: 1,
+    periodFeedbackViewed: 0,
     openedAt: "2026-08-13T09:00:00+09:00",
     ...overrides,
   };

@@ -179,7 +179,8 @@ function execSchema() {
       dwellMs        INTEGER,  -- 팝업 체류 시간(ms)
       tabTodayClicks INTEGER DEFAULT 0,  -- '오늘' 탭 클릭 횟수
       tabWeekClicks  INTEGER DEFAULT 0,  -- '주차별' 탭 클릭 횟수
-      feedbackViewed INTEGER DEFAULT 0,  -- 피드백을 실제로 열람했으면 1
+      todayFeedbackViewed  INTEGER DEFAULT 0,  -- '오늘' 피드백을 실제로 열람(블러 해제)했으면 1
+      periodFeedbackViewed INTEGER DEFAULT 0,  -- '주차별' 피드백을 실제로 열람(체류시간 임계값 충족)했으면 1
       openedAt       TEXT,     -- 팝업 오픈 시각 (engagement 최근성 분석용)
       createdAt      TEXT    DEFAULT (datetime('now'))
     );
