@@ -13,12 +13,19 @@ function _chevronIcon(dir, size = 14) {
   </svg>`;
 }
 
-// 날짜 이동 버튼
+/**
+ * 날짜 이동 버튼. 이 앱에서 테두리 있는 버튼은 기간 선택(여러 상태 중 하나 고르기)
+ * 뿐이라, 1스텝 이동인 이 버튼은 무테두리 계열로 맞춘다. 평소 투명, 호버 시에만 은은한 배경으로 존재감을 준다.
+ * @param {object} opts
+ * @param {string} opts.id
+ * @param {"left"|"right"} opts.dir
+ * @param {boolean} [opts.disabled]
+ */
 function _dateNavButton({ id, dir, disabled = false }) {
   const color = disabled ? "var(--vl-ink-3)" : "var(--vl-ink-2)";
   const label = dir === "left" ? "이전 날짜" : "다음 날짜";
   return `<button id="${id}" class="vl-date-nav-btn vl-press" aria-label="${label}" ${disabled ? "disabled" : ""}
-    style="width:30px;height:30px;border:none;border-radius:50%;background:transparent;color:${color};cursor:${disabled ? "default" : "pointer"};display:grid;place-items:center;opacity:${disabled ? 0.4 : 1}">
+    style="width:30px;height:30px;border:none;border-radius:50%;color:${color};cursor:${disabled ? "default" : "pointer"};display:grid;place-items:center;opacity:${disabled ? 0.4 : 1}">
     ${_chevronIcon(dir, 15)}
   </button>`;
 }
@@ -180,6 +187,21 @@ function isRealReview(text) {
   );
 }
 
+// "하루 돌아보기"·"기간별 돌아보기" 공용 다양성 등급 설명 — 한 곳에서만 관리한다.
+// 당연한 얘기("쏠리면 편중")는 빼고, 실제 경계 기준(정확히 3등분, viewlens-data.js
+// DIVERSITY_BAND_RATIOS)만 밝힌다. 절대 수치는 여전히 노출하지 않는다.
+const DIVERSITY_TIP =
+  "카테고리 다양성 지수가 이론상 최댓값의 1/3, 2/3 지점을 기준으로 편중·보통·다양 세 구간으로 나뉘어요.";
+
+/**
+ * 다양성 등급 옆 정보 아이콘. 호버 영역을 아이콘 자체로 좁혀 정확히 뭘 가리켜야
+ * 설명이 뜨는지 분명히 하고, 클릭 동작이 없어 help 대신 default 커서를 쓴다.
+ * @returns {string} HTML
+ */
+function _diversityInfoIcon() {
+  return `<span class="vl-tip" data-tip="${DIVERSITY_TIP}" style="display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border-radius:50%;background:var(--vl-ink-3);color:var(--vl-card);font-size:9px;font-weight:700;line-height:1;vertical-align:middle;margin-left:4px;cursor:default">i</span>`;
+}
+
 function _collectingBanner(count) {
   if (!count) return "";
   const timerText = VL.today?.collectingTimer || "";
@@ -201,12 +223,12 @@ function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
       <div style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : dateLabel}</div>
       ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
     </div>
-    <div style="flex:1;padding:24px 24px 40px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px">
+    <div style="flex:1;padding:24px 24px 40px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:22px">
       <div style="position:relative;width:80px;height:80px">
         <span style="position:absolute;inset:0;border-radius:50%;background:var(--vl-accent-soft);animation:vlPulse 2.4s ease-out infinite"></span>
         <span style="position:absolute;inset:0;border-radius:50%;border:2px solid var(--vl-accent);opacity:0.4;animation:vlPulse 2.4s ease-out infinite 0.6s"></span>
         <span style="position:absolute;inset:0;display:grid;place-items:center">
-          ${markSVG({ size: 36, filled: false, accent: "var(--vl-accent)" })}
+          ${markSVG({ size: 36, filled: false, accent: "var(--vl-accent)", animated: true })}
         </span>
       </div>
       <div>
@@ -232,17 +254,31 @@ function screenToday() {
   }
   const h = VL.entropy(d.dist);
   const delta = h - d.prevEntropy;
+  const NEAR_ZERO = 0.15;
+  const todayLabel = VL.diversityLabel(h);
+  const prevLabel = d.hasPrevData ? VL.diversityLabel(d.prevEntropy) : null;
+  const toneColor = (tone) =>
+    ({ warn: "var(--vl-warn)", good: "var(--vl-good)" })[tone] ||
+    "var(--vl-ink-2)";
+  const prevLabelText = d.prevIsYesterday ? "어제" : d.prevDateLabel;
+  const pctChange = VL.diversityDeltaPct(d.prevEntropy, h);
 
+  // 도넛 조각이 채워지는 타이밍에 맞춰 자기 카테고리가 다 찰 때 해당 줄이 나타난다
+  // (트리거는 _animateCharts, viewlens-app.js). d.dist가 이미 비율 내림차순이라 누적
+  // 비율만 계산하면 된다.
+  let catAcc = 0;
   const catRows = d.dist
-    .map(
-      (c) => `
-    <div style="display:flex;align-items:center;gap:8px">
+    .map((c) => {
+      catAcc += c.p;
+      const revealMs = Math.round(catAcc * VL_DONUT_DRAW_MS);
+      return `
+    <div class="vl-cat-row" style="display:flex;align-items:center;gap:8px;opacity:0;transform:translateX(6px);transition:opacity .3s ease ${revealMs}ms,transform .3s ease ${revealMs}ms">
       <span style="width:8px;height:8px;border-radius:3px;background:${c.color};flex-shrink:0"></span>
       <span style="font-size:var(--vl-fs-3);color:var(--vl-ink);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name}</span>
       <span style="font-size:var(--vl-fs-3);color:var(--vl-ink-2)">${Math.round(c.p * 100)}%</span>
     </div>
-  `,
-    )
+  `;
+    })
     .join("");
 
   const isToday = d.dateLabel === koreanDateLabel(new Date());
@@ -284,22 +320,38 @@ function screenToday() {
 
     ${vlCard({
       pad: 16,
-      children: `
-      <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);font-weight:600;margin-bottom:11px">직전 시청일 대비 다양성</div>
-      <div style="display:flex;align-items:center;gap:13px">
+      children: d.hasPrevData
+        ? `
+      <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);font-weight:600;margin-bottom:11px">${prevLabelText} 대비 다양성${_diversityInfoIcon()}</div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:20px">
         <div style="text-align:center">
-          <div style=";font-size:var(--vl-fs-5);font-weight:700;color:var(--vl-ink-3);line-height:1">${d.prevEntropy.toFixed(2)}</div>
-          <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:4px">${d.prevDateLabel}</div>
+          <div style=";font-size:var(--vl-fs-5);font-weight:700;color:${toneColor(prevLabel.tone)};line-height:1">${prevLabel.label}</div>
+          <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:4px">${prevLabelText}</div>
         </div>
         <span style="font-size:var(--vl-fs-4);color:var(--vl-ink-3)">→</span>
         <div style="text-align:center">
-          <div style=";font-size:var(--vl-fs-6);font-weight:700;color:var(--vl-ink);line-height:1">${h.toFixed(2)}</div>
+          <div style=";font-size:var(--vl-fs-6);font-weight:700;color:${toneColor(todayLabel.tone)};line-height:1">${todayLabel.label}</div>
           <div style="font-size:var(--vl-fs-2);color:var(--vl-accent);margin-top:4px;font-weight:700">오늘</div>
         </div>
-        <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:3px">
-          ${vlDeltaChip({ value: delta })}
-          <span style="font-size:var(--vl-fs-2);font-weight:700;color:${delta >= 0 ? "var(--vl-good)" : "var(--vl-warn)"}">${delta >= 0 ? "더 다양해졌어요" : "더 편중됐어요"}</span>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:5px;margin-top:12px;padding-top:12px;border-top:1px solid var(--vl-line);white-space:nowrap">
+        ${vlDeltaChip({ value: Math.abs(delta) < NEAR_ZERO ? 0 : delta, showValue: false })}
+        <span style="font-size:var(--vl-fs-2);font-weight:700;color:${Math.abs(delta) < NEAR_ZERO ? "var(--vl-ink-2)" : delta > 0 ? "var(--vl-good)" : "var(--vl-warn)"}">${
+          Math.abs(delta) < NEAR_ZERO
+            ? "지난 기록과 비슷해요"
+            : delta > 0
+              ? `${Math.abs(pctChange)}%p 더 다양해졌어요`
+              : `${Math.abs(pctChange)}%p 더 편중됐어요`
+        }</span>
+      </div>
+    `
+        : `
+      <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);font-weight:600;margin-bottom:11px">오늘의 다양성${_diversityInfoIcon()}</div>
+      <div style="display:flex;align-items:center;gap:13px">
+        <div style="text-align:center">
+          <div style=";font-size:var(--vl-fs-6);font-weight:700;color:${toneColor(todayLabel.tone)};line-height:1">${todayLabel.label}</div>
         </div>
+        <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3)">비교할 이전 시청 기록이 없어요</span>
       </div>
     `,
     })}
@@ -331,6 +383,8 @@ function _todayCumulativeCard(isToday, d, locked) {
       text: d.review,
       topic: d.reviewTopic || "",
       videos: d.videos,
+      videoListLabel: "이 날 시청한 영상",
+      totalCount: d.videoCount,
       locked: false,
       sessionId: d.sessionId ?? null,
     });
@@ -346,6 +400,8 @@ function _todayCumulativeCard(isToday, d, locked) {
       : cumulative.review || "",
     topic: cumulative.generating ? "" : cumulative.reviewTopic || "",
     videos: d.videos,
+    videoListLabel: "오늘 시청한 영상",
+    totalCount: d.videoCount,
     locked: !!locked && !cumulative.generating,
     sessionId: cumulative.sessionId ?? null,
   });
@@ -356,22 +412,39 @@ function _todayCumulativeCard(isToday, d, locked) {
 function screenFeedback(currentWeek, selWeek) {
   const w = VL.weeks[selWeek - 1];
   const prevW = selWeek >= 2 ? VL.weeks[selWeek - 2] : null;
-  const vsPrev = prevW ? w.entropy - prevW.entropy : 0;
+  const NEAR_ZERO = 0.15;
+  const rawVsPrev = prevW ? w.entropy - prevW.entropy : 0;
+  const vsPrev = Math.abs(rawVsPrev) < NEAR_ZERO ? 0 : rawVsPrev;
+  const vsPrevPct = prevW ? VL.diversityDeltaPct(prevW.entropy, w.entropy) : 0;
+  const scoreLabel = VL.diversityLabel(w.entropy);
+  const toneColor = (tone) =>
+    ({ warn: "var(--vl-warn)", good: "var(--vl-good)" })[tone] ||
+    "var(--vl-ink)";
+  // 이 기간(선택된 주차) 안의 날짜별 값
+  // w.daily는 로컬 데이터로 실제 계산 가능할 때만 채워진다(null이면 일별 데이터를 알 수 없다는 뜻, 가짜로 채우지 않는다).
+  const dailyPoints = w.daily || [];
+  const trendData = dailyPoints.map((d) => d.entropy);
+  const trendLabels = dailyPoints.map((d) => d.label);
+  const trendTooltips = dailyPoints.map(
+    (d) => `영상 ${d.videoCount}개 · 카테고리 ${d.categoryCount}개`,
+  );
+  const bandBoundaries = VL.DIVERSITY_BAND_RATIOS.map((r) => VL.H_MAX * r);
 
+  // 위 탭 바와 같은 언어(테두리 없이 색+밑줄로 선택 상태 표현)로 맞춘다
+  // 이 버튼만 예전 방식(테두리+채움 배경)이 남아 있었다.
   const weekBtns = VL.weeks
     .map((wk) => {
       const locked = wk.week > currentWeek;
       const active = wk.week === selWeek && !locked;
-      return `<button data-week="${wk.week}" class="vl-press" ${locked ? "disabled" : ""}
-      style="flex:0 0 72px;padding:10px 4px;border-radius:12px;cursor:${locked ? "default" : "pointer"};
-        border:1.5px solid ${active ? "var(--vl-accent)" : "var(--vl-line)"};
-        background:${active ? "var(--vl-accent-soft)" : "var(--vl-card)"};
+      return `<button data-week="${wk.week}" class="vl-press vl-period-btn" ${locked ? "disabled" : ""}
+      style="flex:0 0 56px;padding:5px 4px 6px;border:none;border-radius:8px;cursor:${locked ? "default" : "pointer"};
         color:${locked ? "var(--vl-ink-3)" : active ? "var(--vl-accent)" : "var(--vl-ink-2)"};
-        font-family:inherit;font-weight:700;font-size:var(--vl-fs-3);opacity:${locked ? 0.65 : 1};
-        display:flex;flex-direction:column;align-items:center;gap:3px">
+        font-family:inherit;font-weight:${active ? 800 : 600};font-size:var(--vl-fs-3);opacity:${locked ? 0.55 : 1};
+        display:flex;flex-direction:column;align-items:center;gap:4px">
       <span style="display:flex;align-items:center;gap:4px;white-space:nowrap">
         ${locked ? _lockIcon(10) : ""}${wk.label}
       </span>
+      <span style="width:${active ? 16 : 0}px;height:3px;border-radius:999px;background:var(--vl-accent)"></span>
     </button>`;
     })
     .join("");
@@ -380,22 +453,22 @@ function screenFeedback(currentWeek, selWeek) {
     ? `<div>
         <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-bottom:4px">직전 기간(${prevW.label}) 대비</div>
         <div style="display:flex;align-items:center;gap:7px">
-          ${vlDeltaChip({ value: vsPrev })}
-          <span style="font-size:var(--vl-fs-3);color:var(--vl-ink-2)">${vsPrev >= 0 ? "더 다양해요" : "덜 다양해요"}</span>
+          ${vlDeltaChip({ value: vsPrev, showValue: false })}
+          <span style="font-size:var(--vl-fs-3);color:var(--vl-ink-2)">${
+            vsPrev === 0
+              ? "비슷해요"
+              : vsPrev > 0
+                ? `${Math.abs(vsPrevPct)}%p 더 다양해요`
+                : `${Math.abs(vsPrevPct)}%p 덜 다양해요`
+          }</span>
         </div>
       </div>`
     : `<p style="margin:0;font-size:var(--vl-fs-3);line-height:1.55;color:var(--vl-ink-2)">첫 기간이라 비교할 데이터가 없어요.</p>`;
 
-  const baselineLegend = !w.isBaseline
-    ? `
-    <div style="display:flex;align-items:center;gap:5px;margin-top:7px">
-      <span style="width:14px;height:0;border-top:1px dashed var(--vl-ink-3)"></span>
-      <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3)">점선 = 기준값 ${VL.baselineH.toFixed(2)}</span>
-    </div>`
-    : "";
-
   return `<div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
-    <div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:2px" id="vl-week-btns">${weekBtns}</div>
+    <!-- 버튼 라벨이 가운데 정렬이라 박스 왼쪽 끝보다 더 오른쪽에서 시작한다(실측
+    약 13.6px) — 아래 제목과 맞추려고 줄 전체를 그만큼 왼쪽으로 당긴다. -->
+    <div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:2px;margin-left:-14px" id="vl-week-btns">${weekBtns}</div>
 
     <div style="display:flex;align-items:center;justify-content:space-between">
       <div>
@@ -410,23 +483,40 @@ function screenFeedback(currentWeek, selWeek) {
       pad: 16,
       children: `
       <div style="display:flex;align-items:center;gap:14px">
-        <div class="vl-tip" data-tip="시청한 영상이 여러 카테고리에 고르게 퍼져 있을수록 높아지는 점수예요.&#10;한 주제만 보면 낮고, 다양하게 볼수록 올라가요." style="text-align:center;flex-shrink:0">
-          <div style="font-weight:700;font-size:var(--vl-fs-7);color:var(--vl-ink);line-height:1;letter-spacing:-0.02em">${w.entropy.toFixed(2)}</div>
-          <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:4px;font-weight:600">다양성 점수 ⓘ</div>
+        <div style="text-align:center;flex-shrink:0">
+          <div style="font-weight:700;font-size:var(--vl-fs-7);color:${toneColor(scoreLabel.tone)};line-height:1;letter-spacing:-0.02em">${scoreLabel.label}</div>
+          <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:4px;font-weight:600">다양성${_diversityInfoIcon()}</div>
         </div>
         <div style="width:1px;align-self:stretch;background:var(--vl-line)"></div>
         <div style="flex:1">${vsBaseContent}</div>
       </div>
       <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--vl-line)">
         ${vlSectionLabel({ text: "일별 다양성 추이" })}
-        ${vlMiniLine({
-          // 기간이 1일뿐이면 점 하나라 선을 못 그림(내부에서 0으로 나눠 깨짐) — 같은 값을
-          // 2번 넣어 평평한 선으로라도 표시(테스트 기간 한정 임시 처리, 실제 연구 땐 불필요).
-          data:
-            w.daily.length > 1 ? w.daily : [w.daily[0] ?? 0, w.daily[0] ?? 0],
-          baseline: w.isBaseline ? null : VL.baselineH,
-        })}
-        ${baselineLegend}
+        ${
+          dailyPoints.length > 0
+            ? vlMiniLine({
+                // 그 기간 안에 시청 기록이 있는 날이 하루뿐이면 점 하나라 선을 못 그림
+                // 같은 값을 2번 넣어 점으로라도 표시.
+                data:
+                  trendData.length > 1
+                    ? trendData
+                    : [trendData[0] ?? 0, trendData[0] ?? 0],
+                labels:
+                  trendData.length > 1
+                    ? trendLabels
+                    : [trendLabels[0] ?? "", trendLabels[0] ?? ""],
+                tooltips:
+                  trendData.length > 1
+                    ? trendTooltips
+                    : [trendTooltips[0] ?? "", trendTooltips[0] ?? ""],
+                bands: {
+                  boundaries: bandBoundaries,
+                  labels: ["다양", "보통", "편중"],
+                },
+                height: 96,
+              })
+            : `<p style="margin:0;font-size:var(--vl-fs-3);line-height:1.55;color:var(--vl-ink-2)">이 기간은 일별 데이터를 볼 수 없어요.</p>`
+        }
       </div>
     `,
     })}
@@ -435,7 +525,7 @@ function screenFeedback(currentWeek, selWeek) {
       pad: 16,
       children: `
       ${vlSectionLabel({ text: "주간 카테고리 분포" })}
-      ${vlBarChart({ data: w.dist })}
+      ${vlStackedBar({ data: w.dist })}
     `,
     })}
 
@@ -475,7 +565,7 @@ function screenControlHome(day, stats = {}) {
         <span style="position:absolute;inset:0;border-radius:50%;background:var(--vl-accent-soft)"></span>
         <span style="position:absolute;inset:0;border-radius:50%;border:2px solid var(--vl-accent);opacity:0.5;animation:vlPulse 2.4s ease-out infinite"></span>
         <span style="position:absolute;inset:0;display:grid;place-items:center">
-          ${markSVG({ size: 36, filled: false, accent: "var(--vl-accent)" })}
+          ${markSVG({ size: 36, filled: false, accent: "var(--vl-accent)", animated: true })}
         </span>
       </div>
       <div style="margin-top:16px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink)">시청 기록을 수집하고 있어요</div>
@@ -567,6 +657,8 @@ function screenPastDayRevealModal(pastDay) {
         text: pastDay.review,
         topic: pastDay.reviewTopic,
         videos: pastDay.videos,
+        videoListLabel: "이 날 시청한 영상",
+        totalCount: pastDay.videoCount,
         locked: false,
         id: "vl-reveal-review-card",
       })}
