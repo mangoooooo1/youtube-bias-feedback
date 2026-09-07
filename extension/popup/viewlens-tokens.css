@@ -88,6 +88,77 @@ body {
     opacity: 0;
   }
 }
+/* 로고 블레이드가 조리개처럼 -16°↔+16°(0° 기준 양방향)로 숨쉬듯 여닫힌다. 각도를
+   sin(2π·t)로 5%마다 미리 계산해 linear로 잇는다 — 0/25/50/75/100%만 찍고
+   ease-in-out을 쓰면 -16°/0°/+16°마다 속도가 끊겨 두 단계로 뚝뚝 끊기는 것처럼 보인다. */
+@keyframes vlApertureBreathe {
+  0% {
+    transform: rotate(0deg);
+  }
+  5% {
+    transform: rotate(-4.94deg);
+  }
+  10% {
+    transform: rotate(-9.4deg);
+  }
+  15% {
+    transform: rotate(-12.94deg);
+  }
+  20% {
+    transform: rotate(-15.22deg);
+  }
+  25% {
+    transform: rotate(-16deg);
+  }
+  30% {
+    transform: rotate(-15.22deg);
+  }
+  35% {
+    transform: rotate(-12.94deg);
+  }
+  40% {
+    transform: rotate(-9.4deg);
+  }
+  45% {
+    transform: rotate(-4.94deg);
+  }
+  50% {
+    transform: rotate(0deg);
+  }
+  55% {
+    transform: rotate(4.94deg);
+  }
+  60% {
+    transform: rotate(9.4deg);
+  }
+  65% {
+    transform: rotate(12.94deg);
+  }
+  70% {
+    transform: rotate(15.22deg);
+  }
+  75% {
+    transform: rotate(16deg);
+  }
+  80% {
+    transform: rotate(15.22deg);
+  }
+  85% {
+    transform: rotate(12.94deg);
+  }
+  90% {
+    transform: rotate(9.4deg);
+  }
+  95% {
+    transform: rotate(4.94deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+.vl-aperture-blade {
+  animation: vlApertureBreathe 3.8s linear infinite;
+}
 @keyframes vlSheet {
   from {
     transform: translateY(100%);
@@ -95,6 +166,21 @@ body {
   to {
     transform: translateY(0);
   }
+}
+/* 추이 그래프 점에서 은은하게 퍼지는 핑 원. r·opacity를 SVG geometry 프로퍼티로 직접
+   애니메이션한다(Chrome은 r을 stylable property로 지원). */
+@keyframes vlDotPing {
+  0% {
+    r: 2.6px;
+    opacity: 0.55;
+  }
+  100% {
+    r: 8px;
+    opacity: 0;
+  }
+}
+.vl-dot-ping {
+  animation: vlDotPing 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 @keyframes vlBlink {
   0%,
@@ -194,9 +280,30 @@ body {
   filter: brightness(0.9);
 }
 
-/* 날짜 이동 버튼은 원형이라 press 시 살짝 더 큰 스케일감이 자연스럽다 */
+/* 날짜 이동 버튼: 평소엔 배경 없음(투명), 호버할 때만 은은한 배경으로 존재감을 준다.
+   press 시엔 원형이라 살짝 더 큰 스케일감이 자연스럽다. */
+.vl-date-nav-btn {
+  background: transparent;
+  transition:
+    background-color 0.15s ease,
+    transform 0.1s ease,
+    filter 0.15s ease;
+}
+.vl-date-nav-btn:hover:not(:disabled) {
+  background: var(--vl-card-2);
+}
 .vl-date-nav-btn:active:not(:disabled) {
   transform: scale(0.88);
+}
+
+/* 기간 선택 버튼(1구간/2구간…): 날짜 이동 버튼과 같은 원칙 — 평소엔 배경 없음,
+   호버할 때만 은은한 배경. 선택 상태는 버튼 안의 밑줄(색+너비)로만 표현한다. */
+.vl-period-btn {
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+.vl-period-btn:hover:not(:disabled) {
+  background: var(--vl-card-2);
 }
 
 /* 호버 툴팁 (data-tip 속성 사용) */
@@ -234,4 +341,19 @@ body {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
+}
+/* 차트 오른쪽 절반의 점처럼, 기준점이 카드 오른쪽 가장자리에 가까우면 툴팁이 왼쪽으로
+   펼쳐지게 한다(그대로 두면 카드 밖으로 잘림). */
+.vl-tip-right::after {
+  left: auto;
+  right: 0;
+}
+/* 차트 위 투명 히트 영역: 그 자체가 안 보이면 어디를 가리키고 있는지 드러나지 않으므로,
+   호버 시 점 위에 은은한 원(halo)을 띄워 정확히 뭘 가리키는지 보이게 한다. */
+.vl-chart-hit {
+  border-radius: 50%;
+  transition: background-color 0.15s ease;
+}
+.vl-chart-hit:hover {
+  background: color-mix(in oklab, var(--vl-accent) 22%, transparent);
 }
