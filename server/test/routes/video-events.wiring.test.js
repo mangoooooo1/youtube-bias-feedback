@@ -165,6 +165,27 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
     expect(row.referrerType).toBe("external");
   });
 
+  // 채널(/@handle) 등 유튜브 내부 경로라도 4분류 밖(unknown)이면 식별 정보를 담을 수 있어
+  // entryPath를 저장하지 않아야 한다는 지적의 회귀 테스트.
+  it("유튜브 내부 경로라도 unknown으로 분류되면(예: 채널 페이지) entryPath는 저장하지 않는다", async () => {
+    const res = await request(app)
+      .post("/api/video-events")
+      .send(
+        basePayload({
+          entryHost: "www.youtube.com",
+          entryPath: "/@someChannelHandle",
+        }),
+      );
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare("SELECT * FROM video_events WHERE videoId = ?")
+      .get("wiring-v1");
+    expect(row.entryHost).toBe("www.youtube.com");
+    expect(row.entryPath).toBeNull();
+    expect(row.referrerType).toBe("unknown");
+  });
+
   it("entryHost/entryPath 미전송(구버전 확장)이면 referrerType은 unknown, relatedTrigger는 null로 저장된다", async () => {
     const res = await request(app)
       .post("/api/video-events")

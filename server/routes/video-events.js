@@ -13,6 +13,15 @@ const insertEvent = db.prepare(`
     (@eventId, @anonymousId, @videoId, @title, @watchedAt, @sessionId, @entryHost, @entryPath, @referrerType, @relatedTrigger)
 `);
 
+// entryPath를 저장해도 되는 referrerType 화이트리스트. 외부 사이트 경로(external)뿐 아니라,
+// 채널(/@handle, /channel/UCxxx) 등 식별 정보를 담을 수 있는 유튜브 내부 경로도 4분류 밖이라
+// unknown으로 떨어지므로 함께 걸러진다 — "unknown이면 안전하다고 확인되지 않은 것"으로 취급.
+const SAFE_ENTRY_PATH_REFERRER_TYPES = new Set([
+  "direct_search",
+  "home_feed",
+  "related",
+]);
+
 router.post("/", (req, res, next) => {
   const error = validateVideoEvent(req.body);
   if (error) {
@@ -45,11 +54,9 @@ router.post("/", (req, res, next) => {
     navigationTrigger ?? null,
   );
 
-  // 외부 사이트의 경로는 사용자명·계정ID 등 직접 식별 정보를 담을 수 있다.
-  // content.js가 애초에 안 보내도록 막아뒀지만, 구버전 확장이나 향후 변경으로
-  // 그 값이 들어와도 서버가 저장 직전에 한 번 더 걸러낸다.
-  const storedEntryPath =
-    referrerType === "external" ? null : (entryPath ?? null);
+  const storedEntryPath = SAFE_ENTRY_PATH_REFERRER_TYPES.has(referrerType)
+    ? (entryPath ?? null)
+    : null;
 
   try {
     insertEvent.run({
