@@ -14,20 +14,26 @@ const VL_APERTURE_LINES = [
  * @param {boolean} opts.filled  - squircle background (default true)
  * @param {string}  opts.accent  - accent color (default var(--vl-accent))
  * @param {string}  opts.face    - stroke color on filled bg (default var(--vl-on-accent))
+ * @param {boolean} [opts.animated] - 조리개 여닫힘 애니메이션 여부(default false, "대기 중" 화면 전용)
  */
 function markSVG({
   size = 40,
   filled = true,
   accent = "var(--vl-accent)",
   face = "var(--vl-on-accent)",
+  animated = false,
 } = {}) {
   const ink = filled ? face : accent;
   const bg = filled
     ? `<rect x="0" y="0" width="100" height="100" rx="28" ry="28" fill="${accent}"/>`
     : "";
-  const lines = VL_APERTURE_LINES.map(
-    ([x1, y1, x2, y2]) => `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`,
-  ).join("");
+  // 블레이드마다 원 위의 바깥쪽 끝을 transform-origin으로 잡아야 진짜 조리개처럼 회전한다.
+  const lines = VL_APERTURE_LINES.map(([x1, y1, x2, y2]) => {
+    const style = animated
+      ? ` class="vl-aperture-blade" style="transform-origin:${x2}px ${y2}px"`
+      : "";
+    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"${style}/>`;
+  }).join("");
   return `<svg width="${size}" height="${size}" viewBox="0 0 100 100"
       style="display:block;flex-shrink:0" aria-label="ViewLens"
       xmlns="http://www.w3.org/2000/svg">
