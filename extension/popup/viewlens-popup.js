@@ -114,8 +114,28 @@ function topKey(sess) {
   return top ? toVlKey(top[0]) : "etc";
 }
 
+// 영상별 실제 카테고리는 로컬에 저장돼 있지 않아서(세션 단위 categoryDistribution만 있음),
+// 목록에 표시하는 카테고리는 그 영상이 속한 세션의 대표 카테고리(topKey)로 근사한다.
+function listSessionVideos(sessions) {
+  return sessions.flatMap((sess) => {
+    const cat = topKey(sess);
+    return (sess.videos || []).map((v) => ({
+      title: v.title,
+      cat,
+      videoId: v.videoId || null,
+    }));
+  });
+}
+
 // ── Build VL.today ────────────────────────────────────────────────────────────
 
+/**
+ * 특정 날짜의 하루 요약 데이터를 만든다.
+ * hasPrevData(직전 기록 존재 여부)·prevIsYesterday(그 기록이 실제로 어제인지)를 함께 반환해,
+ * "비교 데이터 없음"과 "진짜 0"을 구분하고 "어제"라는 표현을 오표기하지 않게 한다.
+ * @param {Array<object>} allSessions - 전체 세션 목록
+ * @param {Date} targetDate - 조회할 날짜
+ */
 function buildDataForDate(allSessions, targetDate) {
   const todayStr = dateStr(targetDate);
 
@@ -136,6 +156,8 @@ function buildDataForDate(allSessions, targetDate) {
       dist: [],
       prevEntropy: 0,
       prevDateLabel: "—",
+      hasPrevData: false,
+      prevIsYesterday: false,
       videos: [],
       review: "",
       sessionIds: [],
