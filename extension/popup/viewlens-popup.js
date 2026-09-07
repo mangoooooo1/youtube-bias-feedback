@@ -840,6 +840,23 @@ async function handleFeedbackConfirmClick(popup, sessionId) {
 // 주차별 탭에 머문 시간이 이 값 이상이어야 periodFeedbackViewed를 확정
 const PERIOD_FEEDBACK_VIEW_THRESHOLD_MS = 2000;
 
+// m.feedbackTabEnteredAt(현재 연속 체류가 시작된 실제 시각)과 지금 시각의 차이를
+// periodTabMs에 누적하고, 마커를 지금 시각으로 당겨서 중복 계산 없이 반복 호출 가능하게 한다.
+// setInterval의 고정 tick 주기가 아니라 실제 경과 시간을 쓰므로, 탭 진입 직후 tick이
+// 곧바로 도는 경우에도 그 순간까지의 실제 체류 시간만 인정된다.
+function accruePeriodFeedbackDwell(m) {
+  if (!m.feedbackTabEnteredAt) return;
+  const now = Date.now();
+  m.periodTabMs += now - m.feedbackTabEnteredAt;
+  m.feedbackTabEnteredAt = now;
+  if (
+    !m.periodFeedbackViewed &&
+    m.periodTabMs >= PERIOD_FEEDBACK_VIEW_THRESHOLD_MS
+  ) {
+    m.periodFeedbackViewed = 1;
+  }
+}
+
 function buildPopupEventPayload(m) {
   return {
     eventId: m.eventId,
@@ -1197,6 +1214,9 @@ async function boot() {
           : 0,
       periodFeedbackViewed: 0,
       periodTabMs: 0,
+      // 주차별 탭에 현재 연속으로 머무는 중이면 그 시작 시각, 아니면 null.
+      // 팝업은 항상 "오늘" 탭으로 열리므로 초기값은 null.
+      feedbackTabEnteredAt: null,
     };
     persistLivePopupEvent(popupMetrics);
 
@@ -1207,10 +1227,16 @@ async function boot() {
       if (tabBtn) {
         if (tabBtn.dataset.tab === "today") {
           popupMetrics.tabTodayClicks++;
+          // 주차별 탭을 벗어나는 시점. 지금까지의 연속 체류를 확정하고 마커를 지운다.
+          accruePeriodFeedbackDwell(popupMetrics);
+          popupMetrics.feedbackTabEnteredAt = null;
         } else if (tabBtn.dataset.tab === "feedback") {
           popupMetrics.tabWeekClicks++;
-          // periodFeedbackViewed는 여기서 바로 세우지 않는다.
-          // 실제 열람 판정은 아래 setInterval이 체류시간으로 확정한다.
+          // 실제 열람 판정(periodFeedbackViewed)은 체류시간 기준으로 아래에서 확정한다.
+          // 이미 연속 체류 중이면(중복 클릭 등) 시작 시각을 되돌리지 않는다.
+          if (!popupMetrics.feedbackTabEnteredAt) {
+            popupMetrics.feedbackTabEnteredAt = Date.now();
+          }
         }
         persistLivePopupEvent(popupMetrics);
         return;
@@ -1250,6 +1276,9 @@ async function boot() {
      * 잘려도 세션 중 스냅샷이 다음 boot에서 승격되므로, sendBeacon이 실패해도 데이터는 남는다.
      */
     const finalizePopupMetrics = () => {
+      // 주차별 탭에 머문 채로 팝업이 닫히는 경우, 마지막 setInterval tick 이후의
+      // 짧은 잔여 체류시간까지 마저 반영한다.
+      accruePeriodFeedbackDwell(popupMetrics);
       persistLivePopupEvent(popupMetrics);
       sendPopupEventBeacon(stored.serverUrl, popupMetrics);
     };
@@ -1346,14 +1375,9 @@ async function boot() {
     VL._lastWatchedAt = localLastWatchedAt;
 
     if (popupMetrics) {
-      // 주차별 탭에 머문 누적 시간이 임계값을 넘어야만 실제 열람으로 확정
-      // 탭을 열자마자 바로 다른 곳으로 이동한 경우(오클릭 등)를 걸러내기 위함.
-      if (popup._tab === "feedback" && !popupMetrics.periodFeedbackViewed) {
-        popupMetrics.periodTabMs += 1000;
-        if (popupMetrics.periodTabMs >= PERIOD_FEEDBACK_VIEW_THRESHOLD_MS) {
-          popupMetrics.periodFeedbackViewed = 1;
-        }
-      }
+      // 주차별 탭에 머문 실제 경과 시간을 갱신. tick 횟수가 아니라 feedbackTabEnteredAt과의
+      // 실제 시간차를 쓰므로, 탭 진입 직후 tick이 곧바로 돌아도 그만큼만 인정된다.
+      accruePeriodFeedbackDwell(popupMetrics);
       // dwellMs 스냅샷 갱신. close write가 잘려도 최근값(±1초)이 보존됨
       persistLivePopupEvent(popupMetrics);
     }
