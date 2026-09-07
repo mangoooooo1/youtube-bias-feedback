@@ -1,6 +1,3 @@
-// 직전 URL(entryHost/entryPath)과 자동재생/클릭 원시 신호(navigationTrigger)를 받아
-// referrerType(유입 경로)과 relatedTrigger(관련 동영상일 때만 의미 있는 세부 원인)를 정한다.
-
 const YOUTUBE_HOSTS = new Set([
   "www.youtube.com",
   "youtube.com",
@@ -8,6 +5,16 @@ const YOUTUBE_HOSTS = new Set([
   "music.youtube.com",
 ]);
 
+/**
+ * 직전 URL(entryHost/entryPath)과 자동재생/클릭 원시 신호(navigationTrigger)를 받아
+ * referrerType(direct_search/home_feed/related/external/unknown)과
+ * relatedTrigger(related일 때만 의미 있는 세부 원인)로 분류한다.
+ *
+ * @param {string|null} entryHost - 직전 페이지 도메인
+ * @param {string|null} entryPath - 직전 페이지 경로(유튜브 내부 페이지일 때만 존재)
+ * @param {"ended"|"interaction"|null} navigationTrigger - 이동 직전 원시 신호(자동재생 종료 vs 클릭/키입력)
+ * @returns {{ referrerType: "direct_search"|"home_feed"|"related"|"external"|"unknown", relatedTrigger: "autoplay"|"click"|"unknown"|null }}
+ */
 function classifyReferrerType(entryHost, entryPath, navigationTrigger) {
   // 직전 URL 자체를 못 구한 경우(탭 최초 진입인데 referrer가 없는 등)
   if (!entryPath) {
