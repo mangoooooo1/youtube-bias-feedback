@@ -23,7 +23,7 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 const SOURCE_DB_PATH = process.env.SOURCE_DB_PATH || process.argv[2];
 const DB_ENCRYPTION_KEY = process.env.DB_ENCRYPTION_KEY;
 
-// 골드스탠다드 층화 추출 설계용 최소 영상 수 — 이보다 적으면 다양성을 구조적으로 보여줄 수 없다
+// 골드스탠다드 층화 추출 설계용 최소 영상 수. 이보다 적으면 다양성을 구조적으로 보여줄 수 없다
 // (richness가 1~2로 고정됨). 사용자와 논의 후 확정한 값.
 const MIN_VIDEO_COUNT_FOR_SAMPLING = 5;
 
@@ -206,7 +206,8 @@ function main() {
     sessionId: s.sessionId,
     anonymousId: s.anonymousId,
     groupCode: s.groupCode ?? null,
-    isTestAccount: typeof s.groupCode === "string" && s.groupCode.startsWith("TEST"),
+    isTestAccount:
+      typeof s.groupCode === "string" && s.groupCode.startsWith("TEST"),
     videoCount: s.videoCount,
     entropy: s.entropy,
     categoryCount: categoryCountOf(s.categoryDistribution),
@@ -235,7 +236,8 @@ function main() {
     const gridKey = `${entropyBucket(s.entropy)}_${categoryBucket(s.categoryCount)}`;
     grid[gridKey] = (grid[gridKey] ?? 0) + 1;
     const histKey = String(s.categoryCount);
-    categoryCountHistogram[histKey] = (categoryCountHistogram[histKey] ?? 0) + 1;
+    categoryCountHistogram[histKey] =
+      (categoryCountHistogram[histKey] ?? 0) + 1;
   }
 
   const byParticipant = new Map();
