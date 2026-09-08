@@ -18,8 +18,8 @@ function extractVideoId(url) {
   }
 }
 
-// server/routes/video-events-classify.js의 YOUTUBE_HOSTS와 동일한 목록
-// 확장(브라우저)과 서버(Node)가 서로 다른 런타임이라 모듈을 공유할 수 없어 중복 정의한다. 바뀌면 양쪽 다 갱신할 것.
+// server/routes/video-events-classify.js의 YOUTUBE_HOSTS와 동일
+// 런타임이 달라 모듈 공유가 안 돼 중복 정의(바뀌면 양쪽 다 갱신).
 const YOUTUBE_HOSTS = new Set([
   "www.youtube.com",
   "youtube.com",
@@ -28,13 +28,9 @@ const YOUTUBE_HOSTS = new Set([
 ]);
 
 /**
- * 직전 페이지 URL에서 도메인·경로를 뽑아낸다. 경로는 유튜브 내부 페이지일 때만 담는다.
- * 외부 사이트의 경로는 사용자명·계정ID 등을 그대로 담고 있을 수 있어 애초에 보내지 않는다.
- * 유튜브 경로 중에도 채널(/@handle, /channel/UCxxx) 등 식별 정보를 담는 경우가 있으므로,
- * 최종적으로 어떤 경로를 저장할지는 서버가 referrerType 분류 결과로 다시 한번 걸러낸다
- * (server/routes/video-events.js의 SAFE_ENTRY_PATH_REFERRER_TYPES 화이트리스트).
- * 외부 유입 여부 판별에는 도메인만 있으면 충분하고 경로 내용은 쓰이지 않는다.
- * 파싱 실패(값이 없거나 URL 형식이 아닌 경우)는 둘 다 null로 처리한다.
+ * 직전 페이지 URL에서 도메인·경로를 뽑는다. 경로는 유튜브 내부 페이지일 때만 담는다.
+ * 외부 사이트 경로는 계정ID 등 식별 정보를 담을 수 있어 애초에 안 보낸다(서버가
+ * referrerType 분류로 한 번 더 거름, server/routes/video-events.js).
  *
  * @param {string|null} href - 직전 페이지의 URL(예: document.referrer 또는 이전 location.href)
  * @returns {{ entryHost: string|null, entryPath: string|null }}
@@ -88,12 +84,11 @@ function waitForTitle(prevTitle, maxRetries = 10, interval = 200) {
 // 서비스 워커 수면과 무관하게 storage에 직접 기록
 let writeQueue = Promise.resolve();
 
-// 유튜브 탭을 여러 개 동시에 열어두면 탭마다 완전히 독립된 콘텐츠 스크립트 인스턴스가 돌아서 큐만으로는 탭 간 경합을 못 막는다.
+// 탭마다 독립된 콘텐츠 스크립트가 돌아 큐만으로는 다중 탭 동시 시청 시 경합을 못 막는다.
 function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger) {
   writeQueue = writeQueue.then(async () => {
-    // 확장을 리로드/업데이트하면 이미 열려있던 유튜브 탭의 content script는 페이지를
-    // 새로고침하기 전까지 무효화된 컨텍스트로 남는다 — 이 상태에서 chrome.* 호출은 전부
-    // 예외를 던진다. 미리 감지해 조용히 실패하지 말고 콘솔에 남겨서 원인을 알 수 있게 한다.
+    // 확장 리로드/업데이트 후 남은 탭은 새로고침 전까지 컨텍스트가 무효화돼 chrome.*
+    // 호출이 전부 예외를 던진다 — 조용히 삼키지 않고 콘솔에 남긴다.
     if (!chrome.runtime?.id) {
       console.warn(
         "[content] 확장 컨텍스트 무효화됨(리로드/업데이트) — 이 탭을 새로고침해야 기록이 재개됩니다.",
@@ -126,9 +121,7 @@ function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger) {
       // uuid를 videoKey와 eventId 양쪽에 재사용한다.
       const eventId = crypto.randomUUID();
       const videoKey = `video__${session.sessionId}__${eventId}`;
-      // sent:false로 시작
-      // 아래 전송이 실패하면 이 값이 그대로 남아, background.js의
-      // 1분 재시도 큐(retryUnsentVideoEvents)가 나중에 다시 보낼 대상을 찾아낼 수 있다.
+      // sent:false로 시작 — 전송 실패 시 이 값이 남아 background.js의 재시도 큐가 찾아낸다.
       await chrome.storage.local.set({
         lastWatchedAt: now,
         currentSession: {
@@ -151,8 +144,7 @@ function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger) {
       });
       console.log("[content] recorded:", { videoId, title });
 
-      // 서버에 즉시 전송
-      // 성공(200)했을 때만 sent:true로 갱신한다. 실패해도 여기서 다시 시도하지 않는다.
+      // 서버에 즉시 전송 — 성공(200) 시에만 sent:true로 갱신, 실패해도 여기서 재시도 안 함.
       if (anonymousId && serverUrl && !serverUrl.startsWith("YOUR_")) {
         fetch(`${serverUrl.replace(/\/$/, "")}/api/video-events`, {
           method: "POST",
@@ -198,8 +190,7 @@ function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger) {
 let lastVideoId = null;
 // waitForTitle의 staleness 비교 기준(새 title을 실제로 확보했을 때만 갱신)
 let lastTitle = null;
-// 탭이 처음 열릴 때는 document.referrer로 시작하고, 이후로는 SPA 내부 이동(yt-navigate-finish)마다
-// 직접 갱신한다. document.referrer는 이 최초 진입 시점 이후로는 절대 바뀌지 않기 때문이다.
+// 탭 최초 진입은 document.referrer로 시작, 이후 SPA 이동마다 갱신(referrer는 최초 이후 안 바뀜).
 let previousLocationHref = document.referrer || null;
 
 // 자동재생 종료 vs 관련영상 클릭 구분용 상태
@@ -208,8 +199,7 @@ let lastInteractionAt = null;
 // 자동재생 카운트다운(~8초)보다 여유를 둔 판정 창
 const NAV_TRIGGER_WINDOW_MS = 12000;
 
-// ended는 버블링되지 않아 캡처 단계(3번째 인자 true)에서 등록해야 잡힌다.
-// SPA 이동으로 <video>가 교체돼도 캡처 리스너는 재등록할 필요 없다.
+// ended는 버블링 안 돼 캡처 단계(3번째 인자 true)에서 등록 — SPA로 <video>가 바뀌어도 재등록 불필요.
 document.addEventListener(
   "ended",
   () => {
@@ -248,6 +238,11 @@ function classifyNavigationTrigger(now) {
   return endedDelta <= interactionDelta ? "ended" : "interaction";
 }
 
+// handleVideoChange 재진입 감지용 세대 카운터 — document.title은 탭 전체가 공유하는 값이라
+// 빠른 연속 이동 시 이전 호출의 waitForTitle 폴링이 다음 영상의 title을 가로챌 수 있다(실제
+// 데이터 오염 사례 있음). await 후 세대가 앞질러졌으면 잡은 title을 못 믿으므로 포기한다.
+let handleVideoChangeGen = 0;
+
 async function handleVideoChange() {
   const videoId = extractVideoId(location.href);
 
@@ -261,15 +256,25 @@ async function handleVideoChange() {
 
   if (videoId === lastVideoId) return;
 
-  // previousLocationHref를 이번 영상의 location.href로 덮어쓰기 전에 먼저 읽어야
-  // "이 영상 직전 페이지가 어디였는지"를 알 수 있다.
+  // 덮어쓰기 전에 먼저 읽어야 "이 영상 직전 페이지"를 알 수 있다.
   const { entryHost, entryPath } = parseEntryLocation(previousLocationHref);
   const navigationTrigger = classifyNavigationTrigger(Date.now());
   previousLocationHref = location.href;
 
   lastVideoId = videoId;
 
+  const myGen = ++handleVideoChangeGen;
   const title = await waitForTitle(lastTitle);
+  if (myGen !== handleVideoChangeGen) {
+    // await 도중 더 최신 이동이 시작됨 — 잡은 title이 그쪽 것일 수 있어 조용히 포기.
+    console.warn(
+      "[content] 더 빠른 다음 이동 감지 — 기록 건너뜀(재진입 방지):",
+      {
+        videoId,
+      },
+    );
+    return;
+  }
   if (title) lastTitle = title;
   console.log("[content] video detected:", { videoId, title });
 

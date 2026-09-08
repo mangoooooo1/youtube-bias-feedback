@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -344,6 +344,100 @@ function collectVideos(storeDump, sessionId) {
     .filter(([k]) => k.startsWith(`video__${sessionId}__`))
     .map(([, v]) => v);
 }
+
+// handleVideoChange는 extractVideoId부터 자기 자신까지 순서대로 의존하므로 그 구간을
+// 통째로 추출한다. 실제 recordVideo(storage/fetch 의존, 별도 describe에서 이미 검증됨)는
+// 이 테스트의 관심사가 아니라 호출 인자만 기록하는 목으로 치환한다.
+const HANDLE_VIDEO_CHANGE_BLOCK_DECL =
+  /function extractVideoId\(url\) \{[\s\S]*?\nasync function handleVideoChange\(\) \{[\s\S]*?\n\}/;
+
+function loadHandleVideoChangeFactory() {
+  const raw = readFileSync(CONTENT_PATH, "utf8");
+  const blockMatch = raw.match(HANDLE_VIDEO_CHANGE_BLOCK_DECL);
+  if (!blockMatch) {
+    throw new Error(
+      "handleVideoChange 관련 코드를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  if (!RECORD_VIDEO_DECL.test(blockMatch[0])) {
+    throw new Error(
+      "recordVideo 선언을 찾지 못해 목(mock)으로 치환할 수 없습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  const body = blockMatch[0].replace(
+    RECORD_VIDEO_DECL,
+    "function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger) { recordVideoCalls.push({ videoId, title, entryHost, entryPath, navigationTrigger }); return Promise.resolve(); }",
+  );
+  return new Function(
+    "document",
+    "location",
+    "recordVideoCalls",
+    `${body}\nreturn handleVideoChange;`,
+  );
+}
+
+describe("content.js handleVideoChange — 재진입 경합(연구 무결성 점검 항목 4)", () => {
+  let handleVideoChange, recordVideoCalls, documentMock, locationMock;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    recordVideoCalls = [];
+    documentMock = { referrer: "", title: "YouTube", addEventListener: () => {} };
+    locationMock = { href: "https://www.youtube.com/watch?v=AAAA" };
+    handleVideoChange = loadHandleVideoChangeFactory()(
+      documentMock,
+      locationMock,
+      recordVideoCalls,
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // 실제로 관측된 데이터 오염 재현: 영상 A로 이동했지만 title이 아직 "YouTube"
+  // 플레이스홀더라 A의 waitForTitle이 재시도 타이머로 대기하는 사이, 더 빠르게 영상 B로
+  // 이동해 title이 곧바로 반영되면(B의 waitForTitle은 동기적으로 해결) — A의 재시도
+  // 타이머가 나중에 돌 때도 document.title은 여전히 B의 값이라, 재진입 방지가 없으면
+  // A가 B의 title을 가로채 videoId A + title B로 잘못 기록한다.
+  it("빠른 연속 이동 시 이전 호출이 다음 이동의 title을 가로채 기록하지 않는다", async () => {
+    const callA = handleVideoChange();
+
+    locationMock.href = "https://www.youtube.com/watch?v=BBBB";
+    documentMock.title = "영상 B 실제 제목 - YouTube";
+    const callB = handleVideoChange();
+
+    await callB;
+    // A의 재시도 타이머(200ms)를 흘려보낸다 — 이 시점에도 document.title은 여전히 B의 값이다.
+    await vi.advanceTimersByTimeAsync(250);
+    await callA;
+
+    expect(recordVideoCalls).toHaveLength(1);
+    expect(recordVideoCalls[0]).toMatchObject({
+      videoId: "BBBB",
+      title: "영상 B 실제 제목",
+    });
+  });
+
+  it("겹치지 않는 순차 이동은 평소처럼 각각 기록된다(재진입 방지가 정상 흐름을 막지 않음)", async () => {
+    documentMock.title = "영상 A 실제 제목 - YouTube";
+    await handleVideoChange();
+
+    locationMock.href = "https://www.youtube.com/watch?v=BBBB";
+    documentMock.title = "영상 B 실제 제목 - YouTube";
+    await handleVideoChange();
+
+    expect(recordVideoCalls).toHaveLength(2);
+    expect(recordVideoCalls[0]).toMatchObject({
+      videoId: "AAAA",
+      title: "영상 A 실제 제목",
+    });
+    expect(recordVideoCalls[1]).toMatchObject({
+      videoId: "BBBB",
+      title: "영상 B 실제 제목",
+    });
+  });
+});
 
 describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 항목 3)", () => {
   let recordVideoFactory;
