@@ -29,7 +29,7 @@ function entropy(arr) {
 
 // 베이스라인 기간(설치 후 BASELINE_DAYS 미만) 판정
 // 팝업/Studio는 classic script라 ESM import를 쓸 수 없어(background.js는 type=module) 로직을 중복 정의한다.
-const BASELINE_DAYS = 2;
+const BASELINE_DAYS = 4;
 function isBaselinePeriod(installDate, now = new Date()) {
   if (!installDate) return true;
   return (
@@ -195,11 +195,10 @@ const weeks = [
 weeks.forEach((w) => {
   w.entropy = entropy(w.dist);
 });
-// 파일럿 검증용으로 6일로 단축(베이스라인 2일 + 일반 2일×2)
-const TOTAL_DAYS = 6;
-// 탭을 며칠 단위로 나눌지 — 평소 운영값은 7(주 단위), 파일럿 기간엔 2일 단위로 여러 날짜에
-// 걸친 집계 경로(본조사에서만 타는 경로)를 미리 검증한다.
-const DAYS_PER_PERIOD = 2;
+// 총 실험 기간 12일(베이스라인 4일 + 4일씩 2개 기간)
+const TOTAL_DAYS = 12;
+// 탭을 며칠 단위로 나눌지 — 4일 단위로 기간을 구분한다.
+const DAYS_PER_PERIOD = 4;
 const TOTAL_WEEKS = Math.ceil(TOTAL_DAYS / DAYS_PER_PERIOD);
 
 function periodLabel(n) {
