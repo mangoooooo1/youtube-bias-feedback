@@ -37,8 +37,8 @@ describe("verifyAndRecordStudyEndCode", () => {
   let db;
   const CODE = "ABCD1234";
   const FIXED_NOW = new Date("2026-06-10T10:00:00+09:00");
-  const ENDED_INSTALL_DATE = "2026-06-01T00:00:00+09:00"; // +6일(TOTAL_DAYS) = 6/7 → 종료됨
-  const NOT_ENDED_INSTALL_DATE = "2026-06-08T00:00:00+09:00"; // +6일 = 6/14 → 진행 중
+  const ENDED_INSTALL_DATE = "2026-05-25T00:00:00+09:00"; // +12일(TOTAL_DAYS) = 6/6 → 종료됨
+  const NOT_ENDED_INSTALL_DATE = "2026-06-08T00:00:00+09:00"; // +12일 = 6/20 → 진행 중
 
   function createTestDb() {
     const database = new Database(":memory:");

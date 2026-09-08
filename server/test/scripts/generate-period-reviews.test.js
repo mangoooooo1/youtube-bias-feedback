@@ -50,10 +50,10 @@ function createTestDb() {
   return db;
 }
 
-// 설치일로부터 이미 6일이 지난 것으로 고정 — 파일럿 구성(DAYS_PER_PERIOD=2, TOTAL_DAYS=6)
+// 설치일로부터 이미 12일이 지난 것으로 고정 — 현재 구성(DAYS_PER_PERIOD=4, TOTAL_DAYS=12)
 // 기준으로 3개 기간(베이스라인 1구간 + 일반 2구간) 전부 완료 대상이 된다.
 const INSTALL_DATE = "2026-06-01T00:00:00+09:00";
-const FIXED_NOW = new Date("2026-06-07T10:00:00+09:00");
+const FIXED_NOW = new Date("2026-06-13T10:00:00+09:00");
 
 describe("generate-period-reviews.js — run()", () => {
   let db;
@@ -122,12 +122,12 @@ describe("generate-period-reviews.js — run()", () => {
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
     ).run("active-user", INSTALL_DATE);
 
-    // DAYS_PER_PERIOD=2 기준 각 기간(1구간 6/1-6/2, 2구간 6/3-6/4, 3구간 6/5-6/6)에
+    // DAYS_PER_PERIOD=4 기준 각 기간(1구간 6/1-6/4, 2구간 6/5-6/8, 3구간 6/9-6/12)에
     // 하나씩 세션을 심어 3개 기간 모두 데이터가 있는 상태로 만든다.
     for (const [day, count] of [
       ["2026-06-01T10:00:00+09:00", 5],
-      ["2026-06-03T10:00:00+09:00", 5],
       ["2026-06-05T10:00:00+09:00", 5],
+      ["2026-06-09T10:00:00+09:00", 5],
     ]) {
       db.prepare(
         "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
@@ -242,13 +242,13 @@ describe("generate-period-reviews.js — run()", () => {
   });
 
   describe("fallback 재시도 정책 (periodEnd 기준 3일 이내)", () => {
-    // 1일차(offset 0-1, periodEnd=2026-06-02) 하나만 완료되도록 고정 — 나머지 기간은
+    // 1구간(offset 0-3, periodEnd=2026-06-04) 하나만 완료되도록 고정 — 나머지 기간은
     // 이 테스트들과 무관하니 아직 진행 중인 채로 둔다.
     const P1_INSTALL_DATE = "2026-06-01T00:00:00+09:00";
     const P1_SESSION_AT = "2026-06-01T10:00:00+09:00";
 
     it("성공(llmStatus=success)한 기간은 재실행해도 다시 시도하지 않는다", async () => {
-      vi.setSystemTime(new Date("2026-06-03T10:00:00+09:00"));
+      vi.setSystemTime(new Date("2026-06-05T10:00:00+09:00"));
       db.prepare(
         "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
       ).run("locked-success-user", P1_INSTALL_DATE);
@@ -289,7 +289,7 @@ describe("generate-period-reviews.js — run()", () => {
     });
 
     it("fallback 기간은 periodEnd로부터 3일 이내면 재시도해 성공으로 갱신될 수 있다", async () => {
-      vi.setSystemTime(new Date("2026-06-03T10:00:00+09:00"));
+      vi.setSystemTime(new Date("2026-06-05T10:00:00+09:00"));
       db.prepare(
         "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
       ).run("retry-user", P1_INSTALL_DATE);
@@ -302,7 +302,7 @@ describe("generate-period-reviews.js — run()", () => {
         status: 500,
         text: async () => "server error",
       });
-      await run(db, "fake-key"); // 1회차 — 실패 → fallback 저장 (periodEnd=6/2, 재시도 기한 6/5)
+      await run(db, "fake-key"); // 1회차 — 실패 → fallback 저장 (periodEnd=6/4, 재시도 기한 6/7)
 
       let row = db
         .prepare(
@@ -312,7 +312,7 @@ describe("generate-period-reviews.js — run()", () => {
       expect(row.llmStatus).toBe("fallback");
 
       // 하루 뒤(재시도 기한 안) — 이번엔 성공하도록 변경 후 재실행
-      vi.setSystemTime(new Date("2026-06-04T10:00:00+09:00"));
+      vi.setSystemTime(new Date("2026-06-06T10:00:00+09:00"));
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
@@ -344,7 +344,7 @@ describe("generate-period-reviews.js — run()", () => {
     });
 
     it("fallback 기간이 재시도 기한(periodEnd+3일)을 지나면 더 이상 재시도하지 않는다", async () => {
-      vi.setSystemTime(new Date("2026-06-03T10:00:00+09:00"));
+      vi.setSystemTime(new Date("2026-06-05T10:00:00+09:00"));
       db.prepare(
         "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
       ).run("expired-user", P1_INSTALL_DATE);
@@ -357,10 +357,10 @@ describe("generate-period-reviews.js — run()", () => {
         status: 500,
         text: async () => "server error",
       });
-      await run(db, "fake-key"); // periodEnd=6/2, 재시도 기한 6/5
+      await run(db, "fake-key"); // periodEnd=6/4, 재시도 기한 6/7
 
-      // 기한(6/5)을 지난 시점 — 이제 성공하도록 바꿔도 더 이상 호출되면 안 된다.
-      vi.setSystemTime(new Date("2026-06-06T10:00:00+09:00"));
+      // 기한(6/7)을 지난 시점 — 이제 성공하도록 바꿔도 더 이상 호출되면 안 된다.
+      vi.setSystemTime(new Date("2026-06-08T10:00:00+09:00"));
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({

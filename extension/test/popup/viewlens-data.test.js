@@ -37,8 +37,8 @@ function loadVL(totalDaysOverride) {
   return evaluate(sandbox);
 }
 
-// TOTAL_DAYS=6은 지금 실제 운영 중인 파일럿 값, 42는 본조사 전환 후 예상 값
-describe.each([6, 42])(
+// TOTAL_DAYS=12는 지금 실제 운영 중인 값, 42는 본조사 확장 시나리오 예상 값
+describe.each([12, 42])(
   "VL.isStudyEnded — TOTAL_DAYS=%i일 때 study-period.js와 동치성",
   (totalDays) => {
     let VL;

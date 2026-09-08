@@ -149,9 +149,9 @@ describe("getPeriodReviews", () => {
   // 여부에 따라 조건부로만 열람을 허용한다. Story 10-10, 명세서 2·7절.
   describe("대조군(CON, TEST-CON) 종료 후 조건부 열람", () => {
     const FIXED_NOW = new Date("2026-06-10T10:00:00+09:00");
-    // +6일(TOTAL_DAYS) = 2026-06-07 → FIXED_NOW(6/10) 이전이라 종료된 것으로 판정된다.
-    const ENDED_INSTALL_DATE = "2026-06-01T00:00:00+09:00";
-    // +6일 = 2026-06-14 → FIXED_NOW(6/10) 이후라 아직 진행 중으로 판정된다.
+    // +12일(TOTAL_DAYS) = 2026-06-06 → FIXED_NOW(6/10) 이전이라 종료된 것으로 판정된다.
+    const ENDED_INSTALL_DATE = "2026-05-25T00:00:00+09:00";
+    // +12일 = 2026-06-20 → FIXED_NOW(6/10) 이후라 아직 진행 중으로 판정된다.
     const NOT_ENDED_INSTALL_DATE = "2026-06-08T00:00:00+09:00";
 
     beforeEach(() => {
@@ -243,8 +243,8 @@ describe("getPeriodReviews", () => {
 describe("isStudyEnded / isStudyEndUnlocked", () => {
   let db;
   const FIXED_NOW = new Date("2026-06-10T10:00:00+09:00");
-  const ENDED_INSTALL_DATE = "2026-06-01T00:00:00+09:00"; // +6일 = 6/7 → 종료됨
-  const NOT_ENDED_INSTALL_DATE = "2026-06-08T00:00:00+09:00"; // +6일 = 6/14 → 진행 중
+  const ENDED_INSTALL_DATE = "2026-05-25T00:00:00+09:00"; // +12일 = 6/6 → 종료됨
+  const NOT_ENDED_INSTALL_DATE = "2026-06-08T00:00:00+09:00"; // +12일 = 6/20 → 진행 중
 
   beforeEach(() => {
     db = createTestDb();

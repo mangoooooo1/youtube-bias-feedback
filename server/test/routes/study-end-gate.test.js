@@ -118,7 +118,7 @@ function buildApp() {
 const app = buildApp();
 
 // +6일(TOTAL_DAYS, 파일럿값) 지나 FIXED_NOW 기준 이미 종료된 것으로 판정되는 설치일
-const ENDED_INSTALL_DATE = "2026-06-01T00:00:00+09:00";
+const ENDED_INSTALL_DATE = "2026-05-25T00:00:00+09:00"; // +12일(TOTAL_DAYS) = 6/6 → 종료됨
 const FIXED_NOW = new Date("2026-06-10T10:00:00+09:00");
 
 function insertParticipant(anonymousId, group_code, installDate) {

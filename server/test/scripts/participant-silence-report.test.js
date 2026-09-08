@@ -10,7 +10,7 @@ import {
 } from "../../scripts/participant-silence-report.js";
 
 const DAY = 24 * 60 * 60 * 1000;
-const TOTAL_DAYS = 6; // server/pipeline/study-constants.js의 파일럿 값과 동일
+const TOTAL_DAYS = 12; // server/pipeline/study-constants.js의 값과 동일
 
 function sha10(value) {
   return crypto
