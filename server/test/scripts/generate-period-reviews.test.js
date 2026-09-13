@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import Database from "better-sqlite3-multiple-ciphers";
-import { run } from "../../scripts/generate-period-reviews.js";
+import { run, shouldFail } from "../../scripts/generate-period-reviews.js";
 
 function createTestDb() {
   const db = new Database(":memory:");
@@ -102,7 +102,7 @@ describe("generate-period-reviews.js — run()", () => {
     ).run("empty-user", INSTALL_DATE);
 
     global.fetch = vi.fn();
-    await run(db, "fake-key");
+    const summary = await run(db, "fake-key");
 
     const rows = db
       .prepare(
@@ -115,6 +115,16 @@ describe("generate-period-reviews.js — run()", () => {
       rows.every((r) => r.review.includes("분석할 시청 기록이 없어요")),
     ).toBe(true);
     expect(global.fetch).not.toHaveBeenCalled();
+
+    // 세션이 없어 Gemini 호출 자체를 생략한 fallback은 llmFailures로 세지 않는다.
+    // 참여자가 그 기간에 안 본 것뿐이라 실패로 볼 이유가 없다(shouldFail 참고).
+    expect(summary).toEqual({
+      created: 0,
+      fallback: 3,
+      llmFailures: 0,
+      skipped: 0,
+    });
+    expect(shouldFail(summary)).toBe(false);
   });
 
   it("밀린 여러 기간을 오래된 순서로 순차 처리한다 (동시 호출 없음)", async () => {
@@ -158,7 +168,7 @@ describe("generate-period-reviews.js — run()", () => {
       };
     });
 
-    await run(db, "fake-key");
+    const summary = await run(db, "fake-key");
 
     expect(maxConcurrent).toBe(1); // 병렬 호출 없음 — 항상 하나씩만 진행 중
     expect(global.fetch).toHaveBeenCalledTimes(3);
@@ -170,6 +180,14 @@ describe("generate-period-reviews.js — run()", () => {
       .all("active-user");
     expect(rows.map((r) => r.periodIndex)).toEqual([1, 2, 3]);
     expect(rows.every((r) => r.source === "llm")).toBe(true);
+
+    expect(summary).toEqual({
+      created: 3,
+      fallback: 0,
+      llmFailures: 0,
+      skipped: 0,
+    });
+    expect(shouldFail(summary)).toBe(false);
   });
 
   it("period_reviews에 이미 있는 기간은 건너뛰고, UNIQUE 제약으로 중복 행이 생기지 않는다", async () => {
@@ -229,7 +247,7 @@ describe("generate-period-reviews.js — run()", () => {
       text: async () => "server error",
     });
 
-    await run(db, "fake-key");
+    const summary = await run(db, "fake-key");
 
     const row = db
       .prepare(
@@ -239,6 +257,18 @@ describe("generate-period-reviews.js — run()", () => {
     expect(row.source).toBe("fallback");
     expect(row.llmStatus).toBe("fallback");
     expect(row.failureReason).toBe("http_error");
+
+    // period 1은 세션이 있어 Gemini를 실제로 호출했다가 실패(llmFailures), 2·3은 세션이
+    // 없어 애초에 호출을 생략한 정상 fallback. 이 참여자 하나뿐이라 created가 0이라,
+    // "시도한 건 있는데 하나도 못 살렸다"는 패턴으로 실패 판정된다(P01·0 감사에서 찾은
+    // 사각지대: 예전엔 이 경우도 exit code 0이었다).
+    expect(summary).toEqual({
+      created: 0,
+      fallback: 2,
+      llmFailures: 1,
+      skipped: 0,
+    });
+    expect(shouldFail(summary)).toBe(true);
   });
 
   describe("fallback 재시도 정책 (periodEnd 기준 3일 이내)", () => {
@@ -385,5 +415,37 @@ describe("generate-period-reviews.js — run()", () => {
         .get("expired-user");
       expect(row.llmStatus).toBe("fallback");
     });
+  });
+});
+
+describe("shouldFail — run() 집계로 실패 여부를 판정하는 순수 함수", () => {
+  it("전부 정상(created만 있음)이면 실패가 아니다", () => {
+    expect(
+      shouldFail({ created: 3, fallback: 0, llmFailures: 0, skipped: 0 }),
+    ).toBe(false);
+  });
+
+  it("세션이 없어 생긴 fallback만 있으면(llmFailures=0) 실패가 아니다", () => {
+    expect(
+      shouldFail({ created: 0, fallback: 5, llmFailures: 0, skipped: 0 }),
+    ).toBe(false);
+  });
+
+  it("llmFailures가 있어도 created가 1 이상이면(부분 실패) 아직 실패로 보지 않는다", () => {
+    expect(
+      shouldFail({ created: 2, fallback: 0, llmFailures: 1, skipped: 0 }),
+    ).toBe(false);
+  });
+
+  it("llmFailures가 있는데 created가 0이면(전량 실패) 실패다", () => {
+    expect(
+      shouldFail({ created: 0, fallback: 0, llmFailures: 1, skipped: 0 }),
+    ).toBe(true);
+  });
+
+  it("skipped가 하나라도 있으면 다른 값과 무관하게 실패다", () => {
+    expect(
+      shouldFail({ created: 10, fallback: 0, llmFailures: 0, skipped: 1 }),
+    ).toBe(true);
   });
 });

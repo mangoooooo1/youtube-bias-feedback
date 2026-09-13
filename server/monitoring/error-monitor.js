@@ -2,9 +2,11 @@
 /**
  * PM2 에러 로그 무음 실패 감시 (cron 실행용)
  *
- * server/middleware/responseHandler.js의 errorHandler가 남기는 `[Error] ...` 라인만
- * 감시 대상으로 삼는다. 이 접두사는 "예상 못 한 서버 예외"에만 붙으므로, 검증 실패 같은
- * 정상적인 4xx 응답은 fail()에서 바로 반환돼 애초에 여기 걸리지 않는다.
+ * - Tier 1(즉시): [Error] (errorHandler) + [sessions] 오늘 리뷰 생성 오류
+ *   이미 안쪽에 fallback/방어 로직이 있는데도 뚫고 올라온 구조적 실패라 1건만 나와도 알린다.
+ * - Tier 2(임계값): [youtube] API 오류:/[youtube] 네트워크 오류/[today-review-llm] API error body
+ *   이미 fallback 경로가 있는 외부 API 호출 실패라, 1건은 일시적 네트워크 blip일 수 있어 노이즈가 된다.
+ *   같은 실행 주기(30분) 안에서 같은 지문이 TIER2_MIN_OCCURRENCES회 이상 나올 때만 알린다.
  *
  * 매번 로그 전체를 다시 읽지 않고 마지막 확인 지점 이후만 읽는다.
  * 같은 에러가 반복돼도 이메일이 반복 발송되지 않도록 지문(fingerprint) + 쿨다운으로
@@ -29,15 +31,39 @@ const {
 
 const PING_ENV_VAR = "ERROR_MONITOR_PING_URL";
 const STATE_NAME = "error-monitor";
-const ERROR_PREFIX = "[Error] ";
 const DEFAULT_COOLDOWN_MS = 30 * 60 * 1000;
 
-/** 로그 텍스트 중 errorHandler가 남긴 에러 라인만 추출한다. */
+// Tier 1: 구조적 실패 — 1건만 나와도 즉시 알린다.
+const TIER1_PREFIXES = ["[Error] ", "[sessions] 오늘 리뷰 생성 오류:"];
+
+// Tier 2: 이미 fallback 경로가 있는 외부 API 호출 실패
+// 같은 실행 주기(30분) 안에서 같은 지문이 TIER2_MIN_OCCURRENCES회 이상 나올 때만 알린다.
+// 실제 YouTube API 사고는 29시간 동안 4017건이 쌓일 정도로 사고성 패턴은 이 임계값을 훌쩍 넘긴다.
+const TIER2_PREFIXES = [
+  "[youtube] API 오류:",
+  "[youtube] 네트워크 오류:",
+  "[today-review-llm] API error body:",
+];
+const TIER2_MIN_OCCURRENCES = 5;
+
+const ALL_PREFIXES = [...TIER1_PREFIXES, ...TIER2_PREFIXES];
+
+/** 로그 텍스트 중 Tier 1·Tier 2 접두사에 해당하는 라인만 추출한다. */
 function extractErrorLines(text) {
   return text
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.startsWith(ERROR_PREFIX));
+    .filter((line) => ALL_PREFIXES.some((prefix) => line.startsWith(prefix)));
+}
+
+/**
+ * 라인의 접두사로 Tier를 판정한다. 알려지지 않은 접두사는 방어적으로 1(즉시)로 취급한다.
+ * 무음 실패를 만드느니 과알림이 낫다.
+ */
+function classifyTier(message) {
+  if (TIER1_PREFIXES.some((prefix) => message.startsWith(prefix))) return 1;
+  if (TIER2_PREFIXES.some((prefix) => message.startsWith(prefix))) return 2;
+  return 1;
 }
 
 // sessionId·videoId 같은 숫자·UUID를 지우면, 같은 종류의 에러는 매번 같은 문자열로 정규화된다.
@@ -131,6 +157,7 @@ function decideAlerts(
   fingerprints = {},
   now = Date.now(),
   cooldownMs = DEFAULT_COOLDOWN_MS,
+  tier2MinOccurrences = TIER2_MIN_OCCURRENCES,
 ) {
   const updated = { ...fingerprints };
   const alerts = [];
@@ -144,6 +171,12 @@ function decideAlerts(
   }
 
   for (const [fp, { message, count }] of grouped) {
+    // Tier 2는 이번 실행에서 새로 읽은 구간 안의 발생 횟수가 임계값을 넘을 때만
+    // 알림 대상으로 취급한다. 미달이면 이번 실행에서는 조용히 건너뛰고
+    // 다음 실행에서 새로 집계한다. 여러 실행에 걸쳐 조금씩 나뉘어 쌓이는 패턴은
+    // 이 설계로는 못 잡는다는 점은 의도적으로 감수한 단순화다.
+    if (classifyTier(message) === 2 && count < tier2MinOccurrences) continue;
+
     const prev = updated[fp];
     if (!prev) {
       updated[fp] = { firstSeenAt: now, lastAlertedAt: now, count };
@@ -238,4 +271,5 @@ module.exports = {
   readNewText,
   decideAlerts,
   shouldPersistState,
+  classifyTier,
 };

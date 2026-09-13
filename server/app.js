@@ -6,6 +6,21 @@ const { success, errorHandler } = require("./middleware/responseHandler");
 const { db, initializeDB } = require("./db");
 const { buildHealthPayload } = require("./routes/health");
 
+// 전역 예외 핸들러
+// errorHandler는 Express 요청 흐름 안의 예외만 잡기 때문에 이 둘을 등록해야
+// 요청 흐름 밖에서 처리되지 않은 예외/거부는 [Error] 접두사가 없어서 필터링되지 않는다.
+// [Error] 포맷으로 통일해 남기고, 상태가 오염됐을 수 있는 프로세스를 계속 쓰지 않도록 PM2가 재시작하게 종료한다.
+process.on("uncaughtException", (err) => {
+  console.error(`[Error] uncaught exception: ${err.stack || err.message}`);
+  process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  const message =
+    reason instanceof Error ? reason.stack || reason.message : String(reason);
+  console.error(`[Error] unhandled rejection: ${message}`);
+  process.exit(1);
+});
+
 initializeDB();
 
 const app = express();
