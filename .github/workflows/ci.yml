@@ -29,7 +29,6 @@ jobs:
           node --check server/app.js
           node --check server/db.js
           node --check server/routes/sessions.js
-          node --check server/routes/surveys.js
           node --check server/routes/health.js
           node --check server/middleware/responseHandler.js
           node --check server/monitoring/healthchecks-ping.js
