@@ -5,8 +5,8 @@ const { getPeriodReviews } = require("./period-reviews-query");
 
 const router = express.Router();
 
-router.get("/", (req, res) => {
-  const anonymousId = (req.query.anonymousId || "").toString().trim();
+router.post("/", (req, res) => {
+  const anonymousId = (req.body?.anonymousId || "").toString().trim();
   if (!anonymousId) {
     return fail(
       res,

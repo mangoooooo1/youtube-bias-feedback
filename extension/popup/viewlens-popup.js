@@ -460,10 +460,12 @@ async function fetchPeriodReviews(serverUrl, anonymousId) {
     PERIOD_REVIEWS_TIMEOUT_MS,
   );
   try {
-    const res = await fetch(
-      `${serverUrl.replace(/\/$/, "")}/api/period-reviews?anonymousId=${encodeURIComponent(anonymousId)}`,
-      { signal: controller.signal },
-    );
+    const res = await fetch(`${serverUrl.replace(/\/$/, "")}/api/period-reviews`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ anonymousId }),
+      signal: controller.signal,
+    });
     if (!res.ok) return null;
     const json = await res.json();
     return Array.isArray(json.data) ? json.data : null;
@@ -534,10 +536,12 @@ async function fetchTodayReviews(serverUrl, anonymousId) {
     TODAY_REVIEWS_TIMEOUT_MS,
   );
   try {
-    const res = await fetch(
-      `${serverUrl.replace(/\/$/, "")}/api/today-reviews?anonymousId=${encodeURIComponent(anonymousId)}`,
-      { signal: controller.signal },
-    );
+    const res = await fetch(`${serverUrl.replace(/\/$/, "")}/api/today-reviews`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ anonymousId }),
+      signal: controller.signal,
+    });
     if (!res.ok) return null;
     const json = await res.json();
     return Array.isArray(json.data) ? json.data : null;
