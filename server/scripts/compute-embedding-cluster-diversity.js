@@ -228,7 +228,7 @@ async function main() {
   let pipeline;
   try {
     ({ pipeline } = require("@huggingface/transformers"));
-  } catch (err) {
+  } catch {
     fail(
       "'@huggingface/transformers' 패키지가 없습니다. server 디렉터리에서 " +
         "'npm install @huggingface/transformers'를 실행한 뒤 다시 시도하세요.",

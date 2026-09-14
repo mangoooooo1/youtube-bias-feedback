@@ -44,5 +44,8 @@ jobs:
           node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json', 'utf8'))"
           echo "manifest.json is valid JSON"
 
-      - name: Run test suite
-        run: pnpm test
+      - name: Lint
+        run: pnpm lint
+
+      - name: Run test suite with coverage
+        run: pnpm test:coverage
