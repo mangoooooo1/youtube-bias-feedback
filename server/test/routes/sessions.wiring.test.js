@@ -54,6 +54,13 @@ afterAll(() => {
 
 beforeEach(() => {
   db.exec("DELETE FROM sessions");
+  // basePayload()의 anonymousId("wiring-user")가 등록된 참여자여야 이 파일의 대부분의
+  // 테스트가 통과한다(참여자 존재 확인이 추가됨). "오늘 누적 리뷰" describe의 afterEach가
+  // participants를 통째로 지우므로, 매 테스트 전에 멱등하게 다시 넣어준다.
+  db.prepare(
+    `INSERT OR IGNORE INTO participants (anonymousId, group_code, installDate)
+     VALUES ('wiring-user', 'EXP', '2020-01-01T00:00:00+09:00')`,
+  ).run();
 });
 
 function basePayload(overrides = {}) {
@@ -313,7 +320,7 @@ describe("POST /api/sessions — 오늘 누적 리뷰 생성·자격 게이팅",
     expect(res.body.data.todayReview).toBeNull();
   });
 
-  it("참여자 등록이 없는 anonymousId(온보딩 전 등)도 세션 저장은 성공하고 오늘 리뷰만 비어 있다", async () => {
+  it("참여자 등록이 없는 anonymousId(온보딩 전 등)는 세션 저장을 거부한다(날조된 참여자 방지)", async () => {
     const res = await request(app)
       .post("/api/sessions")
       .send(
@@ -323,8 +330,13 @@ describe("POST /api/sessions — 오늘 누적 리뷰 생성·자격 게이팅",
         }),
       );
 
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.data.todayReview).toBeNull();
+    expect(res.status).toBe(404);
+    expect(res.body.success).toBe(false);
+    expect(res.body.code).toBe("NOT_FOUND");
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS c FROM sessions WHERE sessionId = ?")
+        .get("unregistered-s1").c,
+    ).toBe(0);
   });
 });

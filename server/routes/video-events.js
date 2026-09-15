@@ -3,6 +3,7 @@ const { db } = require("../db");
 const { success, fail } = require("../middleware/responseHandler");
 const { validateVideoEvent } = require("./video-events-validate");
 const { classifyReferrerType } = require("./video-events-classify");
+const { requireParticipant } = require("../middleware/requireParticipant");
 
 const router = express.Router();
 
@@ -22,7 +23,10 @@ const SAFE_ENTRY_PATH_REFERRER_TYPES = new Set([
   "related",
 ]);
 
-router.post("/", (req, res, next) => {
+// background.js의 retryUnsentVideoEvents(1분 주기 알람)가 실패한 이벤트를 sent=false로
+// 남겨 재시도하므로, requireParticipant가 이 요청을 거부해도(등록이 아직 반영 전 등)
+// 유실되지 않는다.
+router.post("/", requireParticipant, (req, res, next) => {
   const error = validateVideoEvent(req.body);
   if (error) {
     return fail(

@@ -41,6 +41,10 @@ afterAll(() => {
 
 beforeEach(() => {
   db.exec("DELETE FROM popup_events");
+  db.prepare(
+    `INSERT OR IGNORE INTO participants (anonymousId, group_code, installDate)
+     VALUES ('wiring-user', 'EXP', '2020-01-01T00:00:00+09:00')`,
+  ).run();
 });
 
 function basePayload(overrides = {}) {
@@ -114,5 +118,17 @@ describe("실제 server/routes/popup-events.js 라우터 배선", () => {
       "/api/popup-events/no-such-route",
     );
     expect(res.status).toBe(404);
+  });
+
+  it("등록되지 않은 anonymousId는 저장을 거부한다(날조된 참여자 방지)", async () => {
+    const res = await request(app)
+      .post("/api/popup-events")
+      .send(basePayload({ anonymousId: "unregistered-user" }));
+
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe("NOT_FOUND");
+    expect(
+      db.prepare("SELECT COUNT(*) AS c FROM popup_events").get().c,
+    ).toBe(0);
   });
 });

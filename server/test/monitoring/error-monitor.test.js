@@ -5,6 +5,7 @@ import {
   readNewText,
   decideAlerts,
   shouldPersistState,
+  classifyTier,
 } from "../../monitoring/error-monitor.js";
 
 describe("extractErrorLines", () => {
@@ -22,12 +23,50 @@ describe("extractErrorLines", () => {
     ]);
   });
 
+  it("Tier 2 접두사([youtube]/[today-review-llm])도 추출 대상에 포함된다", () => {
+    const text = [
+      "[youtube] API 오류: 403",
+      "[youtube] 네트워크 오류: fetch failed",
+      "[today-review-llm] API error body: quota exceeded",
+      "[sessions] 오늘 리뷰 생성 오류: no such table",
+      "그냥 일반 로그 라인",
+    ].join("\n");
+
+    expect(extractErrorLines(text)).toEqual([
+      "[youtube] API 오류: 403",
+      "[youtube] 네트워크 오류: fetch failed",
+      "[today-review-llm] API error body: quota exceeded",
+      "[sessions] 오늘 리뷰 생성 오류: no such table",
+    ]);
+  });
+
   it("에러 라인이 없으면 빈 배열을 반환한다", () => {
     expect(extractErrorLines("all good\nnothing here\n")).toEqual([]);
   });
 
   it("빈 텍스트에도 크래시하지 않는다", () => {
     expect(extractErrorLines("")).toEqual([]);
+  });
+});
+
+describe("classifyTier", () => {
+  it("[Error] 와 [sessions] 오늘 리뷰 생성 오류는 Tier 1이다", () => {
+    expect(
+      classifyTier("[Error] POST /api/sessions : database is locked"),
+    ).toBe(1);
+    expect(classifyTier("[sessions] 오늘 리뷰 생성 오류: no such table")).toBe(
+      1,
+    );
+  });
+
+  it("[youtube]/[today-review-llm] 계열은 Tier 2다", () => {
+    expect(classifyTier("[youtube] API 오류: 403")).toBe(2);
+    expect(classifyTier("[youtube] 네트워크 오류: fetch failed")).toBe(2);
+    expect(classifyTier("[today-review-llm] API error body: x")).toBe(2);
+  });
+
+  it("알려지지 않은 접두사는 방어적으로 Tier 1로 취급한다", () => {
+    expect(classifyTier("[뭔가 새로운 실패]")).toBe(1);
   });
 });
 
@@ -142,11 +181,7 @@ describe("readNewText — 커서 이후만 읽기 + 로테이션 대응", () => 
     const content = "[Error] after rotation\n";
     const fsImpl = fakeFs({ size: content.length, ino: 200, content });
 
-    const result = readNewText(
-      "/log",
-      { inode: 100, offset: 9999 },
-      fsImpl,
-    );
+    const result = readNewText("/log", { inode: 100, offset: 9999 }, fsImpl);
 
     expect(result.text).toBe(content);
     expect(result.cursor).toEqual({ inode: 200, offset: content.length });
@@ -247,6 +282,53 @@ describe("decideAlerts — 지문 + 쿨다운 기반 중복 알림 방지", () =
 
     expect(alerts).toHaveLength(2);
     expect(new Set(alerts.map((x) => x.fingerprint)).size).toBe(2);
+  });
+
+  describe("Tier 2(외부 API 실패) — 임계값 미만이면 알리지 않는다", () => {
+    const line = "[youtube] API 오류: 403";
+
+    it("이번 실행에서 임계값(기본 5회) 미만이면 알리지 않고 상태도 남기지 않는다", () => {
+      const lines = Array(4).fill(line);
+
+      const { alerts, fingerprints } = decideAlerts(lines, {}, 1000);
+
+      expect(alerts).toEqual([]);
+      expect(fingerprints).toEqual({});
+    });
+
+    it("이번 실행에서 임계값(기본 5회) 이상이면 즉시 알린다", () => {
+      const lines = Array(5).fill(line);
+
+      const { alerts } = decideAlerts(lines, {}, 1000);
+
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]).toMatchObject({ message: line, count: 5, isNew: true });
+    });
+
+    it("커스텀 임계값을 넘기면 그 값을 기준으로 판정한다", () => {
+      const lines = Array(2).fill(line);
+
+      const belowCustom = decideAlerts(lines, {}, 1000, 30 * 60 * 1000, 3);
+      const atCustom = decideAlerts(
+        Array(3).fill(line),
+        {},
+        1000,
+        30 * 60 * 1000,
+        3,
+      );
+
+      expect(belowCustom.alerts).toEqual([]);
+      expect(atCustom.alerts).toHaveLength(1);
+    });
+
+    it("Tier 1([Error])은 개수와 무관하게 1건도 즉시 알린다", () => {
+      const tier1Line = "[Error] POST /api/sessions : database is locked";
+
+      const { alerts } = decideAlerts([tier1Line], {}, 1000);
+
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0].isNew).toBe(true);
+    });
   });
 });
 

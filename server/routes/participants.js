@@ -2,12 +2,19 @@ const express = require("express");
 const { db } = require("../db");
 const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const { recordStudyEndReviewEvent } = require("./study-end-review-event");
-const { TEST_CODES, findEarliestParticipant } = require("./participant-recovery");
+const {
+  TEST_CODES,
+  findEarliestParticipant,
+} = require("./participant-recovery");
 const {
   registerParticipant,
   validateParticipantCode,
 } = require("./participants-store");
 const { rateLimiter } = require("../middleware/rateLimiter");
+const {
+  requireParticipant,
+  issueParticipantToken,
+} = require("../middleware/requireParticipant");
 
 const router = express.Router();
 
@@ -17,6 +24,7 @@ const STUDY_END_EVENTS = new Set(["modal_shown", "review_viewed"]);
 // 실제 참여자는 재설치당 1회만 호출하므로 15분에 5회면 정상 사용을 막지 않는다.
 const recoverRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5 });
 
+// 참여자 신규 등록. 참여 코드를 검증하고 참여자 토큰을 발급한다.
 router.post("/", (req, res, next) => {
   let result;
   try {
@@ -59,11 +67,16 @@ router.post("/", (req, res, next) => {
         "participantCode",
       );
     default:
-      return success(res);
+      // result.anonymousId(정규화된 값)를 써야 registerParticipant가 DB에 저장한 값과
+      // 정확히 같은 입력으로 토큰이 계산된다 — req.body.anonymousId(원본, 트림 전)를 쓰면
+      // 공백이 섞인 입력에서 발급 토큰과 검증 시 재계산값이 어긋난다(코드리뷰로 발견된 버그).
+      return success(res, {
+        participantToken: issueParticipantToken(result.anonymousId),
+      });
   }
 });
 
-// 온보딩 코드 검증 — 발급 명단(issued_codes)과 대조 (등록 없이 확인만)
+// 참여 코드 유효성 확인. 발급 명단과 대조만 하고 등록은 하지 않는다.
 // 응답 data: { valid: boolean, group_code?: string, previouslyRegistered?: boolean }
 router.get("/validate", (req, res) => {
   const code = (req.query.code || "").toString().trim().toUpperCase();
@@ -79,7 +92,7 @@ router.get("/validate", (req, res) => {
   return success(res, validateParticipantCode(db, code));
 });
 
-// 참여코드 기반 재설치 복구 (이슈 4) — bindOnboarding 확인 모달에서 "예" 선택 시에만 호출된다.
+// 재설치한 참여자를 참여 코드로 복구. 기존 등록 이력을 찾아 참여자 토큰을 재발급한다.
 // 응답 data: { anonymousId, installDate, group_code }
 router.post("/recover", recoverRateLimit, (req, res) => {
   const participantCode = (req.body.participantCode || "")
@@ -108,22 +121,16 @@ router.post("/recover", recoverRateLimit, (req, res) => {
     );
   }
 
-  return success(res, row);
+  return success(res, {
+    ...row,
+    participantToken: issueParticipantToken(row.anonymousId),
+  });
 });
 
-// 대조군 종료 안내 모달 노출 / 6주 누적 리뷰 열람 이벤트 기록
-router.post("/study-end-review-event", (req, res, next) => {
+// 연구 종료 리뷰 이벤트 기록. 종료 안내 모달 노출, 누적 리뷰 열람 여부를 저장한다.
+router.post("/study-end-review-event", requireParticipant, (req, res, next) => {
   const { anonymousId, event } = req.body;
 
-  if (typeof anonymousId !== "string" || !anonymousId.trim()) {
-    return fail(
-      res,
-      400,
-      ERROR_CODES.MISSING_REQUIRED_FIELD,
-      "anonymousId 필드가 올바르지 않습니다.",
-      "anonymousId",
-    );
-  }
   if (!STUDY_END_EVENTS.has(event)) {
     return fail(
       res,

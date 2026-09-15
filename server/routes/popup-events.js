@@ -2,6 +2,7 @@ const express = require("express");
 const { db } = require("../db");
 const { success, fail } = require("../middleware/responseHandler");
 const { validatePopupEvent } = require("./popup-events-validate");
+const { requireParticipant } = require("../middleware/requireParticipant");
 
 const router = express.Router();
 
@@ -14,7 +15,9 @@ const insertPopupEvent = db.prepare(`
   VALUES (@eventId, @anonymousId, @dwellMs, @tabTodayClicks, @tabWeekClicks, @todayFeedbackViewed, @periodFeedbackViewed, @openedAt)
 `);
 
-router.post("/", (req, res, next) => {
+// 클라이언트의 pendingPopupEvents 큐가 실패한 항목을 그대로 남겨 다음 팝업 open 때
+// 재전송하므로, requireParticipant가 이 요청을 거부해도 유실되지 않는다.
+router.post("/", requireParticipant, (req, res, next) => {
   const error = validatePopupEvent(req.body);
   if (error) {
     return fail(

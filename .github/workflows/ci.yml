@@ -29,7 +29,6 @@ jobs:
           node --check server/app.js
           node --check server/db.js
           node --check server/routes/sessions.js
-          node --check server/routes/surveys.js
           node --check server/routes/health.js
           node --check server/middleware/responseHandler.js
           node --check server/monitoring/healthchecks-ping.js
@@ -45,5 +44,8 @@ jobs:
           node -e "JSON.parse(require('fs').readFileSync('extension/manifest.json', 'utf8'))"
           echo "manifest.json is valid JSON"
 
-      - name: Run test suite
-        run: pnpm test
+      - name: Lint
+        run: pnpm lint
+
+      - name: Run test suite with coverage
+        run: pnpm test:coverage

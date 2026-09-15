@@ -443,7 +443,14 @@ async function syncParticipant(
       console.warn("[popup] participants 등록 실패:", res.status);
       return;
     }
-    await chrome.storage.local.set({ participantSynced: true });
+    const json = await res.json();
+    const participantToken = json.data?.participantToken ?? null;
+    // PARTICIPANT_TOKEN_SECRET 미설정 서버는 null을 돌려준다.
+    // 그 경우 저장은 하되 값은 없는 채로 두면, 이후 서버가 토큰을 요구하기 시작해도 다음 boot의 재동기화가 채워준다.
+    await chrome.storage.local.set({
+      participantSynced: true,
+      participantToken,
+    });
   } catch (error) {
     console.warn("[popup] participants 등록 오류:", error.message);
   }
@@ -451,8 +458,8 @@ async function syncParticipant(
 
 const PERIOD_REVIEWS_TIMEOUT_MS = 5000;
 
-// 완료된 기간 리뷰 조회 (Story 11-1) — 실패(오프라인·서버 미설정·타임아웃 등) 시 null.
-async function fetchPeriodReviews(serverUrl, anonymousId) {
+// 완료된 기간 리뷰 조회. 실패(오프라인·서버 미설정·타임아웃 등) 시 null.
+async function fetchPeriodReviews(serverUrl, anonymousId, participantToken) {
   if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId) return null;
   const controller = new AbortController();
   const timeoutId = setTimeout(
@@ -461,8 +468,13 @@ async function fetchPeriodReviews(serverUrl, anonymousId) {
   );
   try {
     const res = await fetch(
-      `${serverUrl.replace(/\/$/, "")}/api/period-reviews?anonymousId=${encodeURIComponent(anonymousId)}`,
-      { signal: controller.signal },
+      `${serverUrl.replace(/\/$/, "")}/api/period-reviews`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anonymousId, participantToken }),
+        signal: controller.signal,
+      },
     );
     if (!res.ok) return null;
     const json = await res.json();
@@ -482,7 +494,12 @@ function _isIncompleteForCon(group, reviews) {
 
 // 기간 리뷰 로컬 캐싱
 // 팝업을 열 때마다 서버를 조회하지 않고, 캐시가 오늘 날짜 것이 아닐 때만 재조회
-async function getPeriodReviewsCached(serverUrl, anonymousId, group) {
+async function getPeriodReviewsCached(
+  serverUrl,
+  anonymousId,
+  group,
+  participantToken,
+) {
   const { periodReviewsCache } =
     await chrome.storage.local.get("periodReviewsCache");
   const todayStr = dateStr(new Date());
@@ -496,7 +513,11 @@ async function getPeriodReviewsCached(serverUrl, anonymousId, group) {
     return periodReviewsCache.reviews;
   }
 
-  const fetched = await fetchPeriodReviews(serverUrl, anonymousId);
+  const fetched = await fetchPeriodReviews(
+    serverUrl,
+    anonymousId,
+    participantToken,
+  );
   if (fetched) {
     if (!_isIncompleteForCon(group, fetched)) {
       await chrome.storage.local.set({
@@ -526,7 +547,7 @@ async function getPeriodReviewsCached(serverUrl, anonymousId, group) {
 
 const TODAY_REVIEWS_TIMEOUT_MS = 5000;
 
-async function fetchTodayReviews(serverUrl, anonymousId) {
+async function fetchTodayReviews(serverUrl, anonymousId, participantToken) {
   if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId) return null;
   const controller = new AbortController();
   const timeoutId = setTimeout(
@@ -535,8 +556,13 @@ async function fetchTodayReviews(serverUrl, anonymousId) {
   );
   try {
     const res = await fetch(
-      `${serverUrl.replace(/\/$/, "")}/api/today-reviews?anonymousId=${encodeURIComponent(anonymousId)}`,
-      { signal: controller.signal },
+      `${serverUrl.replace(/\/$/, "")}/api/today-reviews`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anonymousId, participantToken }),
+        signal: controller.signal,
+      },
     );
     if (!res.ok) return null;
     const json = await res.json();
@@ -566,6 +592,7 @@ async function getTodayReviewsCached(
   serverUrl,
   anonymousId,
   todaySessionCount,
+  participantToken,
 ) {
   const { todayReviewsCache } =
     await chrome.storage.local.get("todayReviewsCache");
@@ -582,7 +609,11 @@ async function getTodayReviewsCached(
     return todayReviewsCache.reviews;
   }
 
-  const fetched = await fetchTodayReviews(serverUrl, anonymousId);
+  const fetched = await fetchTodayReviews(
+    serverUrl,
+    anonymousId,
+    participantToken,
+  );
   if (fetched) {
     await chrome.storage.local.set({
       todayReviewsCache: { anonymousId, reviews: fetched },
@@ -704,10 +735,12 @@ window.recoverParticipant = recoverParticipant;
 const STUDY_END_CODE_TIMEOUT_MS = 5000;
 
 async function validateStudyEndCode(code) {
-  const { serverUrl, anonymousId } = await chrome.storage.local.get([
-    "serverUrl",
-    "anonymousId",
-  ]);
+  const { serverUrl, anonymousId, participantToken } =
+    await chrome.storage.local.get([
+      "serverUrl",
+      "anonymousId",
+      "participantToken",
+    ]);
   if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId)
     return { ok: false, reason: "offline" };
   const controller = new AbortController();
@@ -721,7 +754,7 @@ async function validateStudyEndCode(code) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, anonymousId }),
+        body: JSON.stringify({ code, anonymousId, participantToken }),
         signal: controller.signal,
       },
     );
@@ -776,10 +809,12 @@ async function markFeedbackConfirmedLocally(sessionId) {
 // 서버에 feedbackConfirmedAt 기록 — 실패해도 로컬 확인 상태(위)는 이미 반영돼 있어
 // 사용자 경험에는 영향 없고, 연구 데이터 쪽만 유실될 수 있다(다른 서버 전송들과 동일한 정책).
 async function postFeedbackConfirmed(sessionId) {
-  const { serverUrl, anonymousId } = await chrome.storage.local.get([
-    "serverUrl",
-    "anonymousId",
-  ]);
+  const { serverUrl, anonymousId, participantToken } =
+    await chrome.storage.local.get([
+      "serverUrl",
+      "anonymousId",
+      "participantToken",
+    ]);
   if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId) return;
   try {
     const res = await fetch(
@@ -787,7 +822,7 @@ async function postFeedbackConfirmed(sessionId) {
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ anonymousId }),
+        body: JSON.stringify({ anonymousId, participantToken }),
       },
     );
     if (!res.ok) console.warn("[popup] 피드백 확인 기록 실패:", res.status);
@@ -798,10 +833,12 @@ async function postFeedbackConfirmed(sessionId) {
 
 // 대조군 종료 안내 모달 노출/6주 리뷰 열람 이벤트 기록
 async function postStudyEndReviewEvent(event) {
-  const { serverUrl, anonymousId } = await chrome.storage.local.get([
-    "serverUrl",
-    "anonymousId",
-  ]);
+  const { serverUrl, anonymousId, participantToken } =
+    await chrome.storage.local.get([
+      "serverUrl",
+      "anonymousId",
+      "participantToken",
+    ]);
   if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId) return;
   try {
     const res = await fetch(
@@ -809,7 +846,7 @@ async function postStudyEndReviewEvent(event) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ anonymousId, event }),
+        body: JSON.stringify({ anonymousId, participantToken, event }),
       },
     );
     if (!res.ok)
@@ -861,6 +898,7 @@ function buildPopupEventPayload(m) {
   return {
     eventId: m.eventId,
     anonymousId: m.anonymousId,
+    participantToken: m.participantToken,
     dwellMs: Math.max(0, Date.now() - m.startTs),
     tabTodayClicks: m.tabTodayClicks,
     tabWeekClicks: m.tabWeekClicks,
@@ -969,6 +1007,7 @@ async function boot() {
     "currentSession",
     "lastWatchedAt",
     "anonymousId",
+    "participantToken",
     "serverUrl",
     "participantSynced",
     "participantCode",
@@ -1043,6 +1082,7 @@ async function boot() {
         stored.serverUrl,
         stored.anonymousId,
         realToday.sessionIds.length,
+        stored.participantToken,
       )
     : [];
   VL._todayReviewsByDate = Object.fromEntries(
@@ -1096,6 +1136,7 @@ async function boot() {
       stored.serverUrl,
       stored.anonymousId,
       stored.group,
+      stored.participantToken,
     );
   }
   VL._studyEndNoticeShown = !!stored.studyEndNoticeShown;
@@ -1132,6 +1173,7 @@ async function boot() {
         // 이미 서버에 있는 행이므로 POST /api/participants는 다시 호출하지 않는다.
         await chrome.storage.local.set({
           anonymousId: recovered.anonymousId,
+          participantToken: recovered.participantToken,
           participantCode,
           group: g,
           installDate: recovered.installDate,
@@ -1194,6 +1236,7 @@ async function boot() {
 
     popupMetrics = {
       anonymousId: stored.anonymousId,
+      participantToken: stored.participantToken,
       // 팝업 오픈당 1회 발급. 재전송돼도 서버가 이 id로 중복을 무시(멱등)
       eventId: crypto.randomUUID(),
       openedAt: new Date().toISOString(),

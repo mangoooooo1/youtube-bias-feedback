@@ -96,8 +96,8 @@ function buildApp() {
   app.use("/api/study-end-code", studyEndCodeRouter);
 
   const periodReviewsRouter = express.Router();
-  periodReviewsRouter.get("/", (req, res) => {
-    const anonymousId = (req.query.anonymousId || "").toString().trim();
+  periodReviewsRouter.post("/", (req, res) => {
+    const anonymousId = (req.body?.anonymousId || "").toString().trim();
     if (!anonymousId) {
       return fail(
         res,
@@ -147,15 +147,15 @@ afterEach(() => {
 });
 
 describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", () => {
-  it("연구 종료 + 전체 기간 완성이어도, 코드 검증 전에는 GET /api/period-reviews가 빈 배열을 반환한다", async () => {
+  it("연구 종료 + 전체 기간 완성이어도, 코드 검증 전에는 POST /api/period-reviews가 빈 배열을 반환한다", async () => {
     insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
     insertPeriodReview("con-user", 1);
     insertPeriodReview("con-user", 2);
     insertPeriodReview("con-user", 3);
 
     const res = await request(app)
-      .get("/api/period-reviews")
-      .query({ anonymousId: "con-user" });
+      .post("/api/period-reviews")
+      .send({ anonymousId: "con-user" });
     expect(res.body.data).toEqual([]);
   });
 
@@ -171,12 +171,12 @@ describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", ()
     expect(validateRes.body.data).toEqual({ valid: false });
 
     const reviewsRes = await request(app)
-      .get("/api/period-reviews")
-      .query({ anonymousId: "con-user" });
+      .post("/api/period-reviews")
+      .send({ anonymousId: "con-user" });
     expect(reviewsRes.body.data).toEqual([]);
   });
 
-  it("올바른 코드로 검증하면 이후 GET /api/period-reviews가 실제로 열린다(핵심 흐름)", async () => {
+  it("올바른 코드로 검증하면 이후 POST /api/period-reviews가 실제로 열린다(핵심 흐름)", async () => {
     insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
     insertPeriodReview("con-user", 1);
     insertPeriodReview("con-user", 2);
@@ -195,8 +195,8 @@ describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", ()
     expect(row.studyEndCodeVerifiedAt).not.toBeNull();
 
     const reviewsRes = await request(app)
-      .get("/api/period-reviews")
-      .query({ anonymousId: "con-user" });
+      .post("/api/period-reviews")
+      .send({ anonymousId: "con-user" });
     expect(reviewsRes.body.data.map((r) => r.periodIndex)).toEqual([1, 2, 3]);
   });
 
@@ -215,8 +215,8 @@ describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", ()
     insertPeriodReview("exp-user", 1);
 
     const res = await request(app)
-      .get("/api/period-reviews")
-      .query({ anonymousId: "exp-user" });
+      .post("/api/period-reviews")
+      .send({ anonymousId: "exp-user" });
     expect(res.body.data).toHaveLength(1);
   });
 

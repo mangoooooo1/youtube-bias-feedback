@@ -3,6 +3,7 @@ const { db } = require("../db");
 const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const { validateSession } = require("./sessions-validate");
 const { insertSession, recordFeedbackTimestamp } = require("./sessions-store");
+const { requireParticipant } = require("../middleware/requireParticipant");
 const { generateAndStoreTodayReview } = require("./today-review-generate");
 const { isTodayReviewEligible } = require("./today-reviews-query");
 const {
@@ -17,7 +18,7 @@ const {
 
 const router = express.Router();
 
-router.post("/", async (req, res, next) => {
+router.post("/", requireParticipant, async (req, res, next) => {
   const error = validateSession(req.body);
   if (error) {
     return fail(
@@ -141,19 +142,8 @@ router.post("/", async (req, res, next) => {
 function makeFeedbackTimestampHandler(column) {
   return (req, res, next) => {
     const { sessionId } = req.params;
-    // req.body가 null/undefined일 수 있어(본문 없는 요청) 구조 분해 대신 옵셔널 체이닝으로
-    // 접근한다 — 구조 분해였다면 여기서 예외가 던져져 아래 400 검증을 건너뛰고 500으로 샜다.
-    const anonymousId = req.body?.anonymousId;
-
-    if (typeof anonymousId !== "string" || !anonymousId.trim()) {
-      return fail(
-        res,
-        400,
-        ERROR_CODES.MISSING_REQUIRED_FIELD,
-        "anonymousId 필드가 올바르지 않습니다.",
-        "anonymousId",
-      );
-    }
+    // requireParticipant가 이미 anonymousId 존재·형식을 검증한 뒤에만 여기 도달한다.
+    const anonymousId = req.body.anonymousId;
 
     let result;
     try {
@@ -179,11 +169,13 @@ function makeFeedbackTimestampHandler(column) {
 // 알림 클릭 기준 — background.js가 호출 (느슨한 신호)
 router.patch(
   "/:sessionId/feedback-viewed",
+  requireParticipant,
   makeFeedbackTimestampHandler("feedbackViewedAt"),
 );
 // "피드백 확인하기" 블러 해제 버튼 클릭 기준 — popup.js가 호출 (가장 엄격한 신호)
 router.patch(
   "/:sessionId/feedback-confirmed",
+  requireParticipant,
   makeFeedbackTimestampHandler("feedbackConfirmedAt"),
 );
 

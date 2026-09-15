@@ -2,7 +2,7 @@
 
 const TEST_CODES = new Set(["TEST-EXP", "TEST-CON"]);
 
-/** code로 이미 등록된 참여자가 있는지 — TEST 코드는 항상 false */
+/** code로 이미 등록된 참여자가 있는지. TEST 코드는 항상 false */
 function isPreviouslyRegistered(db, code) {
   if (TEST_CODES.has(code)) return false;
   return !!db
