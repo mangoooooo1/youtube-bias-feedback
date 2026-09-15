@@ -324,6 +324,16 @@ describe("getOnboarding", () => {
       installDate: "2026-01-01T00:00:00Z",
     });
   });
+
+  it("participantToken도 저장돼 있으면 함께 반환한다", async () => {
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: "2026-01-01T00:00:00Z",
+      participantToken: "hmac-token-abc",
+    });
+    expect((await getOnboarding()).participantToken).toBe("hmac-token-abc");
+  });
 });
 
 // 연구 무결성 점검: content.js의 /api/video-events 즉시 전송이 실패하면 sent:false로

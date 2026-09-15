@@ -126,7 +126,10 @@ async function markFeedbackViewed(sessionId) {
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ anonymousId: onboarding.anonymousId }),
+        body: JSON.stringify({
+          anonymousId: onboarding.anonymousId,
+          participantToken: onboarding.participantToken,
+        }),
       },
     );
     if (!response.ok) {
@@ -273,12 +276,16 @@ export async function retryUnsentVideoEvents() {
 
   const events = await getUnsentVideoEvents();
   for (const event of events) {
-    const ok = await postVideoEventToServer(onboarding.anonymousId, event);
+    const ok = await postVideoEventToServer(
+      onboarding.anonymousId,
+      onboarding.participantToken,
+      event,
+    );
     if (ok) await markVideoEventSent(event);
   }
 }
 
-async function postVideoEventToServer(anonymousId, event) {
+async function postVideoEventToServer(anonymousId, participantToken, event) {
   if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) return false;
 
   const cleanUrl = SERVER_URL.replace(/\/$/, "");
@@ -288,6 +295,7 @@ async function postVideoEventToServer(anonymousId, event) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         anonymousId,
+        participantToken,
         videoId: event.videoId,
         title: event.title ?? null,
         watchedAt: event.watchedAt,
@@ -369,6 +377,7 @@ async function postSessionToServer(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         anonymousId: onboarding.anonymousId,
+        participantToken: onboarding.participantToken,
         sessionId: session.sessionId,
         startTime: session.startTime,
         endTime: session.endTime,

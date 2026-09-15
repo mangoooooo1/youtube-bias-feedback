@@ -1,9 +1,9 @@
 const express = require("express");
 const { db } = require("../db");
-const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
+const { success, fail } = require("../middleware/responseHandler");
 const { validateVideoEvent } = require("./video-events-validate");
 const { classifyReferrerType } = require("./video-events-classify");
-const { participantExists } = require("./participant-exists");
+const { requireParticipant } = require("../middleware/requireParticipant");
 
 const router = express.Router();
 
@@ -23,7 +23,10 @@ const SAFE_ENTRY_PATH_REFERRER_TYPES = new Set([
   "related",
 ]);
 
-router.post("/", (req, res, next) => {
+// background.js의 retryUnsentVideoEvents(1분 주기 알람)가 실패한 이벤트를 sent=false로
+// 남겨 재시도하므로, requireParticipant가 이 요청을 거부해도(등록이 아직 반영 전 등)
+// 유실되지 않는다.
+router.post("/", requireParticipant, (req, res, next) => {
   const error = validateVideoEvent(req.body);
   if (error) {
     return fail(
@@ -46,19 +49,6 @@ router.post("/", (req, res, next) => {
     entryPath,
     navigationTrigger,
   } = req.body;
-
-  // 등록된 적 없는 anonymousId는 거부한다
-  // background.js의 retryUnsentVideoEvents(1분 주기 알람)가 실패한 이벤트를
-  // sent=false로 남겨 재시도하므로, 등록이 아직 반영되기 전 요청이 404를 받아도 유실되지 않는다.
-  if (!participantExists(db, anonymousId)) {
-    return fail(
-      res,
-      404,
-      ERROR_CODES.NOT_FOUND,
-      "등록되지 않은 참여자입니다.",
-      "anonymousId",
-    );
-  }
 
   // referrerType/relatedTrigger는 요청 body로 직접 받지 않고,
   // 원시 신호로부터 서버가 매번 다시 계산한다.

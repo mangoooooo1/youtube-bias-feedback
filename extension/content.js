@@ -98,13 +98,19 @@ function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger) {
 
     try {
       const now = new Date().toISOString();
-      const { currentSession, lastRecordedVideo, anonymousId, serverUrl } =
-        await chrome.storage.local.get([
-          "currentSession",
-          "lastRecordedVideo",
-          "anonymousId",
-          "serverUrl",
-        ]);
+      const {
+        currentSession,
+        lastRecordedVideo,
+        anonymousId,
+        serverUrl,
+        participantToken,
+      } = await chrome.storage.local.get([
+        "currentSession",
+        "lastRecordedVideo",
+        "anonymousId",
+        "serverUrl",
+        "participantToken",
+      ]);
 
       // 새로고침(F5)으로 같은 영상이 다시 감지되는 경우를 막는다.
       const session = currentSession ?? {
@@ -151,6 +157,7 @@ function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             anonymousId,
+            participantToken,
             videoId,
             title: title ?? null,
             watchedAt: now,

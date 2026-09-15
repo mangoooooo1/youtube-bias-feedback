@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, afterAll } from "vitest";
+import crypto from "crypto";
 import request from "supertest";
 import express from "express";
 import { createRequire } from "node:module";
@@ -69,5 +70,59 @@ describe("실제 server/routes/today-reviews.js 라우터 배선", () => {
       .get("/api/today-reviews")
       .query({ anonymousId: "wiring-test-exp" });
     expect(res.status).toBe(404);
+  });
+});
+
+// IDOR 방지 — 다른 참여자의 anonymousId를 아는 것만으로 그 사람의 리뷰를 조회할 수 있던
+// 문제(코드리뷰 지적)의 회귀 확인. PARTICIPANT_TOKEN_SECRET을 실제로 설정했을 때만
+// requireParticipant가 토큰을 강제하므로, 이 describe 안에서만 켠다.
+describe("POST /api/today-reviews — PARTICIPANT_TOKEN_SECRET 설정 시 소유권 검증", () => {
+  const originalSecret = process.env.PARTICIPANT_TOKEN_SECRET;
+  const SECRET = "wiring-test-secret";
+
+  beforeEach(() => {
+    process.env.PARTICIPANT_TOKEN_SECRET = SECRET;
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
+    ).run("token-owner", "TEST-EXP", "2026-01-01T00:00:00Z");
+  });
+
+  afterEach(() => {
+    if (originalSecret === undefined) {
+      delete process.env.PARTICIPANT_TOKEN_SECRET;
+    } else {
+      process.env.PARTICIPANT_TOKEN_SECRET = originalSecret;
+    }
+  });
+
+  function tokenFor(anonymousId) {
+    return crypto
+      .createHmac("sha256", SECRET)
+      .update(anonymousId)
+      .digest("hex");
+  }
+
+  it("유효한 토큰이면 200", async () => {
+    const res = await request(app).post("/api/today-reviews").send({
+      anonymousId: "token-owner",
+      participantToken: tokenFor("token-owner"),
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("토큰이 아예 없으면 403 — anonymousId만 아는 것으로는 더 이상 조회할 수 없다", async () => {
+    const res = await request(app)
+      .post("/api/today-reviews")
+      .send({ anonymousId: "token-owner" });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe("INVALID_PARTICIPANT_TOKEN");
+  });
+
+  it("다른 참여자의 토큰이면 403(IDOR 시나리오 그대로 재현)", async () => {
+    const res = await request(app).post("/api/today-reviews").send({
+      anonymousId: "token-owner",
+      participantToken: tokenFor("someone-else"),
+    });
+    expect(res.status).toBe(403);
   });
 });

@@ -5,6 +5,7 @@ const { db } = require("../db");
 const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const { rateLimiter } = require("../middleware/rateLimiter");
 const { verifyAndRecordStudyEndCode } = require("./study-end-code-validation");
+const { requireParticipant } = require("../middleware/requireParticipant");
 
 const router = express.Router();
 
@@ -12,7 +13,7 @@ const router = express.Router();
 const validateRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5 });
 
 // code를 쿼리스트링이 아니라 요청 본문으로 받는다
-router.post("/validate", validateRateLimit, (req, res) => {
+router.post("/validate", validateRateLimit, requireParticipant, (req, res) => {
   const { code, anonymousId } = req.body;
   if (typeof code !== "string" || !code.trim()) {
     return fail(
@@ -21,15 +22,6 @@ router.post("/validate", validateRateLimit, (req, res) => {
       ERROR_CODES.MISSING_REQUIRED_FIELD,
       "code 필드가 필요합니다.",
       "code",
-    );
-  }
-  if (typeof anonymousId !== "string" || !anonymousId.trim()) {
-    return fail(
-      res,
-      400,
-      ERROR_CODES.MISSING_REQUIRED_FIELD,
-      "anonymousId 필드가 필요합니다.",
-      "anonymousId",
     );
   }
 

@@ -244,13 +244,15 @@ async function _markVideoEventSent(event) {
 export const VALID_GROUPS = ["EXP", "CON", "TEST-EXP", "TEST-CON"];
 
 export async function getOnboarding() {
-  const { anonymousId, group, installDate } = await chrome.storage.local.get([
-    "anonymousId",
-    "group",
-    "installDate",
-  ]);
+  const { anonymousId, group, installDate, participantToken } =
+    await chrome.storage.local.get([
+      "anonymousId",
+      "group",
+      "installDate",
+      "participantToken",
+    ]);
   if (!group) return null;
-  return { anonymousId, group, installDate };
+  return { anonymousId, group, installDate, participantToken };
 }
 
 export async function saveOnboarding(group) {

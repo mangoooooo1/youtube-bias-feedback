@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, afterAll } from "vitest";
+import crypto from "crypto";
 import request from "supertest";
 import express from "express";
 import { createRequire } from "node:module";
@@ -118,6 +119,11 @@ describe("실제 server/routes/participants.js 라우터 배선", () => {
   });
 
   it("POST /api/participants/study-end-review-event — event 값이 잘못되면 400", async () => {
+    // requireParticipant가 먼저 통과해야 event 검증까지 도달하므로, 등록된 참여자여야 한다.
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
+    ).run("wiring-a1", "EXP", "2026-08-13T00:00:00Z");
+
     const res = await request(app)
       .post("/api/participants/study-end-review-event")
       .send({ anonymousId: "wiring-a1", event: "not-a-real-event" });
@@ -128,5 +134,83 @@ describe("실제 server/routes/participants.js 라우터 배선", () => {
   it("등록되지 않은 경로는 404 — 예기치 않은 라우트가 실수로 노출되지 않았는지 확인", async () => {
     const res = await request(app).get("/api/participants/no-such-route");
     expect(res.status).toBe(404);
+  });
+});
+
+// anonymousId 소유권 증명용 토큰 발급 — period-reviews/today-reviews 등 조회 라우트가
+// requireParticipant로 강제하는 토큰의 발급 지점(IDOR 대응, 코드리뷰 지적).
+describe("실제 server/routes/participants.js — participantToken 발급", () => {
+  const originalSecret = process.env.PARTICIPANT_TOKEN_SECRET;
+
+  afterEach(() => {
+    if (originalSecret === undefined) {
+      delete process.env.PARTICIPANT_TOKEN_SECRET;
+    } else {
+      process.env.PARTICIPANT_TOKEN_SECRET = originalSecret;
+    }
+  });
+
+  it("PARTICIPANT_TOKEN_SECRET 미설정이면 등록 응답에 participantToken이 없다(기존 동작과 동일, 하위호환)", async () => {
+    delete process.env.PARTICIPANT_TOKEN_SECRET;
+    const res = await request(app).post("/api/participants").send({
+      anonymousId: "no-token-user",
+      group_code: "EXP",
+      installDate: "2026-08-13T00:00:00Z",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.participantToken).toBeNull();
+  });
+
+  it("PARTICIPANT_TOKEN_SECRET 설정 시 등록 응답에 그 anonymousId로 검증 가능한 토큰이 실린다", async () => {
+    process.env.PARTICIPANT_TOKEN_SECRET = "reg-test-secret";
+    const res = await request(app).post("/api/participants").send({
+      anonymousId: "token-user",
+      group_code: "EXP",
+      installDate: "2026-08-13T00:00:00Z",
+    });
+    expect(res.status).toBe(200);
+
+    const expected = crypto
+      .createHmac("sha256", "reg-test-secret")
+      .update("token-user")
+      .digest("hex");
+    expect(res.body.data.participantToken).toBe(expected);
+  });
+
+  it("이미 등록된 참여자가 재동기화(멱등 재등록)해도 같은 토큰을 다시 받는다", async () => {
+    process.env.PARTICIPANT_TOKEN_SECRET = "reg-test-secret";
+    const payload = {
+      anonymousId: "resync-user",
+      group_code: "EXP",
+      installDate: "2026-08-13T00:00:00Z",
+    };
+    const first = await request(app).post("/api/participants").send(payload);
+    const second = await request(app).post("/api/participants").send(payload);
+    expect(first.body.data.participantToken).toBe(
+      second.body.data.participantToken,
+    );
+  });
+
+  it("재설치 복구(POST /recover) 응답에도 그 anonymousId로 검증 가능한 토큰이 실린다", async () => {
+    process.env.PARTICIPANT_TOKEN_SECRET = "recover-test-secret";
+    db.prepare(
+      "INSERT INTO participants (anonymousId, participantCode, group_code, installDate) VALUES (?, ?, ?, ?)",
+    ).run(
+      "recovered-user",
+      "RECOVER-CODE",
+      "EXP",
+      "2026-08-13T00:00:00Z",
+    );
+
+    const res = await request(app)
+      .post("/api/participants/recover")
+      .send({ participantCode: "RECOVER-CODE" });
+    expect(res.status).toBe(200);
+
+    const expected = crypto
+      .createHmac("sha256", "recover-test-secret")
+      .update("recovered-user")
+      .digest("hex");
+    expect(res.body.data.participantToken).toBe(expected);
   });
 });
