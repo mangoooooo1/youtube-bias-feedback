@@ -32,6 +32,13 @@ const ALLOWED_ORIGIN_PATTERNS = [
   /^https:\/\/([a-z0-9-]+\.)*youtube\.com$/,
   "https://viewlens.site",
 ];
+// 로컬 개발 편의. "압축해제된 확장 프로그램"으로 로드하면 배포 ID와 다른 ID가 발급되므로,
+// production이 아닐 때만 .env의 DEV_EXTENSION_ID를 추가로 허용한다. 운영 환경 보안엔 영향 없음.
+if (process.env.NODE_ENV !== "production" && process.env.DEV_EXTENSION_ID) {
+  ALLOWED_ORIGIN_PATTERNS.push(
+    `chrome-extension://${process.env.DEV_EXTENSION_ID}`,
+  );
+}
 app.use(
   cors({
     origin(origin, callback) {
@@ -43,6 +50,11 @@ app.use(
       );
       callback(null, allowed);
     },
+    // navigator.sendBeacon(popup-events 백업 전송, viewlens-popup.js)은 credentials
+    // mode를 끌 방법이 없어 cross-origin이어도 항상 포함해서 보낸다. 이 서버는 쿠키를
+    // 쓰지 않지만, Access-Control-Allow-Credentials가 없으면 브라우저가 그 preflight
+    // 자체를 막아버려 beacon이 항상 실패한다.
+    credentials: true,
   }),
 );
 app.use(express.json());
