@@ -3,6 +3,7 @@ const { db } = require("../db");
 const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const { validateSession } = require("./sessions-validate");
 const { insertSession, recordFeedbackTimestamp } = require("./sessions-store");
+const { participantExists } = require("./participant-exists");
 const { generateAndStoreTodayReview } = require("./today-review-generate");
 const { isTodayReviewEligible } = require("./today-reviews-query");
 const {
@@ -26,6 +27,19 @@ router.post("/", async (req, res, next) => {
       error.code,
       `${error.field} 필드가 올바르지 않습니다.`,
       error.field,
+    );
+  }
+
+  // 등록된 적 없는 anonymousId는 거부한다.
+  // 인증 미들웨어가 없어 누구나 이 엔드포인트를 직접 호출할 수 있으므로,
+  // 형식 검증만으론 임의의 참여자를 지어내는 걸 못 막는다.
+  if (!participantExists(db, req.body.anonymousId)) {
+    return fail(
+      res,
+      404,
+      ERROR_CODES.NOT_FOUND,
+      "등록되지 않은 참여자입니다.",
+      "anonymousId",
     );
   }
 

@@ -1,7 +1,8 @@
 const express = require("express");
 const { db } = require("../db");
-const { success, fail } = require("../middleware/responseHandler");
+const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const { validatePopupEvent } = require("./popup-events-validate");
+const { participantExists } = require("./participant-exists");
 
 const router = express.Router();
 
@@ -36,6 +37,19 @@ router.post("/", (req, res, next) => {
     periodFeedbackViewed,
     openedAt,
   } = req.body;
+
+  // 등록된 적 없는 anonymousId는 거부한다.
+  // 클라이언트의 pendingPopupEvents 큐가 실패한 항목을 그대로 남겨
+  // 다음 팝업 open 때 재전송하므로, 등록이 아직 반영되기 전 요청이 404를 받아도 유실되지 않는다.
+  if (!participantExists(db, anonymousId)) {
+    return fail(
+      res,
+      404,
+      ERROR_CODES.NOT_FOUND,
+      "등록되지 않은 참여자입니다.",
+      "anonymousId",
+    );
+  }
 
   try {
     insertPopupEvent.run({
