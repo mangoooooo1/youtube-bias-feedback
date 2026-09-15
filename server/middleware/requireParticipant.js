@@ -3,6 +3,7 @@
 const crypto = require("crypto");
 const { db } = require("../db");
 const { fail, ERROR_CODES } = require("./responseHandler");
+const { normalizeAnonymousId } = require("../routes/anonymous-id");
 
 function computeToken(anonymousId, secret) {
   return crypto.createHmac("sha256", secret).update(anonymousId).digest("hex");
@@ -17,7 +18,7 @@ function computeToken(anonymousId, secret) {
 function issueParticipantToken(anonymousId) {
   const secret = process.env.PARTICIPANT_TOKEN_SECRET;
   if (!secret) return null;
-  return computeToken(anonymousId, secret);
+  return computeToken(normalizeAnonymousId(anonymousId), secret);
 }
 
 /**
@@ -26,7 +27,7 @@ function issueParticipantToken(anonymousId) {
  * @returns {"ok" | "missing_anonymous_id" | "not_found" | "invalid_token"}
  */
 function checkParticipant(db, secret, anonymousId, token) {
-  const normalizedId = (anonymousId || "").toString().trim();
+  const normalizedId = normalizeAnonymousId(anonymousId);
   if (!normalizedId) return "missing_anonymous_id";
 
   const exists = !!db
@@ -50,6 +51,12 @@ function checkParticipant(db, secret, anonymousId, token) {
  * Express 미들웨어. req.body의 anonymousId/participantToken을 확인해 등록된 참여자만,
  * PARTICIPANT_TOKEN_SECRET이 설정돼 있고 토큰까지 왔다면 그 토큰이 유효한 소유자인지까지
  * 확인한다. 실패 시 fail() 응답을 직접 보내고 next()를 호출하지 않는다.
+ *
+ * 통과 시 req.body.anonymousId를 정규화된 값으로 덮어쓴다 — 그래야 이 미들웨어 뒤에 오는
+ * 라우트 핸들러가 req.body.anonymousId를 다시 꺼내 자체 DB 조회(recordFeedbackTimestamp,
+ * recordStudyEndReviewEvent 등)에 쓸 때도 등록 시 저장된 정규화된 값과 일치한다. 이 단계에서
+ * 덮어쓰지 않으면, 여기서는 통과해도 핸들러의 조회는 원본(트림 전) 값으로 실패할 수 있다
+ * (코드리뷰로 발견된 정규화 불일치 버그의 연장선).
  */
 function requireParticipant(req, res, next) {
   const result = checkParticipant(
@@ -85,6 +92,7 @@ function requireParticipant(req, res, next) {
         "participantToken",
       );
     default:
+      req.body.anonymousId = normalizeAnonymousId(req.body.anonymousId);
       return next();
   }
 }
@@ -93,4 +101,5 @@ module.exports = {
   requireParticipant,
   issueParticipantToken,
   checkParticipant,
+  normalizeAnonymousId,
 };

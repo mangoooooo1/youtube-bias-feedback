@@ -10,9 +10,9 @@ const router = express.Router();
 // 다시 받아오는 조회 경로 — period-reviews와 동일하게 자격 없으면 빈 배열을 반환한다.
 // requireParticipant로 소유권도 확인한다(period-reviews.js와 동일한 이유, IDOR 지적).
 
+// requireParticipant가 req.body.anonymousId를 이미 정규화해둔다.
 router.post("/", requireParticipant, (req, res) => {
-  const anonymousId = req.body.anonymousId.toString().trim();
-  return success(res, getTodayReviews(db, anonymousId));
+  return success(res, getTodayReviews(db, req.body.anonymousId));
 });
 
 module.exports = router;

@@ -67,8 +67,11 @@ router.post("/", (req, res, next) => {
         "participantCode",
       );
     default:
+      // result.anonymousId(정규화된 값)를 써야 registerParticipant가 DB에 저장한 값과
+      // 정확히 같은 입력으로 토큰이 계산된다 — req.body.anonymousId(원본, 트림 전)를 쓰면
+      // 공백이 섞인 입력에서 발급 토큰과 검증 시 재계산값이 어긋난다(코드리뷰로 발견된 버그).
       return success(res, {
-        participantToken: issueParticipantToken(req.body.anonymousId),
+        participantToken: issueParticipantToken(result.anonymousId),
       });
   }
 });

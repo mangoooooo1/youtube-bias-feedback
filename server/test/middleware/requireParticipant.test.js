@@ -160,4 +160,14 @@ describe("issueParticipantToken", () => {
       issueParticipantToken("user-2"),
     );
   });
+
+  // 코드리뷰 지적 회귀: 등록(registerParticipant)이 DB에 정규화된 값을 저장하는데
+  // issueParticipantToken이 원본(트림 전) 값으로 계산하면, checkParticipant의 트림된
+  // 조회·HMAC 계산과 영영 어긋난다.
+  it("앞뒤 공백이 있는 anonymousId도 트림한 값으로 토큰을 계산한다(등록이 저장하는 값과 일치)", () => {
+    process.env.PARTICIPANT_TOKEN_SECRET = "top-secret";
+    expect(issueParticipantToken("  user-1  ")).toBe(
+      issueParticipantToken("user-1"),
+    );
+  });
 });

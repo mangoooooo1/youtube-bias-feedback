@@ -25,11 +25,15 @@ initializeDB();
 
 const { errorHandler } = require("../../middleware/responseHandler.js");
 const participantsRouter = require("../../routes/participants.js");
+// 정규화 회귀 테스트용 — period-reviews는 자격 미달이어도 403/404 없이 빈 배열만 돌려주므로,
+// requireParticipant 체인이 실제로 통과했는지를 그룹별 부가 조건과 섞이지 않고 확인할 수 있다.
+const periodReviewsRouter = require("../../routes/period-reviews.js");
 
 function buildApp() {
   const app = express();
   app.use(express.json());
   app.use("/api/participants", participantsRouter);
+  app.use("/api/period-reviews", periodReviewsRouter);
   app.use(errorHandler);
   return app;
 }
@@ -175,6 +179,45 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
       .update("token-user")
       .digest("hex");
     expect(res.body.data.participantToken).toBe(expected);
+  });
+
+  // 코드리뷰 지적 회귀 테스트: registerParticipant가 공백만 검사하고 원본을 저장하면서
+  // issueParticipantToken도 원본으로 호출되면, checkParticipant는 trim한 값으로 조회·HMAC
+  // 계산을 하니 등록 직후 발급한 토큰이 보호된 라우트에서 not_found/invalid_token으로 실패한다.
+  it("앞뒤 공백이 섞인 anonymousId로 등록해도, DB엔 정규화된 값이 저장되고 발급 토큰이 보호된 라우트에서 그대로 통과한다", async () => {
+    process.env.PARTICIPANT_TOKEN_SECRET = "whitespace-test-secret";
+    const res = await request(app).post("/api/participants").send({
+      anonymousId: "  user-1  ",
+      group_code: "EXP",
+      installDate: "2026-08-13T00:00:00Z",
+    });
+    expect(res.status).toBe(200);
+
+    // DB엔 트림된 값으로 저장돼야 한다 — 원본(공백 포함)으로 저장되면 checkParticipant의
+    // trim한 조회와 어긋나 이후 모든 보호된 요청이 not_found가 된다.
+    const row = db
+      .prepare("SELECT anonymousId FROM participants WHERE anonymousId = ?")
+      .get("user-1");
+    expect(row).toBeDefined();
+
+    const { participantToken } = res.body.data;
+    expect(participantToken).toBe(
+      crypto
+        .createHmac("sha256", "whitespace-test-secret")
+        .update("user-1")
+        .digest("hex"),
+    );
+
+    // 발급받은 토큰이 실제 보호된 라우트(requireParticipant)를 통과하는지까지 확인. period-reviews는
+    // 자격 미달이어도 403/404 없이 빈 배열만 돌려주므로, 200 여부만으로 requireParticipant 체인의
+    // 성패를 다른 그룹별 부가 조건과 섞이지 않고 판정할 수 있다. 클라이언트는 자기가 보낸 원본
+    // (공백 포함) anonymousId를 그대로 들고 있으므로, 그 값으로 요청해도 통과해야 한다 —
+    // 서버가 등록 시점에 이미 정규화해 저장했기 때문.
+    const reviewRes = await request(app).post("/api/period-reviews").send({
+      anonymousId: "  user-1  ",
+      participantToken,
+    });
+    expect(reviewRes.status).toBe(200);
   });
 
   it("이미 등록된 참여자가 재동기화(멱등 재등록)해도 같은 토큰을 다시 받는다", async () => {
