@@ -9,14 +9,70 @@ const { isTodayReviewEligible } = require("./today-reviews-query");
 const {
   ensureVideoMetadata,
   getCategoryIdsForVideos,
+  getDurationsForVideos,
   findMissingVideoIds,
 } = require("./video-metadata-store");
 const {
   calculateDistribution,
   calculateEntropy,
+  isValidWatch,
+  calculateWeightedDistribution,
 } = require("../pipeline/category-diversity");
 
 const router = express.Router();
+
+/**
+ * categoryId가 전부 해소된 뒤 호출한다. 클릭성 이탈(오클릭) 영상을 걸러낸 1차 지표
+ * (영상 개수 가중)와, 같은 필터를 통과한 영상들을 실제 시청 시간으로 가중한 보조 지표(weightedEntropy)를 함께 산출한다.
+ * watchedSecondsList가 전혀 없는(구버전 확장) 요청은 isValidWatch가 전부 true를 반환해 기존 동작과 동일하게 유지되고, weighted 계열만 "데이터 없음(null)"으로 남는다.
+ * @param {import("better-sqlite3").Database} db - DB 커넥션
+ * @param {string[]} videoIds - 세션에서 시청한 videoId 목록 (중복 포함)
+ * @param {(number|null)[]|undefined} watchedSecondsList - videoIds와 병렬인 시청시간(초) 원시값, 없으면 undefined
+ * @returns {{categoryDistribution: object, entropy: number, weightedCategoryDistribution: object|null, weightedEntropy: number|null, validVideoCount: number}}
+ */
+function computeSessionAnalysis(db, videoIds, watchedSecondsList) {
+  const categoryIds = getCategoryIdsForVideos(db, videoIds);
+  const durations = getDurationsForVideos(db, videoIds);
+  const list = Array.isArray(watchedSecondsList)
+    ? watchedSecondsList
+    : videoIds.map(() => null);
+
+  const entries = videoIds.map((_, i) => ({
+    categoryId: categoryIds[i],
+    durationSeconds: durations[i],
+    watchedSeconds: list[i] ?? null,
+  }));
+  const validEntries = entries.filter((e) => isValidWatch(e));
+
+  const categoryDistribution = calculateDistribution(
+    validEntries.map((e) => e.categoryId),
+  );
+  const entropy = calculateEntropy(categoryDistribution);
+
+  const totalWatchedSeconds = validEntries.reduce(
+    (sum, e) => sum + (e.watchedSeconds ?? 0),
+    0,
+  );
+  let weightedCategoryDistribution = null;
+  let weightedEntropy = null;
+  if (totalWatchedSeconds > 0) {
+    weightedCategoryDistribution = calculateWeightedDistribution(
+      validEntries.map((e) => ({
+        categoryId: e.categoryId,
+        weight: e.watchedSeconds ?? 0,
+      })),
+    );
+    weightedEntropy = calculateEntropy(weightedCategoryDistribution);
+  }
+
+  return {
+    categoryDistribution,
+    entropy,
+    weightedCategoryDistribution,
+    weightedEntropy,
+    validVideoCount: validEntries.length,
+  };
+}
 
 router.post("/", requireParticipant, async (req, res, next) => {
   const error = validateSession(req.body);
@@ -31,8 +87,9 @@ router.post("/", requireParticipant, async (req, res, next) => {
   }
 
   // categoryId 조회·다양성 계산은 이제 서버 책임이다.
-  // 클라이언트는 이 세션에서 시청한 videoId 목록(중복 포함)만 보낸다.
-  const { videoIds } = req.body;
+  // 클라이언트는 이 세션에서 시청한 videoId 목록(중복 포함)과, 같은 순서의 시청시간
+  // 원시 데이터(watchedSecondsList, 선택)만 보낸다.
+  const { videoIds, watchedSecondsList } = req.body;
   const youtubeStart = Date.now();
   await ensureVideoMetadata(db, videoIds, process.env.YOUTUBE_API_KEY);
   // YOUTUBE_API_KEY 미설정·일시적 API 장애 등으로 일부 videoId가 끝내 캐시되지
@@ -41,22 +98,24 @@ router.post("/", requireParticipant, async (req, res, next) => {
   // "확인 자체를 못함"이 구분되지 않고, insertSession은 UPSERT가 아니라서 원인이
   // 나중에 해소돼도 갱신할 방법이 없어 잘못된 값이 영구히 남는다.
   const unresolvedVideoIds = findMissingVideoIds(db, videoIds);
-  const categoryDistribution =
+  const analysis =
     unresolvedVideoIds.length === 0
-      ? calculateDistribution(getCategoryIdsForVideos(db, videoIds))
-      : null;
-  const entropy =
-    categoryDistribution !== null
-      ? calculateEntropy(categoryDistribution)
-      : null;
+      ? computeSessionAnalysis(db, videoIds, watchedSecondsList)
+      : {
+          categoryDistribution: null,
+          entropy: null,
+          weightedCategoryDistribution: null,
+          weightedEntropy: null,
+          validVideoCount: null,
+        };
+  const { categoryDistribution, entropy } = analysis;
   // youtubeMs는 더 이상 클라이언트가 측정해 보내지 않는다.
   const youtubeMs = Date.now() - youtubeStart;
 
   try {
     insertSession(db, {
       ...req.body,
-      categoryDistribution,
-      entropy,
+      ...analysis,
       youtubeMs,
     });
   } catch (err) {
@@ -76,13 +135,21 @@ router.post("/", requireParticipant, async (req, res, next) => {
 
       // 이번 재시도에서 새로 계산이 완료됐는데(categoryDistribution !== null) 기존
       // 저장값은 아직 미확정(null)이었다면, 최초 실패 원인이 해소된 것이므로 지금
-      // 갱신한다. insertSession이 못 하는 갱신을 여기서 대신 한다.
+      // 갱신한다. insertSession이 못 하는 갱신을 여기서 대신 한다. weighted 계열도
+      // 같은 시점에 함께 확정되므로 같이 갱신한다.
       if (categoryDistribution !== null && existingDistribution === null) {
         db.prepare(
-          "UPDATE sessions SET categoryDistribution = ?, entropy = ? WHERE sessionId = ?",
+          `UPDATE sessions SET categoryDistribution = ?, entropy = ?,
+             weightedCategoryDistribution = ?, weightedEntropy = ?, validVideoCount = ?
+           WHERE sessionId = ?`,
         ).run(
           JSON.stringify(categoryDistribution),
           entropy,
+          analysis.weightedCategoryDistribution != null
+            ? JSON.stringify(analysis.weightedCategoryDistribution)
+            : null,
+          analysis.weightedEntropy,
+          analysis.validVideoCount,
           req.body.sessionId,
         );
       }
@@ -135,10 +202,15 @@ router.post("/", requireParticipant, async (req, res, next) => {
   return success(res, { todayReview, categoryDistribution, entropy });
 });
 
-// 피드백 열람/확인 시각 갱신 — 세션 생성 POST와 별도 시점에(알림 클릭, 확인 버튼 클릭 등)
-// 호출된다. anonymousId로 소유권을 확인해 다른 참여자의 세션을 갱신하지 못하도록 막는다.
-// column은 요청 값이 아니라 아래 두 router.patch 호출부에서만 하드코딩으로 주어지므로
-// SQL 인젝션 경로가 없다(server/db.js의 addColumn(table, name, type) 패턴과 동일한 근거).
+/**
+ * 지정한 컬럼에 피드백 열람/확인 시각을 기록하는 Express 라우트 핸들러를 만든다.
+ * 세션 생성 POST와 별도 시점에(알림 클릭, 확인 버튼 클릭 등) 호출되며, anonymousId로
+ * 소유권을 확인해 다른 참여자의 세션을 갱신하지 못하도록 막는다. column은 요청 값이
+ * 아니라 아래 두 router.patch 호출부에서만 하드코딩으로 주어지므로 SQL 인젝션 경로가
+ * 없다(server/db.js의 addColumn(table, name, type) 패턴과 동일한 근거).
+ * @param {string} column - 갱신할 sessions 테이블 컬럼명 (예: "feedbackViewedAt")
+ * @returns {import("express").RequestHandler} sessionId 세션에 해당 컬럼을 기록하는 핸들러
+ */
 function makeFeedbackTimestampHandler(column) {
   return (req, res, next) => {
     const { sessionId } = req.params;
