@@ -11,6 +11,12 @@ const CHANNELS_API_URL = "https://www.googleapis.com/youtube/v3/channels";
 const BATCH_SIZE = 50;
 const TIMEOUT_MS = 10000;
 
+/**
+ * 배열을 지정한 크기 단위로 나눈다.
+ * @param {Array} arr - 나눌 배열
+ * @param {number} size - 청크 하나의 최대 크기
+ * @returns {Array[]} 크기 size 이하로 나뉜 배열들의 배열
+ */
 function chunkArray(arr, size) {
   const chunks = [];
   for (let i = 0; i < arr.length; i += size) {
@@ -19,12 +25,22 @@ function chunkArray(arr, size) {
   return chunks;
 }
 
+/**
+ * id 배열을 받아 모든 값이 null인 맵을 만든다. 조회 실패/결측 기본값으로 쓰인다.
+ * @param {string[]} ids - 키로 쓸 id 목록
+ * @returns {Object<string, null>} 각 id를 null에 매핑한 객체
+ */
 function nullMap(ids) {
   return Object.fromEntries(ids.map((id) => [id, null]));
 }
 
-// YouTube 영상 길이는 년/월/일 단위가 없어(PnYnMnD 없이 항상 PT로 시작) 시/분/초만
-// 처리한다. 형식이 예상과 다르면(라이브 방송 등 예외) null을 반환한다.
+/**
+ * ISO 8601 duration 문자열(PT 형식)을 초 단위로 변환한다.
+ * YouTube 영상 길이는 년/월/일 단위가 없어(PnYnMnD 없이 항상 PT로 시작) 시/분/초만
+ * 처리한다. 형식이 예상과 다르면(라이브 방송 등 예외) null을 반환한다.
+ * @param {string} duration - ISO 8601 duration 문자열 (예: "PT1H2M3S")
+ * @returns {number|null} 총 초, 파싱 실패 시 null
+ */
 function parseIso8601Duration(duration) {
   const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(duration ?? "");
   if (!match) return null;
@@ -35,8 +51,12 @@ function parseIso8601Duration(duration) {
   );
 }
 
-// 채널마다 topicCategories 배열의 순서·개수가 달라 단순 문자열 비교로는 그룹화가
-// 과소평가되는 문제를 보정하기 위해 정렬한 뒤 저장
+/**
+ * 채널마다 topicCategories 배열의 순서·개수가 달라 단순 문자열 비교로는 그룹화가
+ * 과소평가되는 문제를 보정하기 위해 정렬한 뒤 저장한다.
+ * @param {string[]} topicCategories - 채널의 topicCategories 배열
+ * @returns {string|null} 정렬 후 JSON 직렬화한 문자열, 빈 배열/비배열이면 null
+ */
 function normalizeTopicCategories(topicCategories) {
   if (!Array.isArray(topicCategories) || topicCategories.length === 0) {
     return null;
@@ -44,6 +64,13 @@ function normalizeTopicCategories(topicCategories) {
   return JSON.stringify([...topicCategories].sort());
 }
 
+/**
+ * 지정한 URL에 타임아웃을 두고 GET 요청을 보내 JSON 응답을 반환한다.
+ * 네트워크 오류·타임아웃·비정상 응답 상태는 모두 null로 흡수한다.
+ * @param {string} url - 요청할 API 엔드포인트
+ * @param {URLSearchParams} params - 쿼리 파라미터
+ * @returns {Promise<Object|null>} 파싱된 JSON 응답, 실패 시 null
+ */
 async function fetchJson(url, params) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
@@ -64,6 +91,13 @@ async function fetchJson(url, params) {
   }
 }
 
+/**
+ * videoId 최대 BATCH_SIZE개를 한 번의 videos.list 호출로 조회한다.
+ * @param {string[]} videoIds - 조회할 videoId 목록 (BATCH_SIZE 이하)
+ * @param {string} apiKey - YouTube Data API 키
+ * @returns {Promise<Object<string, object|null>>} videoId -> { categoryId, title, durationSeconds, viewCount, channelId, description } | null.
+ *   호출 자체가 실패하면(네트워크 오류/쿼터 초과 등) 빈 객체를 반환한다.
+ */
 async function fetchVideoChunk(videoIds, apiKey) {
   const params = new URLSearchParams({
     part: "snippet,contentDetails,statistics",
@@ -94,6 +128,13 @@ async function fetchVideoChunk(videoIds, apiKey) {
   return result;
 }
 
+/**
+ * channelId 최대 BATCH_SIZE개를 한 번의 channels.list 호출로 조회한다.
+ * @param {string[]} channelIds - 조회할 channelId 목록 (BATCH_SIZE 이하)
+ * @param {string} apiKey - YouTube Data API 키
+ * @returns {Promise<Object<string, object|null>>} channelId -> { channelTitle, subscriberCount, videoCount, topicCategories, keywords } | null.
+ *   호출 자체가 실패하면 빈 객체를 반환한다.
+ */
 async function fetchChannelChunk(channelIds, apiKey) {
   const params = new URLSearchParams({
     part: "snippet,statistics,topicDetails,brandingSettings",
@@ -128,9 +169,15 @@ async function fetchChannelChunk(channelIds, apiKey) {
   return result;
 }
 
-// videoId -> { categoryId, title, durationSeconds, viewCount, channelId, description } | null
-// (null = 확인 결과 존재하지 않는 영상). 청크 전체 호출이 실패한 videoId는 결과 맵에
-// 키 자체가 없다 — 호출부가 이 경우를 재시도 대상으로 구분해야 한다.
+/**
+ * 캐시에 없는 videoId들의 메타데이터를 YouTube Data API에서 조회한다.
+ * 중복 제거 후 BATCH_SIZE 단위로 청크를 나눠 순차 조회한다.
+ * @param {string[]} videoIds - 조회할 videoId 목록 (중복 가능)
+ * @param {string} apiKey - YouTube Data API 키
+ * @returns {Promise<Object<string, object|null>>} videoId -> { categoryId, title, durationSeconds, viewCount, channelId, description } | null
+ *   (null = 확인 결과 존재하지 않는 영상). 청크 전체 호출이 실패한 videoId는 결과 맵에
+ *   키 자체가 없다 — 호출부가 이 경우를 재시도 대상으로 구분해야 한다.
+ */
 async function fetchVideoMetadata(videoIds, apiKey) {
   const uniqueIds = [...new Set(videoIds)];
   const results = {};
@@ -140,9 +187,15 @@ async function fetchVideoMetadata(videoIds, apiKey) {
   return results;
 }
 
-// channelId -> { channelTitle, subscriberCount, videoCount, topicCategories, keywords } | null
-// (null = 확인 결과 존재하지 않는 채널). 청크 전체 호출이 실패한 channelId는 결과 맵에
-// 키 자체가 없다 — 호출부가 이 경우를 재시도 대상으로 구분해야 한다.
+/**
+ * 캐시에 없는 channelId들의 메타데이터를 YouTube Data API에서 조회한다.
+ * 중복 제거 후 BATCH_SIZE 단위로 청크를 나눠 순차 조회한다.
+ * @param {string[]} channelIds - 조회할 channelId 목록 (중복 가능)
+ * @param {string} apiKey - YouTube Data API 키
+ * @returns {Promise<Object<string, object|null>>} channelId -> { channelTitle, subscriberCount, videoCount, topicCategories, keywords } | null
+ *   (null = 확인 결과 존재하지 않는 채널). 청크 전체 호출이 실패한 channelId는 결과 맵에
+ *   키 자체가 없다 — 호출부가 이 경우를 재시도 대상으로 구분해야 한다.
+ */
 async function fetchChannelMetadata(channelIds, apiKey) {
   const uniqueIds = [...new Set(channelIds)];
   const results = {};
