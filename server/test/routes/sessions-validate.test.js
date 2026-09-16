@@ -183,6 +183,77 @@ describe("validateSession — 날짜/숫자 형식", () => {
   });
 });
 
+// 시청시간 원시 데이터(교수 피드백) — videoIds와 병렬 배열
+describe("validateSession — watchedSecondsList (옵션 필드, videoIds와 병렬)", () => {
+  it.each([undefined, null])("%s이면 통과한다(구버전 확장 하위호환)", (value) => {
+    expect(
+      validateSession(basePayload({ watchedSecondsList: value })),
+    ).toBeNull();
+  });
+
+  it("videoIds와 길이가 같고 각 값이 0 이상 숫자거나 null이면 통과한다", () => {
+    expect(
+      validateSession(
+        basePayload({
+          videoIds: ["v1", "v2", "v3"],
+          watchedSecondsList: [30, null, 0],
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("videoIds보다 길이가 짧으면 거부한다", () => {
+    expect(
+      validateSession(
+        basePayload({
+          videoIds: ["v1", "v2", "v3"],
+          watchedSecondsList: [30, 40],
+        }),
+      ),
+    ).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "watchedSecondsList",
+    });
+  });
+
+  it("배열이 아니면 거부한다", () => {
+    expect(
+      validateSession(basePayload({ watchedSecondsList: "30,40,50" })),
+    ).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "watchedSecondsList",
+    });
+  });
+
+  it("음수 값이 있으면 거부한다", () => {
+    expect(
+      validateSession(
+        basePayload({
+          videoIds: ["v1", "v2", "v3"],
+          watchedSecondsList: [30, -1, 0],
+        }),
+      ),
+    ).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "watchedSecondsList",
+    });
+  });
+
+  it("숫자·null이 아닌 값(문자열)이 섞여 있으면 거부한다", () => {
+    expect(
+      validateSession(
+        basePayload({
+          videoIds: ["v1", "v2", "v3"],
+          watchedSecondsList: [30, "40", 0],
+        }),
+      ),
+    ).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "watchedSecondsList",
+    });
+  });
+});
+
 describe("validateSession — videoIds", () => {
   it("videoIds가 없으면 MISSING_REQUIRED_FIELD로 거부한다", () => {
     const payload = basePayload();
