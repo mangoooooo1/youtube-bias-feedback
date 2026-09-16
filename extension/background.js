@@ -7,6 +7,8 @@ import {
   getOnboarding,
   getUnsentVideoEvents,
   markVideoEventSent,
+  getUnsentWatchStats,
+  markWatchStatsSent,
 } from "./storage.js";
 import { isBaselinePeriod } from "./pipeline/baseline.js";
 import { SERVER_URL } from "./config.js";
@@ -18,12 +20,22 @@ const TIMEOUT_MS = 10 * 60 * 1000;
 // 끝난 경우에만 알림·배지를 노출한다.
 const FEEDBACK_ELIGIBLE_GROUPS = new Set(["EXP", "TEST-EXP"]);
 
-// TEST-EXP(연구자 모드)는 "모든 화면을 미리 볼 수 있다"는 설계 의도(GROUPS 주석 참고)가 있어,
-// 실제 참여자 온보딩과 무관하게 베이스라인 게이트를 적용하면 안 된다.
+/**
+ * TEST-EXP(연구자 모드)는 모든 화면을 미리 볼 수 있어야 하므로, 실제 참여자 온보딩과
+ * 무관하게 베이스라인 게이트를 적용하면 안 된다.
+ * @param {string} group - 참여자 그룹 코드
+ * @returns {boolean} TEST- 접두사 그룹이면 true
+ */
 function isTestGroup(group) {
   return typeof group === "string" && group.startsWith("TEST");
 }
 
+/**
+ * 분석 완료 알림 대상인지 판정한다. EXP 계열이면서 베이스라인 기간이 끝난 경우에만 true.
+ * @param {string} group - 참여자 그룹 코드
+ * @param {string} installDate - 설치일(ISO)
+ * @returns {boolean}
+ */
 function isFeedbackNotificationEligible(group, installDate) {
   if (!FEEDBACK_ELIGIBLE_GROUPS.has(group)) return false;
   return isTestGroup(group) || !isBaselinePeriod(installDate);
@@ -36,8 +48,11 @@ const BASE_ICON_PATHS = {
   128: "assets/icons/icon128.png",
 };
 
-// 미열람 표시를 배지 텍스트("•") 대신 아이콘 자체에 그려 넣는다 — 배지 글리프는
-// OS·Chrome 버전마다 렌더링이 달라질 수 있지만, 이렇게 그리면 픽셀이 고정되어 항상 동일하게 보인다.
+/**
+ * 미열람 표시를 배지 텍스트 대신 아이콘에 점으로 그려 넣는다(OS·Chrome 버전 간
+ * 렌더링 차이를 피하기 위함).
+ * @returns {Promise<void>}
+ */
 async function setUnviewedIconDot() {
   try {
     const imageData = {};
@@ -51,6 +66,10 @@ async function setUnviewedIconDot() {
   }
 }
 
+/**
+ * 미열람 아이콘 점을 원래 아이콘으로 되돌린다.
+ * @returns {void}
+ */
 function clearUnviewedIconDot() {
   // setIcon의 상대 경로는 "확장 루트"가 아니라 "호출한 스크립트의 위치" 기준으로 풀린다.
   // background.js는 루트에 있어 상대 경로가 우연히 맞았을 뿐이므로, getURL로 명시적인
@@ -64,6 +83,11 @@ function clearUnviewedIconDot() {
   chrome.action.setIcon({ path });
 }
 
+/**
+ * 기본 아이콘 위에 미열람 표시용 빨간 점을 그려 ImageData로 반환한다.
+ * @param {number} size - 아이콘 픽셀 크기
+ * @returns {Promise<ImageData>}
+ */
 async function drawIconWithDot(size) {
   const response = await fetch(chrome.runtime.getURL(BASE_ICON_PATHS[size]));
   const bitmap = await createImageBitmap(await response.blob());
@@ -98,6 +122,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   // 여분의 요청 하나로 끝나고 데이터가 중복 저장되거나 알림이 두 번 뜨지 않는다.
   retryUnsyncedSessions();
   retryUnsentVideoEvents();
+  retryUnsentWatchStats();
   checkSessionTimeout();
 });
 
@@ -105,6 +130,11 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.notifications.onButtonClicked.addListener(handleNotificationOpen);
 chrome.notifications.onClicked.addListener(handleNotificationOpen);
 
+/**
+ * 알림 클릭 시 팝업을 열고 아이콘 점을 지운 뒤 열람을 서버에 기록한다.
+ * @param {string} sessionId - 알림 id(=sessionId)
+ * @returns {Promise<void>}
+ */
 async function handleNotificationOpen(sessionId) {
   chrome.notifications.clear(sessionId);
   clearUnviewedIconDot();
@@ -112,8 +142,12 @@ async function handleNotificationOpen(sessionId) {
   await markFeedbackViewed(sessionId);
 }
 
-// 알림 클릭을 "실제 열람 시작"으로 서버에 기록 (). 팝업 표시 기반 feedbackViewed(10-5)보다
-// 엄격한 신호 — 알림을 거치지 않고 그냥 팝업을 연 경우는 여기서 기록하지 않는다.
+/**
+ * 알림 클릭을 "실제 열람 시작"으로 서버에 기록한다. 팝업 표시 기반 feedbackViewed보다
+ * 엄격한 신호로, 알림을 거치지 않고 팝업만 연 경우는 기록하지 않는다.
+ * @param {string} sessionId - 대상 세션 id
+ * @returns {Promise<void>}
+ */
 async function markFeedbackViewed(sessionId) {
   if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) return;
   const onboarding = await getOnboarding();
@@ -140,6 +174,10 @@ async function markFeedbackViewed(sessionId) {
   }
 }
 
+/**
+ * 마지막 시청 후 TIMEOUT_MS 이상 지났으면 현재 세션을 종료하고 분석을 시작한다.
+ * @returns {Promise<void>}
+ */
 async function checkSessionTimeout() {
   const lastWatchedAt = await getLastWatchedAt();
   if (!lastWatchedAt) return;
@@ -160,6 +198,12 @@ async function checkSessionTimeout() {
   await analyzeSession(session);
 }
 
+/**
+ * 세션 종료 시 videoCount를 먼저 로컬에 기록해 "분석 대기" 상태를 표시하고,
+ * 이어서 서버로 전송한다(categoryDistribution/entropy는 응답 후 채워짐).
+ * @param {object} session - 종료된 세션(sessionId, videos 등)
+ * @returns {Promise<void>}
+ */
 export async function analyzeSession(session) {
   // 여기서는 videoCount만 먼저 로컬에 기록해 "세션 종료, 서버 응답 대기" 상태를 표시한다.
   // categoryDistribution/entropy는 서버 응답을 받은 뒤(syncSessionToServer)에야 채워진다.
@@ -178,10 +222,14 @@ export async function analyzeSession(session) {
   await syncSessionToServer({ ...session, videoCount }, { totalMs });
 }
 
-// 세션 분석 결과를 서버로 보내고, 응답에 따라 오늘 리뷰 반영·알림까지 처리한다.
-// analyzeSession(최초 전송)과 retryUnsyncedSessions(재시도)가 이 함수를 공유한다 —
-// 최초 시도가 오프라인/서버 오류로 실패해도 syncedToServer가 false로 남기 때문에,
-// pendingPopupEvents 큐(팝업 이벤트용)와 같은 취지로 다음 1분 알람 틱마다 다시 시도된다.
+/**
+ * 세션 분석 결과를 서버로 보내고 응답에 따라 오늘 리뷰 반영·알림까지 처리한다.
+ * analyzeSession(최초 전송)과 retryUnsyncedSessions(재시도)가 공유하며, 실패 시
+ * syncedToServer가 false로 남아 다음 알람 틱에 다시 시도된다.
+ * @param {object} session - 전송할 세션
+ * @param {{totalMs?: number}} [metrics] - 소요 시간 등 부가 지표
+ * @returns {Promise<void>}
+ */
 async function syncSessionToServer(session, metrics = {}) {
   // 알림 자격은 리뷰 생성 결과와 무관하게(그룹·베이스라인만으로) 미리 정해진다.
   // 이 값을 그대로 서버에 함께 보내 sessions.feedbackNotifiedAt에 기록한다.
@@ -204,14 +252,9 @@ async function syncSessionToServer(session, metrics = {}) {
     },
   );
 
-  // 이전 시도가 서버엔 이미 저장됐지만(중복 세션 오류) 그 응답만 못 받아 실패로 남았던 경우이다.
-  // 다시 보낼 필요는 없으니 재시도 대상에서만 제외한다. 서버가 409 응답에
-  // 이미 저장된 categoryDistribution/entropy를 함께 실어 보내주므로, 이번에도 로컬 카테고리 그래프를 채울 수 있다.
-  //
-  // categoryDistribution이 null이면 syncedToServer를 true로 확정하지 않는다.
-  // {}·0처럼 확정값으로 저장해두면 원인이 나중에 풀려도 다시 채울 방법이 없기 때문이다.
-  // false로 남겨두면 다음 알람 틱마다 retryUnsyncedSessions가 계속 재시도하다가, 서버가 실제로
-  // 분석을 끝내는 순간 자연스럽게 채워지고 그때 동기화 완료로 표시된다.
+  // 409(중복 세션) — 이전 시도가 서버엔 이미 저장됐지만 응답만 못 받은 경우다. 서버가
+  // 함께 보내주는 categoryDistribution/entropy로 로컬을 채우되, 값이 null이면
+  // syncedToServer를 true로 확정하지 않아 다음 틱에 다시 시도되게 한다.
   if (postResult?.duplicate) {
     await saveAnalysis(session.sessionId, {
       categoryDistribution: postResult.categoryDistribution,
@@ -240,25 +283,23 @@ async function syncSessionToServer(session, metrics = {}) {
   await mergeTodayReviewIntoCache(onboarding?.anonymousId, todayReview);
   console.log("[background] 오늘 리뷰 반영 완료:", todayReview);
 
-  // 알림 "자격"(eligibleForNotification)은 그룹·베이스라인만으로 미리 정해지지만,
-  // 실제로 알림을 띄우는 건 todayReview가 실제로 있을 때뿐이다 — 서버 전송이
-  // 오프라인/오류로 실패해 todayReview가 null이면, 알림만 뜨고 팝업엔 "생성 중"만
-  // 보이는 불일치가 생기기 때문이다.
+  // 알림 자격은 그룹·베이스라인만으로 미리 정해지지만, 실제 알림은 todayReview가
+  // 있을 때만 띄운다 — 전송 실패로 todayReview가 null이면 알림만 뜨고 팝업엔
+  // "생성 중"만 보이는 불일치가 생기기 때문이다.
   if (eligibleForNotification && todayReview) {
     showFeedbackNotification(session);
   }
 }
 
-// 1분마다 도는 알람에서 checkSessionTimeout과 함께 호출된다. 세션 종료 시점에
-// 오프라인/서버 오류로 서버 전송이 실패해 syncedToServer가 false로 남은 세션을 다시
-// 보낸다 — 서버 장애·일시적 오프라인으로 인한 연구 데이터 유실을 막는 유일한 재시도
-// 경로다(연구 무결성 점검 항목 "서버 장애 대비 로컬 큐잉/재시도" 후속 조치).
+/**
+ * syncedToServer가 false로 남은(오프라인/서버 오류로 전송 실패한) 세션을 재전송한다.
+ * 서버 장애·일시 오프라인으로 인한 연구 데이터 유실을 막는 유일한 재시도 경로다.
+ * @returns {Promise<void>}
+ */
 export async function retryUnsyncedSessions() {
   const sessions = await getAllSessions();
-  // categoryDistribution 유무는 더 이상 이 필터에 쓰지 않는다.
-  // 이제 그 값은 서버 응답을 받아야만 채워지므로, 최초 시도가 오프라인으로 실패한 세션은
-  // categoryDistribution이 없는 상태로 재시도 대상이 돼야 한다. syncedToServer:false만이
-  // "전송 대기"를 나타내는 유일한 신호다.
+  // categoryDistribution 유무는 이제 필터 기준이 아니다 — 그 값은 서버 응답으로만
+  // 채워지므로, syncedToServer:false만이 "전송 대기"를 나타내는 유일한 신호다.
   const unsynced = sessions.filter((s) => s.syncedToServer === false);
   for (const session of unsynced) {
     // 재시도라 최초 지연시간(totalMs)은 더 이상 의미가 없어 보내지 않는다.
@@ -266,10 +307,11 @@ export async function retryUnsyncedSessions() {
   }
 }
 
-// content.js가 영상 한 편을 볼 때마다 즉시 시도하는 /api/video-events 전송은 실패하면
-// 그 자리에서 조용히 버려졌다(연구 무결성 점검: fire-and-forget이라 재시도가 전혀 없었음).
-// 1분마다 도는 알람에서 checkSessionTimeout·retryUnsyncedSessions와 함께 호출돼,
-// 아직 sent:true가 안 된 영상 이벤트를 찾아 다시 보낸다.
+/**
+ * 아직 sent:true가 안 된 영상 이벤트를 찾아 서버로 재전송한다. content.js의 즉시
+ * 전송(fire-and-forget)이 실패하면 재시도가 전혀 없었던 문제를 보완한다.
+ * @returns {Promise<void>}
+ */
 export async function retryUnsentVideoEvents() {
   const onboarding = await getOnboarding();
   if (!onboarding?.anonymousId) return;
@@ -285,6 +327,70 @@ export async function retryUnsentVideoEvents() {
   }
 }
 
+/**
+ * 아직 서버에 확정 반영 못한 시청시간 원시 데이터를 재전송한다. "영상을 봤다"(sent)와
+ * "얼마나 봤다"(watchStatsSent)는 서로 다른 시점에 확정되는 별개 신호라 독립된 큐로 돈다.
+ * @returns {Promise<void>}
+ */
+export async function retryUnsentWatchStats() {
+  const onboarding = await getOnboarding();
+  if (!onboarding?.anonymousId) return;
+
+  const items = await getUnsentWatchStats();
+  for (const item of items) {
+    const ok = await postWatchStatsToServer(
+      onboarding.anonymousId,
+      onboarding.participantToken,
+      item,
+    );
+    if (ok) await markWatchStatsSent(item);
+  }
+}
+
+/**
+ * 시청시간·배속·백그라운드 여부 하나를 PATCH로 서버에 반영한다.
+ * @param {string} anonymousId
+ * @param {string} participantToken
+ * @param {{eventId: string, watchedSeconds: number, playbackRate: number, wasBackgrounded: 0|1}} item
+ * @returns {Promise<boolean>} 성공 여부
+ */
+async function postWatchStatsToServer(anonymousId, participantToken, item) {
+  if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) return false;
+  if (!item.eventId) return false;
+
+  const cleanUrl = SERVER_URL.replace(/\/$/, "");
+  try {
+    const response = await fetch(
+      `${cleanUrl}/api/video-events/${encodeURIComponent(item.eventId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          anonymousId,
+          participantToken,
+          watchedSeconds: item.watchedSeconds,
+          playbackRate: item.playbackRate,
+          wasBackgrounded: item.wasBackgrounded,
+        }),
+      },
+    );
+    if (!response.ok) {
+      console.warn("[background] 시청시간 재전송 실패:", response.status);
+    }
+    return response.ok;
+  } catch (error) {
+    console.warn("[background] 시청시간 재전송 오류:", error);
+    return false;
+  }
+}
+
+/**
+ * 영상 시청 이벤트 하나를 POST로 서버에 (재)전송한다. 같은 eventId는 서버가 멱등 처리한다.
+ * @param {string} anonymousId
+ * @param {string} participantToken
+ * @param {object} event - videoId, title, watchedAt 등을 담은 이벤트
+ * @returns {Promise<boolean>} 성공 여부
+ */
 async function postVideoEventToServer(anonymousId, participantToken, event) {
   if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) return false;
 
@@ -317,7 +423,11 @@ async function postVideoEventToServer(anonymousId, participantToken, event) {
   }
 }
 
-// 버튼 클릭 시 별도 매핑 없이 세션을 역추적한다. 자격 판정은 호출부가 미리 끝내둔 상태로 호출한다.
+/**
+ * 피드백 알림을 띄운다. notificationId로 sessionId를 그대로 써 별도 매핑 없이 역추적한다.
+ * @param {object} session - 알림을 띄울 세션(sessionId 사용)
+ * @returns {void}
+ */
 function showFeedbackNotification(session) {
   chrome.notifications.create(session.sessionId, {
     type: "basic",
@@ -330,8 +440,12 @@ function showFeedbackNotification(session) {
   setUnviewedIconDot();
 }
 
-// 팝업이 읽는 "오늘 누적 리뷰 이력" 캐시
-// 방금 서버가 돌려준 오늘 행 하나만 갈아 끼운다. 자격이 없어 todayReview가 null이면 아무것도 쓰지 않는다.
+/**
+ * 팝업이 읽는 "오늘 누적 리뷰 이력" 캐시에 방금 받은 리뷰 하나만 갈아 끼운다.
+ * @param {string} anonymousId
+ * @param {object|null} todayReview - 없으면(자격 없음) 아무 것도 하지 않음
+ * @returns {Promise<void>}
+ */
 async function mergeTodayReviewIntoCache(anonymousId, todayReview) {
   if (!anonymousId || !todayReview) return;
   const { todayReviewsCache } =
@@ -349,6 +463,15 @@ async function mergeTodayReviewIntoCache(anonymousId, todayReview) {
   });
 }
 
+/**
+ * 세션 하나를 /api/sessions로 전송한다. 409(중복)면 서버가 이미 저장한
+ * categoryDistribution/entropy를 함께 돌려받아 duplicate 응답으로 반환한다.
+ * @param {object} session - 전송할 세션(videos 포함)
+ * @param {number} videoCount
+ * @param {{anonymousId: string, participantToken: string}} onboarding
+ * @param {{totalMs?: number, feedbackNotifiedAt?: string|null}} [metrics]
+ * @returns {Promise<object|null>} 서버 응답 데이터, 실패 시 null
+ */
 async function postSessionToServer(
   session,
   videoCount,
@@ -369,6 +492,12 @@ async function postSessionToServer(
 
   // categoryId 조회는 서버가 하므로, 이 세션에서 시청한 videoId 목록
   const videoIds = session.videos.map((v) => v.videoId);
+  // videoIds와 병렬인 시청시간 원시값 — 서버가 video_events를 재조회하지 않고 이
+  // 값을 그대로 쓴다(PATCH 재시도 지연으로 서버 쪽이 아직 비어있을 수 있어서).
+  // 값 없는 영상은 null로 보내 서버 isValidWatch가 "모름"으로 처리한다.
+  const watchedSecondsList = session.videos.map(
+    (v) => v.watchedSeconds ?? null,
+  );
   const cleanUrl = SERVER_URL.replace(/\/$/, "");
 
   try {
@@ -383,6 +512,7 @@ async function postSessionToServer(
         endTime: session.endTime,
         videoCount,
         videoIds,
+        watchedSecondsList,
         totalMs: metrics.totalMs,
         feedbackNotifiedAt: metrics.feedbackNotifiedAt,
       }),
