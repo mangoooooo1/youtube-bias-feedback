@@ -98,10 +98,14 @@ function validateWatchStats(body) {
 
   const { watchedSeconds, playbackRate, wasBackgrounded } = body;
 
+  // JSON은 Infinity 리터럴은 거부하지만 1e309처럼 유효한 숫자 토큰이 파싱 중 Infinity로
+  // 오버플로되는 건 막지 못한다 — Number.isFinite로 그 값을 걸러낸다(NaN도 함께 차단).
   if (
     watchedSeconds !== undefined &&
     watchedSeconds !== null &&
-    (typeof watchedSeconds !== "number" || watchedSeconds < 0)
+    (typeof watchedSeconds !== "number" ||
+      !Number.isFinite(watchedSeconds) ||
+      watchedSeconds < 0)
   ) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "watchedSeconds" };
   }

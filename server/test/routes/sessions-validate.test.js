@@ -255,6 +255,27 @@ describe("validateSession — watchedSecondsList (옵션 필드, videoIds와 병
       field: "watchedSecondsList",
     });
   });
+
+  // 코드리뷰 회귀: express.json()은 Infinity 리터럴은 거부하지만, 1e309처럼 유효한
+  // JSON 숫자 토큰은 JSON.parse가 파싱 중 그대로 Infinity로 오버플로시킨다(값 자체는
+  // 여기서 쓰는 Infinity와 동일) — 이 값이 그대로 통과하면 서버의 시간 가중 분포
+  // 계산에서 합계가 Infinity/NaN이 될 수 있다.
+  it.each([Infinity, -Infinity, NaN])(
+    "유한하지 않은 값(%s)이 섞여 있으면 거부한다",
+    (value) => {
+      expect(
+        validateSession(
+          basePayload({
+            videoIds: ["v1", "v2", "v3"],
+            watchedSecondsList: [30, value, 0],
+          }),
+        ),
+      ).toEqual({
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "watchedSecondsList",
+      });
+    },
+  );
 });
 
 describe("validateSession — videoIds", () => {

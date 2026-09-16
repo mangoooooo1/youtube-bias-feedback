@@ -49,13 +49,15 @@ function computeSessionAnalysis(db, videoIds, watchedSecondsList) {
   );
   const entropy = calculateEntropy(categoryDistribution);
 
-  const totalWatchedSeconds = validEntries.reduce(
-    (sum, e) => sum + (e.watchedSeconds ?? 0),
-    0,
+  // 합을 구해 0보다 큰지 보는 대신 양수 항목의 존재 자체를 본다.
+  // 유효 항목이 많으면 개별 값은 유한해도 그 합이 부동소수점 오버플로로 Infinity가 될 수 있는데,
+  // 이 분기 판단에 굳이 그런 위험을 지닌 합계를 만들어 쓸 이유가 없다.
+  const hasPositiveWatchedSeconds = validEntries.some(
+    (e) => (e.watchedSeconds ?? 0) > 0,
   );
   let weightedCategoryDistribution = null;
   let weightedEntropy = null;
-  if (totalWatchedSeconds > 0) {
+  if (hasPositiveWatchedSeconds) {
     weightedCategoryDistribution = calculateWeightedDistribution(
       validEntries.map((e) => ({
         categoryId: e.categoryId,

@@ -91,10 +91,13 @@ function validateSession(body) {
         field: "watchedSecondsList",
       };
     }
-    // 각 원소가 null이거나 음수 아닌 숫자인지 확인
+    // 각 원소가 null이거나 음수 아닌 유한한 숫자인지 확인.
+    // JSON은 Infinity 리터럴은 거부하지만 1e309처럼 유효한 숫자 토큰이 파싱 중 Infinity로
+    // 오버플로되는 건 막지 못한다 — Number.isFinite로 그 값을 걸러낸다(NaN도 함께 차단).
     if (
       watchedSecondsList.some(
-        (v) => v !== null && (typeof v !== "number" || v < 0),
+        (v) =>
+          v !== null && (typeof v !== "number" || !Number.isFinite(v) || v < 0),
       )
     ) {
       return {

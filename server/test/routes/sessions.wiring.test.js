@@ -324,6 +324,40 @@ describe("POST /api/sessions — 클릭성 이탈 필터링 및 시간 가중 en
     expect(row.weightedEntropy).toBeGreaterThan(0);
   });
 
+  // 코드리뷰 회귀: 검증기를 통과한(각각 유한한) watchedSeconds라도 개수가 많으면 그
+  // 합계 자체가 부동소수점 오버플로로 Infinity가 될 수 있다 — 그 경우 예전 구현은
+  // weightedCategoryDistribution/weightedEntropy가 NaN이 됐고, JSON.stringify가 그
+  // NaN을 null로 저장해 데이터가 조용히 손상됐다.
+  it("각 watchedSeconds는 유한해도 총합이 오버플로되는 규모(500개)에서도 weighted 계열이 NaN/null 없이 유한하게 계산된다", async () => {
+    const videoIds = Array.from({ length: 500 }, (_, i) =>
+      i % 2 === 0 ? "wt-game" : "wt-music",
+    );
+    // 500개를 그대로 더하면(4e310) 확실히 Infinity로 오버플로된다.
+    const watchedSecondsList = videoIds.map(() => 8e307);
+
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "overflow-guard-s1",
+          videoIds,
+          watchedSecondsList,
+        }),
+      );
+
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare("SELECT * FROM sessions WHERE sessionId = ?")
+      .get("overflow-guard-s1");
+    expect(row.validVideoCount).toBe(500);
+    expect(JSON.parse(row.weightedCategoryDistribution)).toEqual({
+      게임: 0.5,
+      음악: 0.5,
+    });
+    expect(row.weightedEntropy).toBe(1);
+  });
+
   it("모든 영상이 오클릭으로 걸러지면 categoryDistribution은 빈 객체·entropy는 0, weighted 계열은 null이다", async () => {
     const res = await request(app)
       .post("/api/sessions")

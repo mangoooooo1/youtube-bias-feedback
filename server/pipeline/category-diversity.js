@@ -91,20 +91,29 @@ function calculateWeightedDistribution(entries) {
       e.categoryId !== null &&
       e.categoryId !== undefined &&
       typeof e.weight === "number" &&
+      Number.isFinite(e.weight) &&
       e.weight > 0,
   );
   if (valid.length === 0) return {};
 
-  const totalWeight = valid.reduce((sum, e) => sum + e.weight, 0);
+  // 개별 weight가 다 유한해도(입력단 검증 통과) 여러 개를 그대로 더하면 합계 자체가 부동소수점 오버플로로 Infinity가 될 수 있다.
+  // 먼저 최대 weight로 나눠 모든 값을 (0, 1] 범위로 정규화한 뒤 더하면, 유한한 입력에서는 합계가 최대
+  // valid.length(최대 500)를 넘지 않아 오버플로되지 않는다.
+  const maxWeight = Math.max(...valid.map((e) => e.weight));
   const weightByName = {};
   for (const { categoryId, weight } of valid) {
     const name = getCategoryName(categoryId);
-    weightByName[name] = (weightByName[name] ?? 0) + weight;
+    weightByName[name] = (weightByName[name] ?? 0) + weight / maxWeight;
   }
+  const totalNormalizedWeight = Object.values(weightByName).reduce(
+    (sum, w) => sum + w,
+    0,
+  );
 
   const distribution = {};
   for (const [name, weight] of Object.entries(weightByName)) {
-    distribution[name] = Math.round((weight / totalWeight) * 1000) / 1000;
+    distribution[name] =
+      Math.round((weight / totalNormalizedWeight) * 1000) / 1000;
   }
   return distribution;
 }

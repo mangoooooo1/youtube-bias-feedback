@@ -132,6 +132,50 @@ describe("calculateWeightedDistribution", () => {
     ]);
     expect(result).toEqual({ 음악: 0.667, 게임: 0.333 });
   });
+
+  // Infinity/NaN 오염 경로(코드리뷰 회귀): 검증기가 뚫려 weight로 Infinity가 들어오거나,
+  // 유한한 weight들의 합 자체가 부동소수점 오버플로로 Infinity가 되는 두 경우 모두
+  // distribution이 NaN(→ JSON.stringify가 null로 저장)이 되면 안 된다.
+  describe("weight 오버플로/비정상값 방어(코드리뷰 회귀)", () => {
+    it("weight가 Infinity/NaN인 항목은 제외한다(검증기를 우회해 들어온 경우 방어)", () => {
+      const result = calculateWeightedDistribution([
+        { categoryId: 10, weight: 100 },
+        { categoryId: 20, weight: Infinity },
+        { categoryId: 30, weight: NaN },
+      ]);
+      expect(result).toEqual({ 음악: 1 });
+    });
+
+    it("weight 전부가 Infinity/NaN이면 빈 객체를 반환한다", () => {
+      const result = calculateWeightedDistribution([
+        { categoryId: 10, weight: Infinity },
+        { categoryId: 20, weight: NaN },
+      ]);
+      expect(result).toEqual({});
+    });
+
+    it("개별 weight는 유한해도 합계가 오버플로되는 극단값에서도 NaN 없이 유한한 비율을 반환한다", () => {
+      // 1e308 두 개를 그대로 더하면(2e308) 부동소수점 double 표현 범위를 넘어 Infinity가
+      // 된다 — 이 경우 예전 구현(그대로 합산)은 두 카테고리 모두 Infinity/Infinity=NaN이
+      // 됐다. 최대값으로 정규화한 뒤 더하면 이런 경우에도 정상적으로 0.5/0.5가 나와야 한다.
+      const result = calculateWeightedDistribution([
+        { categoryId: 10, weight: 1e308 },
+        { categoryId: 20, weight: 1e308 },
+      ]);
+      expect(result).toEqual({ 음악: 0.5, 게임: 0.5 });
+      expect(Number.isFinite(result.음악)).toBe(true);
+      expect(Number.isFinite(result.게임)).toBe(true);
+    });
+
+    it("여러 유효 항목(500개 규모)의 weight가 모두 커도 합계 오버플로 없이 정상 비율을 낸다", () => {
+      const entries = Array.from({ length: 500 }, (_, i) => ({
+        categoryId: i % 2 === 0 ? 10 : 20,
+        weight: 8e307, // 500개를 그대로 더하면(4e310) 확실히 Infinity로 오버플로된다.
+      }));
+      const result = calculateWeightedDistribution(entries);
+      expect(result).toEqual({ 음악: 0.5, 게임: 0.5 });
+    });
+  });
 });
 
 describe("getCategoryName", () => {
