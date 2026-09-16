@@ -36,6 +36,15 @@ const {
   DAYS_PER_PERIOD,
   BASELINE_DAYS,
 } = require("../pipeline/study-constants");
+const {
+  isValidWatch,
+  calculateWeightedDistribution,
+  calculateEntropy,
+} = require("../pipeline/category-diversity");
+const {
+  getCategoryIdsForVideos,
+  getDurationsForVideos,
+} = require("../routes/video-metadata-store");
 
 // 대조군(CON, TEST-CON)도 실험군과 동일한 주기·동일한 코드 경로로 사전 생성한다
 const ELIGIBLE_GROUPS = ["EXP", "TEST-EXP", "CON", "TEST-CON"];
@@ -53,12 +62,59 @@ function isRetryEligible(periodEnd) {
   return kstDateStr(new Date()) <= kstDateStr(new Date(deadlineMs));
 }
 
+/**
+ * 기간 내 video_events(재시청 포함)로부터 시간 가중 보조 지표를 계산한다.
+ * sessions.js의 computeSessionAnalysis와 동일한 계산(isValidWatch 필터 +
+ * calculateWeightedDistribution)을 세션이 아니라 기간 전체 단위로 수행한다.
+ * 세션별로 이미 정규화된 weightedCategoryDistribution을 병합하면 mergeSessionDistributions가
+ * categoryDistribution에서 겪는 것과 같은 리치니스 인플레이션 문제가 생기므로, 원본 video_events를 직접 풀링해 한 번에 계산한다.
+ * @param {import("better-sqlite3").Database} db - DB 커넥션
+ * @param {{videoId: string, watchedSeconds: number|null}[]} eventsInRange - 기간 내 시청 이벤트
+ * @returns {{weightedCategoryDistribution: object|null, weightedEntropy: number|null, validVideoCount: number}}
+ */
+function computeWeightedPeriodDistribution(db, eventsInRange) {
+  const videoIds = eventsInRange.map((e) => e.videoId);
+  const categoryIds = getCategoryIdsForVideos(db, videoIds);
+  const durations = getDurationsForVideos(db, videoIds);
+
+  const entries = eventsInRange.map((e, i) => ({
+    categoryId: categoryIds[i],
+    durationSeconds: durations[i],
+    watchedSeconds: e.watchedSeconds ?? null,
+  }));
+  const validEntries = entries.filter((e) => isValidWatch(e));
+
+  const hasPositiveWatchedSeconds = validEntries.some(
+    (e) => (e.watchedSeconds ?? 0) > 0,
+  );
+  if (!hasPositiveWatchedSeconds) {
+    return {
+      weightedCategoryDistribution: null,
+      weightedEntropy: null,
+      validVideoCount: validEntries.length,
+    };
+  }
+
+  const weightedCategoryDistribution = calculateWeightedDistribution(
+    validEntries.map((e) => ({
+      categoryId: e.categoryId,
+      weight: e.watchedSeconds ?? 0,
+    })),
+  );
+  return {
+    weightedCategoryDistribution,
+    weightedEntropy: calculateEntropy(weightedCategoryDistribution),
+    validVideoCount: validEntries.length,
+  };
+}
+
 async function processPeriod({
+  db,
   apiKey,
   anonymousId,
   period,
   allSessions,
-  allTitles,
+  allEvents,
   insertPeriodReview,
 }) {
   const sessionsInRange = allSessions.filter((s) =>
@@ -68,18 +124,19 @@ async function processPeriod({
       period.periodEnd,
     ),
   );
-  const titlesInRange = allTitles
-    .filter((v) =>
-      inRange(
-        kstDateStr(new Date(v.watchedAt)),
-        period.periodStart,
-        period.periodEnd,
-      ),
-    )
-    .map((v) => v.title);
+  const eventsInRange = allEvents.filter((v) =>
+    inRange(
+      kstDateStr(new Date(v.watchedAt)),
+      period.periodStart,
+      period.periodEnd,
+    ),
+  );
+  const titlesInRange = eventsInRange.map((v) => v.title);
 
   const { categoryDistribution, entropy, videoCount } =
     mergeSessionDistributions(sessionsInRange);
+  const { weightedCategoryDistribution, weightedEntropy, validVideoCount } =
+    computeWeightedPeriodDistribution(db, eventsInRange);
 
   let result;
   let llmStatus;
@@ -127,6 +184,12 @@ async function processPeriod({
     videoCount,
     categoryDistribution: JSON.stringify(categoryDistribution),
     entropy,
+    weightedCategoryDistribution:
+      weightedCategoryDistribution != null
+        ? JSON.stringify(weightedCategoryDistribution)
+        : null,
+    weightedEntropy,
+    validVideoCount,
     review: result.feedback,
     reviewTopic: result.topic,
     source: result.source,
@@ -164,8 +227,8 @@ async function run(db, apiKey) {
     SELECT categoryDistribution, videoCount, endTime FROM sessions
     WHERE anonymousId = ? AND endTime IS NOT NULL AND categoryDistribution IS NOT NULL
   `);
-  const selectVideoTitles = db.prepare(`
-    SELECT title, watchedAt FROM video_events
+  const selectVideoEvents = db.prepare(`
+    SELECT videoId, title, watchedAt, watchedSeconds FROM video_events
     WHERE anonymousId = ? AND title IS NOT NULL
     ORDER BY watchedAt ASC
   `);
@@ -178,11 +241,13 @@ async function run(db, apiKey) {
   const insertPeriodReview = db.prepare(`
     INSERT OR REPLACE INTO period_reviews
       (anonymousId, periodIndex, periodStart, periodEnd, isBaseline, sessionCount,
-       videoCount, categoryDistribution, entropy, review, reviewTopic, source,
+       videoCount, categoryDistribution, entropy, weightedCategoryDistribution,
+       weightedEntropy, validVideoCount, review, reviewTopic, source,
        promptVersion, llmStatus, failureReason, geminiMs, generatedAt)
     VALUES
       (@anonymousId, @periodIndex, @periodStart, @periodEnd, @isBaseline, @sessionCount,
-       @videoCount, @categoryDistribution, @entropy, @review, @reviewTopic, @source,
+       @videoCount, @categoryDistribution, @entropy, @weightedCategoryDistribution,
+       @weightedEntropy, @validVideoCount, @review, @reviewTopic, @source,
        @promptVersion, @llmStatus, @failureReason, @geminiMs, @generatedAt)
   `);
 
@@ -219,17 +284,18 @@ async function run(db, apiKey) {
         categoryDistribution: JSON.parse(s.categoryDistribution || "{}"),
       }))
       .filter((s) => Object.keys(s.categoryDistribution).length > 0);
-    const allTitles = selectVideoTitles.all(anonymousId);
+    const allEvents = selectVideoEvents.all(anonymousId);
 
     // 밀린 기간이 여러 개면 오래된 순서로 하나씩 — 참여자당 Gemini 호출을 직렬화한다.
     for (const period of periods) {
       try {
         const { llmStatus, failureReason } = await processPeriod({
+          db,
           apiKey,
           anonymousId,
           period,
           allSessions,
-          allTitles,
+          allEvents,
           insertPeriodReview,
         });
         if (llmStatus === "success") created++;
