@@ -67,6 +67,14 @@ function parseTitle() {
   return cleaned && cleaned !== "YouTube" ? cleaned : null;
 }
 
+// watchTracker/trackedVideoEl은 원래 파일 하단(비디오 엘리먼트 계측 섹션)에서 선언됐으나,
+// 파일 하단의 handleVideoChange() 최초 동기 호출이 그 선언보다 먼저 실행돼
+// 콘텐츠 스크립트가 /watch·/shorts 페이지에 곧바로 주입되는 경우
+// captureWatchStatsSnapshot이 "ReferenceError: Cannot access 'watchTracker' before initialization"로
+// 조용히 실패해 그 첫 영상이 recordVideo까지 가지 못하고 유실됐다. 최초 호출보다 먼저 초기화되도록 이 위치로 옮겼다.
+let watchTracker = null;
+let trackedVideoEl = null;
+
 /**
  * 지금까지 추적 중이던 영상의 시청시간 스냅샷을 반환한다(클릭성 이탈 판별용 원시 데이터).
  * watchTracker는 파일 하단에서 선언되지만 호출은 항상 그 이후 시점이라 문제없고,
