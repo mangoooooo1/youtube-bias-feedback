@@ -8,6 +8,12 @@ const {
   fetchChannelMetadata,
 } = require("../pipeline/youtube");
 
+/**
+ * videoIds 중 video_metadata 테이블에 아직 없는 것만 골라낸다.
+ * @param {import("better-sqlite3").Database} db - DB 커넥션
+ * @param {string[]} videoIds - 확인할 videoId 목록 (중복 가능)
+ * @returns {string[]} 캐시에 없는 videoId 목록 (중복 제거됨)
+ */
 function findMissingVideoIds(db, videoIds) {
   const uniqueIds = [...new Set(videoIds)];
   if (uniqueIds.length === 0) return [];
@@ -21,6 +27,12 @@ function findMissingVideoIds(db, videoIds) {
   return uniqueIds.filter((id) => !cached.has(id));
 }
 
+/**
+ * channelIds 중 channel_metadata 테이블에 아직 없는 것만 골라낸다.
+ * @param {import("better-sqlite3").Database} db - DB 커넥션
+ * @param {(string|null|undefined)[]} channelIds - 확인할 channelId 목록 (중복·null 가능)
+ * @returns {string[]} 캐시에 없는 channelId 목록 (중복·null 제거됨)
+ */
 function findMissingChannelIds(db, channelIds) {
   const uniqueIds = [...new Set(channelIds)].filter((id) => id != null);
   if (uniqueIds.length === 0) return [];
@@ -34,9 +46,16 @@ function findMissingChannelIds(db, channelIds) {
   return uniqueIds.filter((id) => !cached.has(id));
 }
 
-// data가 null이면(채널이 삭제됐거나 API 응답에 없음이 확인된 경우) channelId만 있는
-// 빈 행을 남긴다. "확인했지만 값이 없다"를 기록해, 존재하지 않는 채널을 향한 video_metadata
-// FK를 만족시키면서도 매번 재조회하지 않게 한다.
+/**
+ * 채널 메타데이터를 channel_metadata에 upsert한다.
+ * data가 null이면(채널이 삭제됐거나 API 응답에 없음이 확인된 경우) channelId만 있는
+ * 빈 행을 남긴다. "확인했지만 값이 없다"를 기록해, 존재하지 않는 채널을 향한 video_metadata
+ * FK를 만족시키면서도 매번 재조회하지 않게 한다.
+ * @param {import("better-sqlite3").Database} db - DB 커넥션
+ * @param {string} channelId - upsert할 channelId
+ * @param {{channelTitle?: string, subscriberCount?: number, videoCount?: number, topicCategories?: string, keywords?: string}|null} data - fetchChannelMetadata 결과 값
+ * @returns {void}
+ */
 function upsertChannelMetadata(db, channelId, data) {
   db.prepare(
     `INSERT INTO channel_metadata
@@ -54,8 +73,15 @@ function upsertChannelMetadata(db, channelId, data) {
   });
 }
 
-// data가 null이면(영상이 삭제됐거나 API 응답에 없음이 확인된 경우) videoId만 있는 빈
-// 행을 남겨 다음 시청 때 재조회하지 않게 한다.
+/**
+ * 영상 메타데이터를 video_metadata에 upsert한다.
+ * data가 null이면(영상이 삭제됐거나 API 응답에 없음이 확인된 경우) videoId만 있는 빈
+ * 행을 남겨 다음 시청 때 재조회하지 않게 한다.
+ * @param {import("better-sqlite3").Database} db - DB 커넥션
+ * @param {string} videoId - upsert할 videoId
+ * @param {{categoryId?: number, title?: string, durationSeconds?: number, viewCount?: number, channelId?: string, description?: string}|null} data - fetchVideoMetadata 결과 값
+ * @returns {void}
+ */
 function upsertVideoMetadata(db, videoId, data) {
   db.prepare(
     `INSERT INTO video_metadata
@@ -78,6 +104,10 @@ function upsertVideoMetadata(db, videoId, data) {
  * videoIds 중 video_metadata에 없는 것만 골라 YouTube API로 채운다.
  * channel_metadata -> video_metadata 순서(FK 방향)를 지키고, 채널 확보에 실패한
  * videoId는 이번엔 건너뛴다. apiKey가 없으면 아무 것도 하지 않는다.
+ * @param {import("better-sqlite3").Database} db - DB 커넥션
+ * @param {string[]} videoIds - 캐시를 채울 videoId 목록
+ * @param {string|undefined} apiKey - YouTube Data API 키
+ * @returns {Promise<void>}
  */
 async function ensureVideoMetadata(db, videoIds, apiKey) {
   if (!apiKey) return;
@@ -118,9 +148,14 @@ async function ensureVideoMetadata(db, videoIds, apiKey) {
   }
 }
 
-// videoIds 순서·중복(재시청)을 그대로 유지한 채 categoryId 배열로 변환한다.
-// calculateDistribution이 다양성 계산 시 영상 개수(재시청 포함)로 가중하므로, 중복을 제거하면 안 된다.
-// 캐시에 없거나 categoryId 자체가 null인 영상은 null로 남기고, calculateDistribution이 null을 걸러낸다.
+/**
+ * videoIds 순서·중복(재시청)을 그대로 유지한 채 categoryId 배열로 변환한다.
+ * calculateDistribution이 다양성 계산 시 영상 개수(재시청 포함)로 가중하므로, 중복을 제거하면 안 된다.
+ * 캐시에 없거나 categoryId 자체가 null인 영상은 null로 남기고, calculateDistribution이 null을 걸러낸다.
+ * @param {import("better-sqlite3").Database} db - DB 커넥션
+ * @param {string[]} videoIds - 순서·중복을 유지할 videoId 목록
+ * @returns {(number|null)[]} videoIds와 같은 순서·길이의 categoryId 배열
+ */
 function getCategoryIdsForVideos(db, videoIds) {
   const uniqueIds = [...new Set(videoIds)];
   if (uniqueIds.length === 0) return [];
@@ -134,9 +169,30 @@ function getCategoryIdsForVideos(db, videoIds) {
   return videoIds.map((id) => categoryById.get(id) ?? null);
 }
 
+/**
+ * videoIds 순서·중복을 그대로 유지한 채 durationSeconds 배열로 변환한다(getCategoryIdsForVideos와
+ * 동일한 계약). isValidWatch()가 절대/상대 시청 기준을 판정하는 데 쓰인다. 캐시에 없거나 값 자체가 없으면 null로 남긴다.
+ * @param {import("better-sqlite3").Database} db - DB 커넥션
+ * @param {string[]} videoIds - 순서·중복을 유지할 videoId 목록
+ * @returns {(number|null)[]} videoIds와 같은 순서·길이의 durationSeconds 배열
+ */
+function getDurationsForVideos(db, videoIds) {
+  const uniqueIds = [...new Set(videoIds)];
+  if (uniqueIds.length === 0) return [];
+  const placeholders = uniqueIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT videoId, durationSeconds FROM video_metadata WHERE videoId IN (${placeholders})`,
+    )
+    .all(...uniqueIds);
+  const durationById = new Map(rows.map((r) => [r.videoId, r.durationSeconds]));
+  return videoIds.map((id) => durationById.get(id) ?? null);
+}
+
 module.exports = {
   ensureVideoMetadata,
   getCategoryIdsForVideos,
+  getDurationsForVideos,
   findMissingVideoIds,
   findMissingChannelIds,
   upsertChannelMetadata,

@@ -1,4 +1,8 @@
-// URL에서 유튜브 영상 ID를 추출한다(/watch?v=, /shorts/ 형식만 지원, 그 외는 null).
+/**
+ * URL에서 유튜브 영상 ID를 추출한다.
+ * @param {string} url - 파싱할 URL
+ * @returns {string|null} /watch?v=, /shorts/ 형식만 지원, 그 외는 null
+ */
 function extractVideoId(url) {
   try {
     const parsed = new URL(url);
@@ -48,6 +52,10 @@ function parseEntryLocation(href) {
   }
 }
 
+/**
+ * 문서 제목에서 유튜브 특유의 접두사(안 읽은 알림 수)·접미사(" - YouTube")를 제거한다.
+ * @returns {string|null} 정제된 제목, placeholder("YouTube")이거나 없으면 null
+ */
 function parseTitle() {
   const raw = document.title;
   if (!raw) return null;
@@ -59,6 +67,56 @@ function parseTitle() {
   return cleaned && cleaned !== "YouTube" ? cleaned : null;
 }
 
+// watchTracker/trackedVideoEl은 원래 파일 하단(비디오 엘리먼트 계측 섹션)에서 선언됐으나,
+// 파일 하단의 handleVideoChange() 최초 동기 호출이 그 선언보다 먼저 실행돼
+// 콘텐츠 스크립트가 /watch·/shorts 페이지에 곧바로 주입되는 경우
+// captureWatchStatsSnapshot이 "ReferenceError: Cannot access 'watchTracker' before initialization"로
+// 조용히 실패해 그 첫 영상이 recordVideo까지 가지 못하고 유실됐다. 최초 호출보다 먼저 초기화되도록 이 위치로 옮겼다.
+let watchTracker = null;
+let trackedVideoEl = null;
+
+/**
+ * 지금까지 추적 중이던 영상의 시청시간 스냅샷을 반환한다(클릭성 이탈 판별용 원시 데이터).
+ * typeof 가드는 이 함수만 격리 테스트할 때(watchTracker 자체가 선언 안 된 환경) 예외 대신 null을 반환하게 한다.
+ * @returns {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1}|null} watchTracker가 없으면 null
+ */
+function captureWatchStatsSnapshot() {
+  if (typeof watchTracker === "undefined" || !watchTracker) return null;
+  return {
+    watchedSeconds: currentWatchedMs(watchTracker) / 1000,
+    playbackRate: watchTracker.lastPlaybackRate ?? null,
+    wasBackgrounded: watchTracker.sawHidden ? 1 : 0,
+  };
+}
+
+/**
+ * recordVideo가 방금 기록한 영상의 sessionId·eventId
+ * 이 탭의 실행 컨텍스트 안에서만 사는 값이라, background.js의 세션 타임아웃이
+ * storage의 lastRecordedVideo를 null로 지워도 영향받지 않는다.
+ * rememberTrackedVideo(recordVideo 안에서 호출)가 갱신한다.
+ * @type {{sessionId: string, eventId: string}|null}
+ */
+let trackedVideoIdentity = null;
+
+/**
+ * 지금 추적 중인 영상의 식별자를 반환한다. handleVideoChange가 이동 감지 직후(동기
+ * 구간, resetWatchTracker가 다음 영상용으로 리셋하기 전)에 호출해야 정확하다.
+ * typeof 가드는 이 함수만 격리 테스트할 때 예외 대신 null을 반환하게 한다.
+ * @returns {{sessionId: string, eventId: string}|null}
+ */
+function captureTrackedVideoIdentity() {
+  return typeof trackedVideoIdentity !== "undefined"
+    ? trackedVideoIdentity
+    : null;
+}
+
+/**
+ * document.title이 prevTitle과 달라질 때까지 폴링해 새 제목을 기다린다.
+ * @param {string|null} prevTitle - 비교 기준이 되는 이전 제목
+ * @param {number} [maxRetries=10] - 최대 폴링 횟수
+ * @param {number} [interval=200] - 폴링 간격(ms)
+ * @returns {Promise<string|null>} 새 제목, 시간 내 못 구하면 null
+ */
 function waitForTitle(prevTitle, maxRetries = 10, interval = 200) {
   return new Promise((resolve) => {
     let attempts = 0;
@@ -84,8 +142,125 @@ function waitForTitle(prevTitle, maxRetries = 10, interval = 200) {
 // 서비스 워커 수면과 무관하게 storage에 직접 기록
 let writeQueue = Promise.resolve();
 
-// 탭마다 독립된 콘텐츠 스크립트가 돌아 큐만으로는 다중 탭 동시 시청 시 경합을 못 막는다.
-function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger) {
+/**
+ * 이 탭의 실행 컨텍스트 안에서만 사는 값이다. storage의 lastRecordedVideo는
+ * background.js의 세션 타임아웃(endSession)이 전혀 다른 실행 컨텍스트에서
+ * 언제든 null로 지울 수 있다. 한 영상을 끊기지 않고 10분 넘게 계속 보기만 해도
+ * lastWatchedAt이 그 영상 "시작" 시각에 고정된 채라 세션이 강제 종료되기 때문이다
+ * 이 값에 우선 의존하면 그 클로버링에 영향받지 않는다.
+ * @type {{sessionId: string, eventId: string}|null}
+ */
+function rememberTrackedVideo(sessionId, eventId) {
+  if (typeof trackedVideoIdentity === "undefined") return;
+  trackedVideoIdentity = { sessionId, eventId };
+}
+
+/**
+ * 직전 영상의 시청시간을 확정 처리한 뒤(finalizePreviousWatchStats) 호출해, 같은
+ * 영상이 다음 전환에서 또 한 번(이번엔 리셋된 0에 가까운 값으로) 확정되지 않게 한다.
+ * @returns {void}
+ */
+function clearTrackedVideo() {
+  if (typeof trackedVideoIdentity === "undefined") return;
+  trackedVideoIdentity = null;
+}
+
+/**
+ * 특정 영상의 video_events 행(들)에 patch를 병합한다. 라이브 키(video__)가 있으면
+ * 그쪽을, 이미 세션 종료로 sessions[]에 옮겨갔다면 그 안의 해당 영상 항목을 찾아 갱신한다.
+ * @param {{sessionId: string, eventId: string}} target - 갱신 대상 식별 정보
+ * @param {object} patch - 병합할 필드
+ * @returns {Promise<boolean>} 실제로 어딘가에서 찾아 갱신했으면 true
+ */
+async function applyWatchStatsPatch(target, patch) {
+  const videoKey = `video__${target.sessionId}__${target.eventId}`;
+  const { [videoKey]: live } = await chrome.storage.local.get(videoKey);
+  if (live) {
+    await chrome.storage.local.set({ [videoKey]: { ...live, ...patch } });
+    return true;
+  }
+
+  const { sessions } = await chrome.storage.local.get("sessions");
+  if (!Array.isArray(sessions)) return false;
+  let found = false;
+  const updated = sessions.map((session) => {
+    if (session.sessionId !== target.sessionId) return session;
+    return {
+      ...session,
+      videos: (session.videos ?? []).map((v) => {
+        if (v.eventId !== target.eventId) return v;
+        found = true;
+        return { ...v, ...patch };
+      }),
+    };
+  });
+  if (!found) return false;
+  await chrome.storage.local.set({ sessions: updated });
+  return true;
+}
+
+/**
+ * 방금 떠난 영상의 실제 시청시간·배속·백그라운드 여부를 서버 video_events 행에 반영한다.
+ * 실패해도 로컬에 watchStatsSent:false로 남겨 background.js의 재시도 큐가 찾아내게 한다.
+ * @param {{sessionId: string, eventId: string}} target - 방금 떠난 영상의 식별 정보
+ * @param {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1}} stats - captureWatchStatsSnapshot 결과
+ * @returns {Promise<void>}
+ */
+async function finalizePreviousWatchStats(target, stats) {
+  // 라이브 키·sessions[] 어디에도 없으면(참여자가 데이터를 지웠거나 하는 극단적
+  // 경우) 조용히 포기한다. 갱신할 대상 자체가 없다.
+  const applied = await applyWatchStatsPatch(target, {
+    ...stats,
+    watchStatsSent: false,
+  });
+  if (!applied) return;
+
+  const { anonymousId, serverUrl, participantToken } =
+    await chrome.storage.local.get([
+      "anonymousId",
+      "serverUrl",
+      "participantToken",
+    ]);
+  if (!anonymousId || !serverUrl || serverUrl.startsWith("YOUR_")) return;
+
+  try {
+    const response = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/video-events/${encodeURIComponent(target.eventId)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anonymousId, participantToken, ...stats }),
+      },
+    );
+    if (response.ok && chrome.runtime?.id) {
+      await applyWatchStatsPatch(target, { watchStatsSent: true });
+    }
+  } catch {
+    // 네트워크 오류 — watchStatsSent:false로 남아 재시도 큐 대상이 된다.
+  }
+}
+
+/**
+ * 새 영상 감지를 로컬 저장소에 기록하고 서버로 전송한다. 탭마다 독립된 콘텐츠 스크립트가
+ * 돌아 큐만으로는 다중 탭 동시 시청 시 경합을 못 막는다.
+ * @param {string} videoId - 감지된 videoId
+ * @param {string|null} title - 영상 제목
+ * @param {string|null} entryHost - 직전 페이지 도메인
+ * @param {string|null} entryPath - 직전 페이지 경로(유튜브 내부일 때만)
+ * @param {"ended"|"interaction"|null} navigationTrigger - 전환 원인 추정값
+ * @param {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1}|null} previousWatchStats - 직전 영상의 시청시간 스냅샷
+ * @param {{sessionId: string, eventId: string}|null} previousVideoIdentity - captureTrackedVideoIdentity 결과(이 탭 메모리 기준)
+ * @returns {Promise<void>}
+ */
+function recordVideo(
+  videoId,
+  title,
+  entryHost,
+  entryPath,
+  navigationTrigger,
+  previousWatchStats,
+  previousVideoIdentity,
+) {
   writeQueue = writeQueue.then(async () => {
     // 확장 리로드/업데이트 후 남은 탭은 새로고침 전까지 컨텍스트가 무효화돼 chrome.*
     // 호출이 전부 예외를 던진다 — 조용히 삼키지 않고 콘솔에 남긴다.
@@ -124,8 +299,19 @@ function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger) {
         return;
       }
 
+      // 직전 영상의 시청시간 스냅샷을 여기서 확정한다.
+      // previousVideoIdentity(이 탭 자신의 메모리)만 신뢰한다.
+      // storage의 lastRecordedVideo는 모든 탭이 공유해, 폴백으로 쓰면
+      // 다른 탭이 마지막으로 쓴 eventId에 이 탭의 시청시간을 잘못 붙일 수 있다.
+      // 이 탭이 막 로드돼 아직 기억해 둔 값이 없으면 확정을 포기한다. 데이터 유실은 눈에 보이지만
+      // 다른 탭 데이터로 오염되는 건 눈에 안 보이므로, 유실 쪽이 안전하다.
+      if (previousWatchStats && previousVideoIdentity?.eventId) {
+        finalizePreviousWatchStats(previousVideoIdentity, previousWatchStats);
+      }
+
       // uuid를 videoKey와 eventId 양쪽에 재사용한다.
       const eventId = crypto.randomUUID();
+      rememberTrackedVideo(session.sessionId, eventId);
       const videoKey = `video__${session.sessionId}__${eventId}`;
       // sent:false로 시작 — 전송 실패 시 이 값이 남아 background.js의 재시도 큐가 찾아낸다.
       await chrome.storage.local.set({
@@ -136,7 +322,9 @@ function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger) {
           // 탭 경합으로 순간적으로 1 어긋나도(드묾) 실제 데이터에는 영향이 없다.
           videoCount: (session.videoCount ?? 0) + 1,
         },
-        lastRecordedVideo: { videoId, sessionId: session.sessionId },
+        // eventId를 함께 저장해야, 다음 영상 전환 때 이 영상의 시청시간을 finalize할
+        // video_events 행을 정확히 특정할 수 있다.
+        lastRecordedVideo: { videoId, sessionId: session.sessionId, eventId },
         [videoKey]: {
           videoId,
           title,
@@ -170,18 +358,15 @@ function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger) {
         })
           .then((response) => {
             if (response.ok && chrome.runtime?.id) {
-              chrome.storage.local.set({
-                [videoKey]: {
-                  videoId,
-                  title,
-                  watchedAt: now,
-                  sent: true,
-                  eventId,
-                  entryHost,
-                  entryPath,
-                  navigationTrigger,
-                },
-              });
+              // 클로저에 담긴 옛 값으로 키 전체를 재작성하면 안 된다.
+              // 이 videoKey는 이 영상이 "직전 영상"이 될 때 finalizePreviousWatchStats가 시청시간을
+              // 병합하는 대상과 같다. 이 POST가 그 병합보다 늦게 끝나면(느린 네트워크 + 빠른 다음 영상 전환)
+              // 전체 재작성이 이미 저장된 watchedSeconds/watchStatsSent를 지워버린다.
+              // applyWatchStatsPatch로 최신 값을 다시 읽어 sent만 병합한다.
+              applyWatchStatsPatch(
+                { sessionId: session.sessionId, eventId },
+                { sent: true },
+              );
             }
           })
           .catch(() => {});
@@ -250,18 +435,42 @@ function classifyNavigationTrigger(now) {
 // 데이터 오염 사례 있음). await 후 세대가 앞질러졌으면 잡은 title을 못 믿으므로 포기한다.
 let handleVideoChangeGen = 0;
 
+/**
+ * URL 변경(SPA 이동)을 감지해 새 영상이면 제목을 기다렸다가 recordVideo로 기록한다.
+ * @returns {Promise<void>}
+ */
 async function handleVideoChange() {
   const videoId = extractVideoId(location.href);
 
   if (!videoId) {
-    // watch/shorts가 아닌 페이지(홈, 검색결과 등)도 다음 영상의 "직전 페이지"가 될 수 있으므로 갱신한다.
+    // watch/shorts가 아닌 페이지(홈, 검색결과 등)로 이탈 직전 영상의 시청시간을 여기서 먼저 확정해야 한다.
+    // resetWatchTracker를 별도 리스너로 두면 이 분기가 return한 뒤에도 같은 이벤트에서 곧바로 실행되어 watchTracker를 초기화해버려,
+    // 다음에 실제로 다른 영상으로 이동할 때 previousVideoIdentity와 previousWatchStats(리셋된 뒤라 0에 가까움)가 어긋나 이 영상에 0초가
+    // 잘못 기록됐다.
+    const stats = captureWatchStatsSnapshot();
+    const identity = captureTrackedVideoIdentity();
+    if (stats && identity?.eventId) {
+      finalizePreviousWatchStats(identity, stats);
+    }
+    clearTrackedVideo();
+    // resetWatchTracker는 파일 하단(비디오 엘리먼트 계측 섹션)에 있어 이 함수만
+    // 격리 추출한 테스트 환경에는 없을 수 있다 — typeof 가드로 그런 환경에서도
+    // 예외 없이 넘어가게 한다(실제 파일에서는 항상 존재해 정상 호출된다).
+    if (typeof resetWatchTracker === "function") resetWatchTracker();
+    // watch/shorts가 아닌 페이지도 다음 영상의 "직전 페이지"가 될 수 있으므로 갱신한다.
     previousLocationHref = location.href;
     lastVideoId = null;
     lastTitle = null;
     return;
   }
 
+  // 같은 영상이 계속되는 중(스퓨리어스 재이벤트 등)
+  // resetWatchTracker를 호출하면 안 된다. 호출하면 진행 중인 시청 시간이 그대로 사라진다.
   if (videoId === lastVideoId) return;
+
+  // resetWatchTracker보다 먼저 캡처해야 "막 떠나는 영상"의 스냅샷을 얻는다.
+  const previousWatchStats = captureWatchStatsSnapshot();
+  const previousVideoIdentity = captureTrackedVideoIdentity();
 
   // 덮어쓰기 전에 먼저 읽어야 "이 영상 직전 페이지"를 알 수 있다.
   const { entryHost, entryPath } = parseEntryLocation(previousLocationHref);
@@ -269,6 +478,9 @@ async function handleVideoChange() {
   previousLocationHref = location.href;
 
   lastVideoId = videoId;
+  // 위에서 이미 스냅샷을 캡처했으므로 이제 다음 영상용으로 리셋한다.
+  // typeof 가드 이유는 위 분기와 동일.
+  if (typeof resetWatchTracker === "function") resetWatchTracker();
 
   const myGen = ++handleVideoChangeGen;
   const title = await waitForTitle(lastTitle);
@@ -285,10 +497,158 @@ async function handleVideoChange() {
   if (title) lastTitle = title;
   console.log("[content] video detected:", { videoId, title });
 
-  await recordVideo(videoId, title, entryHost, entryPath, navigationTrigger);
+  await recordVideo(
+    videoId,
+    title,
+    entryHost,
+    entryPath,
+    navigationTrigger,
+    previousWatchStats,
+    previousVideoIdentity,
+  );
 }
 
 handleVideoChange();
 
 document.addEventListener("yt-navigate-finish", handleVideoChange);
 window.addEventListener("popstate", handleVideoChange);
+
+// ── 비디오 엘리먼트 계측 ──
+// handleVideoChange와 독립된 후행 리스너로, 항상 "전환 직전 스냅샷 → 다음 영상용 리셋"
+// 순서로 실행된다. 시청시간은 "벽시계 경과 시간"(실제로 몇 초 동안 재생 상태였는가)으로
+// 누적한다 — video.played(미디어 타임라인 상 재생 구간)를 쓰면 배속에 따라 왜곡된다
+// (2배속으로 실제 30초를 시청하면 60초로, 0.5배속이면 15초로 기록됨).
+// play/pause/seeking/seeked 이벤트로 "재생 중" 구간의 시작·끝을 감지해 그 구간의
+// Date.now() 차이만 더한다 — 배속과 무관하게 항상 실제 경과 시간이 나온다.
+// SPA 전환 중 <video> 엘리먼트가 교체되는 경우(쇼츠 피드 등)는 수동 검증이 필요하다.
+// watchTracker/trackedVideoEl 선언은 파일 상단(captureWatchStatsSnapshot 앞)으로 옮겼다 — 이유는 그쪽 주석 참고.
+
+/**
+ * watchTracker의 지금 시점까지 누적된 총 시청 시간(ms)을 계산한다. 재생 중인 구간이
+ * 열려 있으면(segmentStartAt != null) 지금까지의 경과분까지 더해 반환한다 — pause를
+ * 기다리지 않고 언제든(전환·pagehide 시점 등) 정확한 "지금까지" 값을 구할 수 있다.
+ * @param {{accumulatedMs: number, segmentStartAt: number|null}|null} tracker - watchTracker
+ * @returns {number} 누적 시청 시간(ms)
+ */
+function currentWatchedMs(tracker) {
+  if (!tracker) return 0;
+  const openMs =
+    tracker.segmentStartAt != null ? Date.now() - tracker.segmentStartAt : 0;
+  return tracker.accumulatedMs + openMs;
+}
+
+/**
+ * 재생 중이던 구간을 닫는다(pause·탐색 시작·영상 전환 등) — 지금까지의 경과분을
+ * accumulatedMs에 반영하고 segmentStartAt을 비운다. 이미 닫혀 있으면 아무 일도 안 한다.
+ * @returns {void}
+ */
+function closeWatchSegment() {
+  if (!watchTracker || watchTracker.segmentStartAt == null) return;
+  watchTracker.accumulatedMs += Date.now() - watchTracker.segmentStartAt;
+  watchTracker.segmentStartAt = null;
+}
+
+/**
+ * 재생 중인 구간을 연다(play·탐색 종료 후 재생 재개 등) — 이미 열려 있으면 아무 일도 안 한다.
+ * @returns {void}
+ */
+function openWatchSegment() {
+  if (!watchTracker || watchTracker.segmentStartAt != null) return;
+  watchTracker.segmentStartAt = Date.now();
+}
+
+function onTrackedVideoPlay() {
+  openWatchSegment();
+}
+
+function onTrackedVideoPause() {
+  closeWatchSegment();
+}
+
+// 탐색(스크럽바 드래그) 구간은 실제 시청이 아니므로 시작 시점에 열려 있던 구간을 닫는다.
+function onTrackedVideoSeeking() {
+  closeWatchSegment();
+}
+
+// 탐색이 끝난 뒤에도 계속 재생 중이면(대부분의 경우) 새 구간을 연다. 탐색 도중
+// 일시정지해 뒀다면(paused=true) 열지 않는다 — 이후 실제 play 이벤트가 열어 줄 것이다.
+function onTrackedVideoSeeked() {
+  if (trackedVideoEl && !trackedVideoEl.paused) openWatchSegment();
+}
+
+function onTrackedVideoRateChange() {
+  if (!watchTracker || !trackedVideoEl) return;
+  try {
+    watchTracker.lastPlaybackRate = trackedVideoEl.playbackRate;
+  } catch {
+    // playbackRate 접근 자체가 실패하는 비표준 플레이어 상태 — 조용히 무시.
+  }
+}
+
+/**
+ * 현재 페이지의 <video> 엘리먼트에 재생 상태 리스너를 연결한다. SPA 전환으로 엘리먼트가
+ * 바뀌면 이전 리스너를 해제하고 새로 연결하며, 연결 시점에 이미 재생 중이면(자동재생 등)
+ * play 이벤트를 기다리지 않고 그 즉시 구간을 연다.
+ * @returns {void}
+ */
+function attachVideoTracking() {
+  const videoEl = document.querySelector("video");
+  if (!videoEl || videoEl === trackedVideoEl) return;
+  if (trackedVideoEl) {
+    trackedVideoEl.removeEventListener("play", onTrackedVideoPlay);
+    trackedVideoEl.removeEventListener("pause", onTrackedVideoPause);
+    trackedVideoEl.removeEventListener("seeking", onTrackedVideoSeeking);
+    trackedVideoEl.removeEventListener("seeked", onTrackedVideoSeeked);
+    trackedVideoEl.removeEventListener("ratechange", onTrackedVideoRateChange);
+  }
+  trackedVideoEl = videoEl;
+  trackedVideoEl.addEventListener("play", onTrackedVideoPlay);
+  trackedVideoEl.addEventListener("pause", onTrackedVideoPause);
+  trackedVideoEl.addEventListener("seeking", onTrackedVideoSeeking);
+  trackedVideoEl.addEventListener("seeked", onTrackedVideoSeeked);
+  trackedVideoEl.addEventListener("ratechange", onTrackedVideoRateChange);
+  try {
+    if (watchTracker)
+      watchTracker.lastPlaybackRate = trackedVideoEl.playbackRate;
+    if (!trackedVideoEl.paused) openWatchSegment();
+  } catch {
+    // playbackRate/paused 접근 자체가 실패하는 비표준 플레이어 상태 — 조용히 무시.
+  }
+}
+
+/**
+ * 새 영상 진입 시 watchTracker를 초기화하고 <video> 엘리먼트에 다시 연결한다.
+ * @returns {void}
+ */
+function resetWatchTracker() {
+  watchTracker = {
+    accumulatedMs: 0,
+    segmentStartAt: null,
+    lastPlaybackRate: 1,
+    sawHidden: document.hidden,
+  };
+  attachVideoTracking();
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && watchTracker) watchTracker.sawHidden = true;
+});
+
+// yt-navigate-finish/popstate에서 더 이상 별도로 리스닝하지 않는다.
+// handleVideoChange가 스냅샷 캡처 이후 시점에 직접 resetWatchTracker를 호출한다.
+// 최초 로드 시 한 번만 직접 호출한다.
+resetWatchTracker();
+
+// 탭 종료 시 마지막 영상의 시청시간을 최선노력으로 로컬에만 남긴다. sendBeacon은 POST만
+// 지원해 이 값을 반영할 PATCH를 못 쓰므로, background.js의 재시도 큐가 다음 기회에
+// 전송하게 한다. storage.local.set도 pagehide 시점 완주를 보장하진 않는다.
+// trackedVideoIdentity(이 탭 자신의 메모리)만 쓴다. storage의 lastRecordedVideo는
+// 다른 탭이 덮어썼을 수 있어 여기서 그걸 읽으면 다른 탭의 eventId를 이 탭의
+// 시청시간으로 오염시킬 수 있다.
+window.addEventListener("pagehide", () => {
+  const stats = captureWatchStatsSnapshot();
+  if (!stats) return;
+  const target = captureTrackedVideoIdentity();
+  if (!target?.eventId) return;
+  applyWatchStatsPatch(target, { ...stats, watchStatsSent: false });
+});

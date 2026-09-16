@@ -69,6 +69,14 @@ function execSchema() {
       failureReason        TEXT,     -- timeout | http_error | empty_response | parse_error | network_error | policy_filtered (성공 시 NULL)
       httpStatus           INTEGER,  -- failureReason='http_error'일 때만 (429 쿼터 vs 5xx 장애 구분)
       timedOut             INTEGER,  -- 타임아웃으로 실패한 경우 1
+      -- 시간 가중(Time-weighted) 다양성 지표 — 클릭만 하고 이탈한 영상(노이즈)을 걸러낸 뒤
+      -- 실제 시청 시간으로 가중한 보조/탐색적 지표. 1차 결과변수(위 entropy, 영상 개수 가중)는
+      -- 그대로 유지하고 이 값은 병행 저장만 한다.
+      weightedEntropy              REAL,     -- 시간 가중 entropy. 가중 데이터가 전혀 없으면 NULL
+      weightedCategoryDistribution TEXT,     -- 시간 가중 카테고리 분포 JSON. 위와 동일 조건에서 NULL
+      -- isValidWatch() 필터를 통과한(클릭성 이탈로 판정되지 않은) 영상 수 — entropy/weightedEntropy
+      -- 계산에 실제로 쓰인 영상 개수를 투명하게 남겨, 소표본 왜곡 여부를 사후에 판별할 수 있게 한다.
+      validVideoCount              INTEGER,
       -- 실제 생성된 피드백 텍스트 (Story 10-11) — 면담·로그·설문 삼각검증 및 처치 충실도 판정에 필요
       -- "오늘" 탭 리뷰 카드 통합 이후로는 이 세션 하나만의 격리된 관찰치가 아니라,
       -- 그 세션 종료 시점까지의 "오늘 누적" 스냅샷이다(세션 경계마다 찍힌 시계열) — 생성 당시
@@ -121,6 +129,14 @@ function execSchema() {
       -- referrerType='related'일 때만 의미 있음(그 외엔 NULL) — 자동재생(ended)/사용자 조작(click·keydown) 구분,
       -- 판단 근거가 부족하면 'unknown'
       relatedTrigger TEXT,  -- 'autoplay' | 'click' | 'unknown' | NULL
+      -- 시청시간 원시 데이터 — 클릭만 하고 이탈한 영상을 다양성 계산에서 걸러내기
+      -- 위한 근거 데이터. 확장이 <video> 엘리먼트를 계측해 산출하며, 계측 실패·구버전 확장 등으로
+      -- 값을 못 구했으면 NULL(= "모름", "0초 시청"과 구분해야 하므로 0으로 채우지 않는다).
+      watchedSeconds REAL, -- 누적 실제 재생 시간(초). 일시정지·되감기 중복은 제외(video.played 기준),
+                           -- 배속 재생이어도 "실제 소비한 콘텐츠 분량"(재생 위치 기준)을 그대로 담는다.
+      playbackRate   REAL, -- 이 영상을 떠날 때 마지막으로 관측된 재생 배속(기본 1). 배속 변경 이력
+                           -- 전체가 아니라 최종값 1개만 남긴다(원시 로그 비대화 방지, 통제변수 용도로 충분).
+      wasBackgrounded INTEGER, -- 이 영상 시청 중 탭이 한 번이라도 백그라운드로 전환된 적 있으면 1
       createdAt   TEXT    DEFAULT (datetime('now'))
     );
 

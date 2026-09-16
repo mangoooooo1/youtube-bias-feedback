@@ -22,6 +22,11 @@ const SOURCES = ["llm", "fallback"];
 // videoIds 개수 상한
 const MAX_VIDEO_IDS = 500;
 
+/**
+ * POST /api/sessions 요청 본문을 검증한다.
+ * @param {unknown} body - 요청 본문
+ * @returns {{code: string, field: string}|null} 검증 실패 시 에러 코드·필드, 통과하면 null
+ */
 function validateSession(body) {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "body" };
@@ -39,6 +44,7 @@ function validateSession(body) {
     }
   }
 
+  // startTime/endTime이 Date.parse로 해석 가능한 형식인지 확인
   const startMs = Date.parse(startTime);
   if (isNaN(startMs)) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "startTime" };
@@ -51,6 +57,7 @@ function validateSession(body) {
   if (endMs < startMs) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "endTime" };
   }
+  // videoCount: 있으면(선택 항목) 음수 아닌 정수인지 검증
   if (
     videoCount !== undefined &&
     (!Number.isInteger(videoCount) || videoCount < 0)
@@ -68,6 +75,38 @@ function validateSession(body) {
   if (videoIds.some((id) => typeof id !== "string" || id.trim() === "")) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "videoIds" };
   }
+
+  // 시청시간 원시값(watchedSecondsList)
+  // videoIds와 병렬 배열. video_events 재조회 없이 그대로 신뢰하며(전송 지연 대응),
+  // 구버전 확장 하위호환으로 선택 항목이다.
+  const { watchedSecondsList } = body;
+  if (watchedSecondsList !== undefined && watchedSecondsList !== null) {
+    // 배열 여부·videoIds와 길이 일치 확인
+    if (
+      !Array.isArray(watchedSecondsList) ||
+      watchedSecondsList.length !== videoIds.length
+    ) {
+      return {
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "watchedSecondsList",
+      };
+    }
+    // 각 원소가 null이거나 음수 아닌 유한한 숫자인지 확인.
+    // JSON은 Infinity 리터럴은 거부하지만 1e309처럼 유효한 숫자 토큰이 파싱 중 Infinity로
+    // 오버플로되는 건 막지 못한다 — Number.isFinite로 그 값을 걸러낸다(NaN도 함께 차단).
+    if (
+      watchedSecondsList.some(
+        (v) =>
+          v !== null && (typeof v !== "number" || !Number.isFinite(v) || v < 0),
+      )
+    ) {
+      return {
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "watchedSecondsList",
+      };
+    }
+  }
+  // totalMs/geminiMs: 있으면(선택 항목) 음수 아닌 정수인지 검증
   for (const field of LATENCY_FIELDS) {
     const value = body[field];
     if (

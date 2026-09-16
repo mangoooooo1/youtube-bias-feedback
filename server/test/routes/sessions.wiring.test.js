@@ -215,6 +215,172 @@ describe("POST /api/sessions — categoryDistribution 미확정(null) 처리 및
   });
 });
 
+// 시청시간 원시 데이터 기반 노이즈 제거 + 시간 가중 보조 지표
+describe("POST /api/sessions — 클릭성 이탈 필터링 및 시간 가중 entropy", () => {
+  const originalFetch = global.fetch;
+  const originalApiKey = process.env.YOUTUBE_API_KEY;
+
+  // 이 파일의 다른 describe들이 이미 "v1"/"v2"를 categoryId=20(게임)으로 캐싱해 뒀을 수
+  // 있다(video_metadata는 sessions와 달리 테스트 사이에 초기화되지 않고, 한 번 캐싱되면
+  // ensureVideoMetadata가 재조회하지 않는다 — 운영과 동일한 동작). 다른 describe와 절대
+  // 겹치지 않는 전용 videoId(wt- 접두사)를 써서 캐시 오염을 원천 차단한다.
+  beforeEach(() => {
+    process.env.YOUTUBE_API_KEY = "wiring-test-key";
+    // wt-game은 게임(20), wt-music은 음악(10) 카테고리로 응답한다.
+    global.fetch = vi.fn((url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/videos")) {
+        const ids = parsed.searchParams.get("id").split(",");
+        const categoryById = { "wt-game": "20", "wt-music": "10" };
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: ids.map((id) => ({
+              id,
+              snippet: { categoryId: categoryById[id] ?? "20", title: id },
+            })),
+          }),
+        });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ items: [] }) });
+    });
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    process.env.YOUTUBE_API_KEY = originalApiKey;
+  });
+
+  it("watchedSecondsList를 보내지 않으면(구버전 확장) 기존과 동일하게 모든 영상을 개수 기준으로 집계하고, weighted 계열은 null이다", async () => {
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "legacy-no-watchtime",
+          videoIds: ["wt-game"],
+        }),
+      );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.categoryDistribution).toEqual({ 게임: 1 });
+    expect(res.body.data.entropy).toBe(0);
+
+    const row = db
+      .prepare("SELECT * FROM sessions WHERE sessionId = ?")
+      .get("legacy-no-watchtime");
+    expect(row.validVideoCount).toBe(1);
+    expect(row.weightedEntropy).toBeNull();
+    expect(row.weightedCategoryDistribution).toBeNull();
+  });
+
+  it("30초 미만이고 재생 비율도 25% 미만인 영상(오클릭)은 카테고리 분포 계산에서 제외된다", async () => {
+    // wt-game(게임)은 2초만 시청(오클릭), wt-music(음악)은 40초 시청(정상
+    // wt-game이 걸러져 결과 분포는 음악 100%여야 한다.
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "misclick-filtered",
+          videoIds: ["wt-game", "wt-music"],
+          watchedSecondsList: [2, 40],
+        }),
+      );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.categoryDistribution).toEqual({ 음악: 1 });
+    expect(res.body.data.entropy).toBe(0);
+
+    const row = db
+      .prepare("SELECT * FROM sessions WHERE sessionId = ?")
+      .get("misclick-filtered");
+    expect(row.validVideoCount).toBe(1);
+  });
+
+  it("유효한 영상들에 한해 시청시간으로 가중한 weightedEntropy/weightedCategoryDistribution을 함께 저장한다", async () => {
+    // 둘 다 유효(wt-game=40초, wt-music=120초)하지만 개수는 1:1, 시청시간은 40:120(1:3)
+    // 개수 기준 entropy(균등, 1.0)와 시간 가중 entropy(비균등, 더 낮음)가 갈려야 한다.
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "weighted-entropy-s1",
+          videoIds: ["wt-game", "wt-music"],
+          watchedSecondsList: [40, 120],
+        }),
+      );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.entropy).toBe(1); // 개수 기준: 게임 50% / 음악 50%
+
+    const row = db
+      .prepare("SELECT * FROM sessions WHERE sessionId = ?")
+      .get("weighted-entropy-s1");
+    expect(row.validVideoCount).toBe(2);
+    expect(JSON.parse(row.weightedCategoryDistribution)).toEqual({
+      게임: 0.25,
+      음악: 0.75,
+    });
+    expect(row.weightedEntropy).toBeLessThan(1);
+    expect(row.weightedEntropy).toBeGreaterThan(0);
+  });
+
+  // 코드리뷰 회귀: 검증기를 통과한(각각 유한한) watchedSeconds라도 개수가 많으면 그
+  // 합계 자체가 부동소수점 오버플로로 Infinity가 될 수 있다 — 그 경우 예전 구현은
+  // weightedCategoryDistribution/weightedEntropy가 NaN이 됐고, JSON.stringify가 그
+  // NaN을 null로 저장해 데이터가 조용히 손상됐다.
+  it("각 watchedSeconds는 유한해도 총합이 오버플로되는 규모(500개)에서도 weighted 계열이 NaN/null 없이 유한하게 계산된다", async () => {
+    const videoIds = Array.from({ length: 500 }, (_, i) =>
+      i % 2 === 0 ? "wt-game" : "wt-music",
+    );
+    // 500개를 그대로 더하면(4e310) 확실히 Infinity로 오버플로된다.
+    const watchedSecondsList = videoIds.map(() => 8e307);
+
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "overflow-guard-s1",
+          videoIds,
+          watchedSecondsList,
+        }),
+      );
+
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare("SELECT * FROM sessions WHERE sessionId = ?")
+      .get("overflow-guard-s1");
+    expect(row.validVideoCount).toBe(500);
+    expect(JSON.parse(row.weightedCategoryDistribution)).toEqual({
+      게임: 0.5,
+      음악: 0.5,
+    });
+    expect(row.weightedEntropy).toBe(1);
+  });
+
+  it("모든 영상이 오클릭으로 걸러지면 categoryDistribution은 빈 객체·entropy는 0, weighted 계열은 null이다", async () => {
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "all-misclicks",
+          videoIds: ["wt-game"],
+          watchedSecondsList: [1],
+        }),
+      );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.categoryDistribution).toEqual({});
+    expect(res.body.data.entropy).toBe(0);
+
+    const row = db
+      .prepare("SELECT * FROM sessions WHERE sessionId = ?")
+      .get("all-misclicks");
+    expect(row.validVideoCount).toBe(0);
+    expect(row.weightedEntropy).toBeNull();
+  });
+});
+
 // 세션 저장 직후 "오늘" 누적 리뷰를 서버가 직접 생성해 응답에 실어 보내는지(연구 무결성
 // 점검 항목 1 후속 조치) — 자격 없는 그룹/시기에는 리뷰 텍스트 자체가 응답에 없어야 한다.
 // TODAY_REVIEW_GEMINI_API_KEY를 설정하지 않았으므로 실제 Gemini 호출 없이 폴백만 사용된다.

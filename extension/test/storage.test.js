@@ -7,6 +7,8 @@ import {
   saveAnalysis,
   getUnsentVideoEvents,
   markVideoEventSent,
+  getUnsentWatchStats,
+  markWatchStatsSent,
 } from "../storage.js";
 
 // 프로젝트에 chrome.storage.local 목이 없어 이번에 처음 만든다.
@@ -379,7 +381,7 @@ describe("getUnsentVideoEvents / markVideoEventSent", () => {
     // 이미 서버 전송에 성공한 상태다. !== true로 판정하면 이런 레거시 항목까지
     // "미전송"으로 오판해 eventId도 없이 재전송 → video_events에 영구 중복이 쌓인다.
     await global.chrome.storage.local.set({
-      "video__s1__legacy": {
+      video__s1__legacy: {
         videoId: "v1",
         title: "제목-v1",
         watchedAt: "2026-01-01T00:00:00Z",
@@ -451,6 +453,131 @@ describe("getUnsentVideoEvents / markVideoEventSent", () => {
     const videos = sessions[0].videos;
     expect(videos.find((v) => v.videoId === "v1").sent).toBe(true);
     expect(videos.find((v) => v.videoId === "v2").sent).toBe(true);
+  });
+});
+
+// 시청시간 원시 데이터 — getUnsentVideoEvents/markVideoEventSent와 동일한
+// dual-location(live video__ 키 / sessions[].videos[]) 구조를 검증한다.
+describe("getUnsentWatchStats / markWatchStatsSent", () => {
+  it("watchedSeconds가 있고 watchStatsSent가 false인 live 영상만 찾아낸다", async () => {
+    await global.chrome.storage.local.set({
+      "video__s1__v1-1": {
+        videoId: "v1",
+        eventId: "v1-1",
+        watchedSeconds: 42,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        watchStatsSent: false,
+      },
+    });
+
+    const items = await getUnsentWatchStats();
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      location: "live",
+      sessionId: "s1",
+      eventId: "v1-1",
+      watchedSeconds: 42,
+    });
+  });
+
+  it("watchedSeconds가 아직 없으면(계측 전) 대상에서 제외한다", async () => {
+    await global.chrome.storage.local.set({
+      "video__s1__v1-1": {
+        videoId: "v1",
+        eventId: "v1-1",
+        watchStatsSent: false,
+      },
+    });
+
+    expect(await getUnsentWatchStats()).toEqual([]);
+  });
+
+  it("watchStatsSent가 true면(이미 반영됨) 대상에서 제외한다", async () => {
+    await global.chrome.storage.local.set({
+      "video__s1__v1-1": {
+        videoId: "v1",
+        eventId: "v1-1",
+        watchedSeconds: 42,
+        watchStatsSent: true,
+      },
+    });
+
+    expect(await getUnsentWatchStats()).toEqual([]);
+  });
+
+  it("세션 종료 후(sessions[].videos)의 미반영 시청시간도 찾아낸다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [
+            {
+              videoId: "v1",
+              eventId: "e1",
+              watchedSeconds: 10,
+              watchStatsSent: true,
+            },
+            {
+              videoId: "v2",
+              eventId: "e2",
+              watchedSeconds: 55,
+              watchStatsSent: false,
+            },
+          ],
+        },
+      ],
+    });
+
+    const items = await getUnsentWatchStats();
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      location: "session",
+      sessionId: "s1",
+      eventId: "e2",
+      watchedSeconds: 55,
+    });
+  });
+
+  it("markWatchStatsSent(live)는 video__ 키를 watchStatsSent:true로 갱신한다", async () => {
+    await global.chrome.storage.local.set({
+      "video__s1__v1-1": {
+        videoId: "v1",
+        eventId: "v1-1",
+        watchedSeconds: 42,
+        watchStatsSent: false,
+      },
+    });
+    const [item] = await getUnsentWatchStats();
+
+    await markWatchStatsSent(item);
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__v1-1"].watchStatsSent).toBe(true);
+  });
+
+  it("markWatchStatsSent(session)는 sessions[].videos 안의 해당 영상만 watchStatsSent:true로 갱신한다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [
+            {
+              videoId: "v1",
+              eventId: "e1",
+              watchedSeconds: 55,
+              watchStatsSent: false,
+            },
+          ],
+        },
+      ],
+    });
+    const [item] = await getUnsentWatchStats();
+
+    await markWatchStatsSent(item);
+
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    expect(sessions[0].videos[0].watchStatsSent).toBe(true);
   });
 });
 

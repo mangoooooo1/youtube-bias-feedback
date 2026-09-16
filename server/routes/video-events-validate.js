@@ -2,6 +2,11 @@
 
 const { ERROR_CODES } = require("../middleware/responseHandler");
 
+/**
+ * POST /api/video-events 요청 본문을 검증한다.
+ * @param {unknown} body - 요청 본문
+ * @returns {{code: string, field: string}|null} 검증 실패 시 에러 코드·필드, 통과하면 null
+ */
 function validateVideoEvent(body) {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "body" };
@@ -79,4 +84,52 @@ function validateVideoEvent(body) {
   return null;
 }
 
-module.exports = { validateVideoEvent };
+/**
+ * PATCH /api/video-events/:eventId 요청 본문을 검증한다.
+ * anonymousId/participantToken은 requireParticipant가 이미 검증하므로 여기서는 다루지 않는다.
+ * 세 필드 모두 선택이지만(계측 실패 시 일부만 보낼 수 있음), 값이 있다면 형식은 지킨다.
+ * @param {unknown} body - 요청 본문
+ * @returns {{code: string, field: string}|null} 검증 실패 시 에러 코드·필드, 통과하면 null
+ */
+function validateWatchStats(body) {
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "body" };
+  }
+
+  const { watchedSeconds, playbackRate, wasBackgrounded } = body;
+
+  // JSON은 Infinity 리터럴은 거부하지만 1e309처럼 유효한 숫자 토큰이 파싱 중 Infinity로
+  // 오버플로되는 건 막지 못한다 — Number.isFinite로 그 값을 걸러낸다(NaN도 함께 차단).
+  if (
+    watchedSeconds !== undefined &&
+    watchedSeconds !== null &&
+    (typeof watchedSeconds !== "number" ||
+      !Number.isFinite(watchedSeconds) ||
+      watchedSeconds < 0)
+  ) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "watchedSeconds" };
+  }
+
+  // YouTube가 실제 허용하는 배속(0.25~2)보다 넉넉하게 잡아, 실험적 배속 확장 등으로
+  // 값이 조금 벗어나도 원시 데이터 저장 자체를 막지 않는다. 이상치 판별은 분석 단계의 몫이다.
+  if (
+    playbackRate !== undefined &&
+    playbackRate !== null &&
+    (typeof playbackRate !== "number" || playbackRate <= 0 || playbackRate > 16)
+  ) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "playbackRate" };
+  }
+
+  if (
+    wasBackgrounded !== undefined &&
+    wasBackgrounded !== null &&
+    wasBackgrounded !== 0 &&
+    wasBackgrounded !== 1
+  ) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "wasBackgrounded" };
+  }
+
+  return null;
+}
+
+module.exports = { validateVideoEvent, validateWatchStats };

@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { validateVideoEvent } from "../../routes/video-events-validate.js";
+import {
+  validateVideoEvent,
+  validateWatchStats,
+} from "../../routes/video-events-validate.js";
 import { ERROR_CODES } from "../../middleware/responseHandler.js";
 
 function basePayload(overrides = {}) {
@@ -20,13 +23,16 @@ describe("validateVideoEvent — 잘못된 형태의 body", () => {
     ["배열", []],
     ["문자열", "not-an-object"],
     ["숫자", 42],
-  ])("body가 %s이면 예외 없이 INVALID_FIELD_VALUE(field: body)를 반환한다", (_label, body) => {
-    expect(() => validateVideoEvent(body)).not.toThrow();
-    expect(validateVideoEvent(body)).toEqual({
-      code: ERROR_CODES.INVALID_FIELD_VALUE,
-      field: "body",
-    });
-  });
+  ])(
+    "body가 %s이면 예외 없이 INVALID_FIELD_VALUE(field: body)를 반환한다",
+    (_label, body) => {
+      expect(() => validateVideoEvent(body)).not.toThrow();
+      expect(validateVideoEvent(body)).toEqual({
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "body",
+      });
+    },
+  );
 });
 
 describe("validateVideoEvent — 필수 필드 (anonymousId/videoId/watchedAt)", () => {
@@ -79,7 +85,9 @@ describe("validateVideoEvent — 필수 필드 (anonymousId/videoId/watchedAt)",
 
 describe("validateVideoEvent — watchedAt 형식", () => {
   it("파싱 불가능한 문자열이면 INVALID_FIELD_VALUE(watchedAt)를 반환한다", () => {
-    expect(validateVideoEvent(basePayload({ watchedAt: "not-a-date" }))).toEqual({
+    expect(
+      validateVideoEvent(basePayload({ watchedAt: "not-a-date" })),
+    ).toEqual({
       code: ERROR_CODES.INVALID_FIELD_VALUE,
       field: "watchedAt",
     });
@@ -87,9 +95,12 @@ describe("validateVideoEvent — watchedAt 형식", () => {
 });
 
 describe("validateVideoEvent — sessionId (옵션 필드, 하위호환)", () => {
-  it.each([undefined, null])("%s이면 통과한다(구버전 확장 하위호환)", (value) => {
-    expect(validateVideoEvent(basePayload({ sessionId: value }))).toBeNull();
-  });
+  it.each([undefined, null])(
+    "%s이면 통과한다(구버전 확장 하위호환)",
+    (value) => {
+      expect(validateVideoEvent(basePayload({ sessionId: value }))).toBeNull();
+    },
+  );
 
   it("빈 문자열이면 거부한다", () => {
     expect(validateVideoEvent(basePayload({ sessionId: "" }))).toEqual({
@@ -118,9 +129,12 @@ describe("validateVideoEvent — sessionId (옵션 필드, 하위호환)", () =>
 });
 
 describe("validateVideoEvent — eventId (옵션 필드, 멱등 키·하위호환)", () => {
-  it.each([undefined, null])("%s이면 통과한다(구버전 확장 하위호환)", (value) => {
-    expect(validateVideoEvent(basePayload({ eventId: value }))).toBeNull();
-  });
+  it.each([undefined, null])(
+    "%s이면 통과한다(구버전 확장 하위호환)",
+    (value) => {
+      expect(validateVideoEvent(basePayload({ eventId: value }))).toBeNull();
+    },
+  );
 
   it("빈 문자열이면 거부한다", () => {
     expect(validateVideoEvent(basePayload({ eventId: "" }))).toEqual({
@@ -144,9 +158,7 @@ describe("validateVideoEvent — eventId (옵션 필드, 멱등 키·하위호�
   });
 
   it("유효한 문자열이면 통과한다", () => {
-    expect(
-      validateVideoEvent(basePayload({ eventId: "evt-abc" })),
-    ).toBeNull();
+    expect(validateVideoEvent(basePayload({ eventId: "evt-abc" }))).toBeNull();
   });
 });
 
@@ -196,9 +208,7 @@ describe("validateVideoEvent — entryPath (옵션 필드, 유입 경로 판별�
   });
 
   it("유효한 문자열이면 통과한다", () => {
-    expect(
-      validateVideoEvent(basePayload({ entryPath: "/watch" })),
-    ).toBeNull();
+    expect(validateVideoEvent(basePayload({ entryPath: "/watch" }))).toBeNull();
   });
 });
 
@@ -225,9 +235,7 @@ describe("validateVideoEvent — navigationTrigger (옵션 필드, 정해진 값
   });
 
   it("문자열이 아니면(숫자) 거부한다", () => {
-    expect(
-      validateVideoEvent(basePayload({ navigationTrigger: 1 })),
-    ).toEqual({
+    expect(validateVideoEvent(basePayload({ navigationTrigger: 1 }))).toEqual({
       code: ERROR_CODES.INVALID_FIELD_VALUE,
       field: "navigationTrigger",
     });
@@ -239,5 +247,113 @@ describe("validateVideoEvent — title (옵션, 검증 대상 아님)", () => {
     const payload = basePayload();
     delete payload.title;
     expect(validateVideoEvent(payload)).toBeNull();
+  });
+});
+
+// PATCH /api/video-events/:eventId 본문 검증 (시청시간 원시 데이터)
+describe("validateWatchStats — 잘못된 형태의 body", () => {
+  it.each([
+    ["undefined", undefined],
+    ["null", null],
+    ["배열", []],
+    ["문자열", "not-an-object"],
+  ])(
+    "body가 %s이면 INVALID_FIELD_VALUE(field: body)를 반환한다",
+    (_label, body) => {
+      expect(validateWatchStats(body)).toEqual({
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "body",
+      });
+    },
+  );
+});
+
+describe("validateWatchStats — 세 필드 모두 선택 항목", () => {
+  it("빈 객체는 통과한다(계측 실패 등으로 값을 못 구한 경우)", () => {
+    expect(validateWatchStats({})).toBeNull();
+  });
+
+  it("watchedSeconds/playbackRate/wasBackgrounded가 모두 정상 값이면 통과한다", () => {
+    expect(
+      validateWatchStats({
+        watchedSeconds: 42.5,
+        playbackRate: 1.5,
+        wasBackgrounded: 1,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe("validateWatchStats — watchedSeconds", () => {
+  it.each([undefined, null])("%s이면 통과한다", (value) => {
+    expect(validateWatchStats({ watchedSeconds: value })).toBeNull();
+  });
+
+  it("음수면 거부한다", () => {
+    expect(validateWatchStats({ watchedSeconds: -1 })).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "watchedSeconds",
+    });
+  });
+
+  it("숫자가 아니면(문자열) 거부한다", () => {
+    expect(validateWatchStats({ watchedSeconds: "30" })).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "watchedSeconds",
+    });
+  });
+
+  it("0은 통과한다(경계값)", () => {
+    expect(validateWatchStats({ watchedSeconds: 0 })).toBeNull();
+  });
+
+  // 코드리뷰 회귀: express.json()은 Infinity 리터럴은 거부하지만, 1e309처럼 유효한
+  // JSON 숫자 토큰은 JSON.parse가 파싱 중 그대로 Infinity로 오버플로시킨다(값 자체는
+  // 여기서 쓰는 Infinity와 동일). typeof/음수 검사만으로는 이 값을 걸러내지 못한다.
+  it.each([Infinity, -Infinity, NaN])(
+    "유한하지 않은 값(%s)이면 거부한다",
+    (value) => {
+      expect(validateWatchStats({ watchedSeconds: value })).toEqual({
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "watchedSeconds",
+      });
+    },
+  );
+});
+
+describe("validateWatchStats — playbackRate", () => {
+  it.each([undefined, null])("%s이면 통과한다", (value) => {
+    expect(validateWatchStats({ playbackRate: value })).toBeNull();
+  });
+
+  it("0 이하면 거부한다", () => {
+    expect(validateWatchStats({ playbackRate: 0 })).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "playbackRate",
+    });
+  });
+
+  it("비현실적으로 크면(16 초과) 거부한다", () => {
+    expect(validateWatchStats({ playbackRate: 17 })).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "playbackRate",
+    });
+  });
+});
+
+describe("validateWatchStats — wasBackgrounded", () => {
+  it.each([undefined, null])("%s이면 통과한다", (value) => {
+    expect(validateWatchStats({ wasBackgrounded: value })).toBeNull();
+  });
+
+  it.each([0, 1])("%s이면 통과한다", (value) => {
+    expect(validateWatchStats({ wasBackgrounded: value })).toBeNull();
+  });
+
+  it("0/1이 아니면 거부한다", () => {
+    expect(validateWatchStats({ wasBackgrounded: 2 })).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "wasBackgrounded",
+    });
   });
 });

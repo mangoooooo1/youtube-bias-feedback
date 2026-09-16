@@ -785,3 +785,219 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
     expect(calls).toHaveLength(0);
   });
 });
+
+// 시청시간 원시 데이터 재시도 큐 — content.js의 finalizePreviousWatchStats나
+// pagehide 핸들러가 남겨둔, 아직 서버에 확정 반영 못한 watchedSeconds를 찾아 PATCH로
+// 재전송한다. video-events(POST, "봤다")와는 독립된 별도 큐다.
+describe("retryUnsentWatchStats — 시청시간 서버 장애 대비 재시도 큐", () => {
+  it("세션 종료 전(video__ 키)에 남은 미반영 시청시간을 PATCH로 재전송하고 watchStatsSent:true로 표시한다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { patches: [] };
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.includes("/api/video-events/") && options.method === "PATCH") {
+        calls.patches.push({ url: href, body: JSON.parse(options.body) });
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      video__s1__uuid1: {
+        videoId: "v1",
+        eventId: "uuid1",
+        watchedSeconds: 42,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        watchStatsSent: false,
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentWatchStats();
+
+    expect(calls.patches).toHaveLength(1);
+    expect(calls.patches[0].url).toBe(
+      "http://localhost:3000/api/video-events/uuid1",
+    );
+    expect(calls.patches[0].body).toMatchObject({
+      anonymousId: "a1",
+      watchedSeconds: 42,
+      playbackRate: 1,
+      wasBackgrounded: 0,
+    });
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__uuid1"].watchStatsSent).toBe(true);
+  });
+
+  it("세션 종료 후(sessions[].videos)에 남은 미반영 시청시간도 재전송한다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { patches: [] };
+    global.fetch = vi.fn(async (url, options = {}) => {
+      if (options.method === "PATCH") {
+        calls.patches.push(JSON.parse(options.body));
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${url}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [
+            {
+              videoId: "v1",
+              eventId: "e1",
+              watchedSeconds: 10,
+              watchStatsSent: true, // 이미 반영 — 건드리면 안 됨
+            },
+            {
+              videoId: "v2",
+              eventId: "e2",
+              watchedSeconds: 55,
+              watchStatsSent: false,
+            },
+          ],
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentWatchStats();
+
+    expect(calls.patches).toHaveLength(1);
+    expect(calls.patches[0]).toMatchObject({ watchedSeconds: 55 });
+
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    const videos = sessions[0].videos;
+    expect(videos.find((v) => v.videoId === "v1").watchStatsSent).toBe(true);
+    expect(videos.find((v) => v.videoId === "v2").watchStatsSent).toBe(true);
+  });
+
+  it("재전송도 실패하면 watchStatsSent:false로 남겨 다음 알람 틱에서 다시 시도할 수 있게 한다", async () => {
+    global.chrome = createChromeMock();
+    global.fetch = vi.fn().mockRejectedValue(new TypeError("network down"));
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      video__s1__uuid1: {
+        videoId: "v1",
+        eventId: "uuid1",
+        watchedSeconds: 42,
+        watchStatsSent: false,
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentWatchStats();
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__uuid1"].watchStatsSent).toBe(false);
+  });
+
+  it("anonymousId가 없으면(온보딩 전) 아무것도 시도하지 않는다", async () => {
+    global.chrome = createChromeMock();
+    const calls = [];
+    global.fetch = vi.fn(async (url) => {
+      calls.push(String(url));
+      return { ok: true, json: async () => ({ success: true }) };
+    });
+
+    await global.chrome.storage.local.set({
+      video__s1__uuid1: {
+        videoId: "v1",
+        eventId: "uuid1",
+        watchedSeconds: 42,
+        watchStatsSent: false,
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentWatchStats();
+
+    expect(calls).toHaveLength(0);
+  });
+});
+
+// 세션 POST 페이로드에 시청시간 원시 데이터(watchedSecondsList)가 실려 가는지
+// 서버가 이 값으로 클릭성 이탈을 걸러내고 시간 가중 entropy를 계산한다.
+describe("analyzeSession — watchedSecondsList를 세션 페이로드에 함께 보낸다", () => {
+  it("videos 배열의 watchedSeconds를 videoIds와 같은 순서의 병렬 배열로 변환해 보낸다", async () => {
+    global.chrome = createChromeMock();
+    const { fetchMock, calls } = createFetchMock({ todayReview: null });
+    global.fetch = fetchMock;
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
+          endTime: FIXED_NOW.toISOString(),
+          videos: [
+            { videoId: "v1", title: "노래 모음", watchedSeconds: 42 },
+            { videoId: "v2", title: "게임", watchedSeconds: null },
+          ],
+        },
+      ],
+    });
+
+    const analyzeSession = await loadAnalyzeSession();
+    await analyzeSession({
+      sessionId: "s1",
+      videos: [
+        { videoId: "v1", title: "노래 모음", watchedSeconds: 42 },
+        { videoId: "v2", title: "게임", watchedSeconds: null },
+      ],
+    });
+
+    expect(calls.sessions[0]).toMatchObject({
+      videoIds: ["v1", "v2"],
+      watchedSecondsList: [42, null],
+    });
+  });
+
+  it("watchedSeconds 필드 자체가 없는 영상은(구기능·계측 실패) null로 보낸다", async () => {
+    global.chrome = createChromeMock();
+    const { fetchMock, calls } = createFetchMock({ todayReview: null });
+    global.fetch = fetchMock;
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
+          endTime: FIXED_NOW.toISOString(),
+          videos: [{ videoId: "v1", title: "노래 모음" }],
+        },
+      ],
+    });
+
+    const analyzeSession = await loadAnalyzeSession();
+    await analyzeSession({
+      sessionId: "s1",
+      videos: [{ videoId: "v1", title: "노래 모음" }],
+    });
+
+    expect(calls.sessions[0].watchedSecondsList).toEqual([null]);
+  });
+});
