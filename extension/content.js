@@ -83,6 +83,27 @@ function captureWatchStatsSnapshot() {
 }
 
 /**
+ * recordVideo가 방금 기록한 영상의 sessionId·eventId
+ * 이 탭의 실행 컨텍스트 안에서만 사는 값이라, background.js의 세션 타임아웃이
+ * storage의 lastRecordedVideo를 null로 지워도 영향받지 않는다.
+ * rememberTrackedVideo(recordVideo 안에서 호출)가 갱신한다.
+ * @type {{sessionId: string, eventId: string}|null}
+ */
+let trackedVideoIdentity = null;
+
+/**
+ * 지금 추적 중인 영상의 식별자를 반환한다. handleVideoChange가 이동 감지 직후(동기
+ * 구간, resetWatchTracker가 다음 영상용으로 리셋하기 전)에 호출해야 정확하다.
+ * typeof 가드는 이 함수만 격리 테스트할 때 예외 대신 null을 반환하게 한다.
+ * @returns {{sessionId: string, eventId: string}|null}
+ */
+function captureTrackedVideoIdentity() {
+  return typeof trackedVideoIdentity !== "undefined"
+    ? trackedVideoIdentity
+    : null;
+}
+
+/**
  * document.title이 prevTitle과 달라질 때까지 폴링해 새 제목을 기다린다.
  * @param {string|null} prevTitle - 비교 기준이 되는 이전 제목
  * @param {number} [maxRetries=10] - 최대 폴링 횟수
@@ -115,23 +136,67 @@ function waitForTitle(prevTitle, maxRetries = 10, interval = 200) {
 let writeQueue = Promise.resolve();
 
 /**
+ * 이 탭의 실행 컨텍스트 안에서만 사는 값이다. storage의 lastRecordedVideo는
+ * background.js의 세션 타임아웃(endSession)이 전혀 다른 실행 컨텍스트에서
+ * 언제든 null로 지울 수 있다. 한 영상을 끊기지 않고 10분 넘게 계속 보기만 해도
+ * lastWatchedAt이 그 영상 "시작" 시각에 고정된 채라 세션이 강제 종료되기 때문이다
+ * 이 값에 우선 의존하면 그 클로버링에 영향받지 않는다.
+ * @type {{sessionId: string, eventId: string}|null}
+ */
+function rememberTrackedVideo(sessionId, eventId) {
+  if (typeof trackedVideoIdentity === "undefined") return;
+  trackedVideoIdentity = { sessionId, eventId };
+}
+
+/**
+ * 특정 영상의 video_events 행(들)에 patch를 병합한다. 라이브 키(video__)가 있으면
+ * 그쪽을, 이미 세션 종료로 sessions[]에 옮겨갔다면 그 안의 해당 영상 항목을 찾아 갱신한다.
+ * @param {{sessionId: string, eventId: string}} target - 갱신 대상 식별 정보
+ * @param {object} patch - 병합할 필드
+ * @returns {Promise<boolean>} 실제로 어딘가에서 찾아 갱신했으면 true
+ */
+async function applyWatchStatsPatch(target, patch) {
+  const videoKey = `video__${target.sessionId}__${target.eventId}`;
+  const { [videoKey]: live } = await chrome.storage.local.get(videoKey);
+  if (live) {
+    await chrome.storage.local.set({ [videoKey]: { ...live, ...patch } });
+    return true;
+  }
+
+  const { sessions } = await chrome.storage.local.get("sessions");
+  if (!Array.isArray(sessions)) return false;
+  let found = false;
+  const updated = sessions.map((session) => {
+    if (session.sessionId !== target.sessionId) return session;
+    return {
+      ...session,
+      videos: (session.videos ?? []).map((v) => {
+        if (v.eventId !== target.eventId) return v;
+        found = true;
+        return { ...v, ...patch };
+      }),
+    };
+  });
+  if (!found) return false;
+  await chrome.storage.local.set({ sessions: updated });
+  return true;
+}
+
+/**
  * 방금 떠난 영상의 실제 시청시간·배속·백그라운드 여부를 서버 video_events 행에 반영한다.
  * 실패해도 로컬에 watchStatsSent:false로 남겨 background.js의 재시도 큐가 찾아내게 한다.
- * @param {{sessionId: string, eventId: string}} lastRecordedVideo - 방금 떠난 영상의 식별 정보
+ * @param {{sessionId: string, eventId: string}} target - 방금 떠난 영상의 식별 정보
  * @param {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1}} stats - captureWatchStatsSnapshot 결과
  * @returns {Promise<void>}
  */
-async function finalizePreviousWatchStats(lastRecordedVideo, stats) {
-  const videoKey = `video__${lastRecordedVideo.sessionId}__${lastRecordedVideo.eventId}`;
-  const { [videoKey]: existing } = await chrome.storage.local.get(videoKey);
-  // existing이 없으면(세션이 그새 종료돼 sessions[]로 옮겨간 경우) 갱신을 건너뛴다.
-  // 발생 빈도가 극히 낮고 content.js는 storage.js의 dual-location 탐색 로직을
-  // 가져올 수 없어(별도 런타임) 이번 범위에서는 감수하기로 한 한계다.
-  if (!existing) return;
-
-  await chrome.storage.local.set({
-    [videoKey]: { ...existing, ...stats, watchStatsSent: false },
+async function finalizePreviousWatchStats(target, stats) {
+  // 라이브 키·sessions[] 어디에도 없으면(참여자가 데이터를 지웠거나 하는 극단적
+  // 경우) 조용히 포기한다. 갱신할 대상 자체가 없다.
+  const applied = await applyWatchStatsPatch(target, {
+    ...stats,
+    watchStatsSent: false,
   });
+  if (!applied) return;
 
   const { anonymousId, serverUrl, participantToken } =
     await chrome.storage.local.get([
@@ -143,7 +208,7 @@ async function finalizePreviousWatchStats(lastRecordedVideo, stats) {
 
   try {
     const response = await fetch(
-      `${serverUrl.replace(/\/$/, "")}/api/video-events/${encodeURIComponent(lastRecordedVideo.eventId)}`,
+      `${serverUrl.replace(/\/$/, "")}/api/video-events/${encodeURIComponent(target.eventId)}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -151,12 +216,7 @@ async function finalizePreviousWatchStats(lastRecordedVideo, stats) {
       },
     );
     if (response.ok && chrome.runtime?.id) {
-      const { [videoKey]: latest } = await chrome.storage.local.get(videoKey);
-      if (latest) {
-        await chrome.storage.local.set({
-          [videoKey]: { ...latest, watchStatsSent: true },
-        });
-      }
+      await applyWatchStatsPatch(target, { watchStatsSent: true });
     }
   } catch {
     // 네트워크 오류 — watchStatsSent:false로 남아 재시도 큐 대상이 된다.
@@ -172,6 +232,7 @@ async function finalizePreviousWatchStats(lastRecordedVideo, stats) {
  * @param {string|null} entryPath - 직전 페이지 경로(유튜브 내부일 때만)
  * @param {"ended"|"interaction"|null} navigationTrigger - 전환 원인 추정값
  * @param {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1}|null} previousWatchStats - 직전 영상의 시청시간 스냅샷
+ * @param {{sessionId: string, eventId: string}|null} previousVideoIdentity - captureTrackedVideoIdentity 결과(이 탭 메모리 기준)
  * @returns {Promise<void>}
  */
 function recordVideo(
@@ -181,6 +242,7 @@ function recordVideo(
   entryPath,
   navigationTrigger,
   previousWatchStats,
+  previousVideoIdentity,
 ) {
   writeQueue = writeQueue.then(async () => {
     // 확장 리로드/업데이트 후 남은 탭은 새로고침 전까지 컨텍스트가 무효화돼 chrome.*
@@ -220,15 +282,17 @@ function recordVideo(
         return;
       }
 
-      // 직전 영상의 시청시간 스냅샷을 여기서 확정한다 — lastRecordedVideo가 아직 그
-      // 직전 영상의 sessionId·eventId를 담고 있다(바로 아래에서 덮어쓰기 전). 세션이
-      // 이미 종료돼 sessions[]로 옮겨간 경우는 finalizePreviousWatchStats가 건너뛴다.
-      if (previousWatchStats && lastRecordedVideo?.eventId) {
-        finalizePreviousWatchStats(lastRecordedVideo, previousWatchStats);
+      // 직전 영상의 시청시간 스냅샷을 여기서 확정한다.
+      // 우선순위: (1) 이 탭이 방금 전 rememberTrackedVideo로 기억해 둔 값
+      // (2) 탭 재로드 등으로 (1)이 없으면 storage의 lastRecordedVideo로 대체
+      const watchStatsTarget = previousVideoIdentity ?? lastRecordedVideo;
+      if (previousWatchStats && watchStatsTarget?.eventId) {
+        finalizePreviousWatchStats(watchStatsTarget, previousWatchStats);
       }
 
       // uuid를 videoKey와 eventId 양쪽에 재사용한다.
       const eventId = crypto.randomUUID();
+      rememberTrackedVideo(session.sessionId, eventId);
       const videoKey = `video__${session.sessionId}__${eventId}`;
       // sent:false로 시작 — 전송 실패 시 이 값이 남아 background.js의 재시도 큐가 찾아낸다.
       await chrome.storage.local.set({
@@ -376,6 +440,7 @@ async function handleVideoChange() {
   // 동기 구간이 먼저 실행됨) 캡처해야 "막 떠나는 영상"의 스냅샷을 얻는다. await 이후엔
   // 계측 리스너가 이미 새 영상으로 리셋한 뒤라 값이 섞인다.
   const previousWatchStats = captureWatchStatsSnapshot();
+  const previousVideoIdentity = captureTrackedVideoIdentity();
 
   // 덮어쓰기 전에 먼저 읽어야 "이 영상 직전 페이지"를 알 수 있다.
   const { entryHost, entryPath } = parseEntryLocation(previousLocationHref);
@@ -406,6 +471,7 @@ async function handleVideoChange() {
     entryPath,
     navigationTrigger,
     previousWatchStats,
+    previousVideoIdentity,
   );
 }
 

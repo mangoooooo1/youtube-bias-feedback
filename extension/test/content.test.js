@@ -260,7 +260,7 @@ describe("content.js classifyNavigationTrigger", () => {
 // recordVideo를 호출하면" 두 writeQueue가 서로를 모른 채 같은 저장소를 놓고 경합해
 // 한쪽의 기록이 사라지는지를 재현한다(연구 무결성 점검 항목 3).
 const RECORD_VIDEO_DECL =
-  /let writeQueue = Promise\.resolve\(\);[\s\S]*?\nfunction recordVideo\(\n {2}videoId,\n {2}title,\n {2}entryHost,\n {2}entryPath,\n {2}navigationTrigger,\n {2}previousWatchStats,\n\) \{[\s\S]*?\n\}/;
+  /let writeQueue = Promise\.resolve\(\);[\s\S]*?\nfunction recordVideo\(\n {2}videoId,\n {2}title,\n {2}entryHost,\n {2}entryPath,\n {2}navigationTrigger,\n {2}previousWatchStats,\n {2}previousVideoIdentity,\n\) \{[\s\S]*?\n\}/;
 
 // recordVideo는 전역 chrome/fetch/console을 참조한다. 매개변수로 감싸서 넘기면 그 이름들이
 // 지역 바인딩으로 가려지므로, 이 팩토리를 두 번 호출하는 것만으로 "서로 다른 탭 = 서로 다른
@@ -381,7 +381,7 @@ function loadHandleVideoChangeFactory() {
   }
   const body = blockMatch[0].replace(
     RECORD_VIDEO_DECL,
-    "function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger, previousWatchStats) { recordVideoCalls.push({ videoId, title, entryHost, entryPath, navigationTrigger, previousWatchStats }); return Promise.resolve(); }",
+    "function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger, previousWatchStats, previousVideoIdentity) { recordVideoCalls.push({ videoId, title, entryHost, entryPath, navigationTrigger, previousWatchStats, previousVideoIdentity }); return Promise.resolve(); }",
   );
   return new Function(
     "document",
@@ -630,6 +630,55 @@ describe("content.js captureWatchStatsSnapshot", () => {
   });
 });
 
+const TRACKED_IDENTITY_DECL =
+  /let trackedVideoIdentity = null;[\s\S]*?\nfunction captureTrackedVideoIdentity\(\) \{[\s\S]*?\n\}/;
+const REMEMBER_TRACKED_VIDEO_DECL =
+  /function rememberTrackedVideo\(sessionId, eventId\) \{[\s\S]*?\n\}/;
+
+function loadTrackedVideoIdentityHelpers() {
+  const raw = readFileSync(CONTENT_PATH, "utf8");
+  const identityMatch = raw.match(TRACKED_IDENTITY_DECL);
+  const rememberMatch = raw.match(REMEMBER_TRACKED_VIDEO_DECL);
+  if (!identityMatch) {
+    throw new Error(
+      "trackedVideoIdentity/captureTrackedVideoIdentity를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  if (!rememberMatch) {
+    throw new Error(
+      "rememberTrackedVideo 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  return new Function(`
+    ${identityMatch[0]}
+    ${rememberMatch[0]}
+    return {
+      remember: rememberTrackedVideo,
+      capture: captureTrackedVideoIdentity,
+    };
+  `)();
+}
+
+describe("content.js trackedVideoIdentity — 세션 타임아웃에 영향받지 않는 시청시간 확정 대상 추적 (코드리뷰 회귀)", () => {
+  it("초기값은 null이다", () => {
+    const { capture } = loadTrackedVideoIdentityHelpers();
+    expect(capture()).toBeNull();
+  });
+
+  it("rememberTrackedVideo로 기억해 둔 값을 그대로 돌려준다", () => {
+    const { remember, capture } = loadTrackedVideoIdentityHelpers();
+    remember("s1", "evt-1");
+    expect(capture()).toEqual({ sessionId: "s1", eventId: "evt-1" });
+  });
+
+  it("여러 번 기억하면 가장 최근 값으로 덮어쓴다(영상이 여러 번 전환된 경우)", () => {
+    const { remember, capture } = loadTrackedVideoIdentityHelpers();
+    remember("s1", "evt-1");
+    remember("s1", "evt-2");
+    expect(capture()).toEqual({ sessionId: "s1", eventId: "evt-2" });
+  });
+});
+
 describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플래그로 남긴다", () => {
   let recordVideoFactory;
 
@@ -834,6 +883,136 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
     });
 
     await recordVideo("vA", "영상A");
+    await flushMicrotasks();
+
+    expect(patchCalls).toHaveLength(0);
+  });
+
+  // 코드리뷰 지적 회귀 테스트: 한 영상을 10분 넘게 끊기지 않고 계속 보면
+  // checkSessionTimeout이 세션을 먼저 종료해(lastWatchedAt이 영상 "시작" 시각에
+  // 고정돼 있으므로) video__ 키가 sessions[]로 옮겨가고 storage의 lastRecordedVideo도
+  // null이 된다. 이 상황을 그대로 재현한다.
+  it("세션이 먼저 타임아웃돼 storage의 lastRecordedVideo가 null이어도, previousVideoIdentity(이 탭 메모리)로 직전 영상을 찾아 확정한다", async () => {
+    const storage = createSharedStorage({
+      // endSession이 이미 실행된 상태를 재현: currentSession/lastRecordedVideo는
+      // null이고, 영상 A는 sessions[].videos[]로 옮겨가 있다(라이브 video__ 키 없음).
+      currentSession: null,
+      lastRecordedVideo: null,
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [
+            {
+              videoId: "vA",
+              title: "영상A",
+              eventId: "evt-A",
+              sent: true,
+              watchStatsSent: undefined,
+            },
+          ],
+        },
+      ],
+    });
+    const patchCalls = [];
+    const recordVideo = makeTabWithFetch(storage, (url, options) => {
+      if (options?.method === "PATCH") {
+        patchCalls.push({ url: String(url), body: JSON.parse(options.body) });
+        return Promise.resolve({ ok: true });
+      }
+      return Promise.resolve({ ok: true });
+    });
+
+    // handleVideoChange가 captureTrackedVideoIdentity()로 얻어 전달했을 값을 그대로
+    // 재현 — 세션 타임아웃과 무관하게 이 탭이 기억하고 있던 영상 A의 식별자.
+    await recordVideo(
+      "vB",
+      "영상B",
+      null,
+      null,
+      null,
+      { watchedSeconds: 620, playbackRate: 1, wasBackgrounded: 0 },
+      { sessionId: "s1", eventId: "evt-A" },
+    );
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(patchCalls).toHaveLength(1);
+    expect(patchCalls[0].url).toBe(
+      "http://localhost:3000/api/video-events/evt-A",
+    );
+    expect(patchCalls[0].body).toMatchObject({ watchedSeconds: 620 });
+
+    // 라이브 키가 아니라 sessions[].videos[] 안의 해당 항목이 갱신됐는지 확인 —
+    // dual-location 조회가 실제로 동작했다는 증거.
+    const { sessions } = storage.dump();
+    const videoA = sessions[0].videos.find((v) => v.eventId === "evt-A");
+    expect(videoA.watchedSeconds).toBe(620);
+    expect(videoA.watchStatsSent).toBe(true);
+  });
+
+  it("previousVideoIdentity가 없으면(탭 재로드 등) storage의 lastRecordedVideo로 대체한다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+      lastRecordedVideo: { videoId: "vA", sessionId: "s1", eventId: "evt-A" },
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+      "video__s1__evt-A": {
+        videoId: "vA",
+        eventId: "evt-A",
+        sent: true,
+      },
+    });
+    const patchCalls = [];
+    const recordVideo = makeTabWithFetch(storage, (url, options) => {
+      if (options?.method === "PATCH") {
+        patchCalls.push({ url: String(url) });
+        return Promise.resolve({ ok: true });
+      }
+      return Promise.resolve({ ok: true });
+    });
+
+    // previousVideoIdentity를 아예 안 넘긴다(탭 재로드로 이 탭의 메모리가 비어있는 상황) —
+    // 7번째 인자 생략.
+    await recordVideo("vB", "영상B", null, null, null, {
+      watchedSeconds: 33,
+      playbackRate: 1,
+      wasBackgrounded: 0,
+    });
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(patchCalls).toHaveLength(1);
+    expect(patchCalls[0].url).toBe(
+      "http://localhost:3000/api/video-events/evt-A",
+    );
+  });
+
+  it("라이브 키·sessions[] 어디에도 대상이 없으면(참여자가 데이터를 지운 경우 등) 예외 없이 조용히 포기한다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    const patchCalls = [];
+    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+      if (options?.method === "PATCH") patchCalls.push(1);
+      return Promise.resolve({ ok: true });
+    });
+
+    await expect(
+      recordVideo(
+        "vB",
+        "영상B",
+        null,
+        null,
+        null,
+        { watchedSeconds: 10, playbackRate: 1, wasBackgrounded: 0 },
+        { sessionId: "s-gone", eventId: "evt-gone" },
+      ),
+    ).resolves.toBeUndefined();
+    await flushMicrotasks();
     await flushMicrotasks();
 
     expect(patchCalls).toHaveLength(0);
