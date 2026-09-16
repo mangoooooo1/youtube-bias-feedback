@@ -230,3 +230,90 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
     ).toBe(0);
   });
 });
+
+// 시청시간 원시 데이터 확정 (교수 피드백: 클릭성 이탈 판별용) — 영상을 떠난 뒤에야 알 수
+// 있는 값이라 POST와 분리된 PATCH로 온다.
+describe("PATCH /api/video-events/:eventId — 시청시간 확정", () => {
+  it("정상 요청이면 watchedSeconds/playbackRate/wasBackgrounded가 저장된다", async () => {
+    await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ eventId: "watch-evt-1" }));
+
+    const res = await request(app)
+      .patch("/api/video-events/watch-evt-1")
+      .send({
+        anonymousId: "wiring-user",
+        watchedSeconds: 42.5,
+        playbackRate: 1.5,
+        wasBackgrounded: 1,
+      });
+
+    expect(res.status).toBe(200);
+    const row = db
+      .prepare("SELECT * FROM video_events WHERE eventId = ?")
+      .get("watch-evt-1");
+    expect(row.watchedSeconds).toBe(42.5);
+    expect(row.playbackRate).toBe(1.5);
+    expect(row.wasBackgrounded).toBe(1);
+  });
+
+  it("존재하지 않는 eventId면 404를 반환한다", async () => {
+    const res = await request(app)
+      .patch("/api/video-events/no-such-event")
+      .send({ anonymousId: "wiring-user", watchedSeconds: 10 });
+
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe("NOT_FOUND");
+  });
+
+  it("다른 참여자의 eventId는 갱신되지 않는다(소유권 검증)", async () => {
+    db.prepare(
+      `INSERT OR IGNORE INTO participants (anonymousId, group_code, installDate)
+       VALUES ('other-user', 'EXP', '2020-01-01T00:00:00+09:00')`,
+    ).run();
+    await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ eventId: "watch-evt-2" }));
+
+    const res = await request(app)
+      .patch("/api/video-events/watch-evt-2")
+      .send({ anonymousId: "other-user", watchedSeconds: 99 });
+
+    expect(res.status).toBe(404);
+    const row = db
+      .prepare("SELECT * FROM video_events WHERE eventId = ?")
+      .get("watch-evt-2");
+    expect(row.watchedSeconds).toBeNull();
+  });
+
+  it("잘못된 값(음수 watchedSeconds)이면 400을 반환하고 갱신하지 않는다", async () => {
+    await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ eventId: "watch-evt-3" }));
+
+    const res = await request(app)
+      .patch("/api/video-events/watch-evt-3")
+      .send({ anonymousId: "wiring-user", watchedSeconds: -5 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("INVALID_FIELD_VALUE");
+  });
+
+  it("일부 필드만 보내도(계측 일부 실패) 나머지는 null로 저장된다", async () => {
+    await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ eventId: "watch-evt-4" }));
+
+    const res = await request(app)
+      .patch("/api/video-events/watch-evt-4")
+      .send({ anonymousId: "wiring-user", watchedSeconds: 12 });
+
+    expect(res.status).toBe(200);
+    const row = db
+      .prepare("SELECT * FROM video_events WHERE eventId = ?")
+      .get("watch-evt-4");
+    expect(row.watchedSeconds).toBe(12);
+    expect(row.playbackRate).toBeNull();
+    expect(row.wasBackgrounded).toBeNull();
+  });
+});

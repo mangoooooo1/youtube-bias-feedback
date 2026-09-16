@@ -1,7 +1,10 @@
 const express = require("express");
 const { db } = require("../db");
-const { success, fail } = require("../middleware/responseHandler");
-const { validateVideoEvent } = require("./video-events-validate");
+const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
+const {
+  validateVideoEvent,
+  validateWatchStats,
+} = require("./video-events-validate");
 const { classifyReferrerType } = require("./video-events-classify");
 const { requireParticipant } = require("../middleware/requireParticipant");
 
@@ -77,6 +80,58 @@ router.post("/", requireParticipant, (req, res, next) => {
     });
   } catch (err) {
     return next(err);
+  }
+
+  return success(res);
+});
+
+// 시청시간 원시 데이터 확정
+// 확장이 이 영상을 "떠날 때"(다음 영상으로 전환, 또는 탭 종료 시 최선노력 전송)에야 알 수 있는 값이라
+// POST 시점(시청 시작)과 분리된 별도 호출로 온다. sessions.js의 feedback-viewed/confirmed PATCH와 동일한
+// 소유권 검증 패턴. eventId가 이 anonymousId의 것이 아니면 갱신하지 않는다.
+router.patch("/:eventId", requireParticipant, (req, res, next) => {
+  const error = validateWatchStats(req.body);
+  if (error) {
+    return fail(
+      res,
+      400,
+      error.code,
+      `${error.field} 필드가 올바르지 않습니다.`,
+      error.field,
+    );
+  }
+
+  const { eventId } = req.params;
+  const { anonymousId, watchedSeconds, playbackRate, wasBackgrounded } =
+    req.body;
+
+  let result;
+  try {
+    result = db
+      .prepare(
+        `UPDATE video_events SET watchedSeconds = @watchedSeconds,
+           playbackRate = @playbackRate, wasBackgrounded = @wasBackgrounded
+         WHERE eventId = @eventId AND anonymousId = @anonymousId`,
+      )
+      .run({
+        eventId,
+        anonymousId,
+        watchedSeconds: watchedSeconds ?? null,
+        playbackRate: playbackRate ?? null,
+        wasBackgrounded: wasBackgrounded === undefined ? null : wasBackgrounded,
+      });
+  } catch (err) {
+    return next(err);
+  }
+
+  if (result.changes === 0) {
+    return fail(
+      res,
+      404,
+      ERROR_CODES.NOT_FOUND,
+      "영상 이벤트를 찾을 수 없습니다.",
+      eventId,
+    );
   }
 
   return success(res);
