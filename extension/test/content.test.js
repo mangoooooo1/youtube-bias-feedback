@@ -624,8 +624,13 @@ describe("content.js currentWatchedMs", () => {
 
 // ── 비디오 엘리먼트 계측 통합 테스트
 // 벽시계 경과 시간(Date.now() 차이) 기반으로 바뀌었는지를 실제 play/pause/seeking/seeked 이벤트를 발생시켜 검증한다.
+// watchTracker/trackedVideoEl 선언은 파일 초반(TDZ 회귀 수정 이후)으로, 이를 쓰는
+// currentWatchedMs~resetWatchTracker 함수들은 파일 후반에 있어 더 이상 한 구간으로
+// 붙어 있지 않다 — 두 조각을 따로 추출해 이어 붙인다.
+const WATCH_TRACKER_VARS_DECL =
+  /let watchTracker = null;\nlet trackedVideoEl = null;/;
 const VIDEO_TRACKING_SECTION_DECL =
-  /let watchTracker = null;[\s\S]*?\nfunction resetWatchTracker\(\) \{[\s\S]*?\n\}/;
+  /function currentWatchedMs\(tracker\) \{[\s\S]*?\nfunction resetWatchTracker\(\) \{[\s\S]*?\n\}/;
 
 function createFakeVideoElement({ paused = true, playbackRate = 1 } = {}) {
   const listeners = {};
@@ -646,8 +651,14 @@ function createFakeVideoElement({ paused = true, playbackRate = 1 } = {}) {
 
 function loadVideoTrackingSection(documentMock) {
   const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(VIDEO_TRACKING_SECTION_DECL);
-  if (!match) {
+  const varsMatch = raw.match(WATCH_TRACKER_VARS_DECL);
+  const funcsMatch = raw.match(VIDEO_TRACKING_SECTION_DECL);
+  if (!varsMatch) {
+    throw new Error(
+      "watchTracker/trackedVideoEl 선언을 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  if (!funcsMatch) {
     throw new Error(
       "비디오 엘리먼트 계측 섹션을 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
     );
@@ -655,7 +666,8 @@ function loadVideoTrackingSection(documentMock) {
   const factory = new Function(
     "document",
     `
-    ${match[0]}
+    ${varsMatch[0]}
+    ${funcsMatch[0]}
     return {
       reset: resetWatchTracker,
       getTracker: () => watchTracker,
@@ -1483,5 +1495,192 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
     expect(videoA.sent).toBe(true); // POST 성공 반영은 여전히 일어나야 한다
     expect(videoA.watchedSeconds).toBe(88); // 하지만 지워지면 안 된다
     expect(videoA.watchStatsSent).toBe(true);
+  });
+});
+
+// handleVideoChange부터 resetWatchTracker까지 실제 파일 그대로 통째로 이어 붙여 실행한다.
+// resetWatchTracker를 별도 리스너로 두면 handleVideoChange가 스냅샷을
+// 만들기도 전에 watchTracker를 초기화해, 영상A → 비영상 페이지 → 무관한 영상C로 이동할 때
+// A의 시청시간이 0으로 오염될 수 있었다는 지적을 "영상 엘리먼트 재생 → 실제 URL 이동" 흐름
+// 그대로 재현해 검증한다.
+const FULL_VIDEO_LIFECYCLE_DECL =
+  /function extractVideoId\(url\) \{[\s\S]*?\nfunction resetWatchTracker\(\) \{[\s\S]*?\n\}/;
+
+function loadFullVideoLifecycle(
+  documentMock,
+  locationMock,
+  chromeMock,
+  fetchMock,
+) {
+  const raw = readFileSync(CONTENT_PATH, "utf8");
+  const match = raw.match(FULL_VIDEO_LIFECYCLE_DECL);
+  if (!match) {
+    throw new Error(
+      "영상 수명주기 전체 구간(extractVideoId~resetWatchTracker)을 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  const consoleMock = { log: () => {}, warn: () => {} };
+  // 추출 구간에 window.addEventListener("popstate", ...) 등록이 포함돼 있어
+  // window도 넘겨야 한다 — 실제 popstate 발생은 이 테스트의 관심사가 아니므로 no-op으로 흘려보낸다.
+  const windowMock = { addEventListener: () => {} };
+  const factory = new Function(
+    "document",
+    "location",
+    "chrome",
+    "fetch",
+    "console",
+    "window",
+    `
+    ${match[0]}
+    return {
+      handleVideoChange,
+      getTrackedVideoIdentity: () => trackedVideoIdentity,
+    };
+    `,
+  );
+  return factory(
+    documentMock,
+    locationMock,
+    chromeMock,
+    fetchMock,
+    consoleMock,
+    windowMock,
+  );
+}
+
+// finalizePreviousWatchStats는 handleVideoChange 안에서 await 없이(fire-and-forget) 호출된다.
+// vi.useFakeTimers() 아래에서는 setTimeout 기반 flushMicrotasks가 동작하지 않으므로(타이머를 실제로 진행시켜야
+// resolve됨), 순수 마이크로태스크만 여러 번 흘려보내 그 내부의 await 체인이 다 끝나게 한다.
+async function flushPendingMicrotasks(times = 10) {
+  for (let i = 0; i < times; i++) {
+    await Promise.resolve();
+  }
+}
+
+// lastRecordedVideo도 eventId 필드를 갖고 있어 storage 전체를 eventId로만 뒤지면 그쪽이
+// 먼저 잡힐 수 있다 — 실제 video_events 행("video__" 키)만 대상으로 좁혀 찾는다.
+function findVideoRecordByEventId(storeDump, eventId) {
+  return Object.entries(storeDump)
+    .filter(([k]) => k.startsWith("video__"))
+    .map(([, v]) => v)
+    .find((v) => v?.eventId === eventId);
+}
+
+describe("content.js handleVideoChange 전체 수명주기 — 비영상 페이지 경유 시 직전 영상 시청시간 오염 방지 (코드리뷰 회귀 5)", () => {
+  let videoEl, documentMock, locationMock, storage, api;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+
+    videoEl = createFakeVideoElement({ paused: true });
+    documentMock = {
+      title: "YouTube",
+      referrer: "",
+      hidden: false,
+      addEventListener: () => {},
+      querySelector: () => videoEl,
+    };
+    locationMock = { href: "https://www.youtube.com/" };
+    // serverUrl을 비워 둬 PATCH/POST 네트워크 전송은 건너뛰고(다른 테스트에서 이미 검증됨)
+    // 로컬 storage 병합 결과만으로 오염 여부를 확인한다.
+    storage = createSharedStorage({});
+    const chromeMock = {
+      runtime: { id: "fake-extension-id" },
+      storage: { local: storage },
+    };
+    const fetchMock = () =>
+      Promise.reject(new Error("이 테스트는 네트워크 전송이 없어야 한다"));
+
+    // 팩토리 로드 시점에 파일 최하단의 handleVideoChange() 즉시 호출이 함께 실행된다
+    // (비영상 페이지라 조용히 반환됨) — 실제 스크립트 로드 순서와 동일하다.
+    api = loadFullVideoLifecycle(
+      documentMock,
+      locationMock,
+      chromeMock,
+      fetchMock,
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("영상A 시청 후 비영상 페이지를 거쳐 무관한 영상C로 이동해도 A의 시청시간은 42초로 확정되고 이후 0으로 재오염되지 않는다", async () => {
+    // 1) 영상 A 진입
+    locationMock.href = "https://www.youtube.com/watch?v=AAAA";
+    documentMock.title = "영상 A 실제 제목 - YouTube";
+    await api.handleVideoChange();
+
+    const eventIdA = api.getTrackedVideoIdentity()?.eventId;
+    expect(eventIdA).toEqual(expect.any(String));
+
+    // 2) A를 42초 동안 실제로 재생
+    videoEl.paused = false;
+    videoEl.dispatch("play");
+    vi.setSystemTime(42000);
+    videoEl.paused = true;
+    videoEl.dispatch("pause");
+
+    // 3) 비영상 페이지(홈)로 이탈 — 여기서 A의 시청시간이 먼저 확정돼야 한다.
+    locationMock.href = "https://www.youtube.com/";
+    await api.handleVideoChange();
+    await flushPendingMicrotasks(); // finalizePreviousWatchStats(비동기, 미대기)를 흘려보낸다
+
+    // lastRecordedVideo도 eventId 필드를 갖고 있어 find로 통째로 뒤지면 그쪽이 먼저 잡힌다 —
+    // 실제 video_events 행("video__" 키)만 대상으로 찾는다.
+    let videoA = findVideoRecordByEventId(storage.dump(), eventIdA);
+    expect(videoA.watchedSeconds).toBe(42);
+
+    // 비영상 페이지 이탈 시 이 탭의 추적 대상은 비워져야 다음 영상이 A를 잘못 재확정하지 않는다.
+    expect(api.getTrackedVideoIdentity()).toBeNull();
+
+    // 4) 완전히 무관한 영상 C로 이동
+    locationMock.href = "https://www.youtube.com/watch?v=CCCC";
+    documentMock.title = "영상 C 실제 제목 - YouTube";
+    await api.handleVideoChange();
+    await flushPendingMicrotasks();
+
+    // A는 두 번째로 확정되지 않아(previousVideoIdentity가 이미 비워짐) 42초 그대로 남아야 한다 —
+    // 고쳐지기 전에는 리셋된 watchTracker(0초)가 다시 A의 eventId에 병합돼 0으로 덮어썼다.
+    videoA = findVideoRecordByEventId(storage.dump(), eventIdA);
+    expect(videoA.watchedSeconds).toBe(42);
+
+    // C는 정상적으로 새로 기록된다.
+    const videoC = Object.entries(storage.dump())
+      .filter(([k]) => k.startsWith("video__"))
+      .map(([, v]) => v)
+      .find((v) => v?.videoId === "CCCC");
+    expect(videoC).toBeDefined();
+  });
+
+  it("같은 영상이 계속 재생 중일 때(스퓨리어스 재이벤트)는 누적 중인 시청시간이 초기화되지 않는다", async () => {
+    locationMock.href = "https://www.youtube.com/watch?v=AAAA";
+    documentMock.title = "영상 A 실제 제목 - YouTube";
+    await api.handleVideoChange();
+    const eventIdA = api.getTrackedVideoIdentity()?.eventId;
+    expect(eventIdA).toEqual(expect.any(String));
+
+    videoEl.paused = false;
+    videoEl.dispatch("play");
+    vi.setSystemTime(20000); // 20초 재생 중
+
+    // 스퓨리어스 재이벤트: 같은 videoId로 다시 호출됨
+    await api.handleVideoChange();
+
+    vi.setSystemTime(25000); // 5초 더 재생(초기화됐다면 여기서 5초만 잡혀야 함)
+    videoEl.dispatch("pause");
+
+    // 재이벤트가 resetWatchTracker를 호출했다면 20초가 사라지고 5초만 남았을 것이다.
+    // 아직 확정 전이라 storage에는 watchedSeconds가 없다 — 대신 getTrackedVideoIdentity로
+    // 추적이 끊기지 않았는지, 그리고 다음 이탈에서 실제로 25초가 확정되는지로 검증한다.
+    expect(findVideoRecordByEventId(storage.dump(), eventIdA)).toBeDefined();
+
+    locationMock.href = "https://www.youtube.com/";
+    await api.handleVideoChange();
+    await flushPendingMicrotasks();
+
+    const finalized = findVideoRecordByEventId(storage.dump(), eventIdA);
+    expect(finalized.watchedSeconds).toBe(25); // 20+5, 재이벤트로 끊기지 않음
   });
 });

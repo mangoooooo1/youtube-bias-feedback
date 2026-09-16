@@ -77,8 +77,7 @@ let trackedVideoEl = null;
 
 /**
  * 지금까지 추적 중이던 영상의 시청시간 스냅샷을 반환한다(클릭성 이탈 판별용 원시 데이터).
- * watchTracker는 파일 하단에서 선언되지만 호출은 항상 그 이후 시점이라 문제없고,
- * typeof 가드는 이 함수만 격리 테스트할 때 예외 대신 null을 반환하게 한다.
+ * typeof 가드는 이 함수만 격리 테스트할 때(watchTracker 자체가 선언 안 된 환경) 예외 대신 null을 반환하게 한다.
  * @returns {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1}|null} watchTracker가 없으면 null
  */
 function captureWatchStatsSnapshot() {
@@ -154,6 +153,16 @@ let writeQueue = Promise.resolve();
 function rememberTrackedVideo(sessionId, eventId) {
   if (typeof trackedVideoIdentity === "undefined") return;
   trackedVideoIdentity = { sessionId, eventId };
+}
+
+/**
+ * 직전 영상의 시청시간을 확정 처리한 뒤(finalizePreviousWatchStats) 호출해, 같은
+ * 영상이 다음 전환에서 또 한 번(이번엔 리셋된 0에 가까운 값으로) 확정되지 않게 한다.
+ * @returns {void}
+ */
+function clearTrackedVideo() {
+  if (typeof trackedVideoIdentity === "undefined") return;
+  trackedVideoIdentity = null;
 }
 
 /**
@@ -434,18 +443,32 @@ async function handleVideoChange() {
   const videoId = extractVideoId(location.href);
 
   if (!videoId) {
-    // watch/shorts가 아닌 페이지(홈, 검색결과 등)도 다음 영상의 "직전 페이지"가 될 수 있으므로 갱신한다.
+    // watch/shorts가 아닌 페이지(홈, 검색결과 등)로 이탈 직전 영상의 시청시간을 여기서 먼저 확정해야 한다.
+    // resetWatchTracker를 별도 리스너로 두면 이 분기가 return한 뒤에도 같은 이벤트에서 곧바로 실행되어 watchTracker를 초기화해버려,
+    // 다음에 실제로 다른 영상으로 이동할 때 previousVideoIdentity와 previousWatchStats(리셋된 뒤라 0에 가까움)가 어긋나 이 영상에 0초가
+    // 잘못 기록됐다.
+    const stats = captureWatchStatsSnapshot();
+    const identity = captureTrackedVideoIdentity();
+    if (stats && identity?.eventId) {
+      finalizePreviousWatchStats(identity, stats);
+    }
+    clearTrackedVideo();
+    // resetWatchTracker는 파일 하단(비디오 엘리먼트 계측 섹션)에 있어 이 함수만
+    // 격리 추출한 테스트 환경에는 없을 수 있다 — typeof 가드로 그런 환경에서도
+    // 예외 없이 넘어가게 한다(실제 파일에서는 항상 존재해 정상 호출된다).
+    if (typeof resetWatchTracker === "function") resetWatchTracker();
+    // watch/shorts가 아닌 페이지도 다음 영상의 "직전 페이지"가 될 수 있으므로 갱신한다.
     previousLocationHref = location.href;
     lastVideoId = null;
     lastTitle = null;
     return;
   }
 
+  // 같은 영상이 계속되는 중(스퓨리어스 재이벤트 등)
+  // resetWatchTracker를 호출하면 안 된다. 호출하면 진행 중인 시청 시간이 그대로 사라진다.
   if (videoId === lastVideoId) return;
 
-  // 비디오 계측 리스너가 리셋하기 전인 지금(handleVideoChange가 먼저 등록된 리스너라
-  // 동기 구간이 먼저 실행됨) 캡처해야 "막 떠나는 영상"의 스냅샷을 얻는다. await 이후엔
-  // 계측 리스너가 이미 새 영상으로 리셋한 뒤라 값이 섞인다.
+  // resetWatchTracker보다 먼저 캡처해야 "막 떠나는 영상"의 스냅샷을 얻는다.
   const previousWatchStats = captureWatchStatsSnapshot();
   const previousVideoIdentity = captureTrackedVideoIdentity();
 
@@ -455,6 +478,9 @@ async function handleVideoChange() {
   previousLocationHref = location.href;
 
   lastVideoId = videoId;
+  // 위에서 이미 스냅샷을 캡처했으므로 이제 다음 영상용으로 리셋한다.
+  // typeof 가드 이유는 위 분기와 동일.
+  if (typeof resetWatchTracker === "function") resetWatchTracker();
 
   const myGen = ++handleVideoChangeGen;
   const title = await waitForTitle(lastTitle);
@@ -495,8 +521,7 @@ window.addEventListener("popstate", handleVideoChange);
 // play/pause/seeking/seeked 이벤트로 "재생 중" 구간의 시작·끝을 감지해 그 구간의
 // Date.now() 차이만 더한다 — 배속과 무관하게 항상 실제 경과 시간이 나온다.
 // SPA 전환 중 <video> 엘리먼트가 교체되는 경우(쇼츠 피드 등)는 수동 검증이 필요하다.
-let watchTracker = null;
-let trackedVideoEl = null;
+// watchTracker/trackedVideoEl 선언은 파일 상단(captureWatchStatsSnapshot 앞)으로 옮겼다 — 이유는 그쪽 주석 참고.
 
 /**
  * watchTracker의 지금 시점까지 누적된 총 시청 시간(ms)을 계산한다. 재생 중인 구간이
@@ -609,9 +634,10 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden && watchTracker) watchTracker.sawHidden = true;
 });
 
+// yt-navigate-finish/popstate에서 더 이상 별도로 리스닝하지 않는다.
+// handleVideoChange가 스냅샷 캡처 이후 시점에 직접 resetWatchTracker를 호출한다.
+// 최초 로드 시 한 번만 직접 호출한다.
 resetWatchTracker();
-document.addEventListener("yt-navigate-finish", resetWatchTracker);
-window.addEventListener("popstate", resetWatchTracker);
 
 // 탭 종료 시 마지막 영상의 시청시간을 최선노력으로 로컬에만 남긴다. sendBeacon은 POST만
 // 지원해 이 값을 반영할 PATCH를 못 쓰므로, background.js의 재시도 큐가 다음 기회에
