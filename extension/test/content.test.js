@@ -553,61 +553,9 @@ describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 �
 // 연구 무결성 점검: /api/video-events 즉시 전송이 fire-and-forget이라 실패해도 조용히
 // 버려지던 문제. 이제 성공 여부를 sent 플래그로 남겨, background.js의 재시도 큐
 // (retryUnsentVideoEvents)가 실패분을 찾아낼 수 있게 한다.
-// 시청시간 원시 데이터 video.played(TimeRanges)를 초 단위 합계로 변환하는
-// 순수 함수. 실제 HTMLVideoElement 없이도 TimeRanges와 동일한 인터페이스(length/start/end)의
-// 목 객체로 검증할 수 있다.
-const SUM_PLAYED_RANGES_DECL =
-  /function sumPlayedRanges\(ranges\) \{[\s\S]*?\n\}/;
 
-function loadSumPlayedRanges() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(SUM_PLAYED_RANGES_DECL);
-  if (!match) {
-    throw new Error(
-      "sumPlayedRanges 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  return new Function(`${match[0]}\nreturn sumPlayedRanges;`)();
-}
-
-function fakeTimeRanges(pairs) {
-  return {
-    length: pairs.length,
-    start: (i) => pairs[i][0],
-    end: (i) => pairs[i][1],
-  };
-}
-
-describe("content.js sumPlayedRanges", () => {
-  let sumPlayedRanges;
-
-  beforeAll(() => {
-    sumPlayedRanges = loadSumPlayedRanges();
-  });
-
-  it("구간이 없으면 0을 반환한다", () => {
-    expect(sumPlayedRanges(fakeTimeRanges([]))).toBe(0);
-  });
-
-  it("단일 연속 구간의 길이를 반환한다(일시정지 없이 처음부터 30초 재생)", () => {
-    expect(sumPlayedRanges(fakeTimeRanges([[0, 30]]))).toBe(30);
-  });
-
-  it("여러 구간(일시정지 후 재생 재개)의 길이를 합산한다 — 되감아 다시 본 구간은 겹치는 부분이 TimeRanges 자체에서 병합되므로 중복 가산되지 않는다", () => {
-    // 예: 0~10초 시청 후 20초로 건너뛰어 20~45초 시청(브라우저가 두 구간으로 분리해 보고)
-    expect(
-      sumPlayedRanges(
-        fakeTimeRanges([
-          [0, 10],
-          [20, 45],
-        ]),
-      ),
-    ).toBe(35);
-  });
-});
-
-// captureWatchStatsSnapshot — watchTracker가 아직 초기화되지 않은 상태(이 함수만 격리
-// 추출한 테스트 환경 포함)에서도 예외 없이 null을 반환하는지가 핵심 회귀 지점이다.
+// captureWatchStatsSnapshot
+// watchTracker가 아직 초기화되지 않은 상태에서도 예외 없이 null을 반환하는지가 핵심 회귀 지점이다.
 const CAPTURE_SNAPSHOT_DECL =
   /function captureWatchStatsSnapshot\(\) \{[\s\S]*?\n\}/;
 
@@ -627,6 +575,205 @@ describe("content.js captureWatchStatsSnapshot", () => {
     const captureWatchStatsSnapshot = loadCaptureWatchStatsSnapshot();
     expect(() => captureWatchStatsSnapshot()).not.toThrow();
     expect(captureWatchStatsSnapshot()).toBeNull();
+  });
+});
+
+// currentWatchedMs — 순수 함수라 클로저 의존 없이 그대로 추출해 검증할 수 있다.
+const CURRENT_WATCHED_MS_DECL =
+  /function currentWatchedMs\(tracker\) \{[\s\S]*?\n\}/;
+
+function loadCurrentWatchedMs() {
+  const raw = readFileSync(CONTENT_PATH, "utf8");
+  const match = raw.match(CURRENT_WATCHED_MS_DECL);
+  if (!match) {
+    throw new Error(
+      "currentWatchedMs 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  // Date를 별도로 주입하지 않는다 — 전역 Date를 그대로 참조해야 vi.setSystemTime이
+  // 호출 시점(로드 시점이 아니라)에 반영된다.
+  return new Function(`${match[0]}\nreturn currentWatchedMs;`)();
+}
+
+describe("content.js currentWatchedMs", () => {
+  let currentWatchedMs;
+
+  beforeAll(() => {
+    currentWatchedMs = loadCurrentWatchedMs();
+  });
+
+  it("tracker가 없으면 0을 반환한다", () => {
+    expect(currentWatchedMs(null)).toBe(0);
+  });
+
+  it("열린 구간이 없으면(재생 중이 아님) accumulatedMs만 반환한다", () => {
+    expect(
+      currentWatchedMs({ accumulatedMs: 12345, segmentStartAt: null }),
+    ).toBe(12345);
+  });
+
+  it("열린 구간이 있으면 지금까지의 경과분을 더한다", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10000);
+    expect(
+      currentWatchedMs({ accumulatedMs: 5000, segmentStartAt: 3000 }),
+    ).toBe(5000 + (10000 - 3000));
+    vi.useRealTimers();
+  });
+});
+
+// ── 비디오 엘리먼트 계측 통합 테스트
+// 벽시계 경과 시간(Date.now() 차이) 기반으로 바뀌었는지를 실제 play/pause/seeking/seeked 이벤트를 발생시켜 검증한다.
+const VIDEO_TRACKING_SECTION_DECL =
+  /let watchTracker = null;[\s\S]*?\nfunction resetWatchTracker\(\) \{[\s\S]*?\n\}/;
+
+function createFakeVideoElement({ paused = true, playbackRate = 1 } = {}) {
+  const listeners = {};
+  return {
+    paused,
+    playbackRate,
+    addEventListener(type, cb) {
+      (listeners[type] ??= []).push(cb);
+    },
+    removeEventListener(type, cb) {
+      listeners[type] = (listeners[type] || []).filter((fn) => fn !== cb);
+    },
+    dispatch(type) {
+      for (const cb of listeners[type] || []) cb();
+    },
+  };
+}
+
+function loadVideoTrackingSection(documentMock) {
+  const raw = readFileSync(CONTENT_PATH, "utf8");
+  const match = raw.match(VIDEO_TRACKING_SECTION_DECL);
+  if (!match) {
+    throw new Error(
+      "비디오 엘리먼트 계측 섹션을 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  const factory = new Function(
+    "document",
+    `
+    ${match[0]}
+    return {
+      reset: resetWatchTracker,
+      getTracker: () => watchTracker,
+      currentWatchedMs: () => currentWatchedMs(watchTracker),
+    };
+    `,
+  );
+  return factory(documentMock);
+}
+
+function makeDocumentMock(videoEl, { hidden = false } = {}) {
+  return {
+    hidden,
+    querySelector: () => videoEl,
+    addEventListener: () => {},
+  };
+}
+
+describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 기반 누적 (코드리뷰 회귀)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("2배속으로 실제 15초를 재생해도 watchedSeconds는 15초로 기록된다(콘텐츠 소비량이 아니라 벽시계 경과 시간)", () => {
+    const videoEl = createFakeVideoElement({ paused: false, playbackRate: 2 });
+    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+
+    section.reset(); // attachVideoTracking이 이미 재생 중임을 감지해 즉시 구간을 연다.
+    vi.setSystemTime(15000); // 벽시계 15초 경과(재생 상태 유지)
+
+    expect(section.currentWatchedMs()).toBe(15000);
+  });
+
+  it("0.5배속으로 실제 30초를 재생해도 watchedSeconds는 30초로 기록된다(과소평가되지 않음)", () => {
+    const videoEl = createFakeVideoElement({
+      paused: false,
+      playbackRate: 0.5,
+    });
+    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+
+    section.reset();
+    vi.setSystemTime(30000);
+
+    expect(section.currentWatchedMs()).toBe(30000);
+  });
+
+  it("pause 중에는 시간이 누적되지 않고, 재개하면 그 이후부터 다시 누적된다", () => {
+    const videoEl = createFakeVideoElement({ paused: false });
+    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+
+    section.reset();
+    vi.setSystemTime(10000); // 10초 재생
+
+    videoEl.paused = true;
+    videoEl.dispatch("pause");
+    vi.setSystemTime(40000); // 30초간 일시정지 상태로 방치
+
+    expect(section.currentWatchedMs()).toBe(10000); // 정지 구간은 누적 안 됨
+
+    videoEl.paused = false;
+    videoEl.dispatch("play");
+    vi.setSystemTime(45000); // 재개 후 5초 더 재생
+
+    expect(section.currentWatchedMs()).toBe(15000);
+  });
+
+  it("탐색(seeking) 중에는 시간이 누적되지 않고, 탐색 종료 후 재생 중이면 다시 누적된다", () => {
+    const videoEl = createFakeVideoElement({ paused: false });
+    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+
+    section.reset();
+    vi.setSystemTime(5000); // 5초 재생 후 탐색 시작
+    videoEl.dispatch("seeking");
+    vi.setSystemTime(5100); // 탐색 자체는 100ms 만에 끝났다고 가정
+    videoEl.dispatch("seeked"); // paused=false이므로 다시 구간이 열린다
+    vi.setSystemTime(15100); // 10초 더 재생
+
+    expect(section.currentWatchedMs()).toBe(15000); // 5000 + 10000, 탐색 100ms는 제외
+  });
+
+  it("탐색 후 일시정지 상태로 남으면(paused=true) 재생을 다시 열지 않는다", () => {
+    const videoEl = createFakeVideoElement({ paused: false });
+    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+
+    section.reset();
+    vi.setSystemTime(3000);
+    videoEl.dispatch("seeking");
+    videoEl.paused = true; // 탐색 중 일시정지로 남겨둠
+    videoEl.dispatch("seeked");
+    vi.setSystemTime(20000); // 17초 동안 정지 상태
+
+    expect(section.currentWatchedMs()).toBe(3000); // 늘어나지 않아야 함
+  });
+
+  it("영상이 처음부터 일시정지 상태면(자동재생 꺼짐) 시간이 쌓이지 않는다", () => {
+    const videoEl = createFakeVideoElement({ paused: true });
+    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+
+    section.reset();
+    vi.setSystemTime(20000);
+
+    expect(section.currentWatchedMs()).toBe(0);
+  });
+
+  it("ratechange 발생 시 마지막 배속 값을 기록한다(시간 계산에는 영향 없이 원시 데이터로만 보존)", () => {
+    const videoEl = createFakeVideoElement({ paused: false, playbackRate: 1 });
+    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+
+    section.reset();
+    videoEl.playbackRate = 1.5;
+    videoEl.dispatch("ratechange");
+
+    expect(section.getTracker().lastPlaybackRate).toBe(1.5);
   });
 });
 
@@ -670,11 +817,23 @@ const PAGEHIDE_HANDLER_DECL =
 function loadPagehideHandlerFactory() {
   const raw = readFileSync(CONTENT_PATH, "utf8");
   const identityMatch = raw.match(TRACKED_IDENTITY_DECL);
+  const snapshotMatch = raw.match(CAPTURE_SNAPSHOT_DECL);
+  const watchedMsMatch = raw.match(CURRENT_WATCHED_MS_DECL);
   const applyMatch = raw.match(APPLY_WATCH_STATS_PATCH_DECL);
   const pagehideMatch = raw.match(PAGEHIDE_HANDLER_DECL);
   if (!identityMatch) {
     throw new Error(
       "trackedVideoIdentity/captureTrackedVideoIdentity를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  if (!snapshotMatch) {
+    throw new Error(
+      "captureWatchStatsSnapshot 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  if (!watchedMsMatch) {
+    throw new Error(
+      "currentWatchedMs 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
     );
   }
   if (!applyMatch) {
@@ -687,6 +846,9 @@ function loadPagehideHandlerFactory() {
       "pagehide 리스너를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
     );
   }
+  // pagehide는 이제 captureWatchStatsSnapshot()을 그대로 재사용하므로(코드리뷰 대응으로
+  // watchTracker/video.played 계산 방식이 바뀌면서 함께 재사용하게 됨), 그 함수와
+  // currentWatchedMs까지 함께 묶어야 실제 파일과 동일하게 동작한다.
   return new Function(
     "chrome",
     "fetch",
@@ -696,6 +858,8 @@ function loadPagehideHandlerFactory() {
     `
     ${identityMatch[0]}
     trackedVideoIdentity = initialTrackedIdentity;
+    ${watchedMsMatch[0]}
+    ${snapshotMatch[0]}
     ${applyMatch[0]}
     let capturedPagehideHandler = null;
     const originalAddEventListener = window.addEventListener;
@@ -747,8 +911,11 @@ describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코
     });
     const fetchMock = () => Promise.resolve({ ok: true });
     const env = makeEnv(storage, fetchMock);
+    // 이미 닫힌 구간 77초만 있고(재생 중은 아님, segmentStartAt: null) — captureWatchStatsSnapshot이
+    // currentWatchedMs로 계산해 77초를 그대로 돌려줘야 한다.
     const watchTracker = {
-      lastWatchedSeconds: 77,
+      accumulatedMs: 77000,
+      segmentStartAt: null,
       lastPlaybackRate: 1,
       sawHidden: false,
     };
@@ -801,7 +968,8 @@ describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코
     };
     const env = makeEnv(storage, fetchMock);
     const watchTracker = {
-      lastWatchedSeconds: 5,
+      accumulatedMs: 5000,
+      segmentStartAt: null,
       lastPlaybackRate: 1,
       sawHidden: false,
     };

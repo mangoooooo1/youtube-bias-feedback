@@ -76,7 +76,7 @@ function parseTitle() {
 function captureWatchStatsSnapshot() {
   if (typeof watchTracker === "undefined" || !watchTracker) return null;
   return {
-    watchedSeconds: watchTracker.lastWatchedSeconds ?? null,
+    watchedSeconds: currentWatchedMs(watchTracker) / 1000,
     playbackRate: watchTracker.lastPlaybackRate ?? null,
     wasBackgrounded: watchTracker.sawHidden ? 1 : 0,
   };
@@ -481,51 +481,106 @@ window.addEventListener("popstate", handleVideoChange);
 
 // ── 비디오 엘리먼트 계측 ──
 // handleVideoChange와 독립된 후행 리스너로, 항상 "전환 직전 스냅샷 → 다음 영상용 리셋"
-// 순서로 실행된다. video.played(TimeRanges)로 재생 구간을 누적해 pause/seek에 견고하나,
+// 순서로 실행된다. 시청시간은 "벽시계 경과 시간"(실제로 몇 초 동안 재생 상태였는가)으로
+// 누적한다 — video.played(미디어 타임라인 상 재생 구간)를 쓰면 배속에 따라 왜곡된다
+// (2배속으로 실제 30초를 시청하면 60초로, 0.5배속이면 15초로 기록됨).
+// play/pause/seeking/seeked 이벤트로 "재생 중" 구간의 시작·끝을 감지해 그 구간의
+// Date.now() 차이만 더한다 — 배속과 무관하게 항상 실제 경과 시간이 나온다.
 // SPA 전환 중 <video> 엘리먼트가 교체되는 경우(쇼츠 피드 등)는 수동 검증이 필요하다.
 let watchTracker = null;
 let trackedVideoEl = null;
 
 /**
- * TimeRanges의 각 구간 길이를 합산한다.
- * @param {TimeRanges} ranges - video.played 등에서 얻은 시간 구간 목록
- * @returns {number} 합산된 총 초
+ * watchTracker의 지금 시점까지 누적된 총 시청 시간(ms)을 계산한다. 재생 중인 구간이
+ * 열려 있으면(segmentStartAt != null) 지금까지의 경과분까지 더해 반환한다 — pause를
+ * 기다리지 않고 언제든(전환·pagehide 시점 등) 정확한 "지금까지" 값을 구할 수 있다.
+ * @param {{accumulatedMs: number, segmentStartAt: number|null}|null} tracker - watchTracker
+ * @returns {number} 누적 시청 시간(ms)
  */
-function sumPlayedRanges(ranges) {
-  let total = 0;
-  for (let i = 0; i < ranges.length; i++) {
-    total += ranges.end(i) - ranges.start(i);
-  }
-  return total;
+function currentWatchedMs(tracker) {
+  if (!tracker) return 0;
+  const openMs =
+    tracker.segmentStartAt != null ? Date.now() - tracker.segmentStartAt : 0;
+  return tracker.accumulatedMs + openMs;
 }
 
 /**
- * 추적 중인 video 엘리먼트의 timeupdate마다 누적 시청시간·배속을 watchTracker에 반영한다.
+ * 재생 중이던 구간을 닫는다(pause·탐색 시작·영상 전환 등) — 지금까지의 경과분을
+ * accumulatedMs에 반영하고 segmentStartAt을 비운다. 이미 닫혀 있으면 아무 일도 안 한다.
  * @returns {void}
  */
-function onTrackedVideoTimeUpdate() {
+function closeWatchSegment() {
+  if (!watchTracker || watchTracker.segmentStartAt == null) return;
+  watchTracker.accumulatedMs += Date.now() - watchTracker.segmentStartAt;
+  watchTracker.segmentStartAt = null;
+}
+
+/**
+ * 재생 중인 구간을 연다(play·탐색 종료 후 재생 재개 등) — 이미 열려 있으면 아무 일도 안 한다.
+ * @returns {void}
+ */
+function openWatchSegment() {
+  if (!watchTracker || watchTracker.segmentStartAt != null) return;
+  watchTracker.segmentStartAt = Date.now();
+}
+
+function onTrackedVideoPlay() {
+  openWatchSegment();
+}
+
+function onTrackedVideoPause() {
+  closeWatchSegment();
+}
+
+// 탐색(스크럽바 드래그) 구간은 실제 시청이 아니므로 시작 시점에 열려 있던 구간을 닫는다.
+function onTrackedVideoSeeking() {
+  closeWatchSegment();
+}
+
+// 탐색이 끝난 뒤에도 계속 재생 중이면(대부분의 경우) 새 구간을 연다. 탐색 도중
+// 일시정지해 뒀다면(paused=true) 열지 않는다 — 이후 실제 play 이벤트가 열어 줄 것이다.
+function onTrackedVideoSeeked() {
+  if (trackedVideoEl && !trackedVideoEl.paused) openWatchSegment();
+}
+
+function onTrackedVideoRateChange() {
   if (!watchTracker || !trackedVideoEl) return;
   try {
-    watchTracker.lastWatchedSeconds = sumPlayedRanges(trackedVideoEl.played);
     watchTracker.lastPlaybackRate = trackedVideoEl.playbackRate;
   } catch {
-    // played/playbackRate 접근 자체가 실패하는 비표준 플레이어 상태 — 조용히 무시.
+    // playbackRate 접근 자체가 실패하는 비표준 플레이어 상태 — 조용히 무시.
   }
 }
 
 /**
- * 현재 페이지의 <video> 엘리먼트에 timeupdate 리스너를 연결한다. SPA 전환으로 엘리먼트가
- * 바뀌면 이전 리스너를 해제하고 새로 연결한다.
+ * 현재 페이지의 <video> 엘리먼트에 재생 상태 리스너를 연결한다. SPA 전환으로 엘리먼트가
+ * 바뀌면 이전 리스너를 해제하고 새로 연결하며, 연결 시점에 이미 재생 중이면(자동재생 등)
+ * play 이벤트를 기다리지 않고 그 즉시 구간을 연다.
  * @returns {void}
  */
 function attachVideoTracking() {
   const videoEl = document.querySelector("video");
   if (!videoEl || videoEl === trackedVideoEl) return;
   if (trackedVideoEl) {
-    trackedVideoEl.removeEventListener("timeupdate", onTrackedVideoTimeUpdate);
+    trackedVideoEl.removeEventListener("play", onTrackedVideoPlay);
+    trackedVideoEl.removeEventListener("pause", onTrackedVideoPause);
+    trackedVideoEl.removeEventListener("seeking", onTrackedVideoSeeking);
+    trackedVideoEl.removeEventListener("seeked", onTrackedVideoSeeked);
+    trackedVideoEl.removeEventListener("ratechange", onTrackedVideoRateChange);
   }
   trackedVideoEl = videoEl;
-  trackedVideoEl.addEventListener("timeupdate", onTrackedVideoTimeUpdate);
+  trackedVideoEl.addEventListener("play", onTrackedVideoPlay);
+  trackedVideoEl.addEventListener("pause", onTrackedVideoPause);
+  trackedVideoEl.addEventListener("seeking", onTrackedVideoSeeking);
+  trackedVideoEl.addEventListener("seeked", onTrackedVideoSeeked);
+  trackedVideoEl.addEventListener("ratechange", onTrackedVideoRateChange);
+  try {
+    if (watchTracker)
+      watchTracker.lastPlaybackRate = trackedVideoEl.playbackRate;
+    if (!trackedVideoEl.paused) openWatchSegment();
+  } catch {
+    // playbackRate/paused 접근 자체가 실패하는 비표준 플레이어 상태 — 조용히 무시.
+  }
 }
 
 /**
@@ -534,7 +589,8 @@ function attachVideoTracking() {
  */
 function resetWatchTracker() {
   watchTracker = {
-    lastWatchedSeconds: 0,
+    accumulatedMs: 0,
+    segmentStartAt: null,
     lastPlaybackRate: 1,
     sawHidden: document.hidden,
   };
@@ -556,13 +612,9 @@ window.addEventListener("popstate", resetWatchTracker);
 // 다른 탭이 덮어썼을 수 있어 여기서 그걸 읽으면 다른 탭의 eventId를 이 탭의
 // 시청시간으로 오염시킬 수 있다.
 window.addEventListener("pagehide", () => {
-  if (!watchTracker) return;
+  const stats = captureWatchStatsSnapshot();
+  if (!stats) return;
   const target = captureTrackedVideoIdentity();
   if (!target?.eventId) return;
-  applyWatchStatsPatch(target, {
-    watchedSeconds: watchTracker.lastWatchedSeconds ?? null,
-    playbackRate: watchTracker.lastPlaybackRate ?? null,
-    wasBackgrounded: watchTracker.sawHidden ? 1 : 0,
-    watchStatsSent: false,
-  });
+  applyWatchStatsPatch(target, { ...stats, watchStatsSent: false });
 });
