@@ -21,8 +21,15 @@ function createTestDb() {
     CREATE TABLE video_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       anonymousId TEXT NOT NULL,
+      videoId TEXT,
       title TEXT,
-      watchedAt TEXT NOT NULL
+      watchedAt TEXT NOT NULL,
+      watchedSeconds REAL
+    );
+    CREATE TABLE video_metadata (
+      videoId TEXT PRIMARY KEY,
+      categoryId TEXT,
+      durationSeconds INTEGER
     );
     CREATE TABLE period_reviews (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,6 +42,9 @@ function createTestDb() {
       videoCount INTEGER,
       categoryDistribution TEXT,
       entropy REAL,
+      weightedCategoryDistribution TEXT,
+      weightedEntropy REAL,
+      validVideoCount INTEGER,
       review TEXT,
       reviewTopic TEXT,
       source TEXT,
@@ -125,6 +135,115 @@ describe("generate-period-reviews.js — run()", () => {
       skipped: 0,
     });
     expect(shouldFail(summary)).toBe(false);
+  });
+
+  it("기간 내 video_events의 시청시간을 가중해 weightedEntropy를 계산하고, 오클릭(클릭성 이탈) 영상은 걸러낸다", async () => {
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run("weighted-user", INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+    ).run(
+      "weighted-user",
+      JSON.stringify({ 음악: 1 }),
+      2,
+      "2026-06-01T10:00:00+09:00",
+    );
+    db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, ?)",
+    ).run("vid-music", "10", 600);
+    db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, ?)",
+    ).run("vid-news", "25", 600);
+    // 음악 영상은 300초(길이 600초의 50%) 실제 시청 — 유효. 뉴스 영상은 5초 만에 이탈
+    // (5초<30초, 5/600≈0.8%<25%) — 오클릭으로 간주돼 가중 계산에서 제외돼야 한다.
+    db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, ?, ?, ?, ?)",
+    ).run(
+      "weighted-user",
+      "vid-music",
+      "음악 영상",
+      "2026-06-01T10:00:00+09:00",
+      300,
+    );
+    db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, ?, ?, ?, ?)",
+    ).run(
+      "weighted-user",
+      "vid-news",
+      "뉴스 영상",
+      "2026-06-01T10:05:00+09:00",
+      5,
+    );
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":"문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await run(db, "fake-key");
+
+    const row = db
+      .prepare(
+        "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+      )
+      .get("weighted-user");
+    // 오클릭 영상(뉴스)이 걸러져 유효 영상은 음악 1건뿐 — 카테고리가 1개뿐이라 entropy=0
+    expect(row.validVideoCount).toBe(1);
+    expect(row.weightedEntropy).toBe(0);
+    expect(JSON.parse(row.weightedCategoryDistribution)).toEqual({ 음악: 1 });
+  });
+
+  it("watchedSeconds 데이터가 없으면(구버전 확장) weighted 계열을 NULL로 남기고 1차 지표는 그대로 계산한다", async () => {
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run("legacy-user", INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+    ).run(
+      "legacy-user",
+      JSON.stringify({ 음악: 1 }),
+      1,
+      "2026-06-01T10:00:00+09:00",
+    );
+    // watchedSeconds를 아예 보내지 않는 구버전 확장 상황을 재현 — 컬럼 자체를 채우지 않는다.
+    db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, title, watchedAt) VALUES (?, ?, ?, ?)",
+    ).run("legacy-user", "vid-music", "음악 영상", "2026-06-01T10:00:00+09:00");
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":"문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await run(db, "fake-key");
+
+    const row = db
+      .prepare(
+        "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+      )
+      .get("legacy-user");
+    expect(row.entropy).not.toBeNull();
+    expect(row.weightedEntropy).toBeNull();
+    expect(row.weightedCategoryDistribution).toBeNull();
+    // watchedSeconds를 몰라도(계측 실패) isValidWatch는 보수적으로 true를 반환하므로 영상 자체는 유효로 센다.
+    expect(row.validVideoCount).toBe(1);
   });
 
   it("밀린 여러 기간을 오래된 순서로 순차 처리한다 (동시 호출 없음)", async () => {
