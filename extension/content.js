@@ -283,11 +283,13 @@ function recordVideo(
       }
 
       // 직전 영상의 시청시간 스냅샷을 여기서 확정한다.
-      // 우선순위: (1) 이 탭이 방금 전 rememberTrackedVideo로 기억해 둔 값
-      // (2) 탭 재로드 등으로 (1)이 없으면 storage의 lastRecordedVideo로 대체
-      const watchStatsTarget = previousVideoIdentity ?? lastRecordedVideo;
-      if (previousWatchStats && watchStatsTarget?.eventId) {
-        finalizePreviousWatchStats(watchStatsTarget, previousWatchStats);
+      // previousVideoIdentity(이 탭 자신의 메모리)만 신뢰한다.
+      // storage의 lastRecordedVideo는 모든 탭이 공유해, 폴백으로 쓰면
+      // 다른 탭이 마지막으로 쓴 eventId에 이 탭의 시청시간을 잘못 붙일 수 있다.
+      // 이 탭이 막 로드돼 아직 기억해 둔 값이 없으면 확정을 포기한다. 데이터 유실은 눈에 보이지만
+      // 다른 탭 데이터로 오염되는 건 눈에 안 보이므로, 유실 쪽이 안전하다.
+      if (previousWatchStats && previousVideoIdentity?.eventId) {
+        finalizePreviousWatchStats(previousVideoIdentity, previousWatchStats);
       }
 
       // uuid를 videoKey와 eventId 양쪽에 재사용한다.
@@ -553,23 +555,17 @@ window.addEventListener("popstate", resetWatchTracker);
 // 탭 종료 시 마지막 영상의 시청시간을 최선노력으로 로컬에만 남긴다. sendBeacon은 POST만
 // 지원해 이 값을 반영할 PATCH를 못 쓰므로, background.js의 재시도 큐가 다음 기회에
 // 전송하게 한다. storage.local.set도 pagehide 시점 완주를 보장하진 않는다.
+// trackedVideoIdentity(이 탭 자신의 메모리)만 쓴다. storage의 lastRecordedVideo는
+// 다른 탭이 덮어썼을 수 있어 여기서 그걸 읽으면 다른 탭의 eventId를 이 탭의
+// 시청시간으로 오염시킬 수 있다.
 window.addEventListener("pagehide", () => {
   if (!watchTracker) return;
-  chrome.storage.local.get("lastRecordedVideo", ({ lastRecordedVideo }) => {
-    if (!lastRecordedVideo?.eventId || !lastRecordedVideo?.sessionId) return;
-    const videoKey = `video__${lastRecordedVideo.sessionId}__${lastRecordedVideo.eventId}`;
-    chrome.storage.local.get(videoKey, (result) => {
-      const existing = result[videoKey];
-      if (!existing) return;
-      chrome.storage.local.set({
-        [videoKey]: {
-          ...existing,
-          watchedSeconds: watchTracker.lastWatchedSeconds ?? null,
-          playbackRate: watchTracker.lastPlaybackRate ?? null,
-          wasBackgrounded: watchTracker.sawHidden ? 1 : 0,
-          watchStatsSent: false,
-        },
-      });
-    });
+  const target = captureTrackedVideoIdentity();
+  if (!target?.eventId) return;
+  applyWatchStatsPatch(target, {
+    watchedSeconds: watchTracker.lastWatchedSeconds ?? null,
+    playbackRate: watchTracker.lastPlaybackRate ?? null,
+    wasBackgrounded: watchTracker.sawHidden ? 1 : 0,
+    watchStatsSent: false,
   });
 });

@@ -659,6 +659,152 @@ function loadTrackedVideoIdentityHelpers() {
   `)();
 }
 
+// pagehide 핸들러 — 코드리뷰 지적 회귀 테스트(탭 종료 시에도 공유 lastRecordedVideo가
+// 아니라 이 탭 자신의 trackedVideoIdentity만 써야 한다). applyWatchStatsPatch까지
+// 함께 추출해 실제 dual-location 갱신까지 검증한다.
+const APPLY_WATCH_STATS_PATCH_DECL =
+  /async function applyWatchStatsPatch\(target, patch\) \{[\s\S]*?\n\}/;
+const PAGEHIDE_HANDLER_DECL =
+  /window\.addEventListener\("pagehide", \(\) => \{[\s\S]*?\n\}\);/;
+
+function loadPagehideHandlerFactory() {
+  const raw = readFileSync(CONTENT_PATH, "utf8");
+  const identityMatch = raw.match(TRACKED_IDENTITY_DECL);
+  const applyMatch = raw.match(APPLY_WATCH_STATS_PATCH_DECL);
+  const pagehideMatch = raw.match(PAGEHIDE_HANDLER_DECL);
+  if (!identityMatch) {
+    throw new Error(
+      "trackedVideoIdentity/captureTrackedVideoIdentity를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  if (!applyMatch) {
+    throw new Error(
+      "applyWatchStatsPatch 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  if (!pagehideMatch) {
+    throw new Error(
+      "pagehide 리스너를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  return new Function(
+    "chrome",
+    "fetch",
+    "window",
+    "watchTracker",
+    "initialTrackedIdentity",
+    `
+    ${identityMatch[0]}
+    trackedVideoIdentity = initialTrackedIdentity;
+    ${applyMatch[0]}
+    let capturedPagehideHandler = null;
+    const originalAddEventListener = window.addEventListener;
+    window.addEventListener = (name, cb) => {
+      if (name === "pagehide") capturedPagehideHandler = cb;
+      else if (originalAddEventListener) originalAddEventListener(name, cb);
+    };
+    ${pagehideMatch[0]}
+    return capturedPagehideHandler;
+    `,
+  );
+}
+
+describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코드리뷰 회귀: 다른 탭의 공유 lastRecordedVideo 오염 방지)", () => {
+  function makeEnv(sharedStorage, fetchMock) {
+    return {
+      chrome: { runtime: { id: "fake-extension-id" }, storage: { local: sharedStorage } },
+      fetch: fetchMock,
+      window: {},
+    };
+  }
+
+  // pagehide는 로컬 저장에만 최선노력을 기울인다(네트워크 전송은 background.js의
+  // 재시도 큐 몫 — 파일 상단 주석 "탭 종료 시... 로컬에만 남긴다" 참고). 그래서 이
+  // 테스트는 network PATCH가 아니라 로컬 storage 갱신 결과로 검증한다.
+  it("이 탭의 trackedVideoIdentity로만 로컬 video_events 기록을 갱신하고, 공유 lastRecordedVideo가 가리키는 다른 탭의 항목은 건드리지 않는다", async () => {
+    const storage = createSharedStorage({
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+      // 다른 탭이 마지막으로 써 둔 값이라고 가정 — 이 값은 쓰이면 안 된다.
+      lastRecordedVideo: {
+        videoId: "other-tab-video",
+        sessionId: "s-other",
+        eventId: "evt-other",
+      },
+      "video__s1__evt-mine": { videoId: "vMine", eventId: "evt-mine", sent: true },
+      "video__s-other__evt-other": {
+        videoId: "other-tab-video",
+        eventId: "evt-other",
+        sent: true,
+      },
+    });
+    const fetchMock = () => Promise.resolve({ ok: true });
+    const env = makeEnv(storage, fetchMock);
+    const watchTracker = {
+      lastWatchedSeconds: 77,
+      lastPlaybackRate: 1,
+      sawHidden: false,
+    };
+
+    const factory = loadPagehideHandlerFactory();
+    const handler = factory(env.chrome, env.fetch, env.window, watchTracker, {
+      sessionId: "s1",
+      eventId: "evt-mine",
+    });
+
+    handler();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    // 다른 탭 소유로 가정한 evt-other는 절대 건드리면 안 된다.
+    const untouched = storage.dump()["video__s-other__evt-other"];
+    expect(untouched.watchedSeconds).toBeUndefined();
+
+    // 이 탭 자신의 항목(evt-mine)만 로컬에 갱신되고, watchStatsSent:false로 남아
+    // background.js의 재시도 큐가 실제 전송을 맡는다.
+    const mine = storage.dump()["video__s1__evt-mine"];
+    expect(mine.watchedSeconds).toBe(77);
+    expect(mine.watchStatsSent).toBe(false);
+  });
+
+  it("watchTracker가 없으면(추적 시작 전) 아무 것도 하지 않는다", async () => {
+    const storage = createSharedStorage({ anonymousId: "a1" });
+    const patchCalls = [];
+    const fetchMock = (_url, options) => {
+      if (options?.method === "PATCH") patchCalls.push(1);
+      return Promise.resolve({ ok: true });
+    };
+    const env = makeEnv(storage, fetchMock);
+
+    const factory = loadPagehideHandlerFactory();
+    const handler = factory(env.chrome, env.fetch, env.window, null, null);
+
+    handler();
+    await flushMicrotasks();
+
+    expect(patchCalls).toHaveLength(0);
+  });
+
+  it("trackedVideoIdentity가 없으면(첫 영상도 아직 없음) 아무 것도 하지 않는다", async () => {
+    const storage = createSharedStorage({ anonymousId: "a1" });
+    const patchCalls = [];
+    const fetchMock = (_url, options) => {
+      if (options?.method === "PATCH") patchCalls.push(1);
+      return Promise.resolve({ ok: true });
+    };
+    const env = makeEnv(storage, fetchMock);
+    const watchTracker = { lastWatchedSeconds: 5, lastPlaybackRate: 1, sawHidden: false };
+
+    const factory = loadPagehideHandlerFactory();
+    const handler = factory(env.chrome, env.fetch, env.window, watchTracker, null);
+
+    handler();
+    await flushMicrotasks();
+
+    expect(patchCalls).toHaveLength(0);
+  });
+});
+
 describe("content.js trackedVideoIdentity — 세션 타임아웃에 영향받지 않는 시청시간 확정 대상 추적 (코드리뷰 회귀)", () => {
   it("초기값은 null이다", () => {
     const { capture } = loadTrackedVideoIdentityHelpers();
@@ -812,12 +958,19 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
     await flushMicrotasks();
     const eventIdA = collectVideos(storage.dump(), "s1")[0].eventId;
 
-    // 영상 B로 전환하며 영상 A의 시청시간 스냅샷을 함께 전달
-    await recordVideo("vB", "영상B", null, null, null, {
-      watchedSeconds: 55.5,
-      playbackRate: 1,
-      wasBackgrounded: 0,
-    });
+    // 영상 B로 전환하며 영상 A의 시청시간 스냅샷과 식별자를 함께 전달 — 실제로는
+    // handleVideoChange가 captureTrackedVideoIdentity()로 얻어 넘기는 값이다(이
+    // 격리 테스트는 recordVideo 자체만 추출해 rememberTrackedVideo가 실제
+    // trackedVideoIdentity에 쓰지 않으므로 인자로 직접 재현한다).
+    await recordVideo(
+      "vB",
+      "영상B",
+      null,
+      null,
+      null,
+      { watchedSeconds: 55.5, playbackRate: 1, wasBackgrounded: 0 },
+      { sessionId: "s1", eventId: eventIdA },
+    );
     await flushMicrotasks();
     await flushMicrotasks();
 
@@ -855,11 +1008,15 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
     await flushMicrotasks();
     const eventIdA = collectVideos(storage.dump(), "s1")[0].eventId;
 
-    await recordVideo("vB", "영상B", null, null, null, {
-      watchedSeconds: 20,
-      playbackRate: 1,
-      wasBackgrounded: 0,
-    });
+    await recordVideo(
+      "vB",
+      "영상B",
+      null,
+      null,
+      null,
+      { watchedSeconds: 20, playbackRate: 1, wasBackgrounded: 0 },
+      { sessionId: "s1", eventId: eventIdA },
+    );
     await flushMicrotasks();
     await flushMicrotasks();
 
@@ -952,9 +1109,15 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
     expect(videoA.watchStatsSent).toBe(true);
   });
 
-  it("previousVideoIdentity가 없으면(탭 재로드 등) storage의 lastRecordedVideo로 대체한다", async () => {
+  // 코드리뷰 지적 회귀 테스트: storage의 lastRecordedVideo는 모든 탭이 공유한다.
+  // previousVideoIdentity(이 탭 자신의 메모리)가 비어 있다고 해서(탭 재로드 직후 등)
+  // 공유 storage 값으로 대체하면, 그게 실은 "다른 탭이 마지막으로 기록한 영상"일 수
+  // 있어 엉뚱한 eventId에 이 탭의 시청시간을 붙이게 된다. 그런 폴백을 두지 않고
+  // 조용히 포기하는지 확인한다(데이터 유실 < 데이터 오염).
+  it("previousVideoIdentity가 없으면(탭 재로드 등) storage의 lastRecordedVideo로 대체하지 않고 PATCH를 시도하지 않는다", async () => {
     const storage = createSharedStorage({
       currentSession: { sessionId: "s1", startTime: "t0" },
+      // 다른 탭이 마지막으로 써 둔 값이라고 가정 — 이 값을 오인해 쓰면 안 된다.
       lastRecordedVideo: { videoId: "vA", sessionId: "s1", eventId: "evt-A" },
       anonymousId: "a1",
       serverUrl: "http://localhost:3000",
@@ -965,11 +1128,8 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       },
     });
     const patchCalls = [];
-    const recordVideo = makeTabWithFetch(storage, (url, options) => {
-      if (options?.method === "PATCH") {
-        patchCalls.push({ url: String(url) });
-        return Promise.resolve({ ok: true });
-      }
+    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+      if (options?.method === "PATCH") patchCalls.push(1);
       return Promise.resolve({ ok: true });
     });
 
@@ -983,9 +1143,67 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
     await flushMicrotasks();
     await flushMicrotasks();
 
+    expect(patchCalls).toHaveLength(0);
+    // 공유 storage의 값(다른 탭 소유로 가정한 evt-A)도 건드리지 않았어야 한다.
+    const untouched = storage.dump()["video__s1__evt-A"];
+    expect(untouched.watchedSeconds).toBeUndefined();
+  });
+
+  // 코드리뷰가 지적한 시나리오를 두 개의 독립된 recordVideo 인스턴스(=탭)로 직접
+  // 재현한다: 탭 A가 영상1을 기록한 뒤, 탭 B가(별도 실행 컨텍스트) 영상2를 기록해
+  // 공유 storage의 lastRecordedVideo를 자신의 것으로 덮어쓴다. 그 다음 탭 A가
+  // 영상3으로 이동하면, 탭 A는 (공유 storage가 아니라) 자신이 기억해 둔 영상1의
+  // eventId로만 확정해야 한다.
+  it("탭 A의 시청시간 확정이 탭 B가 덮어쓴 공유 lastRecordedVideo의 영향을 받지 않는다(다중 탭 격리)", async () => {
+    const storage = createSharedStorage({
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    const patchCalls = [];
+    const fetchMock = (_url, options) => {
+      if (options?.method === "PATCH") {
+        patchCalls.push({ url: String(_url) });
+      }
+      return Promise.resolve({ ok: true });
+    };
+    const recordVideoTabA = makeTabWithFetch(storage, fetchMock);
+    const recordVideoTabB = makeTabWithFetch(storage, fetchMock);
+
+    // 탭 A: 영상1 기록 — 탭 A 자신의 trackedVideoIdentity에 영상1의 eventId가 남는다
+    // (이 테스트에서는 recordVideoTabA 클로저 자체가 그 역할을 못하므로, 탭 A가
+    // 이후 넘길 previousVideoIdentity를 직접 캡처해 재사용한다).
+    await recordVideoTabA("video1", "영상1");
+    await flushMicrotasks();
+    const videoKey1 = Object.keys(storage.dump()).find((k) =>
+      k.startsWith("video__"),
+    );
+    const [, sessionId1, eventId1] = videoKey1.split("__");
+
+    // 탭 B: 별도 세션에서 영상2 기록 — 공유 storage의 lastRecordedVideo를 자신의
+    // 것(영상2)으로 덮어쓴다.
+    await recordVideoTabB("video2", "영상2");
+    await flushMicrotasks();
+    expect(storage.dump().lastRecordedVideo.videoId).toBe("video2");
+
+    // 탭 A: 영상3으로 이동. previousVideoIdentity로 "자신이 기억해 둔" 영상1의
+    // eventId를 명시적으로 전달한다(handleVideoChange가 실제로 하는 일을 재현).
+    await recordVideoTabA(
+      "video3",
+      "영상3",
+      null,
+      null,
+      null,
+      { watchedSeconds: 40, playbackRate: 1, wasBackgrounded: 0 },
+      { sessionId: sessionId1, eventId: eventId1 },
+    );
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    // 탭 A가 확정한 PATCH는 영상1(자신의 직전 영상)의 eventId여야 하고, 탭 B가
+    // 공유 storage에 남긴 영상2의 eventId로는 절대 나가면 안 된다.
     expect(patchCalls).toHaveLength(1);
     expect(patchCalls[0].url).toBe(
-      "http://localhost:3000/api/video-events/evt-A",
+      `http://localhost:3000/api/video-events/${eventId1}`,
     );
   });
 
