@@ -225,13 +225,13 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
 
     expect(res.status).toBe(404);
     expect(res.body.code).toBe("NOT_FOUND");
-    expect(
-      db.prepare("SELECT COUNT(*) AS c FROM video_events").get().c,
-    ).toBe(0);
+    expect(db.prepare("SELECT COUNT(*) AS c FROM video_events").get().c).toBe(
+      0,
+    );
   });
 });
 
-// 시청시간 원시 데이터 확정 (교수 피드백: 클릭성 이탈 판별용) — 영상을 떠난 뒤에야 알 수
+// 시청시간 원시 데이터 확정 (클릭성 이탈 판별용) — 영상을 떠난 뒤에야 알 수
 // 있는 값이라 POST와 분리된 PATCH로 온다.
 describe("PATCH /api/video-events/:eventId — 시청시간 확정", () => {
   it("정상 요청이면 watchedSeconds/playbackRate/wasBackgrounded가 저장된다", async () => {
@@ -239,14 +239,12 @@ describe("PATCH /api/video-events/:eventId — 시청시간 확정", () => {
       .post("/api/video-events")
       .send(basePayload({ eventId: "watch-evt-1" }));
 
-    const res = await request(app)
-      .patch("/api/video-events/watch-evt-1")
-      .send({
-        anonymousId: "wiring-user",
-        watchedSeconds: 42.5,
-        playbackRate: 1.5,
-        wasBackgrounded: 1,
-      });
+    const res = await request(app).patch("/api/video-events/watch-evt-1").send({
+      anonymousId: "wiring-user",
+      watchedSeconds: 42.5,
+      playbackRate: 1.5,
+      wasBackgrounded: 1,
+    });
 
     expect(res.status).toBe(200);
     const row = db

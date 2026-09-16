@@ -55,7 +55,7 @@ describe("calculateEntropy", () => {
   });
 });
 
-// 클릭성 이탈(오클릭) 판별 (교수 피드백: 시청시간 기반 노이즈 제거)
+// 클릭성 이탈(오클릭) 판별 (시청시간 기반 노이즈 제거)
 describe("isValidWatch", () => {
   it("watchedSeconds를 모르면(계측 실패·구버전 확장) 보수적으로 유효 처리한다", () => {
     expect(isValidWatch({ watchedSeconds: null, durationSeconds: 600 })).toBe(
@@ -67,19 +67,17 @@ describe("isValidWatch", () => {
   });
 
   it("절대 기준(30초 이상)을 넘으면 durationSeconds와 무관하게 유효하다", () => {
-    expect(
-      isValidWatch({ watchedSeconds: 30, durationSeconds: 3600 }),
-    ).toBe(true);
-    expect(
-      isValidWatch({ watchedSeconds: 45, durationSeconds: null }),
-    ).toBe(true);
+    expect(isValidWatch({ watchedSeconds: 30, durationSeconds: 3600 })).toBe(
+      true,
+    );
+    expect(isValidWatch({ watchedSeconds: 45, durationSeconds: null })).toBe(
+      true,
+    );
   });
 
   it("절대 기준 미달이어도 상대 기준(25% 이상)을 넘으면 유효하다 — 짧은 영상(쇼츠)에 자연히 유리하게 작동", () => {
     // 15초 쇼츠: 25%는 3.75초 — 절대 30초보다 훨씬 낮은 문턱이 저절로 적용된다.
-    expect(isValidWatch({ watchedSeconds: 4, durationSeconds: 15 })).toBe(
-      true,
-    );
+    expect(isValidWatch({ watchedSeconds: 4, durationSeconds: 15 })).toBe(true);
   });
 
   it("절대·상대 기준을 모두 충족 못하면 무효(오클릭)로 판정한다", () => {
@@ -92,16 +90,14 @@ describe("isValidWatch", () => {
   });
 
   it("durationSeconds가 없거나 0이면 상대 기준을 적용할 수 없어 절대 기준만으로 판정한다", () => {
-    expect(isValidWatch({ watchedSeconds: 5, durationSeconds: 0 })).toBe(
-      false,
-    );
+    expect(isValidWatch({ watchedSeconds: 5, durationSeconds: 0 })).toBe(false);
     expect(isValidWatch({ watchedSeconds: 5, durationSeconds: null })).toBe(
       false,
     );
   });
 });
 
-// 시간 가중 다양성 지표 (교수 피드백: 유효/무효 이분법 대신 시청시간 가중 entropy 병행)
+// 시간 가중 다양성 지표 (유효/무효 이분법 대신 시청시간 가중 entropy 병행)
 describe("calculateWeightedDistribution", () => {
   it("빈 배열이면 빈 객체를 반환한다", () => {
     expect(calculateWeightedDistribution([])).toEqual({});

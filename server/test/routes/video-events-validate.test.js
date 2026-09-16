@@ -23,13 +23,16 @@ describe("validateVideoEvent — 잘못된 형태의 body", () => {
     ["배열", []],
     ["문자열", "not-an-object"],
     ["숫자", 42],
-  ])("body가 %s이면 예외 없이 INVALID_FIELD_VALUE(field: body)를 반환한다", (_label, body) => {
-    expect(() => validateVideoEvent(body)).not.toThrow();
-    expect(validateVideoEvent(body)).toEqual({
-      code: ERROR_CODES.INVALID_FIELD_VALUE,
-      field: "body",
-    });
-  });
+  ])(
+    "body가 %s이면 예외 없이 INVALID_FIELD_VALUE(field: body)를 반환한다",
+    (_label, body) => {
+      expect(() => validateVideoEvent(body)).not.toThrow();
+      expect(validateVideoEvent(body)).toEqual({
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "body",
+      });
+    },
+  );
 });
 
 describe("validateVideoEvent — 필수 필드 (anonymousId/videoId/watchedAt)", () => {
@@ -82,7 +85,9 @@ describe("validateVideoEvent — 필수 필드 (anonymousId/videoId/watchedAt)",
 
 describe("validateVideoEvent — watchedAt 형식", () => {
   it("파싱 불가능한 문자열이면 INVALID_FIELD_VALUE(watchedAt)를 반환한다", () => {
-    expect(validateVideoEvent(basePayload({ watchedAt: "not-a-date" }))).toEqual({
+    expect(
+      validateVideoEvent(basePayload({ watchedAt: "not-a-date" })),
+    ).toEqual({
       code: ERROR_CODES.INVALID_FIELD_VALUE,
       field: "watchedAt",
     });
@@ -90,9 +95,12 @@ describe("validateVideoEvent — watchedAt 형식", () => {
 });
 
 describe("validateVideoEvent — sessionId (옵션 필드, 하위호환)", () => {
-  it.each([undefined, null])("%s이면 통과한다(구버전 확장 하위호환)", (value) => {
-    expect(validateVideoEvent(basePayload({ sessionId: value }))).toBeNull();
-  });
+  it.each([undefined, null])(
+    "%s이면 통과한다(구버전 확장 하위호환)",
+    (value) => {
+      expect(validateVideoEvent(basePayload({ sessionId: value }))).toBeNull();
+    },
+  );
 
   it("빈 문자열이면 거부한다", () => {
     expect(validateVideoEvent(basePayload({ sessionId: "" }))).toEqual({
@@ -121,9 +129,12 @@ describe("validateVideoEvent — sessionId (옵션 필드, 하위호환)", () =>
 });
 
 describe("validateVideoEvent — eventId (옵션 필드, 멱등 키·하위호환)", () => {
-  it.each([undefined, null])("%s이면 통과한다(구버전 확장 하위호환)", (value) => {
-    expect(validateVideoEvent(basePayload({ eventId: value }))).toBeNull();
-  });
+  it.each([undefined, null])(
+    "%s이면 통과한다(구버전 확장 하위호환)",
+    (value) => {
+      expect(validateVideoEvent(basePayload({ eventId: value }))).toBeNull();
+    },
+  );
 
   it("빈 문자열이면 거부한다", () => {
     expect(validateVideoEvent(basePayload({ eventId: "" }))).toEqual({
@@ -147,9 +158,7 @@ describe("validateVideoEvent — eventId (옵션 필드, 멱등 키·하위호�
   });
 
   it("유효한 문자열이면 통과한다", () => {
-    expect(
-      validateVideoEvent(basePayload({ eventId: "evt-abc" })),
-    ).toBeNull();
+    expect(validateVideoEvent(basePayload({ eventId: "evt-abc" }))).toBeNull();
   });
 });
 
@@ -199,9 +208,7 @@ describe("validateVideoEvent — entryPath (옵션 필드, 유입 경로 판별�
   });
 
   it("유효한 문자열이면 통과한다", () => {
-    expect(
-      validateVideoEvent(basePayload({ entryPath: "/watch" })),
-    ).toBeNull();
+    expect(validateVideoEvent(basePayload({ entryPath: "/watch" }))).toBeNull();
   });
 });
 
@@ -228,9 +235,7 @@ describe("validateVideoEvent — navigationTrigger (옵션 필드, 정해진 값
   });
 
   it("문자열이 아니면(숫자) 거부한다", () => {
-    expect(
-      validateVideoEvent(basePayload({ navigationTrigger: 1 })),
-    ).toEqual({
+    expect(validateVideoEvent(basePayload({ navigationTrigger: 1 }))).toEqual({
       code: ERROR_CODES.INVALID_FIELD_VALUE,
       field: "navigationTrigger",
     });
@@ -245,19 +250,22 @@ describe("validateVideoEvent — title (옵션, 검증 대상 아님)", () => {
   });
 });
 
-// PATCH /api/video-events/:eventId 본문 검증 (교수 피드백: 시청시간 원시 데이터)
+// PATCH /api/video-events/:eventId 본문 검증 (시청시간 원시 데이터)
 describe("validateWatchStats — 잘못된 형태의 body", () => {
   it.each([
     ["undefined", undefined],
     ["null", null],
     ["배열", []],
     ["문자열", "not-an-object"],
-  ])("body가 %s이면 INVALID_FIELD_VALUE(field: body)를 반환한다", (_label, body) => {
-    expect(validateWatchStats(body)).toEqual({
-      code: ERROR_CODES.INVALID_FIELD_VALUE,
-      field: "body",
-    });
-  });
+  ])(
+    "body가 %s이면 INVALID_FIELD_VALUE(field: body)를 반환한다",
+    (_label, body) => {
+      expect(validateWatchStats(body)).toEqual({
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "body",
+      });
+    },
+  );
 });
 
 describe("validateWatchStats — 세 필드 모두 선택 항목", () => {

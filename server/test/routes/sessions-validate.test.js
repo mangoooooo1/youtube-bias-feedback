@@ -183,13 +183,16 @@ describe("validateSession — 날짜/숫자 형식", () => {
   });
 });
 
-// 시청시간 원시 데이터(교수 피드백) — videoIds와 병렬 배열
+// 시청시간 원시 데이터 — videoIds와 병렬 배열
 describe("validateSession — watchedSecondsList (옵션 필드, videoIds와 병렬)", () => {
-  it.each([undefined, null])("%s이면 통과한다(구버전 확장 하위호환)", (value) => {
-    expect(
-      validateSession(basePayload({ watchedSecondsList: value })),
-    ).toBeNull();
-  });
+  it.each([undefined, null])(
+    "%s이면 통과한다(구버전 확장 하위호환)",
+    (value) => {
+      expect(
+        validateSession(basePayload({ watchedSecondsList: value })),
+      ).toBeNull();
+    },
+  );
 
   it("videoIds와 길이가 같고 각 값이 0 이상 숫자거나 null이면 통과한다", () => {
     expect(

@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterEach,
+  vi,
+} from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -389,7 +397,11 @@ describe("content.js handleVideoChange — 재진입 경합(연구 무결성 점
   beforeEach(() => {
     vi.useFakeTimers();
     recordVideoCalls = [];
-    documentMock = { referrer: "", title: "YouTube", addEventListener: () => {} };
+    documentMock = {
+      referrer: "",
+      title: "YouTube",
+      addEventListener: () => {},
+    };
     locationMock = { href: "https://www.youtube.com/watch?v=AAAA" };
     handleVideoChange = loadHandleVideoChangeFactory()(
       documentMock,
@@ -541,10 +553,11 @@ describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 �
 // 연구 무결성 점검: /api/video-events 즉시 전송이 fire-and-forget이라 실패해도 조용히
 // 버려지던 문제. 이제 성공 여부를 sent 플래그로 남겨, background.js의 재시도 큐
 // (retryUnsentVideoEvents)가 실패분을 찾아낼 수 있게 한다.
-// 시청시간 원시 데이터(교수 피드백) — video.played(TimeRanges)를 초 단위 합계로 변환하는
+// 시청시간 원시 데이터 video.played(TimeRanges)를 초 단위 합계로 변환하는
 // 순수 함수. 실제 HTMLVideoElement 없이도 TimeRanges와 동일한 인터페이스(length/start/end)의
 // 목 객체로 검증할 수 있다.
-const SUM_PLAYED_RANGES_DECL = /function sumPlayedRanges\(ranges\) \{[\s\S]*?\n\}/;
+const SUM_PLAYED_RANGES_DECL =
+  /function sumPlayedRanges\(ranges\) \{[\s\S]*?\n\}/;
 
 function loadSumPlayedRanges() {
   const raw = readFileSync(CONTENT_PATH, "utf8");
@@ -582,7 +595,14 @@ describe("content.js sumPlayedRanges", () => {
 
   it("여러 구간(일시정지 후 재생 재개)의 길이를 합산한다 — 되감아 다시 본 구간은 겹치는 부분이 TimeRanges 자체에서 병합되므로 중복 가산되지 않는다", () => {
     // 예: 0~10초 시청 후 20초로 건너뛰어 20~45초 시청(브라우저가 두 구간으로 분리해 보고)
-    expect(sumPlayedRanges(fakeTimeRanges([[0, 10], [20, 45]]))).toBe(35);
+    expect(
+      sumPlayedRanges(
+        fakeTimeRanges([
+          [0, 10],
+          [20, 45],
+        ]),
+      ),
+    ).toBe(35);
   });
 });
 
@@ -705,7 +725,7 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
   });
 });
 
-// 시청시간 원시 데이터(교수 피드백) — 다음 영상으로 전환될 때 직전 영상의 시청시간을
+// 시청시간 원시 데이터 — 다음 영상으로 전환될 때 직전 영상의 시청시간을
 // PATCH로 확정 반영하는지 검증한다.
 describe("content.js recordVideo — previousWatchStats로 직전 영상의 시청시간을 확정한다", () => {
   let recordVideoFactory;
