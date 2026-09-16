@@ -252,7 +252,7 @@ describe("content.js classifyNavigationTrigger", () => {
 // recordVideo를 호출하면" 두 writeQueue가 서로를 모른 채 같은 저장소를 놓고 경합해
 // 한쪽의 기록이 사라지는지를 재현한다(연구 무결성 점검 항목 3).
 const RECORD_VIDEO_DECL =
-  /let writeQueue = Promise\.resolve\(\);[\s\S]*?\nfunction recordVideo\(videoId, title, entryHost, entryPath, navigationTrigger\) \{[\s\S]*?\n\}/;
+  /let writeQueue = Promise\.resolve\(\);[\s\S]*?\nfunction recordVideo\(\n {2}videoId,\n {2}title,\n {2}entryHost,\n {2}entryPath,\n {2}navigationTrigger,\n {2}previousWatchStats,\n\) \{[\s\S]*?\n\}/;
 
 // recordVideo는 전역 chrome/fetch/console을 참조한다. 매개변수로 감싸서 넘기면 그 이름들이
 // 지역 바인딩으로 가려지므로, 이 팩토리를 두 번 호출하는 것만으로 "서로 다른 탭 = 서로 다른
@@ -280,8 +280,13 @@ function createSharedStorage(initial = {}) {
   let store = { ...initial };
   return {
     get(keys) {
+      // 실제 chrome.storage.local.get()은 string|string[]|null 세 형태를 모두 받는다.
+      // finalizePreviousWatchStats(content.js)가 videoKey 하나만 문자열로 넘기는
+      // 호출부를 추가하면서 이 세 형태를 모두 지원하도록 맞췄다(storage.test.js의
+      // createChromeStorageMock과 동일한 계약).
+      const keyList = keys == null ? Object.keys(store) : [].concat(keys);
       const out = {};
-      for (const k of keys) {
+      for (const k of keyList) {
         out[k] = store[k] === undefined ? undefined : structuredClone(store[k]);
       }
       return Promise.resolve(out);
@@ -311,8 +316,10 @@ function createControllableStorage(initial = {}) {
         // 돌려주므로 호출자마다 항상 독립된 사본을 받는다(참조 공유가 아님) — 여기서
         // 구조적 복제 없이 store[k]를 그대로 돌려주면, 두 탭이 "같은 객체"를 나눠 갖는
         // 비현실적인 상황이 되어 정작 재현하려는 경합이 숨어버린다.
+        // createSharedStorage와 동일하게 string|string[]|null 세 형태를 모두 지원한다.
+        const keyList = keys == null ? Object.keys(store) : [].concat(keys);
         const out = {};
-        for (const k of keys) {
+        for (const k of keyList) {
           out[k] =
             store[k] === undefined ? undefined : structuredClone(store[k]);
         }
@@ -366,7 +373,7 @@ function loadHandleVideoChangeFactory() {
   }
   const body = blockMatch[0].replace(
     RECORD_VIDEO_DECL,
-    "function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger) { recordVideoCalls.push({ videoId, title, entryHost, entryPath, navigationTrigger }); return Promise.resolve(); }",
+    "function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger, previousWatchStats) { recordVideoCalls.push({ videoId, title, entryHost, entryPath, navigationTrigger, previousWatchStats }); return Promise.resolve(); }",
   );
   return new Function(
     "document",
@@ -473,6 +480,7 @@ describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 �
     expect(storage.dump().lastRecordedVideo).toEqual({
       videoId: "v2",
       sessionId: "s1",
+      eventId: expect.any(String),
     });
   });
 
@@ -533,6 +541,75 @@ describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 �
 // 연구 무결성 점검: /api/video-events 즉시 전송이 fire-and-forget이라 실패해도 조용히
 // 버려지던 문제. 이제 성공 여부를 sent 플래그로 남겨, background.js의 재시도 큐
 // (retryUnsentVideoEvents)가 실패분을 찾아낼 수 있게 한다.
+// 시청시간 원시 데이터(교수 피드백) — video.played(TimeRanges)를 초 단위 합계로 변환하는
+// 순수 함수. 실제 HTMLVideoElement 없이도 TimeRanges와 동일한 인터페이스(length/start/end)의
+// 목 객체로 검증할 수 있다.
+const SUM_PLAYED_RANGES_DECL = /function sumPlayedRanges\(ranges\) \{[\s\S]*?\n\}/;
+
+function loadSumPlayedRanges() {
+  const raw = readFileSync(CONTENT_PATH, "utf8");
+  const match = raw.match(SUM_PLAYED_RANGES_DECL);
+  if (!match) {
+    throw new Error(
+      "sumPlayedRanges 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  return new Function(`${match[0]}\nreturn sumPlayedRanges;`)();
+}
+
+function fakeTimeRanges(pairs) {
+  return {
+    length: pairs.length,
+    start: (i) => pairs[i][0],
+    end: (i) => pairs[i][1],
+  };
+}
+
+describe("content.js sumPlayedRanges", () => {
+  let sumPlayedRanges;
+
+  beforeAll(() => {
+    sumPlayedRanges = loadSumPlayedRanges();
+  });
+
+  it("구간이 없으면 0을 반환한다", () => {
+    expect(sumPlayedRanges(fakeTimeRanges([]))).toBe(0);
+  });
+
+  it("단일 연속 구간의 길이를 반환한다(일시정지 없이 처음부터 30초 재생)", () => {
+    expect(sumPlayedRanges(fakeTimeRanges([[0, 30]]))).toBe(30);
+  });
+
+  it("여러 구간(일시정지 후 재생 재개)의 길이를 합산한다 — 되감아 다시 본 구간은 겹치는 부분이 TimeRanges 자체에서 병합되므로 중복 가산되지 않는다", () => {
+    // 예: 0~10초 시청 후 20초로 건너뛰어 20~45초 시청(브라우저가 두 구간으로 분리해 보고)
+    expect(sumPlayedRanges(fakeTimeRanges([[0, 10], [20, 45]]))).toBe(35);
+  });
+});
+
+// captureWatchStatsSnapshot — watchTracker가 아직 초기화되지 않은 상태(이 함수만 격리
+// 추출한 테스트 환경 포함)에서도 예외 없이 null을 반환하는지가 핵심 회귀 지점이다.
+const CAPTURE_SNAPSHOT_DECL =
+  /function captureWatchStatsSnapshot\(\) \{[\s\S]*?\n\}/;
+
+function loadCaptureWatchStatsSnapshot() {
+  const raw = readFileSync(CONTENT_PATH, "utf8");
+  const match = raw.match(CAPTURE_SNAPSHOT_DECL);
+  if (!match) {
+    throw new Error(
+      "captureWatchStatsSnapshot 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
+    );
+  }
+  return new Function(`${match[0]}\nreturn captureWatchStatsSnapshot;`)();
+}
+
+describe("content.js captureWatchStatsSnapshot", () => {
+  it("watchTracker가 선언조차 안 된 격리 환경에서도 예외 없이 null을 반환한다", () => {
+    const captureWatchStatsSnapshot = loadCaptureWatchStatsSnapshot();
+    expect(() => captureWatchStatsSnapshot()).not.toThrow();
+    expect(captureWatchStatsSnapshot()).toBeNull();
+  });
+});
+
 describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플래그로 남긴다", () => {
   let recordVideoFactory;
 
@@ -625,5 +702,120 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
     const videos = collectVideos(storage.dump(), "s1");
     expect(videos[0].eventId).toEqual(expect.any(String));
     expect(sentBody.eventId).toBe(videos[0].eventId);
+  });
+});
+
+// 시청시간 원시 데이터(교수 피드백) — 다음 영상으로 전환될 때 직전 영상의 시청시간을
+// PATCH로 확정 반영하는지 검증한다.
+describe("content.js recordVideo — previousWatchStats로 직전 영상의 시청시간을 확정한다", () => {
+  let recordVideoFactory;
+
+  beforeAll(() => {
+    recordVideoFactory = loadRecordVideoFactory();
+  });
+
+  function makeTabWithFetch(sharedStorage, fetchMock) {
+    const chromeMock = {
+      runtime: { id: "fake-extension-id" },
+      storage: { local: sharedStorage },
+    };
+    const consoleMock = { log: () => {}, warn: () => {} };
+    return recordVideoFactory(chromeMock, fetchMock, consoleMock);
+  }
+
+  it("직전 영상의 eventId로 PATCH /api/video-events/:eventId를 호출하고, 성공하면 로컬 기록을 watchStatsSent:true로 남긴다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    const patchCalls = [];
+    const recordVideo = makeTabWithFetch(storage, (url, options) => {
+      if (options?.method === "PATCH") {
+        patchCalls.push({ url: String(url), body: JSON.parse(options.body) });
+        return Promise.resolve({ ok: true });
+      }
+      return Promise.resolve({ ok: true }); // POST(신규 영상 기록)
+    });
+
+    // 영상 A 기록(previousWatchStats 없음 — 아직 직전 영상이 없음)
+    await recordVideo("vA", "영상A");
+    await flushMicrotasks();
+    const eventIdA = collectVideos(storage.dump(), "s1")[0].eventId;
+
+    // 영상 B로 전환하며 영상 A의 시청시간 스냅샷을 함께 전달
+    await recordVideo("vB", "영상B", null, null, null, {
+      watchedSeconds: 55.5,
+      playbackRate: 1,
+      wasBackgrounded: 0,
+    });
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(patchCalls).toHaveLength(1);
+    expect(patchCalls[0].url).toBe(
+      `http://localhost:3000/api/video-events/${eventIdA}`,
+    );
+    expect(patchCalls[0].body).toMatchObject({
+      anonymousId: "a1",
+      watchedSeconds: 55.5,
+      playbackRate: 1,
+      wasBackgrounded: 0,
+    });
+
+    const videoA = collectVideos(storage.dump(), "s1").find(
+      (v) => v.eventId === eventIdA,
+    );
+    expect(videoA.watchStatsSent).toBe(true);
+    expect(videoA.watchedSeconds).toBe(55.5);
+  });
+
+  it("PATCH가 실패하면 watchStatsSent:false로 남아 재시도 큐 대상이 된다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    const recordVideo = makeTabWithFetch(storage, (_url, options) =>
+      options?.method === "PATCH"
+        ? Promise.resolve({ ok: false, status: 500 })
+        : Promise.resolve({ ok: true }),
+    );
+
+    await recordVideo("vA", "영상A");
+    await flushMicrotasks();
+    const eventIdA = collectVideos(storage.dump(), "s1")[0].eventId;
+
+    await recordVideo("vB", "영상B", null, null, null, {
+      watchedSeconds: 20,
+      playbackRate: 1,
+      wasBackgrounded: 0,
+    });
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    const videoA = collectVideos(storage.dump(), "s1").find(
+      (v) => v.eventId === eventIdA,
+    );
+    expect(videoA.watchStatsSent).toBe(false);
+    expect(videoA.watchedSeconds).toBe(20);
+  });
+
+  it("previousWatchStats가 없으면(첫 영상 등) PATCH를 시도하지 않는다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    const patchCalls = [];
+    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+      if (options?.method === "PATCH") patchCalls.push(1);
+      return Promise.resolve({ ok: true });
+    });
+
+    await recordVideo("vA", "영상A");
+    await flushMicrotasks();
+
+    expect(patchCalls).toHaveLength(0);
   });
 });
