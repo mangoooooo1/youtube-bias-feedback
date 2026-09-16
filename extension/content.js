@@ -341,18 +341,15 @@ function recordVideo(
         })
           .then((response) => {
             if (response.ok && chrome.runtime?.id) {
-              chrome.storage.local.set({
-                [videoKey]: {
-                  videoId,
-                  title,
-                  watchedAt: now,
-                  sent: true,
-                  eventId,
-                  entryHost,
-                  entryPath,
-                  navigationTrigger,
-                },
-              });
+              // 클로저에 담긴 옛 값으로 키 전체를 재작성하면 안 된다.
+              // 이 videoKey는 이 영상이 "직전 영상"이 될 때 finalizePreviousWatchStats가 시청시간을
+              // 병합하는 대상과 같다. 이 POST가 그 병합보다 늦게 끝나면(느린 네트워크 + 빠른 다음 영상 전환)
+              // 전체 재작성이 이미 저장된 watchedSeconds/watchStatsSent를 지워버린다.
+              // applyWatchStatsPatch로 최신 값을 다시 읽어 sent만 병합한다.
+              applyWatchStatsPatch(
+                { sessionId: session.sessionId, eventId },
+                { sent: true },
+              );
             }
           })
           .catch(() => {});

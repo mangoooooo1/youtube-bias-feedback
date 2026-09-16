@@ -712,7 +712,10 @@ function loadPagehideHandlerFactory() {
 describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코드리뷰 회귀: 다른 탭의 공유 lastRecordedVideo 오염 방지)", () => {
   function makeEnv(sharedStorage, fetchMock) {
     return {
-      chrome: { runtime: { id: "fake-extension-id" }, storage: { local: sharedStorage } },
+      chrome: {
+        runtime: { id: "fake-extension-id" },
+        storage: { local: sharedStorage },
+      },
       fetch: fetchMock,
       window: {},
     };
@@ -731,7 +734,11 @@ describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코
         sessionId: "s-other",
         eventId: "evt-other",
       },
-      "video__s1__evt-mine": { videoId: "vMine", eventId: "evt-mine", sent: true },
+      "video__s1__evt-mine": {
+        videoId: "vMine",
+        eventId: "evt-mine",
+        sent: true,
+      },
       "video__s-other__evt-other": {
         videoId: "other-tab-video",
         eventId: "evt-other",
@@ -793,10 +800,20 @@ describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코
       return Promise.resolve({ ok: true });
     };
     const env = makeEnv(storage, fetchMock);
-    const watchTracker = { lastWatchedSeconds: 5, lastPlaybackRate: 1, sawHidden: false };
+    const watchTracker = {
+      lastWatchedSeconds: 5,
+      lastPlaybackRate: 1,
+      sawHidden: false,
+    };
 
     const factory = loadPagehideHandlerFactory();
-    const handler = factory(env.chrome, env.fetch, env.window, watchTracker, null);
+    const handler = factory(
+      env.chrome,
+      env.fetch,
+      env.window,
+      watchTracker,
+      null,
+    );
 
     handler();
     await flushMicrotasks();
@@ -1234,5 +1251,69 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
     await flushMicrotasks();
 
     expect(patchCalls).toHaveLength(0);
+  });
+
+  // 직전 영상(A)의 POST가 아직 응답을 못 받은 상태에서,
+  // 다음 영상(B)으로 전환하며 A의 시청시간 확정(PATCH 경로, applyWatchStatsPatch)이
+  // 먼저 끝나버리면 그 뒤 뒤늦게 도착한 A의 POST 성공 콜백이 옛 클로저 값으로
+  // videoKey 전체를 재작성해 방금 병합된 watchedSeconds/watchStatsSent를 지워버리는지
+  // 확인한다. 이 테스트는 POST 응답을 의도적으로 지연시켜(deferred) 그 순서를
+  // 결정론적으로 재현한다.
+  it("직전 영상의 POST 응답이 늦게 도착해도, 먼저 병합된 시청시간을 덮어쓰지 않는다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    let resolveVideoAPost;
+    const videoAPostPromise = new Promise((resolve) => {
+      resolveVideoAPost = () => resolve({ ok: true });
+    });
+    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+      if (options?.method === "PATCH") return Promise.resolve({ ok: true });
+      const body = JSON.parse(options.body);
+      if (body.videoId === "vA") return videoAPostPromise; // 아직 응답 안 옴
+      return Promise.resolve({ ok: true }); // vB의 POST 등
+    });
+
+    // 영상 A 기록 — POST가 발사되지만 위 deferred promise 때문에 아직 끝나지 않는다.
+    await recordVideo("vA", "영상A");
+    await flushMicrotasks();
+    const eventIdA = collectVideos(storage.dump(), "s1")[0].eventId;
+    expect(collectVideos(storage.dump(), "s1")[0].sent).toBe(false); // 아직 미확정
+
+    // 영상 B로 전환 — A의 시청시간 확정(merge + PATCH)이 A의 POST보다 먼저 끝난다.
+    await recordVideo(
+      "vB",
+      "영상B",
+      null,
+      null,
+      null,
+      { watchedSeconds: 88, playbackRate: 1, wasBackgrounded: 0 },
+      { sessionId: "s1", eventId: eventIdA },
+    );
+    await flushMicrotasks();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    // 이 시점에 A의 시청시간은 이미 병합·확정돼 있어야 한다.
+    let videoA = collectVideos(storage.dump(), "s1").find(
+      (v) => v.eventId === eventIdA,
+    );
+    expect(videoA.watchedSeconds).toBe(88);
+    expect(videoA.watchStatsSent).toBe(true);
+
+    // 이제야 A의 POST가 뒤늦게 응답한다 — 이 시점의 성공 콜백이 병합된 값을
+    // 지우면 안 된다.
+    resolveVideoAPost();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    videoA = collectVideos(storage.dump(), "s1").find(
+      (v) => v.eventId === eventIdA,
+    );
+    expect(videoA.sent).toBe(true); // POST 성공 반영은 여전히 일어나야 한다
+    expect(videoA.watchedSeconds).toBe(88); // 하지만 지워지면 안 된다
+    expect(videoA.watchStatsSent).toBe(true);
   });
 });
