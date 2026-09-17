@@ -40,6 +40,20 @@ def load_data(data_dir: str):
     participants = pd.read_csv(os.path.join(data_dir, "participants.csv"))
     video_events = pd.read_csv(os.path.join(data_dir, "video_events.csv"))
     survey = pd.read_csv(os.path.join(data_dir, "survey_responses.csv"))
+
+    # pd.read_csv()는 빈 셀을 NaN(float)으로 읽지만, metrics.py로 포팅한 프로덕션 로직은
+    # `watched_seconds is None`/`category_id is not None`처럼 파이썬 None만 결측으로
+    # 인식한다. NaN은 모든 비교에서 False가 되므로 is_valid_watch가 "계측 실패 시
+    # 보수적으로 유효 처리"하는 프로덕션 동작과 반대로(무효 처리) 판정하고,
+    # calculate_distribution은 NaN 카테고리를 그대로 분포에 포함시켜 버린다. 지금
+    # 번들된 생성기는 이 필드들을 항상 채워 드러나지 않지만, --data-dir는 임의의
+    # CSV를 받을 수 있으므로 입력 경계에서 명시적으로 None으로 정규화한다.
+    # .where()만 쓰면 float64 컬럼은 dtype을 유지하려 해 None을 다시 NaN으로 되돌려버린다
+    for col in ("watchedSeconds", "durationSeconds", "categoryId"):
+        video_events[col] = (
+            video_events[col].astype(object).where(video_events[col].notna(), None)
+        )
+
     return participants, video_events, survey
 
 
