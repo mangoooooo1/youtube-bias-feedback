@@ -27,6 +27,29 @@ const { db, initializeDB } = require("../db");
 const round3 = (x) => Math.round(x * 1000) / 1000;
 const GROUPS = { EXP: ["EXP", "TEST-EXP"], CON: ["CON", "TEST-CON"] };
 
+/**
+ * CLI 인자로 받은 topN을 검증한다. Number(raw) || 3처럼 느슨하게 받으면 -1(Array.slice의
+ * 음수 인덱스 규칙 때문에 topChange/bottomChange가 topN과 다른 개수로 조용히 나옴),
+ * 2.5(정수가 아닌 값은 slice에서 자동 절삭돼 topN과 실제 후보 수가 어긋남), 0(falsy라
+ * 의도치 않게 기본값 3으로 넘어감), Infinity(JSON.stringify 시 null로 직렬화되어 보고서에
+ * topN이 사라짐) 모두를 그대로 통과시켜 버린다 — 이 스크립트는 연구자가 면담 대상자를
+ * 뽑는 근거 자료라 "그럴듯하지만 틀린 개수"가 조용히 나오면 안 된다.
+ * @param {string|undefined} raw - process.argv[2]
+ * @returns {number} 검증된 topN
+ */
+function parseTopN(raw) {
+  if (raw === undefined) return 3; // 인자 생략 시 기본값(면담 가이드의 "상위 2~3명" 상한)
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) {
+    console.error(
+      `[interview-candidates] topN은 1 이상의 정수여야 합니다(받은 값: ${JSON.stringify(raw)}). ` +
+        `예: node server/scripts/select-interview-candidates.js 3`,
+    );
+    process.exit(1);
+  }
+  return n;
+}
+
 function buildGroupCandidates(selectPeriods, groupCodes, topN) {
   const participants = db
     .prepare(
@@ -86,7 +109,7 @@ function buildGroupCandidates(selectPeriods, groupCodes, topN) {
 }
 
 function main() {
-  const topN = Number(process.argv[2]) || 3;
+  const topN = parseTopN(process.argv[2]);
   initializeDB();
 
   const selectPeriods = db.prepare(
