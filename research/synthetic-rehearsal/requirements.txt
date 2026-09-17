@@ -1,7 +1,22 @@
 # python -m pip install -r requirements.txt
-# Python 3.11 기준. pingouin이 나머지(numpy/pandas/scipy/statsmodels/matplotlib/tabulate)를
-# 의존성으로 함께 끌어오므로 pingouin만 설치해도 대부분 충족되지만, 재현성을 위해
-# 실제 이 리허설을 실행·검증한 버전을 전부 고정한다.
+# Python 3.11.
+#
+# ASCII-only file on purpose: pip's requirements-file parser falls back to the
+# OS locale encoding when it can't detect one (no BOM, no PEP 263 coding
+# declaration), and on Korean-locale Windows that's cp949, which cannot
+# decode UTF-8 Korean text and makes `pip install -r requirements.txt` fail
+# with UnicodeDecodeError. Keep the Korean explanation in README.md instead;
+# this file must stay pure ASCII.
+#
+# Direct dependencies: numpy, pandas, scipy, statsmodels, pingouin,
+# matplotlib, tabulate. Everything below that line is a transitive
+# dependency pulled in by those seven, pinned too so that fig.savefig(...png)
+# output (matplotlib uses Pillow internally for PNG encoding) is reproducible
+# and not left to whatever version the resolver happens to pick.
+#
+# This list is the exact `pip freeze` of a venv where only the 7 direct
+# dependencies above were installed, so it is this rehearsal's precise
+# dependency closure - no unrelated packages from elsewhere on the machine.
 numpy==1.26.4
 pandas==3.0.1
 scipy==1.17.1
@@ -9,3 +24,28 @@ statsmodels==0.15.0
 pingouin==0.6.1
 matplotlib==3.11.2
 tabulate==0.10.0
+
+# --- transitive dependencies pulled in by the 7 packages above ---
+cloudpickle==3.1.2
+contourpy==1.3.3
+cycler==0.12.1
+fonttools==4.65.0
+formulaic==1.2.2
+interface_meta==2.0.1
+joblib==1.6.0
+kiwisolver==1.5.1
+narwhals==2.26.0
+packaging==26.3
+pandas-flavor==0.8.1
+patsy==1.0.3
+pillow==12.3.0
+pyparsing==3.3.2
+python-dateutil==2.9.0.post0
+scikit-learn==1.9.1
+seaborn==0.13.2
+six==1.17.0
+threadpoolctl==3.7.0
+typing_extensions==4.16.0
+tzdata==2026.4
+wrapt==2.4.1
+xarray==2026.7.0
