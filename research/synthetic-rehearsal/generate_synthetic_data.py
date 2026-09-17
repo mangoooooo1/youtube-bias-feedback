@@ -122,8 +122,13 @@ def make_survey_responses(rng, participants: pd.DataFrame, scenario: str) -> pd.
     rows = []
     for _, p in participants.iterrows():
         for construct, n_items in CONSTRUCTS.items():
+            # 참여자×구성개념당 한 번만 뽑는다.
+            # 같은 사람의 사전·사후 잠재점수는 공통 개인 성향을 공유해야 반복측정(개인 내 상관)이 성립한다. 
+            # timepoint 루프 안에서 매번 새로 뽑으면 사전·사후가 서로 다른 사람처럼 독립적이 돼
+            # 오차분산이 부풀고, 아래서 post에만 더하는 효과크기(d≈0.5)가 희석된다.
+            baseline_true_score = rng.normal(4.0, 0.8)  # 7점 척도 중간값 근처 개인 성향
             for timepoint in ("pre", "post"):
-                true_score = rng.normal(4.0, 0.8)  # 7점 척도 중간값 근처 개인 성향
+                true_score = baseline_true_score
                 if (
                     scenario == "effect"
                     and construct in AFFECTED_CONSTRUCTS
