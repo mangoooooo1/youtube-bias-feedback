@@ -217,6 +217,12 @@ function execSchema() {
       videoCount           INTEGER,
       categoryDistribution TEXT,              -- JSON 문자열 (sessions와 동일 포맷)
       entropy              REAL,
+      -- 기간(주차) 단위 시간 가중 보조 지표 — sessions.weightedEntropy와 동일한 계산(오클릭 필터 + 시청시간 가중)을 기간 전체 video_events에 대해 수행한다. 
+      -- 2차 가설("추천 소비 내 다양성의 주 단위 추세")의 결과변수로 쓰인다. 
+      -- 1차 지표(entropy, 영상 개수 가중)는 그대로 두고 병행 저장만 한다.
+      weightedEntropy              REAL,      -- 가중 데이터가 전혀 없으면 NULL(sessions와 동일 규칙)
+      weightedCategoryDistribution TEXT,      -- 위와 동일 조건에서 NULL
+      validVideoCount              INTEGER,   -- isValidWatch 통과 영상 수(기간 전체) — 소표본 왜곡 판별용
       review               TEXT,              -- 참여자에게 노출된 리뷰 문장
       reviewTopic          TEXT,
       source               TEXT,              -- 'llm' | 'fallback'
