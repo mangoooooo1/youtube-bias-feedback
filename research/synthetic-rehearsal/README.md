@@ -25,6 +25,8 @@ Cronbach's alpha 같은 확증적 통계는 애초에 이 저장소가 아니라
 ## 사용법
 
 ```bash
+cd research/synthetic-rehearsal  # 아래 경로는 모두 이 디렉터리 기준 상대 경로다
+
 python -m pip install -r requirements.txt
 
 # 1) 합성 데이터 생성 (두 시나리오)
