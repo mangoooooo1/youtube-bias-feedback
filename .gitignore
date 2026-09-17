@@ -133,6 +133,10 @@ dist
 # 연구용 프로파일링/검증 스크립트의 출력(집계 수치라도 참여자 데이터 기반이라 커밋 안 함)
 server/scripts/output/
 
+# 합성 데이터 리허설 산출물 
+research/synthetic-rehearsal/output/
+research/synthetic-rehearsal/__pycache__/
+
 # 참여 코드 발급 명단(접두사↔그룹 대응표) — 절대 커밋 금지
 codes.csv
 
