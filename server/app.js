@@ -1,3 +1,8 @@
+// dd-trace는 express 등 다른 모듈을 require-hook으로 패치해 계측하므로, 그 모듈들보다
+// 먼저 초기화돼야 한다. 이 파일의 첫 줄이어야 하는 이유. 로컬 Agent로만 보내고 API Key는 필요 없다.
+// 기본값은 request body·query string·DB 쿼리를 캡처하지 않는다.
+require("dd-trace").init({ service: "youtube-bias-server", env: "production" });
+
 require("dotenv").config();
 
 const express = require("express");
