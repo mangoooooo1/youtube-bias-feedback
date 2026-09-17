@@ -246,6 +246,52 @@ describe("generate-period-reviews.js — run()", () => {
     expect(row.validVideoCount).toBe(1);
   });
 
+  it("title이 없는 video_events도 가중 지표(validVideoCount/weightedEntropy) 계산에는 포함한다", async () => {
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run("no-title-user", INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+    ).run(
+      "no-title-user",
+      JSON.stringify({ 음악: 1 }),
+      1,
+      "2026-06-01T10:00:00+09:00",
+    );
+    db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, ?)",
+    ).run("vid-no-title", "10", 600);
+    // title 추출이 실패한(또는 아직 안 붙은) 상황을 재현 — title은 NULL이지만 watchedSeconds는 있다.
+    db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, ?, NULL, ?, ?)",
+    ).run("no-title-user", "vid-no-title", "2026-06-01T10:00:00+09:00", 300);
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":"문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await run(db, "fake-key");
+
+    const row = db
+      .prepare(
+        "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+      )
+      .get("no-title-user");
+    // title이 없다는 이유로 가중 계산에서 제외되면 안 된다 — videoId/watchedSeconds만으로 계산 가능.
+    expect(row.validVideoCount).toBe(1);
+    expect(row.weightedEntropy).toBe(0);
+    expect(JSON.parse(row.weightedCategoryDistribution)).toEqual({ 음악: 1 });
+  });
+
   it("밀린 여러 기간을 오래된 순서로 순차 처리한다 (동시 호출 없음)", async () => {
     db.prepare(
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",

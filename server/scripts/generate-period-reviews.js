@@ -131,7 +131,11 @@ async function processPeriod({
       period.periodEnd,
     ),
   );
-  const titlesInRange = eventsInRange.map((v) => v.title);
+  // Gemini 프롬프트에는 title이 있는 이벤트만 넘긴다.
+  // computeWeightedPeriodDistribution은 아래에서 eventsInRange 전체(title 유무와 무관)로 별도 계산한다.
+  const titlesInRange = eventsInRange
+    .map((v) => v.title)
+    .filter((t) => t != null);
 
   const { categoryDistribution, entropy, videoCount } =
     mergeSessionDistributions(sessionsInRange);
@@ -227,9 +231,13 @@ async function run(db, apiKey) {
     SELECT categoryDistribution, videoCount, endTime FROM sessions
     WHERE anonymousId = ? AND endTime IS NOT NULL AND categoryDistribution IS NOT NULL
   `);
+  // title IS NOT NULL로 거르지 않는다.
+  // computeWeightedPeriodDistribution(가중 엔트로피)은 title 없이도 videoId/watchedSeconds만으로 계산 가능한데,
+  // 여기서 title 없는 이벤트를 미리 제외하면 실제로는 유효한 시청인데도 validVideoCount·가중 분포·가중 엔트로피가
+  // 과소 산정된다. title 필터는 Gemini 프롬프트용 titlesInRange를 만들 때만 적용한다.
   const selectVideoEvents = db.prepare(`
     SELECT videoId, title, watchedAt, watchedSeconds FROM video_events
-    WHERE anonymousId = ? AND title IS NOT NULL
+    WHERE anonymousId = ?
     ORDER BY watchedAt ASC
   `);
   const selectExistingPeriodReviews = db.prepare(`
