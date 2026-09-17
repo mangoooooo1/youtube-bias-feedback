@@ -1,4 +1,15 @@
+// dotenv는 dd-trace가 계측할 대상(express 등)이 아니라 순서 무관
+// NODE_ENV를 dd-trace의 env 태그에 반영하려면 dd-trace.init()보다 먼저 .env를 읽어야 한다.
 require("dotenv").config();
+
+// dd-trace는 express 등 다른 모듈을 require-hook으로 패치해 계측하므로, 그 모듈들보다
+// 먼저 초기화돼야 한다. 로컬 Agent로만 보내고 API Key는 필요 없다. 기본값은 request
+// body·query string·DB 쿼리를 캡처하지 않는다.
+// env는 NODE_ENV를 그대로 재사용해 로컬 개발 트레이스가 production으로 잘못 찍히지 않게 한다.
+require("dd-trace").init({
+  service: "youtube-bias-server",
+  env: process.env.NODE_ENV || "development",
+});
 
 const express = require("express");
 const cors = require("cors");
