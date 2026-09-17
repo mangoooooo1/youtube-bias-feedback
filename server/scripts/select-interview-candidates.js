@@ -1,5 +1,5 @@
 /**
- * 면담 대상자 선정 지원 — 베이스라인 대비 개입기 엔트로피 변화량 기준 목적표집 (읽기 전용)
+ * 면담 대상자 선정 지원 — 베이스라인 대비 개입기 엔트로피 변화량 기준 목적표집
  *
  * "ViewLens 연구 설문지·면담 질문지 최종본"(2026-08-05) 면담 진행 안내: "무작위가 아니라,
  * 베이스라인 대비 개입기 엔트로피 변화량이 큰 상위 2~3명과 변화가 거의 없었던 하위 2~3명을
@@ -43,7 +43,12 @@ function buildGroupCandidates(selectPeriods, groupCodes, topN) {
     const last = interventionPeriods[interventionPeriods.length - 1];
     // 개입기가 아직 한 구간도 끝나지 않았거나 entropy가 null(예: 그 기간에 시청 기록 없음)이면
     // 변화량을 정의할 수 없어 후보에서 제외한다 — 연구 진행 중에는 당연히 발생할 수 있는 상태다.
-    if (!baseline || !last || baseline.entropy == null || last.entropy == null) {
+    if (
+      !baseline ||
+      !last ||
+      baseline.entropy == null ||
+      last.entropy == null
+    ) {
       continue;
     }
     rows.push({

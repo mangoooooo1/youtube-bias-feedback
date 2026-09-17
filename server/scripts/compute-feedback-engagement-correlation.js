@@ -2,17 +2,21 @@
  * 피드백 열람 횟수와 다양성 변화량의 관계 — 탐색적 분석
  *
  * "피드백 열람 횟수와 변화량의 관계(열람을 많이 한 참여자일수록 변화가 큰지)"를 확인한다.
- * 실험군(EXP/TEST-EXP)만 대상으로 한다 — 대조군은 연구 종료 전까지 피드백을 받지 않으므로
+ * 실험군(EXP/TEST-EXP)만 대상으로 한다. 대조군은 연구 종료 전까지 피드백을 받지 않으므로
  * "열람 횟수"라는 변수 자체가 존재하지 않는다.
  *
  * 변화량은 참여자별 베이스라인 기간(period_reviews.isBaseline=1) 대비 가장 마지막으로
  * 완료된 개입기 기간의 entropy/weightedEntropy 차이로 정의한다. weightedEntropy는
- * 오클릭 필터 + 시청시간 가중이 적용된 2차 가설용 지표(feedback 2·1 참고)이므로 둘 다 함께
+ * 오클릭 필터 + 시청시간 가중이 적용된 2차 가설용 지표이므로 둘 다 함께
  * 보고해 1차 지표(entropy)만으로 내린 결론과 갈리는지 대조할 수 있게 한다.
  *
  * 새 데이터 수집이나 본실험 코드 변경 없이 이미 저장된 sessions.feedbackViewedAt과
  * period_reviews만 읽는다. 참여자 표본이 적을 때(파일럿 단계) 상관계수가 불안정할 수 있으므로
  * n을 항상 함께 보고한다.
+ *
+ * viewCount는 lastIntervention.periodEnd 이전(그날 포함) 열람만 센다 — 그 뒤에 발생한 열람을
+ * 포함하면 아직 entropyChange에 반영되지 않은 미래 시점의 열람이 상관계수에 섞여 시간 순서가
+ * 어긋난다(예측변수가 결과변수 측정 구간 이후에 일어난 사건을 포함하게 됨).
  *
  * 사용: node server/scripts/compute-feedback-engagement-correlation.js
  */
@@ -22,6 +26,7 @@ const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { db, initializeDB } = require("../db");
+const { kstDateStr } = require("../pipeline/period-boundaries");
 
 const round3 = (x) => Math.round(x * 1000) / 1000;
 
@@ -54,11 +59,13 @@ function main() {
       `SELECT anonymousId FROM participants WHERE group_code IN ('EXP', 'TEST-EXP')`,
     )
     .all();
-  const selectViewCount = db.prepare(
-    `SELECT COUNT(*) AS n FROM sessions WHERE anonymousId = ? AND feedbackViewedAt IS NOT NULL`,
+  // 집계 COUNT가 아니라 개별 시각을 가져온다
+  // lastIntervention.periodEnd 이전 열람만 세려면 JS 쪽에서 날짜 비교가 필요하다.
+  const selectViewedAt = db.prepare(
+    `SELECT feedbackViewedAt FROM sessions WHERE anonymousId = ? AND feedbackViewedAt IS NOT NULL`,
   );
   const selectPeriods = db.prepare(
-    `SELECT periodIndex, isBaseline, entropy, weightedEntropy FROM period_reviews
+    `SELECT periodIndex, periodEnd, isBaseline, entropy, weightedEntropy FROM period_reviews
      WHERE anonymousId = ? ORDER BY periodIndex ASC`,
   );
 
@@ -77,7 +84,14 @@ function main() {
       continue;
     }
 
-    const viewCount = selectViewCount.get(p.anonymousId).n;
+    // viewCount는 lastIntervention.periodEnd 이전(그날 포함) 열람만 센다.
+    const viewCount = selectViewedAt
+      .all(p.anonymousId)
+      .filter(
+        (r) =>
+          kstDateStr(new Date(r.feedbackViewedAt)) <=
+          lastIntervention.periodEnd,
+      ).length;
     const entropyChange =
       lastIntervention.entropy != null && baseline.entropy != null
         ? round3(lastIntervention.entropy - baseline.entropy)
