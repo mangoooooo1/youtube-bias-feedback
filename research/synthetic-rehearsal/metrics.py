@@ -16,6 +16,14 @@ MIN_ABSOLUTE_WATCH_SECONDS = 30
 MIN_RELATIVE_WATCH_RATIO = 0.25
 
 
+def _js_round(x: float) -> float:
+    """JS Math.round와 동일한 반올림(항상 반올림, 0.5는 올림).
+    이 리허설의 존재 이유(프로덕션 JS와 대조 검증)를 위해 세 지표 계산 모두 이 함수로 통일한다.
+    입력은 전부 비음수(개수·시청시간 기반 비율, entropy)라 음수 케이스는 다루지 않는다.
+    """
+    return math.floor(x + 0.5)
+
+
 def is_valid_watch(watched_seconds, duration_seconds) -> bool:
     """server/pipeline/category-diversity.js isValidWatch 포팅."""
     if watched_seconds is None:
@@ -36,7 +44,7 @@ def calculate_distribution(category_ids: list) -> dict:
     for cid in valid_ids:
         counts[cid] = counts.get(cid, 0) + 1
     total = len(valid_ids)
-    return {name: round((count / total) * 1000) / 1000 for name, count in counts.items()}
+    return {name: _js_round((count / total) * 1000) / 1000 for name, count in counts.items()}
 
 
 def calculate_weighted_distribution(entries: list) -> dict:
@@ -63,7 +71,7 @@ def calculate_weighted_distribution(entries: list) -> dict:
     total_normalized = sum(weight_by_name.values())
 
     return {
-        name: round((w / total_normalized) * 1000) / 1000
+        name: _js_round((w / total_normalized) * 1000) / 1000
         for name, w in weight_by_name.items()
     }
 
@@ -74,4 +82,4 @@ def calculate_entropy(distribution: dict) -> float:
     if not proportions:
         return 0.0
     h = -sum(p * math.log2(p) for p in proportions if p > 0)
-    return round(h * 100) / 100 or 0.0
+    return _js_round(h * 100) / 100 or 0.0
