@@ -51,25 +51,37 @@ function buildGroupCandidates(selectPeriods, groupCodes, topN) {
     ) {
       continue;
     }
+    // 정렬은 반올림 전 원시 차이(rawEntropyChange)로 한다.
+    // round3된 표시값으로 정렬하면 실제 차이가 반올림 단위보다
+    // 작은 참여자들의 순서가 값이 아니라 우연한 DB 조회 순서로 정해질 수 있다.
+    const rawEntropyChange = last.entropy - baseline.entropy;
+    const rawWeightedEntropyChange =
+      baseline.weightedEntropy != null && last.weightedEntropy != null
+        ? last.weightedEntropy - baseline.weightedEntropy
+        : null;
     rows.push({
       anonymousId: p.anonymousId,
-      entropyChange: round3(last.entropy - baseline.entropy),
+      rawEntropyChange,
+      entropyChange: round3(rawEntropyChange),
       weightedEntropyChange:
-        baseline.weightedEntropy != null && last.weightedEntropy != null
-          ? round3(last.weightedEntropy - baseline.weightedEntropy)
+        rawWeightedEntropyChange != null
+          ? round3(rawWeightedEntropyChange)
           : null,
       lastInterventionPeriodIndex: last.periodIndex,
     });
   }
 
-  rows.sort((a, b) => b.entropyChange - a.entropyChange);
+  rows.sort((a, b) => b.rawEntropyChange - a.rawEntropyChange);
+
+  // rawEntropyChange는 정렬 전용 내부값이라 최종 출력에는 반올림된 entropyChange만 남긴다.
+  const toPublic = ({ rawEntropyChange: _raw, ...rest }) => rest;
 
   return {
     eligibleCount: rows.length,
     // 표본이 topN*2보다 적으면 상위/하위 구간이 겹칠 수 있다 — 연구자가 직접 확인해야 함.
-    topChange: rows.slice(0, topN),
-    bottomChange: rows.slice(-topN).reverse(),
-    all: rows,
+    topChange: rows.slice(0, topN).map(toPublic),
+    bottomChange: rows.slice(-topN).reverse().map(toPublic),
+    all: rows.map(toPublic),
   };
 }
 
