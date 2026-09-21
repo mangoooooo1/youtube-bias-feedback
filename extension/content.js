@@ -22,6 +22,19 @@ function extractVideoId(url) {
   }
 }
 
+/**
+ * URL이 유튜브 쇼츠(/shorts/) 형식인지 판별한다.
+ * @param {string} url - 판별할 URL
+ * @returns {boolean} /shorts/ 경로면 true
+ */
+function isShortsUrl(url) {
+  try {
+    return new URL(url).pathname.startsWith("/shorts/");
+  } catch {
+    return false;
+  }
+}
+
 // server/routes/video-events-classify.js의 YOUTUBE_HOSTS와 동일
 // 런타임이 달라 모듈 공유가 안 돼 중복 정의(바뀌면 양쪽 다 갱신).
 const YOUTUBE_HOSTS = new Set([
@@ -248,6 +261,7 @@ async function finalizePreviousWatchStats(target, stats) {
  * @param {string|null} entryHost - 직전 페이지 도메인
  * @param {string|null} entryPath - 직전 페이지 경로(유튜브 내부일 때만)
  * @param {"ended"|"interaction"|null} navigationTrigger - 전환 원인 추정값
+ * @param {boolean} isShorts - 이 영상이 /shorts/ URL로 시청됐는지
  * @param {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1}|null} previousWatchStats - 직전 영상의 시청시간 스냅샷
  * @param {{sessionId: string, eventId: string}|null} previousVideoIdentity - captureTrackedVideoIdentity 결과(이 탭 메모리 기준)
  * @returns {Promise<void>}
@@ -258,6 +272,7 @@ function recordVideo(
   entryHost,
   entryPath,
   navigationTrigger,
+  isShorts,
   previousWatchStats,
   previousVideoIdentity,
 ) {
@@ -334,6 +349,7 @@ function recordVideo(
           entryHost,
           entryPath,
           navigationTrigger,
+          isShortsUrl: isShorts ? 1 : 0,
         },
       });
       console.log("[content] recorded:", { videoId, title });
@@ -354,6 +370,7 @@ function recordVideo(
             entryHost,
             entryPath,
             navigationTrigger,
+            isShortsUrl: isShorts ? 1 : 0,
           }),
         })
           .then((response) => {
@@ -475,6 +492,7 @@ async function handleVideoChange() {
   // 덮어쓰기 전에 먼저 읽어야 "이 영상 직전 페이지"를 알 수 있다.
   const { entryHost, entryPath } = parseEntryLocation(previousLocationHref);
   const navigationTrigger = classifyNavigationTrigger(Date.now());
+  const isShorts = isShortsUrl(location.href);
   previousLocationHref = location.href;
 
   lastVideoId = videoId;
@@ -503,6 +521,7 @@ async function handleVideoChange() {
     entryHost,
     entryPath,
     navigationTrigger,
+    isShorts,
     previousWatchStats,
     previousVideoIdentity,
   );
