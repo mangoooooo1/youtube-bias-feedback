@@ -34,7 +34,11 @@ const STATE_NAME = "error-monitor";
 const DEFAULT_COOLDOWN_MS = 30 * 60 * 1000;
 
 // Tier 1: 구조적 실패 — 1건만 나와도 즉시 알린다.
-const TIER1_PREFIXES = ["[Error] ", "[sessions] 오늘 리뷰 생성 오류:"];
+const TIER1_PREFIXES = [
+  "[Error] ",
+  "[sessions] 오늘 리뷰 생성 오류:",
+  "[access] ",
+];
 
 // Tier 2: 이미 fallback 경로가 있는 외부 API 호출 실패
 // 같은 실행 주기(30분) 안에서 같은 지문이 TIER2_MIN_OCCURRENCES회 이상 나올 때만 알린다.
