@@ -60,7 +60,7 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     if (res.statusCode >= 400 && res.statusCode < 500) {
       const who = req.body?.anonymousId
-        ? ` anonymousId=${req.body.anonymousId}`
+        ? ` anonymousId=${JSON.stringify(req.body.anonymousId)}`
         : "";
       console.warn(
         `[access] ${req.method} ${req.path} ${res.statusCode}${who}`,
