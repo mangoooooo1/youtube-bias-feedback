@@ -56,9 +56,6 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json());
-
-// 4xx 응답을 여기 한 곳에서 로그로 남긴다(5xx는 errorHandler가 이미 남김)
 app.use((req, res, next) => {
   res.on("finish", () => {
     if (res.statusCode >= 400 && res.statusCode < 500) {
@@ -72,6 +69,8 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+app.use(express.json());
 
 app.get("/health", (_req, res) => {
   return success(res, buildHealthPayload(db));
