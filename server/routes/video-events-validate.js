@@ -81,6 +81,18 @@ function validateVideoEvent(body) {
     };
   }
 
+  // /shorts/ URL로 시청했는지 여부
+  // 구버전 확장 하위호환으로 미전송(null)을 허용한다.
+  const { isShortsUrl } = body;
+  if (
+    isShortsUrl !== undefined &&
+    isShortsUrl !== null &&
+    isShortsUrl !== 0 &&
+    isShortsUrl !== 1
+  ) {
+    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "isShortsUrl" };
+  }
+
   return null;
 }
 

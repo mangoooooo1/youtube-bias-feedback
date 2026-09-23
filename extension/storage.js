@@ -118,6 +118,7 @@ function buildClosedSession(sessionId, videos, startTime, endTime) {
         entryHost,
         entryPath,
         navigationTrigger,
+        isShortsUrl,
         watchedSeconds,
         playbackRate,
         wasBackgrounded,
@@ -131,6 +132,7 @@ function buildClosedSession(sessionId, videos, startTime, endTime) {
         entryHost,
         entryPath,
         navigationTrigger,
+        isShortsUrl,
         // 시청시간 원시 데이터 — 세션이 닫혀 video__ 키가 이 배열로 옮겨간
         // 뒤에도 background.js가 재시도 큐·세션 전송(watchedSecondsList)에 쓸 수 있도록
         // 그대로 들고 간다.
@@ -238,6 +240,7 @@ export async function getUnsentVideoEvents() {
       entryHost: v.entryHost,
       entryPath: v.entryPath,
       navigationTrigger: v.navigationTrigger,
+      isShortsUrl: v.isShortsUrl,
     }));
 
   const fromSessions = (all.sessions ?? []).flatMap((session) =>
@@ -253,6 +256,7 @@ export async function getUnsentVideoEvents() {
         entryHost: v.entryHost,
         entryPath: v.entryPath,
         navigationTrigger: v.navigationTrigger,
+        isShortsUrl: v.isShortsUrl,
       })),
   );
 

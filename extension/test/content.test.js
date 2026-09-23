@@ -260,7 +260,7 @@ describe("content.js classifyNavigationTrigger", () => {
 // recordVideo를 호출하면" 두 writeQueue가 서로를 모른 채 같은 저장소를 놓고 경합해
 // 한쪽의 기록이 사라지는지를 재현한다(연구 무결성 점검 항목 3).
 const RECORD_VIDEO_DECL =
-  /let writeQueue = Promise\.resolve\(\);[\s\S]*?\nfunction recordVideo\(\n {2}videoId,\n {2}title,\n {2}entryHost,\n {2}entryPath,\n {2}navigationTrigger,\n {2}previousWatchStats,\n {2}previousVideoIdentity,\n\) \{[\s\S]*?\n\}/;
+  /let writeQueue = Promise\.resolve\(\);[\s\S]*?\nfunction recordVideo\(\n {2}videoId,\n {2}title,\n {2}entryHost,\n {2}entryPath,\n {2}navigationTrigger,\n {2}isShorts,\n {2}previousWatchStats,\n {2}previousVideoIdentity,\n\) \{[\s\S]*?\n\}/;
 
 // recordVideo는 전역 chrome/fetch/console을 참조한다. 매개변수로 감싸서 넘기면 그 이름들이
 // 지역 바인딩으로 가려지므로, 이 팩토리를 두 번 호출하는 것만으로 "서로 다른 탭 = 서로 다른
@@ -381,7 +381,7 @@ function loadHandleVideoChangeFactory() {
   }
   const body = blockMatch[0].replace(
     RECORD_VIDEO_DECL,
-    "function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger, previousWatchStats, previousVideoIdentity) { recordVideoCalls.push({ videoId, title, entryHost, entryPath, navigationTrigger, previousWatchStats, previousVideoIdentity }); return Promise.resolve(); }",
+    "function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger, isShorts, previousWatchStats, previousVideoIdentity) { recordVideoCalls.push({ videoId, title, entryHost, entryPath, navigationTrigger, isShorts, previousWatchStats, previousVideoIdentity }); return Promise.resolve(); }",
   );
   return new Function(
     "document",
@@ -1165,6 +1165,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       null,
       null,
       null,
+      null,
       { watchedSeconds: 55.5, playbackRate: 1, wasBackgrounded: 0 },
       { sessionId: "s1", eventId: eventIdA },
     );
@@ -1208,6 +1209,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
     await recordVideo(
       "vB",
       "영상B",
+      null,
       null,
       null,
       null,
@@ -1286,6 +1288,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       null,
       null,
       null,
+      null,
       { watchedSeconds: 620, playbackRate: 1, wasBackgrounded: 0 },
       { sessionId: "s1", eventId: "evt-A" },
     );
@@ -1332,7 +1335,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
 
     // previousVideoIdentity를 아예 안 넘긴다(탭 재로드로 이 탭의 메모리가 비어있는 상황) —
     // 7번째 인자 생략.
-    await recordVideo("vB", "영상B", null, null, null, {
+    await recordVideo("vB", "영상B", null, null, null, null, {
       watchedSeconds: 33,
       playbackRate: 1,
       wasBackgrounded: 0,
@@ -1390,6 +1393,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       null,
       null,
       null,
+      null,
       { watchedSeconds: 40, playbackRate: 1, wasBackgrounded: 0 },
       { sessionId: sessionId1, eventId: eventId1 },
     );
@@ -1420,6 +1424,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       recordVideo(
         "vB",
         "영상B",
+        null,
         null,
         null,
         null,
@@ -1466,6 +1471,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
     await recordVideo(
       "vB",
       "영상B",
+      null,
       null,
       null,
       null,

@@ -64,7 +64,7 @@ function screenOnboarding() {
           ${_lockIcon(15)}
         </div>
         <p style="margin:0;font-size:var(--vl-fs-2);line-height:1.55;color:var(--vl-ink-2);text-wrap:pretty">
-          시청 기록은 익명으로 저장됩니다. 누가 어떤 영상을 봤는지는 특정되지 않으며, 수집된 데이터는 오직 연구 목적으로만 사용됩니다.
+          시청 기록은 가명으로 처리되어 저장됩니다. 누가 어떤 영상을 봤는지는 참여 코드 없이는 특정되지 않으며, 수집된 데이터는 오직 연구 목적으로만 사용됩니다.
         </p>
       </div>
     </div>

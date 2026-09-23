@@ -40,6 +40,17 @@ describe("extractErrorLines", () => {
     ]);
   });
 
+  it("[access] 접두사(app.js의 4xx 접근 로그)도 추출 대상에 포함된다", () => {
+    const text = [
+      "[access] POST /api/video-events 404 anonymousId=abc-123",
+      "그냥 일반 로그 라인",
+    ].join("\n");
+
+    expect(extractErrorLines(text)).toEqual([
+      "[access] POST /api/video-events 404 anonymousId=abc-123",
+    ]);
+  });
+
   it("에러 라인이 없으면 빈 배열을 반환한다", () => {
     expect(extractErrorLines("all good\nnothing here\n")).toEqual([]);
   });
@@ -50,13 +61,16 @@ describe("extractErrorLines", () => {
 });
 
 describe("classifyTier", () => {
-  it("[Error] 와 [sessions] 오늘 리뷰 생성 오류는 Tier 1이다", () => {
+  it("[Error]·[sessions] 오늘 리뷰 생성 오류·[access]는 Tier 1이다", () => {
     expect(
       classifyTier("[Error] POST /api/sessions : database is locked"),
     ).toBe(1);
     expect(classifyTier("[sessions] 오늘 리뷰 생성 오류: no such table")).toBe(
       1,
     );
+    expect(
+      classifyTier("[access] POST /api/video-events 404 anonymousId=abc"),
+    ).toBe(1);
   });
 
   it("[youtube]/[today-review-llm] 계열은 Tier 2다", () => {

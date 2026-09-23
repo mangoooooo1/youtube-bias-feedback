@@ -137,6 +137,8 @@ function execSchema() {
       playbackRate   REAL, -- 이 영상을 떠날 때 마지막으로 관측된 재생 배속(기본 1). 배속 변경 이력
                            -- 전체가 아니라 최종값 1개만 남긴다(원시 로그 비대화 방지, 통제변수 용도로 충분).
       wasBackgrounded INTEGER, -- 이 영상 시청 중 탭이 한 번이라도 백그라운드로 전환된 적 있으면 1
+      -- durationSeconds를 통한 쇼츠 여부 판별이 신뢰성이 부족하다고 판단하여, URL 경로로 직접 판별한다.
+      isShortsUrl INTEGER,
       createdAt   TEXT    DEFAULT (datetime('now'))
     );
 

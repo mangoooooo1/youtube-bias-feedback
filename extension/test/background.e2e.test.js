@@ -623,6 +623,7 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
         watchedAt: "2026-01-10T11:00:00Z",
         sent: false, // 최초 즉시 전송(content.js)이 실패해 남은 상태
         eventId: "uuid1", // content.js가 최초 시도 때 발급해둔 멱등 키
+        isShortsUrl: 1,
       },
     });
 
@@ -637,6 +638,8 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
       sessionId: "s1",
       // 최초 시도와 같은 eventId를 재전송해야 서버가 OR IGNORE로 중복을 걸러낸다.
       eventId: "uuid1",
+      // coderabbitai 리뷰: 재시도 경로가 이 값을 빠뜨리면 서버에 NULL로 저장된다.
+      isShortsUrl: 1,
     });
 
     const all = await global.chrome.storage.local.get(null);
