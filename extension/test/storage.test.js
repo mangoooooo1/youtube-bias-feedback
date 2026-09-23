@@ -363,6 +363,44 @@ describe("getUnsentVideoEvents / markVideoEventSent", () => {
     });
   });
 
+  it("재시도 대상 영상(video__ 키)의 isShortsUrl을 그대로 들고 간다(coderabbitai 리뷰: 누락 시 재시도 경로에서 값이 NULL로 저장됨)", async () => {
+    await global.chrome.storage.local.set({
+      "video__s1__v1-1": {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: false,
+        eventId: "v1-1",
+        isShortsUrl: 1,
+      },
+    });
+
+    const [event] = await getUnsentVideoEvents();
+    expect(event.isShortsUrl).toBe(1);
+  });
+
+  it("세션 종료 후(sessions[].videos)의 재시도 대상도 isShortsUrl을 그대로 들고 간다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [
+            {
+              videoId: "v1",
+              title: "제목-v1",
+              watchedAt: "t1",
+              sent: false,
+              isShortsUrl: 0,
+            },
+          ],
+        },
+      ],
+    });
+
+    const [event] = await getUnsentVideoEvents();
+    expect(event.isShortsUrl).toBe(0);
+  });
+
   it("sent:true인 영상(세션 종료 전)은 대상에서 제외한다", async () => {
     await global.chrome.storage.local.set({
       "video__s1__v1-1": {
@@ -625,5 +663,25 @@ describe("endSession — sent·eventId를 세션 종료 이후에도 보존한�
 
     const sessions = await getAllSessions();
     expect(sessions[0].videos[0].eventId).toBe("evt-v1");
+  });
+
+  it("isShortsUrl도 그대로 옮긴다(coderabbitai 리뷰: 누락되면 세션 종료 후 재시도 시 NULL로 저장됨)", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    await global.chrome.storage.local.set({
+      video__s1__v1: {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: false,
+        eventId: "evt-v1",
+        isShortsUrl: 1,
+      },
+    });
+    await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions[0].videos[0].isShortsUrl).toBe(1);
   });
 });
