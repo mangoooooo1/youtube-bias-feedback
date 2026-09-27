@@ -1285,7 +1285,7 @@ describe("재시도 큐 fail-fast — 큐 전체에 공통된 실패면 한 틱�
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
-  it("400은 그 항목만 건너뛰고 같은 틱에서 뒤 항목을 계속 보낸다", async () => {
+  it("400은 그 항목만 영구 실패로 표시하고 같은 틱에서 뒤 항목을 계속 보낸다", async () => {
     const mod = await loadBackground({ ...BASE, ...unsentVideos(3) });
     global.fetch = vi.fn(async (_url, options) => {
       const { eventId } = JSON.parse(options.body);
@@ -1304,7 +1304,7 @@ describe("재시도 큐 fail-fast — 큐 전체에 공통된 실패면 한 틱�
 
     expect(global.fetch).toHaveBeenCalledTimes(3);
     const all = await global.chrome.storage.local.get(null);
-    expect(all["video__s1__e0"].sent).toBe(false);
+    expect(all["video__s1__e0"].sent).toBe("invalid");
     expect(all["video__s1__e1"].sent).toBe(true);
     expect(all["video__s1__e2"].sent).toBe(true);
   });
@@ -1421,7 +1421,7 @@ describe("재시도 큐 fail-fast — 큐 전체에 공통된 실패면 한 틱�
           .map(([line]) => line)
           .filter((line) => String(line).includes("queue="));
       expect(queueLines()).toEqual([
-        "[background] queue=video_events result=abort status=404 code=NOT_FOUND pending=5 sentThisTick=0",
+        "[background] queue=video_events result=abort status=404 code=NOT_FOUND pending=5 sentThisTick=0 invalidThisTick=0",
       ]);
 
       await mod.retryUnsentWatchStats();
@@ -1429,6 +1429,194 @@ describe("재시도 큐 fail-fast — 큐 전체에 공통된 실패면 한 틱�
     } finally {
       warn.mockRestore();
       log.mockRestore();
+    }
+  });
+});
+
+describe("400 영구 실패 — 서버가 영원히 거부할 항목은 표시하고 다시 보내지 않는다", () => {
+  const BASE = {
+    anonymousId: "a1",
+    group: "EXP",
+    installDate: new Date(2025, 0, 1).toISOString(),
+  };
+
+  function reject400() {
+    return vi.fn(async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ success: false, code: "INVALID_FIELD_VALUE" }),
+    }));
+  }
+
+  async function loadBackground(storage) {
+    global.chrome = createChromeMock();
+    await global.chrome.storage.local.set(storage);
+    vi.resetModules();
+    return import("../background.js");
+  }
+
+  it("영상 이벤트: live·종료된 세션 양쪽 모두 sent:invalid가 되고 다음 틱엔 보내지 않는다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      video__s1__e1: {
+        videoId: "v1",
+        watchedAt: "2026-01-10T11:00:00Z",
+        eventId: "e1",
+        sent: false,
+      },
+      sessions: [
+        {
+          sessionId: "s0",
+          videos: [
+            {
+              videoId: "v0",
+              watchedAt: "2026-01-10T10:00:00Z",
+              eventId: "e0",
+              sent: false,
+            },
+          ],
+        },
+      ],
+    });
+    global.fetch = reject400();
+
+    await mod.retryUnsentVideoEvents();
+    await mod.retryUnsentVideoEvents();
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__e1"].sent).toBe("invalid");
+    expect(all.sessions[0].videos[0].sent).toBe("invalid");
+  });
+
+  it("시청시간: watchStatsSent:invalid가 되고 다음 틱엔 보내지 않는다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      video__s1__e1: {
+        eventId: "e1",
+        sent: true,
+        watchedSeconds: -5,
+        watchStatsSent: false,
+      },
+    });
+    global.fetch = reject400();
+
+    await mod.retryUnsentWatchStats();
+    await mod.retryUnsentWatchStats();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__e1"].watchStatsSent).toBe("invalid");
+  });
+
+  it("시청시간: eventId가 없는 항목은 요청 없이 invalid로 표시한다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      video__s1__noid: {
+        sent: true,
+        watchedSeconds: 10,
+        watchStatsSent: false,
+      },
+    });
+    global.fetch = vi.fn();
+
+    await mod.retryUnsentWatchStats();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__noid"].watchStatsSent).toBe("invalid");
+  });
+
+  it("세션: syncedToServer:invalid가 되고 다음 틱엔 보내지 않는다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      sessions: [
+        { sessionId: "s1", videos: [{ videoId: "v1" }], syncedToServer: false },
+      ],
+    });
+    global.fetch = reject400();
+
+    await mod.retryUnsyncedSessions();
+    await mod.retryUnsyncedSessions();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    expect(sessions[0].syncedToServer).toBe("invalid");
+  });
+
+  it("영상 POST가 invalid인 항목의 시청시간은 대상에서 뺀다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      video__s1__e1: {
+        eventId: "e1",
+        sent: "invalid",
+        watchedSeconds: 10,
+        watchStatsSent: false,
+      },
+    });
+    global.fetch = vi.fn();
+
+    await mod.retryUnsentWatchStats();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("400 항목이 50건 넘게 앞에 있어도 다음 틱에 뒤 항목이 전송된다", async () => {
+    const storage = { ...BASE };
+    for (let i = 0; i < 55; i++) {
+      storage[`video__s1__e${String(i).padStart(2, "0")}`] = {
+        videoId: `v${i}`,
+        watchedAt: "2026-01-10T11:00:00Z",
+        eventId: `bad${i}`,
+        sent: false,
+      };
+    }
+    storage.video__s1__zz = {
+      videoId: "good",
+      watchedAt: "2026-01-10T11:00:00Z",
+      eventId: "good",
+      sent: false,
+    };
+    const mod = await loadBackground(storage);
+    global.fetch = vi.fn(async (_url, options) => {
+      const good = JSON.parse(options.body).eventId === "good";
+      return {
+        ok: good,
+        status: good ? 200 : 400,
+        json: async () => ({ success: good }),
+      };
+    });
+
+    await mod.retryUnsentVideoEvents();
+    await mod.retryUnsentVideoEvents();
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.video__s1__zz.sent).toBe(true);
+    expect(global.fetch).toHaveBeenCalledTimes(56);
+  });
+
+  it("영구 실패로 표시한 항목은 식별자와 함께 1줄씩 로그를 남긴다", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const mod = await loadBackground({
+        ...BASE,
+        video__s1__e1: {
+          videoId: "v1",
+          watchedAt: "2026-01-10T11:00:00Z",
+          eventId: "e1",
+          sent: false,
+        },
+      });
+      global.fetch = reject400();
+
+      await mod.retryUnsentVideoEvents();
+
+      expect(warn.mock.calls.map(([line]) => line)).toContain(
+        "[background] queue=video_events result=skip_item status=400 code=INVALID_FIELD_VALUE id=e1",
+      );
+    } finally {
+      vi.restoreAllMocks();
     }
   });
 });

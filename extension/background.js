@@ -7,8 +7,10 @@ import {
   getOnboarding,
   getUnsentVideoEvents,
   markVideoEventSent,
+  markVideoEventInvalid,
   getUnsentWatchStats,
   markWatchStatsSent,
+  markWatchStatsInvalid,
 } from "./storage.js";
 import { isBaselinePeriod } from "./pipeline/baseline.js";
 import { SERVER_URL } from "./config.js";
@@ -305,14 +307,20 @@ export function retryUnsyncedSessions() {
     // categoryDistribution 유무는 이제 필터 기준이 아니다 — 그 값은 서버 응답으로만
     // 채워지므로, syncedToServer:false만이 "전송 대기"를 나타내는 유일한 신호다.
     const unsynced = sessions.filter((s) => s.syncedToServer === false);
-    await drainQueue("sessions", unsynced, async (session) => {
-      // 재시도라 최초 지연시간(totalMs)은 더 이상 의미가 없어 보내지 않는다.
-      const result = await syncSessionToServer(session);
-      // 409는 서버에 이미 저장된 세션이라 이 큐에서는 성공이다
-      return result.status === 409
-        ? { ...result, ok: true, kind: "success" }
-        : result;
-    });
+    await drainQueue(
+      "sessions",
+      unsynced,
+      async (session) => {
+        // 재시도라 최초 지연시간(totalMs)은 더 이상 의미가 없어 보내지 않는다.
+        const result = await syncSessionToServer(session);
+        // 409는 서버에 이미 저장된 세션이라 이 큐에서는 성공이다
+        return result.status === 409
+          ? { ...result, ok: true, kind: "success" }
+          : result;
+      },
+      (session) =>
+        saveAnalysis(session.sessionId, { syncedToServer: "invalid" }),
+    );
   });
 }
 
@@ -327,15 +335,20 @@ export function retryUnsentVideoEvents() {
     if (!onboarding?.anonymousId) return;
 
     const events = await getUnsentVideoEvents();
-    await drainQueue("video_events", events, async (event) => {
-      const result = await postVideoEventToServer(
-        onboarding.anonymousId,
-        onboarding.participantToken,
-        event,
-      );
-      if (result.ok) await markVideoEventSent(event);
-      return result;
-    });
+    await drainQueue(
+      "video_events",
+      events,
+      async (event) => {
+        const result = await postVideoEventToServer(
+          onboarding.anonymousId,
+          onboarding.participantToken,
+          event,
+        );
+        if (result.ok) await markVideoEventSent(event);
+        return result;
+      },
+      markVideoEventInvalid,
+    );
   });
 }
 
@@ -350,15 +363,20 @@ export function retryUnsentWatchStats() {
     if (!onboarding?.anonymousId) return;
 
     const items = await getUnsentWatchStats();
-    await drainQueue("watch_stats", items, async (item) => {
-      const result = await postWatchStatsToServer(
-        onboarding.anonymousId,
-        onboarding.participantToken,
-        item,
-      );
-      if (result.ok) await markWatchStatsSent(item);
-      return result;
-    });
+    await drainQueue(
+      "watch_stats",
+      items,
+      async (item) => {
+        const result = await postWatchStatsToServer(
+          onboarding.anonymousId,
+          onboarding.participantToken,
+          item,
+        );
+        if (result.ok) await markWatchStatsSent(item);
+        return result;
+      },
+      markWatchStatsInvalid,
+    );
   });
 }
 
@@ -390,12 +408,14 @@ async function withQueueLock(name, run) {
  * @param {string} name - 로그용 큐 이름
  * @param {object[]} items - 전송 대기 항목
  * @param {(item: object) => ReturnType<typeof sendToServer>} processItem - 전송·성공 표시 후 결과 반환
+ * @param {(item: object) => Promise<void>} markInvalid - 서버가 400으로 영원히 거부한 항목을 큐에서 뺀다
  * @returns {Promise<void>}
  */
-async function drainQueue(name, items, processItem) {
+async function drainQueue(name, items, processItem, markInvalid) {
   if (items.length === 0) return;
 
   let sentThisTick = 0;
+  let invalidThisTick = 0;
   let abortedBy = null;
   for (const item of items.slice(0, MAX_ITEMS_PER_TICK)) {
     const result = await processItem(item);
@@ -404,10 +424,17 @@ async function drainQueue(name, items, processItem) {
     } else if (result.kind === "queue") {
       abortedBy = result;
       break;
+    } else {
+      await markInvalid(item);
+      invalidThisTick += 1;
+      console.warn(
+        `[background] queue=${name} result=skip_item status=${result.status} code=${result.code} id=${item.eventId ?? item.sessionId}`,
+      );
     }
   }
 
-  const summary = `pending=${items.length - sentThisTick} sentThisTick=${sentThisTick}`;
+  const pending = items.length - sentThisTick - invalidThisTick;
+  const summary = `pending=${pending} sentThisTick=${sentThisTick} invalidThisTick=${invalidThisTick}`;
   if (abortedBy) {
     console.warn(
       `[background] queue=${name} result=abort status=${abortedBy.status} code=${abortedBy.code} ${summary}`,
