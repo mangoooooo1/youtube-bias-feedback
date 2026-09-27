@@ -51,6 +51,18 @@ describe("extractErrorLines", () => {
     ]);
   });
 
+  it("[access-other](API 밖 경로의 4xx)는 추출하지 않는다", () => {
+    const text = [
+      "[access-other] GET /.env 404",
+      "[access-other] POST / 404",
+      "[access] POST /api/video-events 404 anonymousId=abc-123",
+    ].join("\n");
+
+    expect(extractErrorLines(text)).toEqual([
+      "[access] POST /api/video-events 404 anonymousId=abc-123",
+    ]);
+  });
+
   it("에러 라인이 없으면 빈 배열을 반환한다", () => {
     expect(extractErrorLines("all good\nnothing here\n")).toEqual([]);
   });

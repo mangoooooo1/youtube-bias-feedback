@@ -2,7 +2,7 @@
 /**
  * PM2 에러 로그 무음 실패 감시 (cron 실행용)
  *
- * - Tier 1(즉시): [Error] (errorHandler) + [sessions] 오늘 리뷰 생성 오류
+ * - Tier 1(즉시): [Error] (errorHandler) + [sessions] 오늘 리뷰 생성 오류 + [access] (API 경로 4xx)
  *   이미 안쪽에 fallback/방어 로직이 있는데도 뚫고 올라온 구조적 실패라 1건만 나와도 알린다.
  * - Tier 2(임계값): [youtube] API 오류:/[youtube] 네트워크 오류/[today-review-llm] API error body
  *   이미 fallback 경로가 있는 외부 API 호출 실패라, 1건은 일시적 네트워크 blip일 수 있어 노이즈가 된다.
@@ -37,6 +37,7 @@ const DEFAULT_COOLDOWN_MS = 30 * 60 * 1000;
 const TIER1_PREFIXES = [
   "[Error] ",
   "[sessions] 오늘 리뷰 생성 오류:",
+  // "[access"로 줄이면 API 밖 경로의 [access-other](스캐너 봇 소음)까지 잡힌다
   "[access] ",
 ];
 
