@@ -10,6 +10,7 @@ require("dd-trace").init({
 const express = require("express");
 const cors = require("cors");
 const { success, errorHandler } = require("./middleware/responseHandler");
+const { createAccessLog } = require("./middleware/accessLog");
 const { db, initializeDB } = require("./db");
 const { buildHealthPayload } = require("./routes/health");
 
@@ -56,19 +57,18 @@ app.use(
     credentials: true,
   }),
 );
-app.use((req, res, next) => {
-  res.on("finish", () => {
-    if (res.statusCode >= 400 && res.statusCode < 500) {
-      const who = req.body?.anonymousId
-        ? ` anonymousId=${JSON.stringify(req.body.anonymousId)}`
-        : "";
-      console.warn(
-        `[access] ${req.method} ${req.path} ${res.statusCode}${who}`,
-      );
-    }
-  });
-  next();
-});
+// 마운트와 접근 로그 감시 대상을 같은 목록에서 만든다
+const API_ROUTES = [
+  ["/api/participants", require("./routes/participants")],
+  ["/api/sessions", require("./routes/sessions")],
+  ["/api/video-events", require("./routes/video-events")],
+  ["/api/popup-events", require("./routes/popup-events")],
+  ["/api/period-reviews", require("./routes/period-reviews")],
+  ["/api/today-reviews", require("./routes/today-reviews")],
+  ["/api/study-end-code", require("./routes/study-end-code")],
+];
+
+app.use(createAccessLog(API_ROUTES.map(([mountPath]) => mountPath)));
 
 app.use(express.json());
 
@@ -76,13 +76,9 @@ app.get("/health", (_req, res) => {
   return success(res, buildHealthPayload(db));
 });
 
-app.use("/api/participants", require("./routes/participants"));
-app.use("/api/sessions", require("./routes/sessions"));
-app.use("/api/video-events", require("./routes/video-events"));
-app.use("/api/popup-events", require("./routes/popup-events"));
-app.use("/api/period-reviews", require("./routes/period-reviews"));
-app.use("/api/today-reviews", require("./routes/today-reviews"));
-app.use("/api/study-end-code", require("./routes/study-end-code"));
+for (const [mountPath, router] of API_ROUTES) {
+  app.use(mountPath, router);
+}
 
 app.use(errorHandler);
 
