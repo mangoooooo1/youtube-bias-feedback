@@ -15,7 +15,12 @@ function fullPath(req) {
 
 /** 마운트 경로 자체이거나 그 하위 경로면 감시 대상이다. 접두사만 같은 경로(/api/sessionsX)는 제외한다. */
 function isMonitoredPath(path, mountPaths) {
-  return mountPaths.some((p) => path === p || path.startsWith(`${p}/`));
+  // Express 라우팅은 기본적으로 대소문자를 구분하지 않으므로 비교도 같게 맞춘다
+  const target = path.toLowerCase();
+  return mountPaths.some((p) => {
+    const mount = p.toLowerCase();
+    return target === mount || target.startsWith(`${mount}/`);
+  });
 }
 
 /**

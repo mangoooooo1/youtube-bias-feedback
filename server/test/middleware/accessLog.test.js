@@ -97,6 +97,12 @@ describe("createAccessLog", () => {
     expect(lines).toEqual(["[access] GET /api/video-events/nope 404"]);
   });
 
+  it("대소문자가 다른 API 경로도 [access]로 분류하고 원래 경로 그대로 기록한다", async () => {
+    const lines = await send(request(buildApp()).post("/API/VIDEO-EVENTS"));
+
+    expect(lines).toEqual(["[access] POST /API/VIDEO-EVENTS 404"]);
+  });
+
   it("우리 API 밖의 경로는 [access-other]로 기록한다", async () => {
     const app = buildApp();
     const lines = await send(
@@ -145,6 +151,12 @@ describe("isMonitoredPath", () => {
     expect(
       isMonitoredPath("/api/sessions/s-1/feedback-viewed", MOUNT_PATHS),
     ).toBe(true);
+  });
+
+  it("대소문자를 구분하지 않고 비교한다", () => {
+    expect(isMonitoredPath("/API/SESSIONS", MOUNT_PATHS)).toBe(true);
+    expect(isMonitoredPath("/Api/Sessions/s-1", MOUNT_PATHS)).toBe(true);
+    expect(isMonitoredPath("/API/SESSIONSX", MOUNT_PATHS)).toBe(false);
   });
 
   it("접두사만 같은 경로는 감시 대상이 아니다", () => {
