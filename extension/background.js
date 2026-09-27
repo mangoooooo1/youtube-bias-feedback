@@ -18,6 +18,7 @@ const TIMEOUT_MS = 10 * 60 * 1000;
 
 const REQUEST_TIMEOUT_MS = 5000;
 const SESSION_REQUEST_TIMEOUT_MS = 60000;
+const MAX_ITEMS_PER_TICK = 50;
 
 // 분석 완료 알림 대상 판정. EXP 그룹이면서 베이스라인 기간(설치 후 14일)이
 // 끝난 경우에만 알림·배지를 노출한다.
@@ -227,7 +228,7 @@ export async function analyzeSession(session) {
  * syncedToServer가 false로 남아 다음 알람 틱에 다시 시도된다.
  * @param {object} session - 전송할 세션
  * @param {{totalMs?: number}} [metrics] - 소요 시간 등 부가 지표
- * @returns {Promise<void>}
+ * @returns {ReturnType<typeof sendToServer>} 재시도 큐가 계속·중단을 판단할 전송 결과
  */
 async function syncSessionToServer(session, metrics = {}) {
   // 알림 자격은 리뷰 생성 결과와 무관하게(그룹·베이스라인만으로) 미리 정해진다.
@@ -261,10 +262,10 @@ async function syncSessionToServer(session, metrics = {}) {
       entropy: result.data?.entropy ?? null,
       syncedToServer: categoryDistribution !== null,
     });
-    return;
+    return result;
   }
   // 이번에도 실패 — syncedToServer는 false로 남아 다음 알람 틱에서 다시 시도된다.
-  if (!result.ok || result.data === null) return;
+  if (!result.ok || result.data === null) return result;
   const postResult = result.data;
 
   // 서버가 이번 응답으로 돌려준 categoryDistribution/entropy를 이제야 로컬에 채운다.
@@ -290,6 +291,7 @@ async function syncSessionToServer(session, metrics = {}) {
   if (eligibleForNotification && todayReview) {
     showFeedbackNotification(session);
   }
+  return result;
 }
 
 /**
@@ -297,15 +299,21 @@ async function syncSessionToServer(session, metrics = {}) {
  * 서버 장애·일시 오프라인으로 인한 연구 데이터 유실을 막는 유일한 재시도 경로다.
  * @returns {Promise<void>}
  */
-export async function retryUnsyncedSessions() {
-  const sessions = await getAllSessions();
-  // categoryDistribution 유무는 이제 필터 기준이 아니다 — 그 값은 서버 응답으로만
-  // 채워지므로, syncedToServer:false만이 "전송 대기"를 나타내는 유일한 신호다.
-  const unsynced = sessions.filter((s) => s.syncedToServer === false);
-  for (const session of unsynced) {
-    // 재시도라 최초 지연시간(totalMs)은 더 이상 의미가 없어 보내지 않는다.
-    await syncSessionToServer(session);
-  }
+export function retryUnsyncedSessions() {
+  return withQueueLock("sessions", async () => {
+    const sessions = await getAllSessions();
+    // categoryDistribution 유무는 이제 필터 기준이 아니다 — 그 값은 서버 응답으로만
+    // 채워지므로, syncedToServer:false만이 "전송 대기"를 나타내는 유일한 신호다.
+    const unsynced = sessions.filter((s) => s.syncedToServer === false);
+    await drainQueue("sessions", unsynced, async (session) => {
+      // 재시도라 최초 지연시간(totalMs)은 더 이상 의미가 없어 보내지 않는다.
+      const result = await syncSessionToServer(session);
+      // 409는 서버에 이미 저장된 세션이라 이 큐에서는 성공이다
+      return result.status === 409
+        ? { ...result, ok: true, kind: "success" }
+        : result;
+    });
+  });
 }
 
 /**
@@ -313,19 +321,22 @@ export async function retryUnsyncedSessions() {
  * 전송(fire-and-forget)이 실패하면 재시도가 전혀 없었던 문제를 보완한다.
  * @returns {Promise<void>}
  */
-export async function retryUnsentVideoEvents() {
-  const onboarding = await getOnboarding();
-  if (!onboarding?.anonymousId) return;
+export function retryUnsentVideoEvents() {
+  return withQueueLock("video_events", async () => {
+    const onboarding = await getOnboarding();
+    if (!onboarding?.anonymousId) return;
 
-  const events = await getUnsentVideoEvents();
-  for (const event of events) {
-    const result = await postVideoEventToServer(
-      onboarding.anonymousId,
-      onboarding.participantToken,
-      event,
-    );
-    if (result.ok) await markVideoEventSent(event);
-  }
+    const events = await getUnsentVideoEvents();
+    await drainQueue("video_events", events, async (event) => {
+      const result = await postVideoEventToServer(
+        onboarding.anonymousId,
+        onboarding.participantToken,
+        event,
+      );
+      if (result.ok) await markVideoEventSent(event);
+      return result;
+    });
+  });
 }
 
 /**
@@ -333,18 +344,76 @@ export async function retryUnsentVideoEvents() {
  * "얼마나 봤다"(watchStatsSent)는 서로 다른 시점에 확정되는 별개 신호라 독립된 큐로 돈다.
  * @returns {Promise<void>}
  */
-export async function retryUnsentWatchStats() {
-  const onboarding = await getOnboarding();
-  if (!onboarding?.anonymousId) return;
+export function retryUnsentWatchStats() {
+  return withQueueLock("watch_stats", async () => {
+    const onboarding = await getOnboarding();
+    if (!onboarding?.anonymousId) return;
 
-  const items = await getUnsentWatchStats();
-  for (const item of items) {
-    const result = await postWatchStatsToServer(
-      onboarding.anonymousId,
-      onboarding.participantToken,
-      item,
+    const items = await getUnsentWatchStats();
+    await drainQueue("watch_stats", items, async (item) => {
+      const result = await postWatchStatsToServer(
+        onboarding.anonymousId,
+        onboarding.participantToken,
+        item,
+      );
+      if (result.ok) await markWatchStatsSent(item);
+      return result;
+    });
+  });
+}
+
+const inFlightQueues = new Set();
+
+/**
+ * 같은 큐의 이전 틱이 아직 진행 중이면(느린 응답·큰 백로그) 이번 틱을 건너뛴다.
+ * 저장소 조회부터 잠가야 두 틱이 같은 항목을 동시에 보내지 않는다.
+ * @param {string} name - 큐 이름
+ * @param {() => Promise<void>} run
+ * @returns {Promise<void>}
+ */
+async function withQueueLock(name, run) {
+  if (inFlightQueues.has(name)) {
+    console.log(`[background] queue=${name} result=reentry_blocked`);
+    return;
+  }
+  inFlightQueues.add(name);
+  try {
+    await run();
+  } finally {
+    inFlightQueues.delete(name);
+  }
+}
+
+/**
+ * 큐를 한 틱 처리한다. 큐 레벨 실패(참여자 미등록·서버 장애·네트워크 등)는 나머지 항목도
+ * 같은 이유로 실패하므로 즉시 멈추고, 항목은 그대로 남겨 다음 틱에 다시 시도한다.
+ * @param {string} name - 로그용 큐 이름
+ * @param {object[]} items - 전송 대기 항목
+ * @param {(item: object) => ReturnType<typeof sendToServer>} processItem - 전송·성공 표시 후 결과 반환
+ * @returns {Promise<void>}
+ */
+async function drainQueue(name, items, processItem) {
+  if (items.length === 0) return;
+
+  let sentThisTick = 0;
+  let abortedBy = null;
+  for (const item of items.slice(0, MAX_ITEMS_PER_TICK)) {
+    const result = await processItem(item);
+    if (result.ok) {
+      sentThisTick += 1;
+    } else if (result.kind === "queue") {
+      abortedBy = result;
+      break;
+    }
+  }
+
+  const summary = `pending=${items.length - sentThisTick} sentThisTick=${sentThisTick}`;
+  if (abortedBy) {
+    console.warn(
+      `[background] queue=${name} result=abort status=${abortedBy.status} code=${abortedBy.code} ${summary}`,
     );
-    if (result.ok) await markWatchStatsSent(item);
+  } else {
+    console.log(`[background] queue=${name} result=done ${summary}`);
   }
 }
 
@@ -431,7 +500,7 @@ async function postWatchStatsToServer(anonymousId, participantToken, item) {
     };
   }
 
-  const result = await sendToServer(
+  return sendToServer(
     `/api/video-events/${encodeURIComponent(item.eventId)}`,
     "PATCH",
     {
@@ -442,14 +511,6 @@ async function postWatchStatsToServer(anonymousId, participantToken, item) {
       wasBackgrounded: item.wasBackgrounded,
     },
   );
-  if (!result.ok) {
-    console.warn(
-      "[background] 시청시간 재전송 실패:",
-      result.status,
-      result.code,
-    );
-  }
-  return result;
 }
 
 /**
@@ -460,7 +521,7 @@ async function postWatchStatsToServer(anonymousId, participantToken, item) {
  * @returns {ReturnType<typeof sendToServer>}
  */
 async function postVideoEventToServer(anonymousId, participantToken, event) {
-  const result = await sendToServer("/api/video-events", "POST", {
+  return sendToServer("/api/video-events", "POST", {
     anonymousId,
     participantToken,
     videoId: event.videoId,
@@ -474,14 +535,6 @@ async function postVideoEventToServer(anonymousId, participantToken, event) {
     navigationTrigger: event.navigationTrigger,
     isShortsUrl: event.isShortsUrl,
   });
-  if (!result.ok) {
-    console.warn(
-      "[background] 영상 이벤트 재전송 실패:",
-      result.status,
-      result.code,
-    );
-  }
-  return result;
 }
 
 /**
