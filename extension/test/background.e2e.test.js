@@ -417,11 +417,10 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
         return {
           ok: false,
           status: 409,
-          text: async () =>
-            JSON.stringify({
-              success: false,
-              data: { categoryDistribution: { 음악: 1 }, entropy: 0 },
-            }),
+          json: async () => ({
+            success: false,
+            data: { categoryDistribution: { 음악: 1 }, entropy: 0 },
+          }),
         };
       }
       throw new Error(`예상치 못한 fetch 호출: ${href}`);
@@ -547,11 +546,10 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
         return {
           ok: false,
           status: 409,
-          text: async () =>
-            JSON.stringify({
-              success: false,
-              data: { categoryDistribution: { 음악: 1 }, entropy: 0 },
-            }),
+          json: async () => ({
+            success: false,
+            data: { categoryDistribution: { 음악: 1 }, entropy: 0 },
+          }),
         };
       }
       throw new Error(`예상치 못한 fetch 호출: ${href}`);
@@ -1002,5 +1000,159 @@ describe("analyzeSession — watchedSecondsList를 세션 페이로드에 함께
     });
 
     expect(calls.sessions[0].watchedSecondsList).toEqual([null]);
+  });
+});
+
+describe("sendToServer — 재시도 큐가 판단할 수 있도록 전송 결과를 분류한다", () => {
+  async function loadSendToServer() {
+    global.chrome = createChromeMock();
+    vi.resetModules();
+    const mod = await import("../background.js");
+    return mod.sendToServer;
+  }
+
+  function respond(status, body) {
+    return vi.fn(async () => ({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+    }));
+  }
+
+  // 실제 fetch처럼 signal이 abort되면 AbortError로 reject하고, 그 전엔 응답하지 않는다
+  function hangUntilAborted() {
+    return vi.fn(
+      (_url, { signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        }),
+    );
+  }
+
+  it("2xx는 success로 분류하고 본문의 data를 돌려준다", async () => {
+    const sendToServer = await loadSendToServer();
+    global.fetch = respond(200, { success: true, data: { id: 1 } });
+
+    await expect(sendToServer("/api/x", "POST", {})).resolves.toEqual({
+      ok: true,
+      kind: "success",
+      status: 200,
+      code: null,
+      data: { id: 1 },
+    });
+  });
+
+  it("400은 항목 레벨(item)로 분류하고 서버가 보낸 code를 담는다", async () => {
+    const sendToServer = await loadSendToServer();
+    global.fetch = respond(400, {
+      success: false,
+      code: "INVALID_FIELD_VALUE",
+    });
+
+    await expect(sendToServer("/api/x", "POST", {})).resolves.toMatchObject({
+      ok: false,
+      kind: "item",
+      status: 400,
+      code: "INVALID_FIELD_VALUE",
+    });
+  });
+
+  it("404·403·429·5xx는 큐 레벨(queue)로 분류한다", async () => {
+    const sendToServer = await loadSendToServer();
+    for (const [status, code] of [
+      [404, "NOT_FOUND"],
+      [403, "INVALID_PARTICIPANT_TOKEN"],
+      [429, "TOO_MANY_REQUESTS"],
+      [500, "INTERNAL_SERVER_ERROR"],
+    ]) {
+      global.fetch = respond(status, { success: false, code });
+      await expect(sendToServer("/api/x", "POST", {})).resolves.toMatchObject({
+        ok: false,
+        kind: "queue",
+        status,
+        code,
+      });
+    }
+  });
+
+  it("본문이 JSON이 아니어도 status만으로 분류한다", async () => {
+    const sendToServer = await loadSendToServer();
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 502,
+      json: async () => {
+        throw new SyntaxError("Unexpected token <");
+      },
+    }));
+
+    await expect(sendToServer("/api/x", "POST", {})).resolves.toMatchObject({
+      ok: false,
+      kind: "queue",
+      status: 502,
+      code: null,
+    });
+  });
+
+  it("네트워크 오류는 큐 레벨, code는 network로 분류한다", async () => {
+    const sendToServer = await loadSendToServer();
+    global.fetch = vi.fn().mockRejectedValue(new TypeError("network down"));
+
+    await expect(sendToServer("/api/x", "POST", {})).resolves.toMatchObject({
+      ok: false,
+      kind: "queue",
+      status: null,
+      code: "network",
+    });
+  });
+
+  it("기본 5초가 지나면 요청을 abort하고 code를 timeout으로 분류한다", async () => {
+    const sendToServer = await loadSendToServer();
+    global.fetch = hangUntilAborted();
+
+    const pending = sendToServer("/api/x", "POST", {});
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      kind: "queue",
+      status: null,
+      code: "timeout",
+    });
+  });
+
+  it("세션 전송은 서버의 YouTube·Gemini 호출을 기다리도록 5초에 끊지 않고 60초에 끊는다", async () => {
+    global.chrome = createChromeMock();
+    global.fetch = hangUntilAborted();
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [{ videoId: "v1" }],
+          syncedToServer: false,
+        },
+      ],
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    let settled = false;
+    const pending = mod.retryUnsyncedSessions().then(() => {
+      settled = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(55000);
+    await pending;
+    expect(settled).toBe(true);
+
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    expect(sessions[0].syncedToServer).toBe(false);
   });
 });
