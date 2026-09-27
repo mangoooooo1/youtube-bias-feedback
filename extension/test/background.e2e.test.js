@@ -1156,3 +1156,39 @@ describe("sendToServer — 재시도 큐가 판단할 수 있도록 전송 결�
     expect(sessions[0].syncedToServer).toBe(false);
   });
 });
+
+describe("알람 핸들러 — 시청시간 PATCH는 영상 POST 재시도가 끝난 뒤 보낸다", () => {
+  it("같은 틱에서 POST가 확정된 영상의 시청시간을 곧바로 PATCH하고, POST보다 먼저 보내지 않는다", async () => {
+    global.chrome = createChromeMock();
+    const order = [];
+    global.fetch = vi.fn(async (url, options = {}) => {
+      order.push(`${options.method} ${new URL(String(url)).pathname}`);
+      return { ok: true, status: 200, json: async () => ({ success: true }) };
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: new Date(2025, 0, 1).toISOString(),
+      video__s1__e1: {
+        videoId: "v1",
+        watchedAt: "2026-01-10T11:00:00Z",
+        eventId: "e1",
+        sent: false,
+        watchedSeconds: 42,
+        watchStatsSent: false,
+      },
+    });
+
+    vi.resetModules();
+    await import("../background.js");
+    const onAlarm = global.chrome.alarms.onAlarm.addListener.mock.calls[0][0];
+    onAlarm({ name: "SESSION_TIMEOUT_CHECK" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(order).toEqual([
+      "POST /api/video-events",
+      "PATCH /api/video-events/e1",
+    ]);
+  });
+});

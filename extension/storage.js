@@ -263,6 +263,13 @@ export async function getUnsentVideoEvents() {
   return [...fromLive, ...fromSessions];
 }
 
+// 영상 POST가 확정되지 않은(sent:false) 항목은 서버에 행이 없어 PATCH가 404가 되므로 POST를 기다린다
+function isWatchStatsPending(v) {
+  return (
+    v?.watchedSeconds != null && v.watchStatsSent === false && v.sent !== false
+  );
+}
+
 /**
  * 로컬엔 있지만 아직 서버에 확정 반영 못한 시청시간 원시값을 live/sessions[] 양쪽에서
  * 모은다. content.js는 live 키만 갱신할 수 있어, 세션이 그 사이 닫힌 경우의 안전망이다.
@@ -272,12 +279,7 @@ export async function getUnsentWatchStats() {
   const all = await chrome.storage.local.get(null);
 
   const fromLive = Object.entries(all)
-    .filter(
-      ([key, v]) =>
-        key.startsWith("video__") &&
-        v?.watchedSeconds != null &&
-        v?.watchStatsSent === false,
-    )
+    .filter(([key, v]) => key.startsWith("video__") && isWatchStatsPending(v))
     .map(([key, v]) => ({
       location: "live",
       key,
@@ -289,16 +291,14 @@ export async function getUnsentWatchStats() {
     }));
 
   const fromSessions = (all.sessions ?? []).flatMap((session) =>
-    (session.videos ?? [])
-      .filter((v) => v.watchedSeconds != null && v.watchStatsSent === false)
-      .map((v) => ({
-        location: "session",
-        sessionId: session.sessionId,
-        eventId: v.eventId,
-        watchedSeconds: v.watchedSeconds,
-        playbackRate: v.playbackRate,
-        wasBackgrounded: v.wasBackgrounded,
-      })),
+    (session.videos ?? []).filter(isWatchStatsPending).map((v) => ({
+      location: "session",
+      sessionId: session.sessionId,
+      eventId: v.eventId,
+      watchedSeconds: v.watchedSeconds,
+      playbackRate: v.playbackRate,
+      wasBackgrounded: v.wasBackgrounded,
+    })),
   );
 
   return [...fromLive, ...fromSessions];

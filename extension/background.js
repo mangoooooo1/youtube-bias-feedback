@@ -118,15 +118,11 @@ chrome.storage.local.set({ serverUrl: SERVER_URL });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== ALARM_NAME) return;
-  // 셋 다 await 없이 실행하므로 서로 순서가 보장되지 않는다 — 예를 들어
-  // checkSessionTimeout이 세션을 막 끝낸 직후 같은 세션을 retryUnsyncedSessions가
-  // 이 틱에서 곧바로 다시 집어도(혹은 그 반대여도) 안전하다: 서버가 세션은 409(중복
-  // 세션), 영상은 eventId 기반 OR IGNORE로 멱등 처리하므로 중복 전송이 일어나도
-  // 여분의 요청 하나로 끝나고 데이터가 중복 저장되거나 알림이 두 번 뜨지 않는다.
+  // 세션 재시도와 타임아웃 검사는 서로 순서가 보장되지 않는다.
   retryUnsyncedSessions();
-  retryUnsentVideoEvents();
-  retryUnsentWatchStats();
   checkSessionTimeout();
+  // 시청시간 PATCH는 영상 POST로 생긴 행을 갱신하므로 POST 재시도가 끝난 뒤 보낸다
+  retryUnsentVideoEvents().finally(() => retryUnsentWatchStats());
 });
 
 // 알림 본문/버튼 클릭 모두 같은 동작 — notificationId가 곧 sessionId이므로 별도 매핑 없이 역추적한다.
