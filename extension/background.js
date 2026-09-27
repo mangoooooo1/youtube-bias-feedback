@@ -7,14 +7,20 @@ import {
   getOnboarding,
   getUnsentVideoEvents,
   markVideoEventSent,
+  markVideoEventInvalid,
   getUnsentWatchStats,
   markWatchStatsSent,
+  markWatchStatsInvalid,
 } from "./storage.js";
 import { isBaselinePeriod } from "./pipeline/baseline.js";
 import { SERVER_URL } from "./config.js";
 
 const ALARM_NAME = "SESSION_TIMEOUT_CHECK";
 const TIMEOUT_MS = 10 * 60 * 1000;
+
+const REQUEST_TIMEOUT_MS = 5000;
+const SESSION_REQUEST_TIMEOUT_MS = 60000;
+const MAX_ITEMS_PER_TICK = 50;
 
 // 분석 완료 알림 대상 판정. EXP 그룹이면서 베이스라인 기간(설치 후 14일)이
 // 끝난 경우에만 알림·배지를 노출한다.
@@ -115,15 +121,11 @@ chrome.storage.local.set({ serverUrl: SERVER_URL });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== ALARM_NAME) return;
-  // 셋 다 await 없이 실행하므로 서로 순서가 보장되지 않는다 — 예를 들어
-  // checkSessionTimeout이 세션을 막 끝낸 직후 같은 세션을 retryUnsyncedSessions가
-  // 이 틱에서 곧바로 다시 집어도(혹은 그 반대여도) 안전하다: 서버가 세션은 409(중복
-  // 세션), 영상은 eventId 기반 OR IGNORE로 멱등 처리하므로 중복 전송이 일어나도
-  // 여분의 요청 하나로 끝나고 데이터가 중복 저장되거나 알림이 두 번 뜨지 않는다.
+  // 세션 재시도와 타임아웃 검사는 서로 순서가 보장되지 않는다.
   retryUnsyncedSessions();
-  retryUnsentVideoEvents();
-  retryUnsentWatchStats();
   checkSessionTimeout();
+  // 시청시간 PATCH는 영상 POST로 생긴 행을 갱신하므로 POST 재시도가 끝난 뒤 보낸다
+  retryUnsentVideoEvents().finally(() => retryUnsentWatchStats());
 });
 
 // 알림 본문/버튼 클릭 모두 같은 동작 — notificationId가 곧 sessionId이므로 별도 매핑 없이 역추적한다.
@@ -228,7 +230,7 @@ export async function analyzeSession(session) {
  * syncedToServer가 false로 남아 다음 알람 틱에 다시 시도된다.
  * @param {object} session - 전송할 세션
  * @param {{totalMs?: number}} [metrics] - 소요 시간 등 부가 지표
- * @returns {Promise<void>}
+ * @returns {ReturnType<typeof sendToServer>} 재시도 큐가 계속·중단을 판단할 전송 결과
  */
 async function syncSessionToServer(session, metrics = {}) {
   // 알림 자격은 리뷰 생성 결과와 무관하게(그룹·베이스라인만으로) 미리 정해진다.
@@ -242,7 +244,7 @@ async function syncSessionToServer(session, metrics = {}) {
     ? new Date().toISOString()
     : null;
 
-  const postResult = await postSessionToServer(
+  const result = await postSessionToServer(
     session,
     session.videoCount,
     onboarding,
@@ -255,16 +257,18 @@ async function syncSessionToServer(session, metrics = {}) {
   // 409(중복 세션) — 이전 시도가 서버엔 이미 저장됐지만 응답만 못 받은 경우다. 서버가
   // 함께 보내주는 categoryDistribution/entropy로 로컬을 채우되, 값이 null이면
   // syncedToServer를 true로 확정하지 않아 다음 틱에 다시 시도되게 한다.
-  if (postResult?.duplicate) {
+  if (result.status === 409) {
+    const categoryDistribution = result.data?.categoryDistribution ?? null;
     await saveAnalysis(session.sessionId, {
-      categoryDistribution: postResult.categoryDistribution,
-      entropy: postResult.entropy,
-      syncedToServer: postResult.categoryDistribution !== null,
+      categoryDistribution,
+      entropy: result.data?.entropy ?? null,
+      syncedToServer: categoryDistribution !== null,
     });
-    return;
+    return result;
   }
   // 이번에도 실패 — syncedToServer는 false로 남아 다음 알람 틱에서 다시 시도된다.
-  if (postResult === null) return;
+  if (!result.ok || result.data === null) return result;
+  const postResult = result.data;
 
   // 서버가 이번 응답으로 돌려준 categoryDistribution/entropy를 이제야 로컬에 채운다.
   await saveAnalysis(session.sessionId, {
@@ -289,6 +293,7 @@ async function syncSessionToServer(session, metrics = {}) {
   if (eligibleForNotification && todayReview) {
     showFeedbackNotification(session);
   }
+  return result;
 }
 
 /**
@@ -296,15 +301,27 @@ async function syncSessionToServer(session, metrics = {}) {
  * 서버 장애·일시 오프라인으로 인한 연구 데이터 유실을 막는 유일한 재시도 경로다.
  * @returns {Promise<void>}
  */
-export async function retryUnsyncedSessions() {
-  const sessions = await getAllSessions();
-  // categoryDistribution 유무는 이제 필터 기준이 아니다 — 그 값은 서버 응답으로만
-  // 채워지므로, syncedToServer:false만이 "전송 대기"를 나타내는 유일한 신호다.
-  const unsynced = sessions.filter((s) => s.syncedToServer === false);
-  for (const session of unsynced) {
-    // 재시도라 최초 지연시간(totalMs)은 더 이상 의미가 없어 보내지 않는다.
-    await syncSessionToServer(session);
-  }
+export function retryUnsyncedSessions() {
+  return withQueueLock("sessions", async () => {
+    const sessions = await getAllSessions();
+    // categoryDistribution 유무는 이제 필터 기준이 아니다 — 그 값은 서버 응답으로만
+    // 채워지므로, syncedToServer:false만이 "전송 대기"를 나타내는 유일한 신호다.
+    const unsynced = sessions.filter((s) => s.syncedToServer === false);
+    await drainQueue(
+      "sessions",
+      unsynced,
+      async (session) => {
+        // 재시도라 최초 지연시간(totalMs)은 더 이상 의미가 없어 보내지 않는다.
+        const result = await syncSessionToServer(session);
+        // 409는 서버에 이미 저장된 세션이라 이 큐에서는 성공이다
+        return result.status === 409
+          ? { ...result, ok: true, kind: "success" }
+          : result;
+      },
+      (session) =>
+        saveAnalysis(session.sessionId, { syncedToServer: "invalid" }),
+    );
+  });
 }
 
 /**
@@ -312,19 +329,27 @@ export async function retryUnsyncedSessions() {
  * 전송(fire-and-forget)이 실패하면 재시도가 전혀 없었던 문제를 보완한다.
  * @returns {Promise<void>}
  */
-export async function retryUnsentVideoEvents() {
-  const onboarding = await getOnboarding();
-  if (!onboarding?.anonymousId) return;
+export function retryUnsentVideoEvents() {
+  return withQueueLock("video_events", async () => {
+    const onboarding = await getOnboarding();
+    if (!onboarding?.anonymousId) return;
 
-  const events = await getUnsentVideoEvents();
-  for (const event of events) {
-    const ok = await postVideoEventToServer(
-      onboarding.anonymousId,
-      onboarding.participantToken,
-      event,
+    const events = await getUnsentVideoEvents();
+    await drainQueue(
+      "video_events",
+      events,
+      async (event) => {
+        const result = await postVideoEventToServer(
+          onboarding.anonymousId,
+          onboarding.participantToken,
+          event,
+        );
+        if (result.ok) await markVideoEventSent(event);
+        return result;
+      },
+      markVideoEventInvalid,
     );
-    if (ok) await markVideoEventSent(event);
-  }
+  });
 }
 
 /**
@@ -332,18 +357,154 @@ export async function retryUnsentVideoEvents() {
  * "얼마나 봤다"(watchStatsSent)는 서로 다른 시점에 확정되는 별개 신호라 독립된 큐로 돈다.
  * @returns {Promise<void>}
  */
-export async function retryUnsentWatchStats() {
-  const onboarding = await getOnboarding();
-  if (!onboarding?.anonymousId) return;
+export function retryUnsentWatchStats() {
+  return withQueueLock("watch_stats", async () => {
+    const onboarding = await getOnboarding();
+    if (!onboarding?.anonymousId) return;
 
-  const items = await getUnsentWatchStats();
-  for (const item of items) {
-    const ok = await postWatchStatsToServer(
-      onboarding.anonymousId,
-      onboarding.participantToken,
-      item,
+    const items = await getUnsentWatchStats();
+    await drainQueue(
+      "watch_stats",
+      items,
+      async (item) => {
+        const result = await postWatchStatsToServer(
+          onboarding.anonymousId,
+          onboarding.participantToken,
+          item,
+        );
+        if (result.ok) await markWatchStatsSent(item);
+        return result;
+      },
+      markWatchStatsInvalid,
     );
-    if (ok) await markWatchStatsSent(item);
+  });
+}
+
+const inFlightQueues = new Set();
+
+/**
+ * 같은 큐의 이전 틱이 아직 진행 중이면(느린 응답·큰 백로그) 이번 틱을 건너뛴다.
+ * 저장소 조회부터 잠가야 두 틱이 같은 항목을 동시에 보내지 않는다.
+ * @param {string} name - 큐 이름
+ * @param {() => Promise<void>} run
+ * @returns {Promise<void>}
+ */
+async function withQueueLock(name, run) {
+  if (inFlightQueues.has(name)) {
+    console.log(`[background] queue=${name} result=reentry_blocked`);
+    return;
+  }
+  inFlightQueues.add(name);
+  try {
+    await run();
+  } finally {
+    inFlightQueues.delete(name);
+  }
+}
+
+/**
+ * 큐를 한 틱 처리한다. 큐 레벨 실패(참여자 미등록·서버 장애·네트워크 등)는 나머지 항목도
+ * 같은 이유로 실패하므로 즉시 멈추고, 항목은 그대로 남겨 다음 틱에 다시 시도한다.
+ * @param {string} name - 로그용 큐 이름
+ * @param {object[]} items - 전송 대기 항목
+ * @param {(item: object) => ReturnType<typeof sendToServer>} processItem - 전송·성공 표시 후 결과 반환
+ * @param {(item: object) => Promise<void>} markInvalid - 서버가 400으로 영원히 거부한 항목을 큐에서 뺀다
+ * @returns {Promise<void>}
+ */
+async function drainQueue(name, items, processItem, markInvalid) {
+  if (items.length === 0) return;
+
+  let sentThisTick = 0;
+  let invalidThisTick = 0;
+  let abortedBy = null;
+  for (const item of items.slice(0, MAX_ITEMS_PER_TICK)) {
+    const result = await processItem(item);
+    if (result.ok) {
+      sentThisTick += 1;
+    } else if (result.kind === "queue") {
+      abortedBy = result;
+      break;
+    } else {
+      await markInvalid(item);
+      invalidThisTick += 1;
+      console.warn(
+        `[background] queue=${name} result=skip_item status=${result.status} code=${result.code} id=${item.eventId ?? item.sessionId}`,
+      );
+    }
+  }
+
+  const pending = items.length - sentThisTick - invalidThisTick;
+  const summary = `pending=${pending} sentThisTick=${sentThisTick} invalidThisTick=${invalidThisTick}`;
+  if (abortedBy) {
+    console.warn(
+      `[background] queue=${name} result=abort status=${abortedBy.status} code=${abortedBy.code} ${summary}`,
+    );
+  } else {
+    console.log(`[background] queue=${name} result=done ${summary}`);
+  }
+}
+
+/**
+ * 서버에 JSON 요청을 보내고 결과를 재시도 큐가 판단할 수 있는 형태로 분류한다.
+ * - success: 2xx
+ * - item: 400 — 이 항목만 서버가 영원히 거부한다
+ * - queue: 그 외 전부(403·404·429·5xx·네트워크·타임아웃) — 큐의 다른 항목도 같은 이유로 실패한다
+ * @param {string} path - /api/... 경로
+ * @param {string} method
+ * @param {object} body
+ * @param {number} [timeoutMs]
+ * @returns {Promise<{ok: boolean, kind: "success"|"item"|"queue", status: number|null, code: string|null, data: any}>}
+ */
+export async function sendToServer(
+  path,
+  method,
+  body,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+) {
+  if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) {
+    return failure(null, "no_server_url");
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${SERVER_URL.replace(/\/$/, "")}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    const json = await readJson(response);
+    const status = response.status ?? (response.ok ? 200 : null);
+    const code = typeof json?.code === "string" ? json.code : null;
+    const data = json?.data ?? null;
+    if (response.ok) {
+      return { ok: true, kind: "success", status, code, data };
+    }
+    return {
+      ok: false,
+      kind: status === 400 ? "item" : "queue",
+      status,
+      code,
+      data,
+    };
+  } catch (error) {
+    return failure(null, error?.name === "AbortError" ? "timeout" : "network");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function failure(status, code) {
+  return { ok: false, kind: "queue", status, code, data: null };
+}
+
+// 본문이 JSON이 아니어도(프록시 오류 페이지 등) 전송 결과 분류는 status만으로 이어간다
+async function readJson(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
   }
 }
 
@@ -352,36 +513,31 @@ export async function retryUnsentWatchStats() {
  * @param {string} anonymousId
  * @param {string} participantToken
  * @param {{eventId: string, watchedSeconds: number, playbackRate: number, wasBackgrounded: 0|1}} item
- * @returns {Promise<boolean>} 성공 여부
+ * @returns {ReturnType<typeof sendToServer>}
  */
 async function postWatchStatsToServer(anonymousId, participantToken, item) {
-  if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) return false;
-  if (!item.eventId) return false;
-
-  const cleanUrl = SERVER_URL.replace(/\/$/, "");
-  try {
-    const response = await fetch(
-      `${cleanUrl}/api/video-events/${encodeURIComponent(item.eventId)}`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          anonymousId,
-          participantToken,
-          watchedSeconds: item.watchedSeconds,
-          playbackRate: item.playbackRate,
-          wasBackgrounded: item.wasBackgrounded,
-        }),
-      },
-    );
-    if (!response.ok) {
-      console.warn("[background] 시청시간 재전송 실패:", response.status);
-    }
-    return response.ok;
-  } catch (error) {
-    console.warn("[background] 시청시간 재전송 오류:", error);
-    return false;
+  // 요청을 보내볼 수조차 없는 이 항목만의 결함이라 항목 레벨로 둔다
+  if (!item.eventId) {
+    return {
+      ok: false,
+      kind: "item",
+      status: null,
+      code: "missing_event_id",
+      data: null,
+    };
   }
+
+  return sendToServer(
+    `/api/video-events/${encodeURIComponent(item.eventId)}`,
+    "PATCH",
+    {
+      anonymousId,
+      participantToken,
+      watchedSeconds: item.watchedSeconds,
+      playbackRate: item.playbackRate,
+      wasBackgrounded: item.wasBackgrounded,
+    },
+  );
 }
 
 /**
@@ -389,39 +545,23 @@ async function postWatchStatsToServer(anonymousId, participantToken, item) {
  * @param {string} anonymousId
  * @param {string} participantToken
  * @param {object} event - videoId, title, watchedAt 등을 담은 이벤트
- * @returns {Promise<boolean>} 성공 여부
+ * @returns {ReturnType<typeof sendToServer>}
  */
 async function postVideoEventToServer(anonymousId, participantToken, event) {
-  if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) return false;
-
-  const cleanUrl = SERVER_URL.replace(/\/$/, "");
-  try {
-    const response = await fetch(`${cleanUrl}/api/video-events`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        anonymousId,
-        participantToken,
-        videoId: event.videoId,
-        title: event.title ?? null,
-        watchedAt: event.watchedAt,
-        sessionId: event.sessionId,
-        // 같은 eventId로 재전송되면 서버가 INSERT OR IGNORE로 걸러내 이미 성공했던 전송을 다시 보내도 중복 행이 남지 않는다.
-        eventId: event.eventId,
-        entryHost: event.entryHost,
-        entryPath: event.entryPath,
-        navigationTrigger: event.navigationTrigger,
-        isShortsUrl: event.isShortsUrl,
-      }),
-    });
-    if (!response.ok) {
-      console.warn("[background] 영상 이벤트 재전송 실패:", response.status);
-    }
-    return response.ok;
-  } catch (error) {
-    console.warn("[background] 영상 이벤트 재전송 오류:", error);
-    return false;
-  }
+  return sendToServer("/api/video-events", "POST", {
+    anonymousId,
+    participantToken,
+    videoId: event.videoId,
+    title: event.title ?? null,
+    watchedAt: event.watchedAt,
+    sessionId: event.sessionId,
+    // 같은 eventId로 재전송되면 서버가 INSERT OR IGNORE로 걸러내 이미 성공했던 전송을 다시 보내도 중복 행이 남지 않는다.
+    eventId: event.eventId,
+    entryHost: event.entryHost,
+    entryPath: event.entryPath,
+    navigationTrigger: event.navigationTrigger,
+    isShortsUrl: event.isShortsUrl,
+  });
 }
 
 /**
@@ -466,12 +606,12 @@ async function mergeTodayReviewIntoCache(anonymousId, todayReview) {
 
 /**
  * 세션 하나를 /api/sessions로 전송한다. 409(중복)면 서버가 이미 저장한
- * categoryDistribution/entropy를 함께 돌려받아 duplicate 응답으로 반환한다.
+ * categoryDistribution/entropy가 result.data에 함께 담겨 온다.
  * @param {object} session - 전송할 세션(videos 포함)
  * @param {number} videoCount
  * @param {{anonymousId: string, participantToken: string}} onboarding
  * @param {{totalMs?: number, feedbackNotifiedAt?: string|null}} [metrics]
- * @returns {Promise<object|null>} 서버 응답 데이터, 실패 시 null
+ * @returns {ReturnType<typeof sendToServer>}
  */
 async function postSessionToServer(
   session,
@@ -483,12 +623,12 @@ async function postSessionToServer(
     console.warn(
       "[background] SERVER_URL이 설정되지 않았습니다. config.js 설정을 확인해주세요.",
     );
-    return null;
+    return failure(null, "no_server_url");
   }
 
   if (!onboarding?.anonymousId) {
     console.warn("[background] anonymousId 없음, 서버 전송 건너뜀");
-    return null;
+    return failure(null, "no_anonymous_id");
   }
 
   // categoryId 조회는 서버가 하므로, 이 세션에서 시청한 videoId 목록
@@ -499,52 +639,29 @@ async function postSessionToServer(
   const watchedSecondsList = session.videos.map(
     (v) => v.watchedSeconds ?? null,
   );
-  const cleanUrl = SERVER_URL.replace(/\/$/, "");
 
-  try {
-    const response = await fetch(`${cleanUrl}/api/sessions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        anonymousId: onboarding.anonymousId,
-        participantToken: onboarding.participantToken,
-        sessionId: session.sessionId,
-        startTime: session.startTime,
-        endTime: session.endTime,
-        videoCount,
-        videoIds,
-        watchedSecondsList,
-        totalMs: metrics.totalMs,
-        feedbackNotifiedAt: metrics.feedbackNotifiedAt,
-      }),
-    });
+  const result = await sendToServer(
+    "/api/sessions",
+    "POST",
+    {
+      anonymousId: onboarding.anonymousId,
+      participantToken: onboarding.participantToken,
+      sessionId: session.sessionId,
+      startTime: session.startTime,
+      endTime: session.endTime,
+      videoCount,
+      videoIds,
+      watchedSecondsList,
+      totalMs: metrics.totalMs,
+      feedbackNotifiedAt: metrics.feedbackNotifiedAt,
+    },
+    SESSION_REQUEST_TIMEOUT_MS,
+  );
 
-    if (!response.ok) {
-      const body = await response.text();
-      console.warn("[background] 서버 전송 실패:", response.status, body);
-      // 409(중복 세션) — 이전 시도가 서버엔 이미 반영됐지만 응답만 못 받았던 경우다.
-      // 서버가 이미 저장된 categoryDistribution/entropy를 본문에 실어 보내므로 함께 꺼내 돌려준다.
-      if (response.status === 409) {
-        let data = null;
-        try {
-          data = JSON.parse(body)?.data ?? null;
-        } catch {
-          data = null;
-        }
-        return {
-          duplicate: true,
-          categoryDistribution: data?.categoryDistribution ?? null,
-          entropy: data?.entropy ?? null,
-        };
-      }
-      return null;
-    }
-
+  if (result.ok) {
     console.log("[background] 서버 전송 완료:", session.sessionId);
-    const json = await response.json();
-    return json?.data ?? null;
-  } catch (error) {
-    console.warn("[background] 서버 전송 오류:", error);
-    return null;
+  } else {
+    console.warn("[background] 서버 전송 실패:", result.status, result.code);
   }
+  return result;
 }

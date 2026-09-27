@@ -263,6 +263,16 @@ export async function getUnsentVideoEvents() {
   return [...fromLive, ...fromSessions];
 }
 
+// 영상 POST가 확정되지 않았거나(sent:false) 영구 실패한(sent:"invalid") 항목은 서버에 행이 없어 PATCH가 404가 되므로 POST를 기다린다
+function isWatchStatsPending(v) {
+  return (
+    v?.watchedSeconds != null &&
+    v.watchStatsSent === false &&
+    v.sent !== false &&
+    v.sent !== "invalid"
+  );
+}
+
 /**
  * 로컬엔 있지만 아직 서버에 확정 반영 못한 시청시간 원시값을 live/sessions[] 양쪽에서
  * 모은다. content.js는 live 키만 갱신할 수 있어, 세션이 그 사이 닫힌 경우의 안전망이다.
@@ -272,12 +282,7 @@ export async function getUnsentWatchStats() {
   const all = await chrome.storage.local.get(null);
 
   const fromLive = Object.entries(all)
-    .filter(
-      ([key, v]) =>
-        key.startsWith("video__") &&
-        v?.watchedSeconds != null &&
-        v?.watchStatsSent === false,
-    )
+    .filter(([key, v]) => key.startsWith("video__") && isWatchStatsPending(v))
     .map(([key, v]) => ({
       location: "live",
       key,
@@ -289,16 +294,14 @@ export async function getUnsentWatchStats() {
     }));
 
   const fromSessions = (all.sessions ?? []).flatMap((session) =>
-    (session.videos ?? [])
-      .filter((v) => v.watchedSeconds != null && v.watchStatsSent === false)
-      .map((v) => ({
-        location: "session",
-        sessionId: session.sessionId,
-        eventId: v.eventId,
-        watchedSeconds: v.watchedSeconds,
-        playbackRate: v.playbackRate,
-        wasBackgrounded: v.wasBackgrounded,
-      })),
+    (session.videos ?? []).filter(isWatchStatsPending).map((v) => ({
+      location: "session",
+      sessionId: session.sessionId,
+      eventId: v.eventId,
+      watchedSeconds: v.watchedSeconds,
+      playbackRate: v.playbackRate,
+      wasBackgrounded: v.wasBackgrounded,
+    })),
   );
 
   return [...fromLive, ...fromSessions];
@@ -310,21 +313,32 @@ export async function getUnsentWatchStats() {
  * @returns {Promise<void>}
  */
 export function markWatchStatsSent(item) {
-  queue = queue.then(() => _markWatchStatsSent(item));
+  queue = queue.then(() => _setWatchStatsSent(item, true));
   return queue;
 }
 
 /**
- * markWatchStatsSent의 실제 갱신 로직 — location(live/session)에 따라 대상을 찾아 갱신한다.
- * @param {object} item
+ * 서버가 400으로 영원히 거부할 시청시간을 watchStatsSent:"invalid"로 표시해 재시도 대상에서 뺀다.
+ * @param {object} item - location/key/sessionId/eventId를 담은 항목
  * @returns {Promise<void>}
  */
-async function _markWatchStatsSent(item) {
+export function markWatchStatsInvalid(item) {
+  queue = queue.then(() => _setWatchStatsSent(item, "invalid"));
+  return queue;
+}
+
+/**
+ * watchStatsSent 갱신 로직 — location(live/session)에 따라 대상을 찾아 갱신한다.
+ * @param {object} item
+ * @param {true|"invalid"} value
+ * @returns {Promise<void>}
+ */
+async function _setWatchStatsSent(item, value) {
   if (item.location === "live") {
     const { [item.key]: existing } = await chrome.storage.local.get(item.key);
     if (!existing) return;
     await chrome.storage.local.set({
-      [item.key]: { ...existing, watchStatsSent: true },
+      [item.key]: { ...existing, watchStatsSent: value },
     });
     return;
   }
@@ -336,7 +350,7 @@ async function _markWatchStatsSent(item) {
     return {
       ...session,
       videos: (session.videos ?? []).map((v) =>
-        v.eventId === item.eventId ? { ...v, watchStatsSent: true } : v,
+        v.eventId === item.eventId ? { ...v, watchStatsSent: value } : v,
       ),
     };
   });
@@ -350,22 +364,34 @@ async function _markWatchStatsSent(item) {
  * @returns {Promise<void>}
  */
 export function markVideoEventSent(event) {
-  queue = queue.then(() => _markVideoEventSent(event));
+  queue = queue.then(() => _setVideoEventSent(event, true));
   return queue;
 }
 
 /**
- * markVideoEventSent의 실제 갱신 로직 — location(live/session)에 따라 대상을 찾아 갱신한다.
+ * 서버가 400으로 영원히 거부할 영상 이벤트를 sent:"invalid"로 표시해 재시도 대상에서 뺀다.
+ * 로컬에는 남겨 원인 조사가 가능하다.
  * @param {object} event
  * @returns {Promise<void>}
  */
-async function _markVideoEventSent(event) {
+export function markVideoEventInvalid(event) {
+  queue = queue.then(() => _setVideoEventSent(event, "invalid"));
+  return queue;
+}
+
+/**
+ * sent 갱신 로직 — location(live/session)에 따라 대상을 찾아 갱신한다.
+ * @param {object} event
+ * @param {true|"invalid"} value
+ * @returns {Promise<void>}
+ */
+async function _setVideoEventSent(event, value) {
   if (event.location === "live") {
     const { [event.key]: existing } = await chrome.storage.local.get(event.key);
     // 이미 세션 종료로 sessions[]로 옮겨졌거나(키 삭제) 다른 재시도가 먼저 표시한 경우.
     if (!existing) return;
     await chrome.storage.local.set({
-      [event.key]: { ...existing, sent: true },
+      [event.key]: { ...existing, sent: value },
     });
     return;
   }
@@ -378,7 +404,7 @@ async function _markVideoEventSent(event) {
       ...session,
       videos: (session.videos ?? []).map((v) =>
         v.videoId === event.videoId && v.watchedAt === event.watchedAt
-          ? { ...v, sent: true }
+          ? { ...v, sent: value }
           : v,
       ),
     };

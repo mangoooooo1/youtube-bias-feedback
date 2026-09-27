@@ -544,6 +544,50 @@ describe("getUnsentWatchStats / markWatchStatsSent", () => {
     expect(await getUnsentWatchStats()).toEqual([]);
   });
 
+  it("영상 POST가 확정되지 않은(sent:false) 항목은 PATCH가 404가 되므로 제외하고, sent:true·레거시(sent 없음)는 포함한다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__pending: {
+        eventId: "pending",
+        watchedSeconds: 10,
+        watchStatsSent: false,
+        sent: false,
+      },
+      video__s1__posted: {
+        eventId: "posted",
+        watchedSeconds: 20,
+        watchStatsSent: false,
+        sent: true,
+      },
+      video__s1__legacy: {
+        eventId: "legacy",
+        watchedSeconds: 30,
+        watchStatsSent: false,
+      },
+      sessions: [
+        {
+          sessionId: "s0",
+          videos: [
+            {
+              eventId: "closed-pending",
+              watchedSeconds: 40,
+              watchStatsSent: false,
+              sent: false,
+            },
+            {
+              eventId: "closed-posted",
+              watchedSeconds: 50,
+              watchStatsSent: false,
+              sent: true,
+            },
+          ],
+        },
+      ],
+    });
+
+    const eventIds = (await getUnsentWatchStats()).map((i) => i.eventId);
+    expect(eventIds.sort()).toEqual(["closed-posted", "legacy", "posted"]);
+  });
+
   it("세션 종료 후(sessions[].videos)의 미반영 시청시간도 찾아낸다", async () => {
     await global.chrome.storage.local.set({
       sessions: [
