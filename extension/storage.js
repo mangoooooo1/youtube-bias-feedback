@@ -506,6 +506,26 @@ export async function recordParticipantSyncFailure(
 }
 
 /**
+ * 서버가 토큰을 거부했을 때(INVALID_PARTICIPANT_TOKEN) 등록 확인 상태를 되돌린다.
+ *
+ * participantSynced는 "서버에 내 participants 행이 있고 내 토큰이 유효하다"의 캐시인데,
+ * 서버 응답으로 내려가는 경로가 없으면 한 번 true가 된 뒤 영원히 true로 남는 단방향
+ * 래치가 된다. 그 상태에서 PARTICIPANT_TOKEN_SECRET이 새로 설정되면 기존 참여자는
+ * 토큰이 null인 채 모든 요청이 403이 되고, 게이트는 synced:true라 아무것도 하지 않아
+ * 복구 수단이 사라진다. 이 함수가 그 래치를 푼다.
+ *
+ * @returns {Promise<boolean>} 이번 호출로 상태가 실제로 바뀌었는지. 403이 연속될 때
+ *   매 틱 storage를 쓰거나 같은 로그를 반복하지 않도록 호출부가 이 값으로 거른다.
+ */
+export async function invalidateParticipantSync() {
+  const { participantSynced } =
+    await chrome.storage.local.get("participantSynced");
+  if (!participantSynced) return false;
+  await chrome.storage.local.set({ participantSynced: false });
+  return true;
+}
+
+/**
  * 참여자를 온보딩 처리한다 — anonymousId를 새로 발급하고 그룹·설치일을 저장한다.
  * @param {string} group - VALID_GROUPS 중 하나
  * @returns {Promise<void>}

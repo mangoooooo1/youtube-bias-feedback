@@ -1830,3 +1830,135 @@ describe("참여자 등록 게이트 — 팝업을 열지 않아도 알람이 �
     expect(order).toContain("POST /api/video-events");
   });
 });
+
+describe("토큰 거부 시 등록 무효화 — 큐가 403을 받으면 다음 틱에 재등록한다", () => {
+  const BASE = {
+    anonymousId: "a1",
+    group: "EXP",
+    participantCode: "QWE-AB23",
+    installDate: new Date(2025, 0, 1).toISOString(),
+    participantSynced: true,
+    participantToken: "stale",
+    video__s1__e1: {
+      videoId: "v1",
+      watchedAt: "2026-01-10T11:00:00Z",
+      eventId: "e1",
+      sent: false,
+    },
+  };
+
+  async function loadBackground(storage = BASE) {
+    global.chrome = createChromeMock();
+    await global.chrome.storage.local.set(storage);
+    vi.resetModules();
+    return import("../background.js");
+  }
+
+  function respond(status, body) {
+    return vi.fn(async () => ({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+    }));
+  }
+
+  // G3 — PARTICIPANT_TOKEN_SECRET을 연구 중간에 켜면 기존 참여자는 토큰이 null인 채
+  // 모든 요청이 403이 된다. 이 경로가 없으면 재설치 말고는 복구 수단이 없다.
+  it("403 INVALID_PARTICIPANT_TOKEN이면 participantSynced를 내린다", async () => {
+    const mod = await loadBackground();
+    global.fetch = respond(403, {
+      success: false,
+      code: "INVALID_PARTICIPANT_TOKEN",
+    });
+
+    await mod.retryUnsentVideoEvents();
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.participantSynced).toBe(false);
+    // 토큰은 지우지 않는다 — 재등록 성공 시 새 값으로 덮어쓴다
+    expect(all.participantToken).toBe("stale");
+    // 영상은 큐에 그대로 남아야 한다
+    expect(all.video__s1__e1.sent).toBe(false);
+  });
+
+  it("무효화 다음 틱에 게이트가 재등록해 토큰을 갱신하고 큐가 풀린다", async () => {
+    const mod = await loadBackground();
+    global.fetch = respond(403, {
+      success: false,
+      code: "INVALID_PARTICIPANT_TOKEN",
+    });
+    await mod.retryUnsentVideoEvents();
+
+    const paths = [];
+    global.fetch = vi.fn(async (url, options = {}) => {
+      paths.push(`${options.method} ${new URL(String(url)).pathname}`);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          data: { participantToken: "fresh" },
+        }),
+      };
+    });
+
+    await mod.ensureParticipantSynced();
+    await mod.retryUnsentVideoEvents();
+
+    expect(paths).toEqual(["POST /api/participants", "POST /api/video-events"]);
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.participantSynced).toBe(true);
+    expect(all.participantToken).toBe("fresh");
+    expect(all.video__s1__e1.sent).toBe(true);
+  });
+
+  it("404 참여자 미등록으로는 participantSynced를 내리지 않는다", async () => {
+    const mod = await loadBackground();
+    global.fetch = respond(404, { success: false, code: "NOT_FOUND" });
+
+    await mod.retryUnsentVideoEvents();
+
+    const all = await global.chrome.storage.local.get(null);
+    // 404에 재등록을 붙이면 삭제 요청으로 지운 행이 되살아난다(PRIVACY.md 5절).
+    expect(all.participantSynced).toBe(true);
+  });
+
+  it("code 없는 403(프록시 오류 등)으로는 내리지 않는다", async () => {
+    const mod = await loadBackground();
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 403,
+      json: async () => {
+        throw new Error("not json");
+      },
+    }));
+
+    await mod.retryUnsentVideoEvents();
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.participantSynced).toBe(true);
+  });
+
+  it("403이 연속돼도 무효화 로그는 상태가 바뀐 첫 틱에만 남긴다", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const mod = await loadBackground();
+      global.fetch = respond(403, {
+        success: false,
+        code: "INVALID_PARTICIPANT_TOKEN",
+      });
+
+      await mod.retryUnsentVideoEvents();
+      await mod.retryUnsentVideoEvents();
+
+      const invalidated = warn.mock.calls
+        .map(([line]) => line)
+        .filter((line) =>
+          String(line).includes("result=participant_invalidated"),
+        );
+      expect(invalidated).toHaveLength(1);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});

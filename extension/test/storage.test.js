@@ -9,6 +9,9 @@ import {
   markVideoEventSent,
   getUnsentWatchStats,
   markWatchStatsSent,
+  getParticipantSyncState,
+  markParticipantSynced,
+  invalidateParticipantSync,
 } from "../storage.js";
 
 // 프로젝트에 chrome.storage.local 목이 없어 이번에 처음 만든다.
@@ -727,5 +730,56 @@ describe("endSession — sent·eventId를 세션 종료 이후에도 보존한�
 
     const sessions = await getAllSessions();
     expect(sessions[0].videos[0].isShortsUrl).toBe(1);
+  });
+});
+
+describe("참여자 등록 게이트 상태", () => {
+  const BASE = {
+    anonymousId: "a1",
+    group: "EXP",
+    installDate: "2026-01-01T00:00:00.000Z",
+  };
+
+  it("참여코드가 없어도 읽되 null로 채운다(구버전 설치 하위호환)", async () => {
+    await global.chrome.storage.local.set(BASE);
+
+    expect(await getParticipantSyncState()).toEqual({
+      ...BASE,
+      participantCode: null,
+      synced: false,
+      failure: null,
+    });
+  });
+
+  it.each([
+    ["group 없음", { anonymousId: "a1", installDate: BASE.installDate }],
+    ["anonymousId 없음", { group: "EXP", installDate: BASE.installDate }],
+    ["installDate 없음", { anonymousId: "a1", group: "EXP" }],
+  ])("%s이면 null을 반환해 요청 자체를 막는다", async (_label, stored) => {
+    await global.chrome.storage.local.set(stored);
+
+    expect(await getParticipantSyncState()).toBeNull();
+  });
+
+  it("등록 성공을 기록하면 남아 있던 실패 기록을 지운다", async () => {
+    await global.chrome.storage.local.set({
+      ...BASE,
+      participantSyncFailure: { kind: "retryable", attempts: 3 },
+    });
+
+    await markParticipantSynced("tok");
+
+    const state = await getParticipantSyncState();
+    expect(state.synced).toBe(true);
+    expect(state.failure).toBeNull();
+  });
+
+  it("무효화는 상태가 실제로 바뀐 경우에만 true를 반환한다", async () => {
+    await global.chrome.storage.local.set({ ...BASE, participantSynced: true });
+
+    expect(await invalidateParticipantSync()).toBe(true);
+    // 403이 연속될 때 매 틱 storage를 쓰지 않도록 두 번째부터는 false
+    expect(await invalidateParticipantSync()).toBe(false);
+    expect((await getParticipantSyncState()).synced).toBe(false);
   });
 });

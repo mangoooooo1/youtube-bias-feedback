@@ -14,6 +14,7 @@ import {
   getParticipantSyncState,
   markParticipantSynced,
   recordParticipantSyncFailure,
+  invalidateParticipantSync,
 } from "./storage.js";
 import { isBaselinePeriod } from "./pipeline/baseline.js";
 import { SERVER_URL } from "./config.js";
@@ -499,6 +500,15 @@ async function drainQueue(name, items, processItem, markInvalid) {
   const pending = items.length - sentThisTick - invalidThisTick;
   const summary = `pending=${pending} sentThisTick=${sentThisTick} invalidThisTick=${invalidThisTick}`;
   if (abortedBy) {
+    // 서버가 토큰을 거부했다면 participantSynced는 더 이상 진실이 아니다. 내려두면 다음 알람 틱에 게이트가 재등록해 토큰을 다시 받아온다.
+    if (
+      abortedBy.code === "INVALID_PARTICIPANT_TOKEN" &&
+      (await invalidateParticipantSync())
+    ) {
+      console.warn(
+        `[background] queue=${name} result=participant_invalidated status=${abortedBy.status}`,
+      );
+    }
     console.warn(
       `[background] queue=${name} result=abort status=${abortedBy.status} code=${abortedBy.code} ${summary}`,
     );
