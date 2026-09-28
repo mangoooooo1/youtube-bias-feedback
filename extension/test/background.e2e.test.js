@@ -2231,6 +2231,29 @@ describe("참여 기간 종료 — 전송 기간이 끝나면 서버 요청을 �
     expect(message).not.toMatch(/삭제|제거/);
   });
 
+  it("알림 생성이 실패하면 기록하지 않고 다음 틱에 다시 시도한다", async () => {
+    const mod = await loadBackground(backlog(ENDED_INSTALL_DATE));
+    global.fetch = okFetch();
+    global.chrome.notifications.create
+      .mockRejectedValueOnce(new Error("notification failed"))
+      .mockResolvedValue("viewlens-participation-ended");
+
+    await expect(mod.runServerTasks()).rejects.toThrow("notification failed");
+    expect(
+      (await global.chrome.storage.local.get("participationEndedNotifiedAt"))
+        .participationEndedNotifiedAt,
+    ).toBeUndefined();
+
+    await mod.runServerTasks();
+    await mod.runServerTasks();
+
+    expect(global.chrome.notifications.create).toHaveBeenCalledTimes(2);
+    expect(
+      (await global.chrome.storage.local.get("participationEndedNotifiedAt"))
+        .participationEndedNotifiedAt,
+    ).toEqual(expect.any(String));
+  });
+
   it("종료 알림을 클릭하면 팝업만 열고 세션 열람 기록 요청은 보내지 않는다", async () => {
     const mod = await loadBackground(backlog(ENDED_INSTALL_DATE));
     global.fetch = okFetch();

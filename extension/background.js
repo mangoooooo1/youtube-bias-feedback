@@ -179,14 +179,15 @@ async function notifyParticipationEndedOnce() {
     "participationEndedNotifiedAt",
   );
   if (participationEndedNotifiedAt) return;
-  await chrome.storage.local.set({
-    participationEndedNotifiedAt: new Date().toISOString(),
-  });
-  chrome.notifications.create(PARTICIPATION_ENDED_NOTIFICATION_ID, {
+  // 생성이 성공한 뒤에 기록해야 실패 시 다음 틱에 다시 시도한다(중복 표시가 누락보다 낫다)
+  await chrome.notifications.create(PARTICIPATION_ENDED_NOTIFICATION_ID, {
     type: "basic",
     iconUrl: chrome.runtime.getURL("assets/icons/icon128.png"),
     title: "ViewLens",
     message: `${ViewLensStudy.ENDED_NOTICE.title} ${ViewLensStudy.ENDED_NOTICE.body}`,
+  });
+  await chrome.storage.local.set({
+    participationEndedNotifiedAt: new Date().toISOString(),
   });
 }
 
