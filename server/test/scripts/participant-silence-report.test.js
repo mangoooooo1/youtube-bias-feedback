@@ -407,9 +407,37 @@ describe("미등록 발급 코드 — 등록 자체가 안 된 참여자를 찾�
 
     const result = run(db, { now: Date.now(), thresholdDays: 3 });
 
-    // issuedCount는 전체(2), 미등록 집계에서만 TEST를 뺀다
-    expect(result).toMatchObject({ issuedCount: 2, unregisteredCount: 1 });
+    // 분모(issuedCount)와 미등록 집계가 같은 기준이어야 "등록 M개 = N - K"가 맞는다.
+    // TEST를 분모에만 넣으면 등록되지 않은 TEST 코드가 "등록됨"으로 잡힌다.
+    expect(result).toMatchObject({ issuedCount: 1, unregisteredCount: 1 });
+    expect(loggedOutput()).toContain("발급 코드 1개 중 등록 0개, 미등록 1개");
     expect(loggedOutput()).not.toContain(sha10("TEST-EXP"));
+  });
+
+  // participants는 group_code로 TEST를 거르므로, 발급 명단도 code만 보면 어긋난다.
+  // codes.csv에 이런 행이 있으면 그 참여자는 등록해도 participants 쪽에서 TEST로 빠지는데
+  // 발급 명단 쪽에서는 계속 "미등록"으로 잡혀 영구 오탐이 된다.
+  it("코드 문자열은 TEST가 아니지만 그룹이 TEST인 발급 행도 제외한다", () => {
+    insertIssuedCode(db, "QWE-PILOT", "TEST-EXP");
+    insertIssuedCode(db, "ASD-PILOT", "TEST-CON");
+    insertIssuedCode(db, "QWE-AAAA", "EXP");
+
+    const result = run(db, { now: Date.now(), thresholdDays: 3 });
+
+    expect(result).toMatchObject({ issuedCount: 1, unregisteredCount: 1 });
+    const out = loggedOutput();
+    expect(out).toContain(sha10("QWE-AAAA"));
+    expect(out).not.toContain(sha10("QWE-PILOT"));
+    expect(out).not.toContain(sha10("ASD-PILOT"));
+  });
+
+  it("TEST 발급 행만 있으면 시드 전과 똑같이 섹션을 생략한다", () => {
+    insertIssuedCode(db, "QWE-PILOT", "TEST-EXP");
+
+    const result = run(db, { now: Date.now(), thresholdDays: 3 });
+
+    expect(result).toMatchObject({ issuedCount: 0, unregisteredCount: 0 });
+    expect(loggedOutput()).not.toContain("발급 코드");
   });
 
   it("시드 전(issued_codes가 비어 있음)이면 섹션 자체를 생략한다", () => {

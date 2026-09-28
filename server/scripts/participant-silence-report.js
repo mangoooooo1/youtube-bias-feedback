@@ -93,7 +93,7 @@ function collectParticipantActivity(db) {
  * 검사 대상에서 통째로 빠진다. 게다가 서버에는 어떤 접촉 흔적도 남지 않는다.
  */
 function collectUnregisteredCodes(db) {
-  const placeholders = [...TEST_CODES].map(() => "?").join(",");
+  const { sql, params } = excludeTestCodes("i");
   return db
     .prepare(
       `
@@ -101,21 +101,36 @@ function collectUnregisteredCodes(db) {
         FROM issued_codes i
         LEFT JOIN participants p ON p.participantCode = i.code
        WHERE p.anonymousId IS NULL
-         AND i.code NOT IN (${placeholders})
+         AND ${sql}
        ORDER BY i.code
     `,
     )
-    .all(...TEST_CODES);
+    .all(...params);
 }
 
 /**
- * 미등록 발급 코드 섹션을 출력한다. 시드 전(issued_codes가 빈 상태)이면 섹션 자체를 생략한다.
+ * issued_codes에서 TEST를 걸러내는 조건. code와 group_code를 둘 다 본다.
+ * @param {string} alias - issued_codes 테이블 별칭
+ */
+function excludeTestCodes(alias) {
+  const placeholders = [...TEST_CODES].map(() => "?").join(",");
+  return {
+    sql: `${alias}.code NOT IN (${placeholders}) AND ${alias}.group_code NOT IN (${placeholders})`,
+    params: [...TEST_CODES, ...TEST_CODES],
+  };
+}
+
+/**
+ * 미등록 발급 코드 섹션을 출력한다. 시드 전(실참여자용 발급 코드가 없는 상태)이면 섹션 자체를 생략한다.
  * @returns {{issuedCount: number, unregisteredCount: number}}
  */
 function reportUnregisteredCodes(db) {
+  // 미등록 조회와 같은 기준으로 세야 "발급 N개 중 등록 M개(= N - K)" 산수가 맞는다.
+  // TEST를 분모에만 넣으면 등록되지 않은 TEST 코드가 "등록됨"으로 집계된다.
+  const { sql, params } = excludeTestCodes("issued_codes");
   const issuedCount = db
-    .prepare("SELECT COUNT(*) AS c FROM issued_codes")
-    .get().c;
+    .prepare(`SELECT COUNT(*) AS c FROM issued_codes WHERE ${sql}`)
+    .get(...params).c;
   if (issuedCount === 0) return { issuedCount: 0, unregisteredCount: 0 };
 
   const unregistered = collectUnregisteredCodes(db);
