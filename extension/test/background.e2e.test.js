@@ -2037,3 +2037,93 @@ describe("storage 실패 — 알람 콜백 밖으로 새어나가지 않는다",
     }
   });
 });
+
+describe("영구 실패는 그 요청 내용에만 적용된다 — 재온보딩을 막지 않는다", () => {
+  const BASE = {
+    anonymousId: "a1",
+    group: "EXP",
+    participantCode: "QWE-BAD1",
+    installDate: new Date(2025, 0, 1).toISOString(),
+  };
+
+  async function loadBackground(storage) {
+    global.chrome = createChromeMock();
+    await global.chrome.storage.local.set(storage);
+    vi.resetModules();
+    return import("../background.js");
+  }
+
+  function respond(status, body) {
+    return vi.fn(async () => ({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+    }));
+  }
+
+  const BAD_CODE = { success: false, code: "INVALID_FIELD_VALUE" };
+
+  it("잘못된 참여코드로 400을 받은 뒤 올바른 코드로 재온보딩하면 다시 시도한다", async () => {
+    const mod = await loadBackground(BASE);
+    global.fetch = respond(400, BAD_CODE);
+    await mod.ensureParticipantSynced();
+
+    // 같은 내용으로는 다시 보내지 않는다
+    global.fetch = respond(400, BAD_CODE);
+    await mod.ensureParticipantSynced();
+    expect(global.fetch).not.toHaveBeenCalled();
+
+    // 팝업 재온보딩 경로는 participantSynced만 되돌리고 participantSyncFailure는 남긴다
+    // (viewlens-popup.js의 온보딩·연구자 리셋·재설치 복구 세 경로 모두 그렇다).
+    await global.chrome.storage.local.set({
+      participantCode: "QWE-GOOD",
+      installDate: new Date(2025, 0, 2).toISOString(),
+      participantSynced: false,
+    });
+
+    global.fetch = respond(200, {
+      success: true,
+      data: { participantToken: "tok" },
+    });
+    await mod.ensureParticipantSynced();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body).participantCode).toBe(
+      "QWE-GOOD",
+    );
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.participantSynced).toBe(true);
+    expect(all.participantSyncFailure).toBeUndefined();
+  });
+
+  it("requestKey가 없는 옛 기록은 막지 않고 재시도하는 쪽으로 떨어진다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      // 이 필드 도입 전 버전이 남긴 기록
+      participantSyncFailure: {
+        kind: "permanent",
+        httpStatus: 400,
+        code: "INVALID_FIELD_VALUE",
+        attempts: 1,
+      },
+    });
+    global.fetch = respond(200, { success: true, data: {} });
+
+    await mod.ensureParticipantSynced();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("실패 기록에 requestKey를 남긴다", async () => {
+    const mod = await loadBackground(BASE);
+    global.fetch = respond(400, BAD_CODE);
+
+    await mod.ensureParticipantSynced();
+
+    const { participantSyncFailure } =
+      await global.chrome.storage.local.get(null);
+    expect(participantSyncFailure.requestKey).toBe(
+      `a1|EXP|${BASE.installDate}|QWE-BAD1`,
+    );
+  });
+});

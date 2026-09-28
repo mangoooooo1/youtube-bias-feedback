@@ -441,7 +441,8 @@ export async function getOnboarding() {
  * storage 한 번 읽기로 가져오게 한다.
  *
  * @returns {Promise<{anonymousId: string, group: string, installDate: string,
- *   participantCode: string|null, synced: boolean, failure: object|null}|null>}
+ *   participantCode: string|null, synced: boolean, failure: object|null,
+ *   requestKey: string}|null>}
  *   등록을 시도할 수 없는 상태(온보딩 전, 필수 값 누락)면 null
  */
 export async function getParticipantSyncState() {
@@ -463,7 +464,21 @@ export async function getParticipantSyncState() {
     participantCode: stored.participantCode ?? null,
     synced: !!stored.participantSynced,
     failure: stored.participantSyncFailure ?? null,
+    requestKey: participantRequestKey(stored),
   };
+}
+
+/**
+ * 등록 요청의 내용을 식별하는 키. 영구 실패(400) 판정이 "어떤 요청에 대한 것"인지 묶어둬,
+ * 요청 내용이 달라지면 그 판정이 자동으로 무효가 되게 한다.
+ */
+function participantRequestKey({
+  anonymousId,
+  group,
+  installDate,
+  participantCode,
+}) {
+  return [anonymousId, group, installDate, participantCode ?? ""].join("|");
 }
 
 /**
@@ -484,6 +499,7 @@ export async function markParticipantSynced(participantToken) {
  * @param {number|null} httpStatus - 네트워크 오류·타임아웃이면 null
  * @param {string|null} code - 서버 ERROR_CODES 또는 network/timeout
  * @param {object|null} prev - 직전 participantSyncFailure
+ * @param {string} requestKey - 이 판정이 적용되는 요청 내용(participantRequestKey)
  * @returns {Promise<void>}
  */
 export async function recordParticipantSyncFailure(
@@ -491,6 +507,7 @@ export async function recordParticipantSyncFailure(
   httpStatus,
   code,
   prev,
+  requestKey,
 ) {
   const now = new Date().toISOString();
   await chrome.storage.local.set({
@@ -498,6 +515,9 @@ export async function recordParticipantSyncFailure(
       kind,
       httpStatus,
       code,
+      // 어떤 요청에 대한 판정인지 함께 남긴다. 재온보딩으로 참여코드·설치일이 바뀌면
+      // 이 키가 달라져 낡은 permanent가 새 등록을 막지 못한다.
+      requestKey,
       attempts: (prev?.attempts ?? 0) + 1,
       firstFailedAt: prev?.firstFailedAt ?? now,
       lastFailedAt: now,

@@ -334,9 +334,13 @@ export function ensureParticipantSynced() {
     const state = await getParticipantSyncState();
     if (!state) return; // 온보딩 전이거나 필수 값 누락
     if (state.synced) return; // 이미 등록됨
-    // 서버가 400으로 거부한 실패는 같은 요청을 다시 보내도 영원히 같은 답이 온다.
-    // 전송 큐의 kind:"item"과 같은 판단이며, 해제는 재온보딩·재설치 복구로만 이뤄진다.
-    if (state.failure?.kind === "permanent") return;
+    // 서버가 400으로 거부한 실패는 "같은 요청"을 다시 보내야 영원히 같은 답이 온다.
+    if (
+      state.failure?.kind === "permanent" &&
+      state.failure.requestKey === state.requestKey
+    ) {
+      return;
+    }
 
     const attempts = (state.failure?.attempts ?? 0) + 1;
     const result = await sendToServer("/api/participants", "POST", {
@@ -364,6 +368,7 @@ export function ensureParticipantSynced() {
       result.status,
       result.code,
       state.failure,
+      state.requestKey,
     );
     console.warn(
       `[background] queue=participants result=${kind} status=${result.status} code=${result.code} attempts=${attempts}`,
