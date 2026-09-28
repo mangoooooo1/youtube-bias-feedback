@@ -5,6 +5,7 @@ import {
   isStudyEndUnlocked,
   isStudyEnded,
 } from "../../routes/period-reviews-query.js";
+import { TOTAL_DAYS } from "../../pipeline/study-constants.js";
 
 // 대조군 케이스와 무관한 기존 EXP/미등록 테스트에서 채워 넣는 자리표시 installDate.
 // EXP 경로는 isStudyEndUnlocked를 호출하지 않으므로 값 자체는 결과에 영향을 주지 않는다.
@@ -298,4 +299,25 @@ describe("isStudyEnded / isStudyEndUnlocked", () => {
 
     expect(isStudyEndUnlocked(db, "con-user", ENDED_INSTALL_DATE)).toBe(false);
   });
+});
+
+describe("isStudyEnded — 마지막 기간 다음 날 09:00 KST(팝업 종료 안내와 같은 시점)", () => {
+  // 6/1 설치 → 마지막 기간은 6/(TOTAL_DAYS)일, 종료는 그다음 날 09:00 KST
+  const endDate = new Date(Date.UTC(2026, 5, 1 + TOTAL_DAYS))
+    .toISOString()
+    .slice(0, 10);
+  const endsAt = Date.parse(`${endDate}T09:00:00+09:00`);
+
+  it.each([
+    ["오전 설치(07:00 KST)", "2026-06-01T07:00:00+09:00"],
+    // 설치 시각 + TOTAL_DAYS(15:00)가 아니라 09:00에 풀려야 팝업 코드 입력 화면과 어긋나지 않는다
+    ["오후 설치(15:00 KST)", "2026-06-01T15:00:00+09:00"],
+    ["자정 직전 설치(23:59 KST)", "2026-06-01T23:59:00+09:00"],
+  ])(
+    "%s: 09:00 KST 직전은 false, 09:00 KST부터 true",
+    (_label, installDate) => {
+      expect(isStudyEnded(installDate, new Date(endsAt - 1))).toBe(false);
+      expect(isStudyEnded(installDate, new Date(endsAt))).toBe(true);
+    },
+  );
 });

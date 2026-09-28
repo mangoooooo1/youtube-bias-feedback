@@ -97,6 +97,7 @@ function createFetchMock({
 }
 
 const FIXED_NOW = new Date(2026, 0, 10, 12, 0, 0);
+const ACTIVE_INSTALL_DATE = new Date(2026, 0, 5).toISOString();
 
 async function loadAnalyzeSession() {
   vi.resetModules();
@@ -132,7 +133,7 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(), // 베이스라인 훨씬 지남 → 알림 대상
+      installDate: ACTIVE_INSTALL_DATE, // 베이스라인 훨씬 지남 → 알림 대상
       sessions: [
         {
           sessionId: "s1",
@@ -195,7 +196,7 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "CON",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       sessions: [
         {
           sessionId: "s1",
@@ -245,7 +246,7 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       sessions: [
         {
           sessionId: "s1",
@@ -301,7 +302,7 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       sessions: [
         {
           sessionId: "s1",
@@ -366,7 +367,7 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       sessions: [
         {
           sessionId: "s1",
@@ -433,7 +434,7 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       sessions: [
         {
           sessionId: "s1",
@@ -479,7 +480,7 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       sessions: [
         {
           sessionId: "s-already-synced",
@@ -562,7 +563,7 @@ describe("retryUnsyncedSessions — 서버 장애 대비 로컬 재시도 큐", 
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       sessions: [
         {
           sessionId: "s1",
@@ -620,7 +621,7 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       currentSession: { sessionId: "s1", startTime: "2026-01-10T11:00:00Z" },
       video__s1__uuid1: {
         videoId: "v1",
@@ -666,7 +667,7 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       sessions: [
         {
           sessionId: "s1",
@@ -715,7 +716,7 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       video__s1__uuid1: {
         videoId: "v1",
         title: "노래 모음",
@@ -767,7 +768,7 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       // 이 재시도 큐가 생기기 전(구버전 content.js)에 기록된 영상 — sent 필드가 없다.
       // 대부분 이미 서버 전송에 성공한 상태라, 이걸 재전송하면 eventId도 없어
       // video_events에 영구 중복 행이 쌓인다.
@@ -813,7 +814,7 @@ describe("retryUnsentWatchStats — 시청시간 서버 장애 대비 재시도 
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       video__s1__uuid1: {
         videoId: "v1",
         eventId: "uuid1",
@@ -857,7 +858,7 @@ describe("retryUnsentWatchStats — 시청시간 서버 장애 대비 재시도 
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       sessions: [
         {
           sessionId: "s1",
@@ -899,7 +900,7 @@ describe("retryUnsentWatchStats — 시청시간 서버 장애 대비 재시도 
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       video__s1__uuid1: {
         videoId: "v1",
         eventId: "uuid1",
@@ -952,7 +953,7 @@ describe("analyzeSession — watchedSecondsList를 세션 페이로드에 함께
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       sessions: [
         {
           sessionId: "s1",
@@ -989,7 +990,7 @@ describe("analyzeSession — watchedSecondsList를 세션 페이로드에 함께
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       sessions: [
         {
           sessionId: "s1",
@@ -1135,7 +1136,7 @@ describe("sendToServer — 재시도 큐가 판단할 수 있도록 전송 결�
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       sessions: [
         {
           sessionId: "s1",
@@ -1176,7 +1177,7 @@ describe("알람 핸들러 — 시청시간 PATCH는 영상 POST 재시도가 �
     await global.chrome.storage.local.set({
       anonymousId: "a1",
       group: "EXP",
-      installDate: new Date(2025, 0, 1).toISOString(),
+      installDate: ACTIVE_INSTALL_DATE,
       // 이 테스트의 관심사는 POST→PATCH 순서뿐이므로 등록 게이트는 열어 둔다
       // (게이트가 닫힌 채 알람이 도는 흐름은 "등록 게이트" describe에서 검증한다).
       participantSynced: true,
@@ -1207,7 +1208,7 @@ describe("재시도 큐 fail-fast — 큐 전체에 공통된 실패면 한 틱�
   const BASE = {
     anonymousId: "a1",
     group: "EXP",
-    installDate: new Date(2025, 0, 1).toISOString(),
+    installDate: ACTIVE_INSTALL_DATE,
   };
 
   function unsentVideos(count) {
@@ -1444,7 +1445,7 @@ describe("400 영구 실패 — 서버가 영원히 거부할 항목은 표시�
   const BASE = {
     anonymousId: "a1",
     group: "EXP",
-    installDate: new Date(2025, 0, 1).toISOString(),
+    installDate: ACTIVE_INSTALL_DATE,
   };
 
   function reject400() {
@@ -1633,7 +1634,7 @@ describe("참여자 등록 게이트 — 팝업을 열지 않아도 알람이 �
     anonymousId: "a1",
     group: "EXP",
     participantCode: "QWE-AB23",
-    installDate: new Date(2025, 0, 1).toISOString(),
+    installDate: ACTIVE_INSTALL_DATE,
   };
 
   async function loadBackground(storage) {
@@ -1843,7 +1844,7 @@ describe("토큰 거부 시 등록 무효화 — 큐가 403을 받으면 다음 
     anonymousId: "a1",
     group: "EXP",
     participantCode: "QWE-AB23",
-    installDate: new Date(2025, 0, 1).toISOString(),
+    installDate: ACTIVE_INSTALL_DATE,
     participantSynced: true,
     participantToken: "stale",
     video__s1__e1: {
@@ -1975,7 +1976,7 @@ describe("storage 실패 — 알람 콜백 밖으로 새어나가지 않는다",
     anonymousId: "a1",
     group: "EXP",
     participantCode: "QWE-AB23",
-    installDate: new Date(2025, 0, 1).toISOString(),
+    installDate: ACTIVE_INSTALL_DATE,
   };
 
   function okResponse() {
@@ -2043,7 +2044,7 @@ describe("영구 실패는 그 요청 내용에만 적용된다 — 재온보딩
     anonymousId: "a1",
     group: "EXP",
     participantCode: "QWE-BAD1",
-    installDate: new Date(2025, 0, 1).toISOString(),
+    installDate: ACTIVE_INSTALL_DATE,
   };
 
   async function loadBackground(storage) {
@@ -2125,5 +2126,152 @@ describe("영구 실패는 그 요청 내용에만 적용된다 — 재온보딩
     expect(participantSyncFailure.requestKey).toBe(
       `a1|EXP|${BASE.installDate}|QWE-BAD1`,
     );
+  });
+});
+
+describe("참여 기간 종료 — 전송 기간이 끝나면 서버 요청을 보내지 않는다", () => {
+  const DAY = 86400000;
+  // 수집 종료(설치+12일이 속한 KST 날짜의 00:00)로부터 FIXED_NOW까지 1~2일 → grace
+  const GRACE_INSTALL_DATE = new Date(FIXED_NOW - 13 * DAY).toISOString();
+  // 8~9일 → ended
+  const ENDED_INSTALL_DATE = new Date(FIXED_NOW - 20 * DAY).toISOString();
+
+  function backlog(installDate) {
+    return {
+      anonymousId: "a1",
+      group: "EXP",
+      installDate,
+      participantCode: "QWE-1234",
+      participantSynced: false,
+      video__s1__e1: {
+        videoId: "v1",
+        watchedAt: "2026-01-01T11:00:00Z",
+        eventId: "e1",
+        sent: false,
+      },
+      video__s1__e2: {
+        videoId: "v2",
+        eventId: "e2",
+        sent: true,
+        watchedSeconds: 10,
+        watchStatsSent: false,
+      },
+      sessions: [
+        { sessionId: "s0", videos: [{ videoId: "v0" }], syncedToServer: false },
+      ],
+    };
+  }
+
+  async function loadBackground(storage) {
+    global.chrome = createChromeMock();
+    global.chrome.tabs = { create: vi.fn() };
+    await global.chrome.storage.local.set(storage);
+    vi.resetModules();
+    return import("../background.js");
+  }
+
+  function okFetch() {
+    return vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: { participantToken: "t" } }),
+    }));
+  }
+
+  it("ended면 등록·세션·영상·시청시간 요청을 하나도 보내지 않는다", async () => {
+    const mod = await loadBackground(backlog(ENDED_INSTALL_DATE));
+    global.fetch = okFetch();
+
+    await mod.runServerTasks();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("grace면 기존처럼 등록 게이트와 재시도 큐가 동작한다", async () => {
+    const mod = await loadBackground(backlog(GRACE_INSTALL_DATE));
+    global.fetch = okFetch();
+
+    await mod.runServerTasks();
+
+    const paths = global.fetch.mock.calls.map(
+      ([url, options]) => `${options.method} ${new URL(url).pathname}`,
+    );
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "POST /api/participants",
+        "POST /api/sessions",
+        "POST /api/video-events",
+        "PATCH /api/video-events/e2",
+      ]),
+    );
+  });
+
+  it("ended 안내 알림은 여러 틱과 서비스워커 재시작을 거쳐도 한 번만 뜬다", async () => {
+    let mod = await loadBackground(backlog(ENDED_INSTALL_DATE));
+    global.fetch = okFetch();
+    await mod.runServerTasks();
+    await mod.runServerTasks();
+
+    // 같은 storage로 모듈만 다시 불러와 서비스워커 재시작을 흉내 낸다
+    const chromeBeforeRestart = global.chrome;
+    vi.resetModules();
+    mod = await import("../background.js");
+    await mod.runServerTasks();
+
+    expect(chromeBeforeRestart.notifications.create).toHaveBeenCalledTimes(1);
+    expect(chromeBeforeRestart.notifications.create).toHaveBeenCalledWith(
+      "viewlens-participation-ended",
+      expect.objectContaining({
+        message: expect.stringContaining("설문 안내를 기다려 주세요"),
+      }),
+    );
+    const [[, { message }]] =
+      chromeBeforeRestart.notifications.create.mock.calls;
+    // 설문 중 리뷰를 다시 봐야 하므로 삭제·제거를 안내하면 안 된다
+    expect(message).not.toMatch(/삭제|제거/);
+  });
+
+  it("알림 생성이 실패하면 기록하지 않고 다음 틱에 다시 시도한다", async () => {
+    const mod = await loadBackground(backlog(ENDED_INSTALL_DATE));
+    global.fetch = okFetch();
+    global.chrome.notifications.create
+      .mockRejectedValueOnce(new Error("notification failed"))
+      .mockResolvedValue("viewlens-participation-ended");
+
+    await expect(mod.runServerTasks()).rejects.toThrow("notification failed");
+    expect(
+      (await global.chrome.storage.local.get("participationEndedNotifiedAt"))
+        .participationEndedNotifiedAt,
+    ).toBeUndefined();
+
+    await mod.runServerTasks();
+    await mod.runServerTasks();
+
+    expect(global.chrome.notifications.create).toHaveBeenCalledTimes(2);
+    expect(
+      (await global.chrome.storage.local.get("participationEndedNotifiedAt"))
+        .participationEndedNotifiedAt,
+    ).toEqual(expect.any(String));
+  });
+
+  it("종료 알림을 클릭하면 팝업만 열고 세션 열람 기록 요청은 보내지 않는다", async () => {
+    const mod = await loadBackground(backlog(ENDED_INSTALL_DATE));
+    global.fetch = okFetch();
+
+    await mod.handleNotificationOpen("viewlens-participation-ended");
+
+    expect(global.chrome.tabs.create).toHaveBeenCalledTimes(1);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("ended에 세션이 닫혀도 서버로 보내지 않고 로컬에 미전송으로 남긴다", async () => {
+    const mod = await loadBackground(backlog(ENDED_INSTALL_DATE));
+    global.fetch = okFetch();
+
+    await mod.analyzeSession({ sessionId: "s0", videos: [{ videoId: "v0" }] });
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    expect(sessions[0].syncedToServer).toBe(false);
   });
 });

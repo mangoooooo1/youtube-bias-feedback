@@ -27,7 +27,7 @@
   "content_scripts": [
     {
       "matches": ["*://*.youtube.com/*"],
-      "js": ["content.js"],
+      "js": ["study-schedule.js", "content.js"],
       "run_at": "document_idle"
     }
   ]

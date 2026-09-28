@@ -645,6 +645,17 @@ function screenStudyEndNoticeModal() {
   });
 }
 
+// ── Participation ended banner ────────────────────────────────────────────────
+
+// 전송 유예까지 끝난(ended) 참여자에게 상단에 계속 보이는 종료 안내.
+// 설문 중에도 리뷰를 다시 볼 수 있어야 해 아래 화면은 가리지 않는다.
+function screenParticipationEndedBanner() {
+  const { title, body } = ViewLensStudy.ENDED_NOTICE;
+  return `<div id="vl-participation-ended-banner" role="status" style="margin:10px 16px 0;padding:10px 12px;border-radius:12px;background:var(--vl-accent-soft);color:var(--vl-ink);font-size:var(--vl-fs-3);line-height:1.5">
+    <strong>${title}</strong><br>${body}
+  </div>`;
+}
+
 // ── Past-day reveal modal (자정 경계 처리) ───────────────────────────────────────
 
 // 하루가 지나면 그 전날의 "봉인된" 마지막 리뷰를 1회 리빌 애니메이션과 함께 보여준다.
@@ -699,5 +710,6 @@ window.screenFeedback = screenFeedback;
 window.screenControlHome = screenControlHome;
 window.screenStudyEndCodeInput = screenStudyEndCodeInput;
 window.screenStudyEndNoticeModal = screenStudyEndNoticeModal;
+window.screenParticipationEndedBanner = screenParticipationEndedBanner;
 window.screenPastDayRevealModal = screenPastDayRevealModal;
 window.screenRecoverConfirmModal = screenRecoverConfirmModal;

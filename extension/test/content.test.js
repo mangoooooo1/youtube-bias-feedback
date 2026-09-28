@@ -10,6 +10,7 @@ import {
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import "../study-schedule.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONTENT_PATH = path.join(__dirname, "../content.js");
@@ -1689,4 +1690,130 @@ describe("content.js handleVideoChange 전체 수명주기 — 비영상 페이�
     const finalized = findVideoRecordByEventId(storage.dump(), eventIdA);
     expect(finalized.watchedSeconds).toBe(25); // 20+5, 재이벤트로 끊기지 않음
   });
+});
+
+describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
+  // installDate 1970-01-01T09:00 KST → 수집 종료 1970-01-13 00:00 KST, 전송 종료 3일 뒤
+  const INSTALL_DATE = "1970-01-01T00:00:00.000Z";
+  const COLLECTION_ENDS_AT = Date.parse("1970-01-13T00:00:00+09:00");
+  const TRANSMISSION_ENDS_AT = COLLECTION_ENDS_AT + 3 * 86400000;
+
+  let videoEl, documentMock, locationMock, storage, fetchCalls, api;
+
+  function setup(initialStorage) {
+    videoEl = createFakeVideoElement({ paused: true });
+    documentMock = {
+      title: "YouTube",
+      referrer: "",
+      hidden: false,
+      addEventListener: () => {},
+      querySelector: () => videoEl,
+    };
+    locationMock = { href: "https://www.youtube.com/" };
+    storage = createSharedStorage(initialStorage);
+    fetchCalls = [];
+    const fetchMock = (url, options = {}) => {
+      fetchCalls.push({ url, method: options.method });
+      return Promise.resolve({ ok: true });
+    };
+    api = loadFullVideoLifecycle(
+      documentMock,
+      locationMock,
+      { runtime: { id: "fake-extension-id" }, storage: { local: storage } },
+      fetchMock,
+    );
+  }
+
+  async function watch(videoId, seconds) {
+    locationMock.href = `https://www.youtube.com/watch?v=${videoId}`;
+    documentMock.title = `영상 ${videoId} - YouTube`;
+    await api.handleVideoChange();
+    await flushPendingMicrotasks();
+    videoEl.paused = false;
+    videoEl.dispatch("play");
+    vi.setSystemTime(Date.now() + seconds * 1000);
+    videoEl.paused = true;
+    videoEl.dispatch("pause");
+  }
+
+  function recordedVideoIds() {
+    return Object.entries(storage.dump())
+      .filter(([k]) => k.startsWith("video__"))
+      .map(([, v]) => v.videoId);
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("수집 종료 후 본 영상은 기록하지 않고, 그 시청시간이 종료 전 영상에 붙지 않는다", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(COLLECTION_ENDS_AT - 60000);
+    setup({ installDate: INSTALL_DATE });
+
+    await watch("AAAA", 30);
+    const eventIdA = api.getTrackedVideoIdentity()?.eventId;
+
+    vi.setSystemTime(COLLECTION_ENDS_AT + 1000);
+    await watch("BBBB", 50); // 종료 후 — 기록되지 않아야 한다
+    expect(api.getTrackedVideoIdentity()).toBeNull();
+
+    await watch("CCCC", 10);
+    locationMock.href = "https://www.youtube.com/";
+    await api.handleVideoChange();
+    await flushPendingMicrotasks();
+
+    expect(recordedVideoIds()).toEqual(["AAAA"]);
+    // A는 종료 전 30초로 확정되고, 종료 후 본 B의 50초로 덮이지 않는다
+    expect(
+      findVideoRecordByEventId(storage.dump(), eventIdA).watchedSeconds,
+    ).toBe(30);
+    expect(storage.dump().currentSession.videoCount).toBe(1);
+  });
+
+  it("수집 종료 후에는 새 영상 POST를 보내지 않는다", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(COLLECTION_ENDS_AT + 1000);
+    setup({
+      installDate: INSTALL_DATE,
+      anonymousId: "a1",
+      serverUrl: "https://srv.example",
+    });
+
+    await watch("AAAA", 10);
+
+    expect(recordedVideoIds()).toEqual([]);
+    expect(fetchCalls).toEqual([]);
+  });
+
+  it.each([
+    ["유예 기간", COLLECTION_ENDS_AT + 1000, 1],
+    ["전송 종료 후", TRANSMISSION_ENDS_AT + 1000, 0],
+  ])(
+    "종료 전 영상의 시청시간을 %s에 확정하면 로컬에는 남기고 PATCH는 %i건 보낸다",
+    async (_label, finalizeAt, expectedPatches) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(COLLECTION_ENDS_AT - 60000);
+      setup({
+        installDate: INSTALL_DATE,
+        anonymousId: "a1",
+        serverUrl: "https://srv.example",
+      });
+
+      await watch("AAAA", 30);
+      const eventIdA = api.getTrackedVideoIdentity()?.eventId;
+
+      vi.setSystemTime(finalizeAt);
+      locationMock.href = "https://www.youtube.com/";
+      await api.handleVideoChange();
+      await flushPendingMicrotasks();
+
+      expect(
+        findVideoRecordByEventId(storage.dump(), eventIdA).watchedSeconds,
+      ).toBe(30);
+      expect(fetchCalls.filter((c) => c.method === "PATCH")).toHaveLength(
+        expectedPatches,
+      );
+    },
+  );
 });
