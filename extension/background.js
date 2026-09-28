@@ -132,14 +132,11 @@ chrome.storage.local
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== ALARM_NAME) return;
-  // 등록이 안 돼 있으면 모든 수집 API가 404이므로, 게이트를 먼저 연 뒤 큐를 돌린다.
-  // 게이트가 닫힌 상태에서도 큐는 어차피 한 틱에 1건만 보내고 중단하므로 기다리는 손해가
-  // 없고, 게이트가 열린 직후면 같은 틱에 밀린 데이터가 나가 오늘 리뷰의 시간 창을 지킨다.
-  ensureParticipantSynced().finally(() => {
-    retryUnsyncedSessions();
-    // 시청시간 PATCH는 영상 POST로 생긴 행을 갱신하므로 POST 재시도가 끝난 뒤 보낸다
-    retryUnsentVideoEvents().finally(() => retryUnsentWatchStats());
-  });
+  runServerTasks().catch((error) =>
+    console.error(
+      `[background] task=server_tasks result=crashed error=${error?.message}`,
+    ),
+  );
   // 로컬 세션 종료 판정은 서버와 무관하므로 게이트를 기다리지 않는다.
   // 네 큐는 withQueueLock이 예외를 흡수하지만 이 경로는 그 밖이라 여기서 직접 받는다.
   checkSessionTimeout().catch((error) =>
@@ -149,17 +146,67 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   );
 });
 
+/**
+ * 알람 틱의 서버 작업. 참여 전송 기간까지 끝났으면(ended) 등록·재시도 큐를 돌리지 않고
+ * 종료 안내만 한 번 띄운다.
+ * @returns {Promise<void>}
+ */
+export async function runServerTasks() {
+  const onboarding = await getOnboarding();
+  if (
+    ViewLensStudy.getParticipationState(onboarding?.installDate) === "ended"
+  ) {
+    await notifyParticipationEndedOnce();
+    return;
+  }
+  await ensureParticipantSynced().finally(() =>
+    Promise.all([
+      retryUnsyncedSessions(),
+      retryUnsentVideoEvents().finally(() => retryUnsentWatchStats()),
+    ]),
+  );
+}
+
+const PARTICIPATION_ENDED_NOTIFICATION_ID = "viewlens-participation-ended";
+
+/**
+ * 참여 종료 안내 알림을 기기당 한 번만 띄운다. 서비스워커가 재시작돼도 다시 뜨지 않도록
+ * 표시 시각을 storage에 남긴다.
+ * @returns {Promise<void>}
+ */
+async function notifyParticipationEndedOnce() {
+  const { participationEndedNotifiedAt } = await chrome.storage.local.get(
+    "participationEndedNotifiedAt",
+  );
+  if (participationEndedNotifiedAt) return;
+  await chrome.storage.local.set({
+    participationEndedNotifiedAt: new Date().toISOString(),
+  });
+  chrome.notifications.create(PARTICIPATION_ENDED_NOTIFICATION_ID, {
+    type: "basic",
+    iconUrl: chrome.runtime.getURL("assets/icons/icon128.png"),
+    title: "ViewLens",
+    message:
+      "연구 참여 기간이 종료되었습니다. 참여해 주셔서 감사합니다. 확장 프로그램을 제거해 주세요.",
+  });
+}
+
 // 알림 본문/버튼 클릭 모두 같은 동작 — notificationId가 곧 sessionId이므로 별도 매핑 없이 역추적한다.
 chrome.notifications.onButtonClicked.addListener(handleNotificationOpen);
 chrome.notifications.onClicked.addListener(handleNotificationOpen);
 
 /**
  * 알림 클릭 시 팝업을 열고 아이콘 점을 지운 뒤 열람을 서버에 기록한다.
- * @param {string} sessionId - 알림 id(=sessionId)
+ * @param {string} sessionId - 알림 id(=sessionId, 참여 종료 알림은 예외)
  * @returns {Promise<void>}
  */
-async function handleNotificationOpen(sessionId) {
+export async function handleNotificationOpen(sessionId) {
   chrome.notifications.clear(sessionId);
+  // 참여 종료 알림은 세션이 아니라 열람 기록 대상이 없다
+  if (sessionId === PARTICIPATION_ENDED_NOTIFICATION_ID) {
+    chrome.tabs.create({ url: chrome.runtime.getURL("popup/popup.html") });
+    return;
+  }
   clearUnviewedIconDot();
   chrome.tabs.create({ url: chrome.runtime.getURL("popup/popup.html") });
   await markFeedbackViewed(sessionId);
@@ -257,6 +304,12 @@ async function syncSessionToServer(session, metrics = {}) {
   // 알림 자격은 리뷰 생성 결과와 무관하게(그룹·베이스라인만으로) 미리 정해진다.
   // 이 값을 그대로 서버에 함께 보내 sessions.feedbackNotifiedAt에 기록한다.
   const onboarding = await getOnboarding();
+  // 알람 틱 밖(세션 종료 직후 최초 전송)에서도 전송 기간이 끝났으면 보내지 않는다
+  if (
+    ViewLensStudy.getParticipationState(onboarding?.installDate) === "ended"
+  ) {
+    return failure(null, "participation_ended");
+  }
   const eligibleForNotification = isFeedbackNotificationEligible(
     onboarding?.group,
     onboarding?.installDate,
