@@ -5,6 +5,7 @@ import {
   run,
   evaluateParticipantSilence,
   collectParticipantActivity,
+  collectUnregisteredCodes,
   parseThresholdArg,
   DEFAULT_THRESHOLD_DAYS,
 } from "../../scripts/participant-silence-report.js";
@@ -115,6 +116,11 @@ function createTestDb() {
       anonymousId TEXT NOT NULL,
       createdAt TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    CREATE TABLE issued_codes (
+      code       TEXT PRIMARY KEY,
+      group_code TEXT NOT NULL,
+      createdAt  TEXT DEFAULT (datetime('now'))
+    );
   `);
   return db;
 }
@@ -126,6 +132,13 @@ function insertParticipant(
   db.prepare(
     "INSERT INTO participants (anonymousId, participantCode, group_code, installDate) VALUES (?, ?, ?, ?)",
   ).run(anonymousId, participantCode, groupCode, installDate);
+}
+
+function insertIssuedCode(db, code, groupCode) {
+  db.prepare("INSERT INTO issued_codes (code, group_code) VALUES (?, ?)").run(
+    code,
+    groupCode,
+  );
 }
 
 function insertVideoEvent(db, anonymousId, watchedAt) {
@@ -221,7 +234,12 @@ describe("run", () => {
 
     const result = run(db, { now, thresholdDays: 3 });
 
-    expect(result).toEqual({ flaggedCount: 0, checkedCount: 1 });
+    expect(result).toEqual({
+      flaggedCount: 0,
+      checkedCount: 1,
+      issuedCount: 0,
+      unregisteredCount: 0,
+    });
     expect(loggedOutput()).toContain("결측 의심 참여자 없음");
   });
 
@@ -237,7 +255,12 @@ describe("run", () => {
 
     const result = run(db, { now, thresholdDays: 3 });
 
-    expect(result).toEqual({ flaggedCount: 1, checkedCount: 1 });
+    expect(result).toEqual({
+      flaggedCount: 1,
+      checkedCount: 1,
+      issuedCount: 0,
+      unregisteredCount: 0,
+    });
     const output = loggedOutput();
     expect(output).toContain("결측 의심 참여자 1명 발견");
     expect(output).toContain(`participantCode(지문)=${sha10("QWE-K7M2")}`);
@@ -287,7 +310,12 @@ describe("run", () => {
 
     const result = run(db, { now, thresholdDays: 3 });
 
-    expect(result).toEqual({ flaggedCount: 0, checkedCount: 0 });
+    expect(result).toEqual({
+      flaggedCount: 0,
+      checkedCount: 0,
+      issuedCount: 0,
+      unregisteredCount: 0,
+    });
   });
 });
 
@@ -314,5 +342,116 @@ describe("parseThresholdArg — CLI 인수 검증", () => {
 
   it("숫자가 아닌 문자열은 거부한다", () => {
     expect(() => parseThresholdArg("abc")).toThrow();
+  });
+});
+
+describe("미등록 발급 코드 — 등록 자체가 안 된 참여자를 찾는 유일한 수단", () => {
+  let db;
+  let logSpy;
+
+  beforeEach(() => {
+    db = createTestDb();
+    logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    db.close();
+    logSpy.mockRestore();
+  });
+
+  function loggedOutput() {
+    return logSpy.mock.calls.map((args) => args.join(" ")).join("\n");
+  }
+
+  it("발급됐지만 participants에 없는 코드를 지문으로 보고한다", () => {
+    insertIssuedCode(db, "QWE-AAAA", "EXP");
+    insertIssuedCode(db, "ASD-BBBB", "CON");
+    insertParticipant(db, {
+      anonymousId: "u1",
+      participantCode: "QWE-AAAA",
+      groupCode: "EXP",
+      installDate: new Date().toISOString(),
+    });
+
+    const result = run(db, { now: Date.now(), thresholdDays: 3 });
+
+    expect(result).toMatchObject({ issuedCount: 2, unregisteredCount: 1 });
+    const out = loggedOutput();
+    expect(out).toContain("발급 코드 2개 중 등록 1개, 미등록 1개");
+    expect(out).toContain(`code(지문)=${sha10("ASD-BBBB")} groupCode=CON`);
+    // 참여코드 원본은 로그에 남지 않아야 한다(사실상의 인증 수단)
+    expect(out).not.toContain("ASD-BBBB");
+    expect(out).not.toContain("QWE-AAAA");
+  });
+
+  it("전부 등록됐으면 개수만 알리고 목록은 내지 않는다", () => {
+    insertIssuedCode(db, "QWE-AAAA", "EXP");
+    insertParticipant(db, {
+      anonymousId: "u1",
+      participantCode: "QWE-AAAA",
+      groupCode: "EXP",
+      installDate: new Date().toISOString(),
+    });
+
+    const result = run(db, { now: Date.now(), thresholdDays: 3 });
+
+    expect(result).toMatchObject({ issuedCount: 1, unregisteredCount: 0 });
+    const out = loggedOutput();
+    expect(out).toContain("발급 코드 1개 중 등록 1개, 미등록 0개");
+    expect(out).not.toContain("실제 모집 명단과 대조해");
+  });
+
+  it("TEST 코드는 미등록이어도 제외한다", () => {
+    insertIssuedCode(db, "TEST-EXP", "TEST-EXP");
+    insertIssuedCode(db, "QWE-AAAA", "EXP");
+
+    const result = run(db, { now: Date.now(), thresholdDays: 3 });
+
+    // 분모(issuedCount)와 미등록 집계가 같은 기준이어야 "등록 M개 = N - K"가 맞는다.
+    // TEST를 분모에만 넣으면 등록되지 않은 TEST 코드가 "등록됨"으로 잡힌다.
+    expect(result).toMatchObject({ issuedCount: 1, unregisteredCount: 1 });
+    expect(loggedOutput()).toContain("발급 코드 1개 중 등록 0개, 미등록 1개");
+    expect(loggedOutput()).not.toContain(sha10("TEST-EXP"));
+  });
+
+  // participants는 group_code로 TEST를 거르므로, 발급 명단도 code만 보면 어긋난다.
+  // codes.csv에 이런 행이 있으면 그 참여자는 등록해도 participants 쪽에서 TEST로 빠지는데
+  // 발급 명단 쪽에서는 계속 "미등록"으로 잡혀 영구 오탐이 된다.
+  it("코드 문자열은 TEST가 아니지만 그룹이 TEST인 발급 행도 제외한다", () => {
+    insertIssuedCode(db, "QWE-PILOT", "TEST-EXP");
+    insertIssuedCode(db, "ASD-PILOT", "TEST-CON");
+    insertIssuedCode(db, "QWE-AAAA", "EXP");
+
+    const result = run(db, { now: Date.now(), thresholdDays: 3 });
+
+    expect(result).toMatchObject({ issuedCount: 1, unregisteredCount: 1 });
+    const out = loggedOutput();
+    expect(out).toContain(sha10("QWE-AAAA"));
+    expect(out).not.toContain(sha10("QWE-PILOT"));
+    expect(out).not.toContain(sha10("ASD-PILOT"));
+  });
+
+  it("TEST 발급 행만 있으면 시드 전과 똑같이 섹션을 생략한다", () => {
+    insertIssuedCode(db, "QWE-PILOT", "TEST-EXP");
+
+    const result = run(db, { now: Date.now(), thresholdDays: 3 });
+
+    expect(result).toMatchObject({ issuedCount: 0, unregisteredCount: 0 });
+    expect(loggedOutput()).not.toContain("발급 코드");
+  });
+
+  it("시드 전(issued_codes가 비어 있음)이면 섹션 자체를 생략한다", () => {
+    const result = run(db, { now: Date.now(), thresholdDays: 3 });
+
+    expect(result).toMatchObject({ issuedCount: 0, unregisteredCount: 0 });
+    expect(loggedOutput()).not.toContain("발급 코드");
+  });
+
+  it("collectUnregisteredCodes는 코드와 그룹만 돌려준다", () => {
+    insertIssuedCode(db, "ASD-BBBB", "CON");
+
+    expect(collectUnregisteredCodes(db)).toEqual([
+      { code: "ASD-BBBB", groupCode: "CON" },
+    ]);
   });
 });

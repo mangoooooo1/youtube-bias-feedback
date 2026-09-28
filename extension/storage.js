@@ -433,6 +433,119 @@ export async function getOnboarding() {
 }
 
 /**
+ * 참여자 등록 게이트(background.js의 ensureParticipantSynced)가 쓰는 상태만 모아 읽는다.
+ *
+ * getOnboarding()에 participantCode·participantSynced를 덧붙이지 않고 별도 접근자를 두는 이유:
+ * getOnboarding()은 세션·영상·시청시간 전송 등 다섯 곳이 공유하는데, 이 세 필드는 등록
+ * 게이트만 쓴다. 공유 접근자를 게이트 전용 필드로 부풀리지 않고, 게이트가 필요한 값을
+ * storage 한 번 읽기로 가져오게 한다.
+ *
+ * @returns {Promise<{anonymousId: string, group: string, installDate: string,
+ *   participantCode: string|null, synced: boolean, failure: object|null,
+ *   requestKey: string}|null>}
+ *   등록을 시도할 수 없는 상태(온보딩 전, 필수 값 누락)면 null
+ */
+export async function getParticipantSyncState() {
+  const stored = await chrome.storage.local.get([
+    "anonymousId",
+    "group",
+    "installDate",
+    "participantCode",
+    "participantSynced",
+    "participantSyncFailure",
+  ]);
+  // 팝업 boot의 재동기화 조건(viewlens-popup.js)과 같은 값 — 셋 중 하나라도 없으면
+  // registerParticipant가 missing_field 400을 돌려주므로 요청 자체를 보내지 않는다.
+  if (!stored.group || !stored.anonymousId || !stored.installDate) return null;
+  return {
+    anonymousId: stored.anonymousId,
+    group: stored.group,
+    installDate: stored.installDate,
+    participantCode: stored.participantCode ?? null,
+    synced: !!stored.participantSynced,
+    failure: stored.participantSyncFailure ?? null,
+    requestKey: participantRequestKey(stored),
+  };
+}
+
+/**
+ * 등록 요청의 내용을 식별하는 키. 영구 실패(400) 판정이 "어떤 요청에 대한 것"인지 묶어둬,
+ * 요청 내용이 달라지면 그 판정이 자동으로 무효가 되게 한다.
+ */
+function participantRequestKey({
+  anonymousId,
+  group,
+  installDate,
+  participantCode,
+}) {
+  return [anonymousId, group, installDate, participantCode ?? ""].join("|");
+}
+
+/**
+ * 등록 성공을 기록한다. 팝업의 syncParticipant와 같은 두 값을 쓰고, 남아 있던 실패 기록을 지운다.
+ * participantToken이 null인 것도 정상이다(서버 PARTICIPANT_TOKEN_SECRET 미설정).
+ * @param {string|null} participantToken
+ * @returns {Promise<void>}
+ */
+export async function markParticipantSynced(participantToken) {
+  await chrome.storage.local.set({ participantSynced: true, participantToken });
+  await chrome.storage.local.remove("participantSyncFailure");
+}
+
+/**
+ * 등록 실패를 기록한다. attempts와 firstFailedAt은 직전 기록에서 이어받아, 연구자가
+ * "이 상태가 얼마나 오래됐는지"를 참여자 PC에서 확인할 수 있게 한다.
+ * @param {"retryable"|"permanent"} kind - permanent면 이후 틱에서 재시도하지 않는다
+ * @param {number|null} httpStatus - 네트워크 오류·타임아웃이면 null
+ * @param {string|null} code - 서버 ERROR_CODES 또는 network/timeout
+ * @param {object|null} prev - 직전 participantSyncFailure
+ * @param {string} requestKey - 이 판정이 적용되는 요청 내용(participantRequestKey)
+ * @returns {Promise<void>}
+ */
+export async function recordParticipantSyncFailure(
+  kind,
+  httpStatus,
+  code,
+  prev,
+  requestKey,
+) {
+  const now = new Date().toISOString();
+  await chrome.storage.local.set({
+    participantSyncFailure: {
+      kind,
+      httpStatus,
+      code,
+      // 어떤 요청에 대한 판정인지 함께 남긴다. 재온보딩으로 참여코드·설치일이 바뀌면
+      // 이 키가 달라져 낡은 permanent가 새 등록을 막지 못한다.
+      requestKey,
+      attempts: (prev?.attempts ?? 0) + 1,
+      firstFailedAt: prev?.firstFailedAt ?? now,
+      lastFailedAt: now,
+    },
+  });
+}
+
+/**
+ * 서버가 토큰을 거부했을 때(INVALID_PARTICIPANT_TOKEN) 등록 확인 상태를 되돌린다.
+ *
+ * participantSynced는 "서버에 내 participants 행이 있고 내 토큰이 유효하다"의 캐시인데,
+ * 서버 응답으로 내려가는 경로가 없으면 한 번 true가 된 뒤 영원히 true로 남는 단방향
+ * 래치가 된다. 그 상태에서 PARTICIPANT_TOKEN_SECRET이 새로 설정되면 기존 참여자는
+ * 토큰이 null인 채 모든 요청이 403이 되고, 게이트는 synced:true라 아무것도 하지 않아
+ * 복구 수단이 사라진다. 이 함수가 그 래치를 푼다.
+ *
+ * @returns {Promise<boolean>} 이번 호출로 상태가 실제로 바뀌었는지. 403이 연속될 때
+ *   매 틱 storage를 쓰거나 같은 로그를 반복하지 않도록 호출부가 이 값으로 거른다.
+ */
+export async function invalidateParticipantSync() {
+  const { participantSynced } =
+    await chrome.storage.local.get("participantSynced");
+  if (!participantSynced) return false;
+  await chrome.storage.local.set({ participantSynced: false });
+  return true;
+}
+
+/**
  * 참여자를 온보딩 처리한다 — anonymousId를 새로 발급하고 그룹·설치일을 저장한다.
  * @param {string} group - VALID_GROUPS 중 하나
  * @returns {Promise<void>}
