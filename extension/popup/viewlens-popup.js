@@ -926,8 +926,14 @@ function sendPopupEventBeacon(serverUrl, m) {
   );
 }
 
+/**
+ * @returns {Promise<{ok: boolean, status: number|null, code: string|null}>}
+ *   code는 서버 응답 본문의 code(INVALID_PARTICIPANT_TOKEN 등). 본문이 JSON이 아니면 null.
+ */
 async function postPopupEvent(serverUrl, event) {
-  if (!serverUrl || serverUrl.startsWith("YOUR_")) return false;
+  if (!serverUrl || serverUrl.startsWith("YOUR_")) {
+    return { ok: false, status: null, code: null };
+  }
   try {
     const res = await fetch(
       `${serverUrl.replace(/\/$/, "")}/api/popup-events`,
@@ -937,9 +943,16 @@ async function postPopupEvent(serverUrl, event) {
         body: JSON.stringify(event),
       },
     );
-    return res.ok;
+    if (res.ok) return { ok: true, status: res.status, code: null };
+    let code = null;
+    try {
+      code = (await res.json())?.code ?? null;
+    } catch {
+      code = null;
+    }
+    return { ok: false, status: res.status, code };
   } catch {
-    return false;
+    return { ok: false, status: null, code: null };
   }
 }
 
@@ -965,15 +978,38 @@ async function drainPreviousPopupEvents() {
  * @param {string} serverUrl
  */
 async function flushPendingPopupEvents(serverUrl) {
-  const { pendingPopupEvents = [] } = await chrome.storage.local.get([
+  const {
+    pendingPopupEvents = [],
+    anonymousId,
+    participantToken,
+  } = await chrome.storage.local.get([
     "pendingPopupEvents",
+    "anonymousId",
+    "participantToken",
   ]);
   if (pendingPopupEvents.length === 0) return;
   // 전송 성공분은 즉시 큐에서 제거 — flush 도중 팝업이 닫혀도 재전송(중복)을 막는다.
   const queue = [...pendingPopupEvents];
   while (queue.length > 0) {
-    const ok = await postPopupEvent(serverUrl, queue[0]);
-    if (!ok) break;
+    const event = queue[0];
+    if (event.anonymousId !== anonymousId) {
+      console.warn(
+        `[popup] popup_events result=skip_foreign_identity eventId=${event.eventId}`,
+      );
+      queue.shift();
+      await chrome.storage.local.set({ pendingPopupEvents: queue });
+      continue;
+    }
+    const result = await postPopupEvent(serverUrl, {
+      ...event,
+      participantToken,
+    });
+    if (!result.ok) {
+      if (result.code === "INVALID_PARTICIPANT_TOKEN") {
+        await chrome.storage.local.set({ participantSynced: false });
+      }
+      break;
+    }
     queue.shift();
     await chrome.storage.local.set({ pendingPopupEvents: queue });
   }
