@@ -1793,7 +1793,12 @@ describe("참여자 등록 게이트 — 팝업을 열지 않아도 알람이 �
       const all = await global.chrome.storage.local.get(null);
       expect(all.participantSyncFailure).toBeUndefined();
     } finally {
-      vi.doUnmock("../config.js");
+      // doUnmock을 쓰면 파일 상단 vi.mock("../config.js")까지 해제돼, 이후 모든 테스트가
+      // 실제 config.js를 보게 된다. CI는 ensure-config.js가 복사한 placeholder를 쓰므로
+      // sendToServer가 요청 없이 no_server_url로 끝나 여기서부터 전부 깨진다(로컬 config.js가
+      // 우연히 목과 같은 값이면 안 드러난다 — 파일 상단 주석이 경고하는 바로 그 함정).
+      // 해제하지 말고 원래 고정값으로 다시 덮어씌운다.
+      vi.doMock("../config.js", () => ({ SERVER_URL: "http://localhost:3000" }));
       vi.resetModules();
     }
   });
