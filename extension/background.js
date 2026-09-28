@@ -186,8 +186,7 @@ async function notifyParticipationEndedOnce() {
     type: "basic",
     iconUrl: chrome.runtime.getURL("assets/icons/icon128.png"),
     title: "ViewLens",
-    message:
-      "연구 참여 기간이 종료되었습니다. 참여해 주셔서 감사합니다. 확장 프로그램을 제거해 주세요.",
+    message: `${ViewLensStudy.ENDED_NOTICE.title} ${ViewLensStudy.ENDED_NOTICE.body}`,
   });
 }
 

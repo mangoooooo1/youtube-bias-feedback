@@ -95,3 +95,14 @@ describe("study-schedule.js — classic script로 불러올 때", () => {
     expect(Object.isFrozen(context.ViewLensStudy)).toBe(true);
   });
 });
+
+describe("ENDED_NOTICE — 종료 안내 문구", () => {
+  it("설문을 기다리라고 안내하고, 삭제·제거는 안내하지 않는다", () => {
+    const { title, body } = ViewLensStudy.ENDED_NOTICE;
+    const text = `${title} ${body}`;
+    expect(text).toContain("종료");
+    expect(text).toContain("설문");
+    // 대조군은 종료 후 리뷰를 봐야 설문을 마칠 수 있고, 실험군도 설문 중 리뷰를 다시 볼 수 있어야 한다
+    expect(text).not.toMatch(/삭제|제거/);
+  });
+});

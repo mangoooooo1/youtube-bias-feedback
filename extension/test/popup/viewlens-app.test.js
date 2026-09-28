@@ -209,3 +209,71 @@ describe("_isStudyEndReviewReady — 대조군(CON)에게만, 연구 종료 후�
     ).toBe(true);
   });
 });
+
+describe("참여 종료 배너와 팝업 등록 재시도", () => {
+  const SCREENS_PATH = path.join(__dirname, "../../popup/viewlens-screens.js");
+  const DAY = 86400000;
+  const NOW = Date.parse("2026-01-20T03:00:00Z");
+  const ACTIVE = new Date(NOW - 5 * DAY).toISOString();
+  const GRACE = new Date(NOW - 13 * DAY).toISOString();
+  const ENDED = new Date(NOW - 20 * DAY).toISOString();
+
+  let gates;
+  beforeAll(async () => {
+    await import("../../study-schedule.js");
+    const appRaw = readFileSync(VIEWLENS_APP_PATH, "utf8");
+    const screensRaw = readFileSync(SCREENS_PATH, "utf8");
+    const popupRaw = readFileSync(VIEWLENS_POPUP_PATH, "utf8");
+    gates = new Function(
+      "ViewLensStudy",
+      `${extract(appRaw, /function _isParticipationEnded\(installDate\) \{[\s\S]*?\n\}/, "_isParticipationEnded")}
+       ${extract(screensRaw, /function screenParticipationEndedBanner\(\) \{[\s\S]*?\n\}/, "screenParticipationEndedBanner")}
+       ${extract(popupRaw, /function shouldRetryParticipantSync\(stored\) \{[\s\S]*?\n\}/, "shouldRetryParticipantSync")}
+       return { _isParticipationEnded, screenParticipationEndedBanner, shouldRetryParticipantSync };`,
+    )(globalThis.ViewLensStudy);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    ["active", ACTIVE, false],
+    ["grace", GRACE, false],
+    ["ended", ENDED, true],
+  ])("%s면 배너 표시 여부는 %s이다", (_label, installDate, expected) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    expect(gates._isParticipationEnded(installDate)).toBe(expected);
+  });
+
+  it("배너는 종료·설문 대기를 안내하고 삭제·제거는 안내하지 않는다", () => {
+    const html = gates.screenParticipationEndedBanner();
+    expect(html).toContain("연구 참여 기간이 종료되었습니다.");
+    expect(html).toContain("설문 안내를 기다려 주세요");
+    expect(html).not.toMatch(/삭제|제거/);
+  });
+
+  it("ended면 팝업 boot에서 등록을 다시 시도하지 않는다(옛 참여코드 재등록 방지)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const unsynced = {
+      group: "CON",
+      anonymousId: "a1",
+      participantSynced: false,
+    };
+    expect(
+      gates.shouldRetryParticipantSync({ ...unsynced, installDate: GRACE }),
+    ).toBe(true);
+    expect(
+      gates.shouldRetryParticipantSync({ ...unsynced, installDate: ENDED }),
+    ).toBe(false);
+    expect(
+      gates.shouldRetryParticipantSync({
+        ...unsynced,
+        installDate: ACTIVE,
+        participantSynced: true,
+      }),
+    ).toBe(false);
+  });
+});

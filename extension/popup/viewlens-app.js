@@ -51,6 +51,11 @@ function _installDateForDay(day) {
   return new Date(Date.now() - (day - 1) * 86400000).toISOString();
 }
 
+// 전송 유예 기간까지 끝났는지 — 종료·설문 대기 배너 표시 여부
+function _isParticipationEnded(installDate) {
+  return ViewLensStudy.getParticipationState(installDate) === "ended";
+}
+
 function _isStudyEndTimeReached(installDate) {
   if (!installDate) return false;
   const revealDateStr = dayFromInstall(installDate, VL.TOTAL_DAYS);
@@ -331,6 +336,7 @@ class ViewLensPopup {
 
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
       ${_popupHeader(groupCfg, day, { participantCode: this._participantCode, studyEnded })}
+      ${_isParticipationEnded(this._installDate) ? screenParticipationEndedBanner() : ""}
       ${
         feedbackActive || this._studyEndTabsActive(groupCfg)
           ? _tabs(this._tab, !VL._todayConfirmed)

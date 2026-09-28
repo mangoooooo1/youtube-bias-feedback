@@ -28,9 +28,15 @@
     return "ended";
   }
 
+  const ENDED_NOTICE = Object.freeze({
+    title: "연구 참여 기간이 종료되었습니다.",
+    body: "참여해 주셔서 감사합니다. 연구자가 보내드릴 설문 안내를 기다려 주세요.",
+  });
+
   globalThis.ViewLensStudy = Object.freeze({
     TOTAL_DAYS,
     END_GRACE_DAYS,
+    ENDED_NOTICE,
     getParticipationState,
   });
 })();

@@ -2222,9 +2222,13 @@ describe("참여 기간 종료 — 전송 기간이 끝나면 서버 요청을 �
     expect(chromeBeforeRestart.notifications.create).toHaveBeenCalledWith(
       "viewlens-participation-ended",
       expect.objectContaining({
-        message: expect.stringContaining("확장 프로그램을 제거해 주세요"),
+        message: expect.stringContaining("설문 안내를 기다려 주세요"),
       }),
     );
+    const [[, { message }]] =
+      chromeBeforeRestart.notifications.create.mock.calls;
+    // 설문 중 리뷰를 다시 봐야 하므로 삭제·제거를 안내하면 안 된다
+    expect(message).not.toMatch(/삭제|제거/);
   });
 
   it("종료 알림을 클릭하면 팝업만 열고 세션 열람 기록 요청은 보내지 않는다", async () => {
