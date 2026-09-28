@@ -387,7 +387,7 @@ export function ensureParticipantSynced() {
   return withQueueLock("participants", async () => {
     const state = await getParticipantSyncState();
     if (!state) return; // 온보딩 전이거나 필수 값 누락
-    if (state.synced) return; // 이미 등록됨
+    if (state.synced && !state.tokenMissing) return;
     // 서버가 400으로 거부한 실패는 "같은 요청"을 다시 보내야 영원히 같은 답이 온다.
     if (
       state.failure?.kind === "permanent" &&

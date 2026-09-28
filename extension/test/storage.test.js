@@ -747,6 +747,7 @@ describe("참여자 등록 게이트 상태", () => {
       ...BASE,
       participantCode: null,
       synced: false,
+      tokenMissing: true,
       failure: null,
       // 참여코드가 없으면 빈 문자열 자리로 들어간다 — 나중에 코드가 생기면 키가 달라져
       // 그때 기록된 permanent 판정이 자동으로 무효가 된다.

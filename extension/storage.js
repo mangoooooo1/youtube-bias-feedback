@@ -453,6 +453,7 @@ export async function getParticipantSyncState() {
     "participantCode",
     "participantSynced",
     "participantSyncFailure",
+    "participantToken",
   ]);
   // 팝업 boot의 재동기화 조건(viewlens-popup.js)과 같은 값 — 셋 중 하나라도 없으면
   // registerParticipant가 missing_field 400을 돌려주므로 요청 자체를 보내지 않는다.
@@ -463,6 +464,7 @@ export async function getParticipantSyncState() {
     installDate: stored.installDate,
     participantCode: stored.participantCode ?? null,
     synced: !!stored.participantSynced,
+    tokenMissing: stored.participantToken === undefined,
     failure: stored.participantSyncFailure ?? null,
     requestKey: participantRequestKey(stored),
   };
