@@ -1798,7 +1798,9 @@ describe("참여자 등록 게이트 — 팝업을 열지 않아도 알람이 �
       // sendToServer가 요청 없이 no_server_url로 끝나 여기서부터 전부 깨진다(로컬 config.js가
       // 우연히 목과 같은 값이면 안 드러난다 — 파일 상단 주석이 경고하는 바로 그 함정).
       // 해제하지 말고 원래 고정값으로 다시 덮어씌운다.
-      vi.doMock("../config.js", () => ({ SERVER_URL: "http://localhost:3000" }));
+      vi.doMock("../config.js", () => ({
+        SERVER_URL: "http://localhost:3000",
+      }));
       vi.resetModules();
     }
   });
@@ -1962,6 +1964,74 @@ describe("토큰 거부 시 등록 무효화 — 큐가 403을 받으면 다음 
           String(line).includes("result=participant_invalidated"),
         );
       expect(invalidated).toHaveLength(1);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+});
+
+describe("storage 실패 — 알람 콜백 밖으로 새어나가지 않는다", () => {
+  const BASE = {
+    anonymousId: "a1",
+    group: "EXP",
+    participantCode: "QWE-AB23",
+    installDate: new Date(2025, 0, 1).toISOString(),
+  };
+
+  function okResponse() {
+    return vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: { participantToken: "t" } }),
+    }));
+  }
+
+  // 모듈 최상단의 serverUrl 저장이 아니라 게이트 실행 중의 storage 실패를 보려는 것이므로,
+  // import가 끝난 뒤에 set을 바꿔 끼운다(용량 초과도 실제로는 나중에 발생한다).
+  async function loadThenBreakSet(message) {
+    global.chrome = createChromeMock();
+    await global.chrome.storage.local.set(BASE);
+    global.fetch = okResponse();
+    vi.resetModules();
+    const mod = await import("../background.js");
+    const realSet = global.chrome.storage.local.set;
+    global.chrome.storage.local.set = () => Promise.reject(new Error(message));
+    return { mod, realSet };
+  }
+
+  // sendToServer는 네트워크 오류를 결과 객체로 바꿔 주지만 chrome.storage 실패는 그 바깥이라
+  // 그대로 튀어 오른다. 알람 콜백이 Promise를 받지 않으므로 흡수하지 않으면 unhandled
+  // rejection이 되고, 어느 큐가 깨졌는지도 알 수 없다.
+  it("등록 게이트의 storage 실패를 흡수하고 큐 이름과 함께 기록한다", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { mod } = await loadThenBreakSet("QUOTA_BYTES quota exceeded");
+
+      // reject하지 않고 정상 종료해야 한다
+      await expect(mod.ensureParticipantSynced()).resolves.toBeUndefined();
+
+      expect(errorSpy.mock.calls.map(([line]) => line)).toContain(
+        "[background] queue=participants result=crashed error=QUOTA_BYTES quota exceeded",
+      );
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("한 큐가 깨져도 락이 풀려 다음 틱이 정상 진입한다", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { mod, realSet } = await loadThenBreakSet("boom");
+
+      await mod.ensureParticipantSynced();
+      // 락이 풀리지 않았다면 여기서 reentry_blocked로 빠져 fetch가 늘지 않는다
+      global.chrome.storage.local.set = realSet;
+      await mod.ensureParticipantSynced();
+
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      const all = await global.chrome.storage.local.get(null);
+      expect(all.participantSynced).toBe(true);
+      expect(errorSpy).toHaveBeenCalledTimes(1);
     } finally {
       vi.restoreAllMocks();
     }

@@ -120,8 +120,14 @@ async function drawIconWithDot(size) {
 // service worker가 깨어날 때마다 실행 — 같은 이름의 alarm은 자동으로 교체됨
 chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
 
-// content script가 읽을 수 있도록 SERVER_URL을 storage에 저장
-chrome.storage.local.set({ serverUrl: SERVER_URL });
+// content script가 읽을 수 있도록 SERVER_URL을 storage에 저장.
+chrome.storage.local
+  .set({ serverUrl: SERVER_URL })
+  .catch((error) =>
+    console.error(
+      `[background] task=persist_server_url result=crashed error=${error?.message}`,
+    ),
+  );
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== ALARM_NAME) return;
@@ -134,7 +140,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     retryUnsentVideoEvents().finally(() => retryUnsentWatchStats());
   });
   // 로컬 세션 종료 판정은 서버와 무관하므로 게이트를 기다리지 않는다.
-  checkSessionTimeout();
+  // 네 큐는 withQueueLock이 예외를 흡수하지만 이 경로는 그 밖이라 여기서 직접 받는다.
+  checkSessionTimeout().catch((error) =>
+    console.error(
+      `[background] task=session_timeout result=crashed error=${error?.message}`,
+    ),
+  );
 });
 
 // 알림 본문/버튼 클릭 모두 같은 동작 — notificationId가 곧 sessionId이므로 별도 매핑 없이 역추적한다.
@@ -461,6 +472,11 @@ async function withQueueLock(name, run) {
   inFlightQueues.add(name);
   try {
     await run();
+  } catch (error) {
+    // sendToServer는 네트워크 오류를 결과 객체로 바꿔 주지만 chrome.storage 실패는 그 바깥이라 그대로 튀어 오른다.
+    console.error(
+      `[background] queue=${name} result=crashed error=${error?.message}`,
+    );
   } finally {
     inFlightQueues.delete(name);
   }
