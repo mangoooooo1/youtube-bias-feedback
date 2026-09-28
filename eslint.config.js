@@ -5,7 +5,11 @@ const prettier = require("eslint-config-prettier");
 // chrome.* 네임스페이스는 extension 전역에서 공유하는 브라우저 API.
 // VL은 extension/popup, extension/studio가 <script> 태그로 순차 로드되며
 // 공유하는 전역 객체(모듈 시스템이 없어 import 없이 파일 간에 참조된다).
-const extensionGlobals = { ...globals.browser, chrome: "readonly" };
+const extensionGlobals = {
+  ...globals.browser,
+  chrome: "readonly",
+  ViewLensStudy: "readonly",
+};
 
 module.exports = [
   {
@@ -33,7 +37,8 @@ module.exports = [
   },
   {
     // extension/content.js — <script src>로 로드되는 단일 클래식 스크립트, 모듈 아님
-    files: ["extension/content.js"],
+    // extension/study-schedule.js — classic script로도 로드되므로 같은 규칙으로 검사한다
+    files: ["extension/content.js", "extension/study-schedule.js"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "script",

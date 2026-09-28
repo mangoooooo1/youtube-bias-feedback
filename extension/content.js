@@ -228,13 +228,15 @@ async function finalizePreviousWatchStats(target, stats) {
   });
   if (!applied) return;
 
-  const { anonymousId, serverUrl, participantToken } =
+  const { anonymousId, serverUrl, participantToken, installDate } =
     await chrome.storage.local.get([
       "anonymousId",
       "serverUrl",
       "participantToken",
+      "installDate",
     ]);
   if (!anonymousId || !serverUrl || serverUrl.startsWith("YOUR_")) return;
+  if (ViewLensStudy.getParticipationState(installDate) === "ended") return;
 
   try {
     const response = await fetch(
@@ -294,12 +296,14 @@ function recordVideo(
         anonymousId,
         serverUrl,
         participantToken,
+        installDate,
       } = await chrome.storage.local.get([
         "currentSession",
         "lastRecordedVideo",
         "anonymousId",
         "serverUrl",
         "participantToken",
+        "installDate",
       ]);
 
       // 새로고침(F5)으로 같은 영상이 다시 감지되는 경우를 막는다.
@@ -322,6 +326,11 @@ function recordVideo(
       // 다른 탭 데이터로 오염되는 건 눈에 안 보이므로, 유실 쪽이 안전하다.
       if (previousWatchStats && previousVideoIdentity?.eventId) {
         finalizePreviousWatchStats(previousVideoIdentity, previousWatchStats);
+      }
+
+      if (ViewLensStudy.getParticipationState(installDate) !== "active") {
+        clearTrackedVideo();
+        return;
       }
 
       // uuid를 videoKey와 eventId 양쪽에 재사용한다.
