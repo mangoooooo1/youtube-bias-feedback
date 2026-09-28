@@ -63,6 +63,13 @@ describe("getParticipationState — 참여 상태 경계", () => {
     ).toBe("active");
   });
 
+  it.each(["not-a-date", "2026-13-45", "undefined"])(
+    "손상된 installDate(%s)는 수집을 멈추지 않도록 active로 둔다",
+    (installDate) => {
+      expect(ViewLensStudy.getParticipationState(installDate)).toBe("active");
+    },
+  );
+
   it("installDate가 없으면(온보딩 전) active로 둔다", () => {
     expect(ViewLensStudy.getParticipationState(undefined)).toBe("active");
     expect(ViewLensStudy.getParticipationState(null)).toBe("active");

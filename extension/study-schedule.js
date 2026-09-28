@@ -17,7 +17,10 @@
    * @returns {"active"|"grace"|"ended"}
    */
   function getParticipationState(installDate, now = new Date()) {
-    if (!installDate) return "active";
+    // 없거나 손상된 설치일은 종료 신호로 보지 않는다 — NaN 비교가 전부 거짓이라 그대로 두면 ended가 된다
+    if (!installDate || !Number.isFinite(new Date(installDate).getTime())) {
+      return "active";
+    }
     const collectionEndsAt = Date.parse(
       `${kstDayFromInstall(installDate, TOTAL_DAYS)}T00:00:00+09:00`,
     );
