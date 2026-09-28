@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { isConGroup } from "../../pipeline/study-period.js";
 import { isBaselinePeriod, BASELINE_DAYS } from "../../pipeline/baseline.js";
 
@@ -275,5 +276,57 @@ describe("참여 종료 배너와 팝업 등록 재시도", () => {
         participantSynced: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe("연구 종료 시점 — 팝업(_isStudyEndTimeReached)과 서버(isStudyEnded)가 같다", () => {
+  // 팝업이 대조군 코드 입력 화면을 여는 순간 서버도 코드를 받아줘야 한다.
+  // 어긋나면 맞는 코드를 넣은 대조군이 "코드가 올바르지 않아요"를 보게 된다.
+  const require = createRequire(import.meta.url);
+  const { TOTAL_DAYS } = require("../../../server/pipeline/study-constants.js");
+  const {
+    isStudyEnded,
+  } = require("../../../server/routes/period-reviews-query.js");
+  const DAY = 86400000;
+  const HOUR = 3600000;
+
+  it.each([
+    ["오전 설치(07:00 KST)", "2026-06-01T07:00:00+09:00"],
+    ["오후 설치(15:00 KST)", "2026-06-01T15:00:00+09:00"],
+    ["자정 직전 설치(23:59 KST)", "2026-06-01T23:59:00+09:00"],
+    ["자정 직후 설치(00:01 KST)", "2026-06-02T00:01:00+09:00"],
+  ])("%s: 종료 전후 여러 시각에서 판정이 같다", (_label, installDate) => {
+    const gates = loadStudyGates(TOTAL_DAYS);
+    const base = Date.parse(installDate) + TOTAL_DAYS * DAY;
+    for (const offset of [
+      -24 * HOUR,
+      -12 * HOUR,
+      -1,
+      0,
+      1,
+      6 * HOUR,
+      24 * HOUR,
+    ]) {
+      // 팝업 경계(다음 날 09:00 KST)를 정확히 지나도록 설치 시각 기준 ±하루를 촘촘히 훑는다
+      for (const hour of [0, 8, 9, 10, 15]) {
+        const now = new Date(base + offset + hour * HOUR);
+        vi.useFakeTimers();
+        vi.setSystemTime(now);
+        expect(gates._isStudyEndTimeReached(installDate)).toBe(
+          isStudyEnded(installDate, now),
+        );
+      }
+    }
+    // 정확한 경계(09:00 KST)에서도 같다
+    const boundary = Date.parse(
+      `${new Date(base).toLocaleDateString("sv", { timeZone: "Asia/Seoul" })}T09:00:00+09:00`,
+    );
+    for (const now of [new Date(boundary - 1), new Date(boundary)]) {
+      vi.useFakeTimers();
+      vi.setSystemTime(now);
+      expect(gates._isStudyEndTimeReached(installDate)).toBe(
+        isStudyEnded(installDate, now),
+      );
+    }
   });
 });

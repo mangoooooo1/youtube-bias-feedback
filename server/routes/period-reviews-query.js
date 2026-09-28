@@ -3,6 +3,7 @@
 // 실제 암호화 DB 연결에 의존하지 않고 db 인스턴스를 인자로 받는 형태로 분리
 
 const { TOTAL_DAYS, DAYS_PER_PERIOD } = require("../pipeline/study-constants");
+const { dayFromInstall } = require("../pipeline/period-boundaries");
 
 const FEEDBACK_GROUPS = new Set(["EXP", "TEST-EXP"]);
 // 대조군(CON, TEST-CON) — 개입 기간 중에는 계속 차단하되, 연구 종료 + 전체 기간 리뷰 생성
@@ -14,9 +15,14 @@ const SELECT_COLUMNS = `
   categoryDistribution, entropy, review, reviewTopic, source, promptVersion, generatedAt
 `;
 
-/** installDate로부터 TOTAL_DAYS가 지났으면 연구 관찰 기간이 종료된 것으로 본다. */
+/**
+ * 연구 종료 시점 — 마지막 기간 다음 날 09:00 KST(04:00 KST 크론이 마지막 기간 리뷰를 만든 뒤).
+ * 팝업의 _isStudyEndTimeReached(종료 안내·대조군 코드 입력 화면을 여는 시점)와 같아야 한다.
+ */
 function isStudyEnded(installDate, now = new Date()) {
-  const endMs = new Date(installDate).getTime() + TOTAL_DAYS * 86400000;
+  const endMs = Date.parse(
+    `${dayFromInstall(installDate, TOTAL_DAYS)}T09:00:00+09:00`,
+  );
   return now.getTime() >= endMs;
 }
 
