@@ -39,6 +39,10 @@ function createChromeMock() {
           store = { ...store, ...obj };
           return Promise.resolve();
         },
+        remove: (keys) => {
+          for (const k of Array.isArray(keys) ? keys : [keys]) delete store[k];
+          return Promise.resolve();
+        },
       },
     },
     alarms: {
@@ -1173,6 +1177,9 @@ describe("알람 핸들러 — 시청시간 PATCH는 영상 POST 재시도가 �
       anonymousId: "a1",
       group: "EXP",
       installDate: new Date(2025, 0, 1).toISOString(),
+      // 이 테스트의 관심사는 POST→PATCH 순서뿐이므로 등록 게이트는 열어 둔다
+      // (게이트가 닫힌 채 알람이 도는 흐름은 "등록 게이트" describe에서 검증한다).
+      participantSynced: true,
       video__s1__e1: {
         videoId: "v1",
         watchedAt: "2026-01-10T11:00:00Z",
@@ -1618,5 +1625,208 @@ describe("400 영구 실패 — 서버가 영원히 거부할 항목은 표시�
     } finally {
       vi.restoreAllMocks();
     }
+  });
+});
+
+describe("참여자 등록 게이트 — 팝업을 열지 않아도 알람이 재등록한다", () => {
+  const BASE = {
+    anonymousId: "a1",
+    group: "EXP",
+    participantCode: "QWE-AB23",
+    installDate: new Date(2025, 0, 1).toISOString(),
+  };
+
+  async function loadBackground(storage) {
+    global.chrome = createChromeMock();
+    await global.chrome.storage.local.set(storage);
+    vi.resetModules();
+    return import("../background.js");
+  }
+
+  function respond(status, body = {}) {
+    return vi.fn(async () => ({
+      ok: status >= 200 && status < 300,
+      status,
+      json: async () => body,
+    }));
+  }
+
+  it("등록이 확인되지 않은 상태면 참여코드·설치일을 담아 재등록을 시도한다", async () => {
+    const mod = await loadBackground(BASE);
+    global.fetch = respond(200, {
+      success: true,
+      data: { participantToken: "tok" },
+    });
+
+    await mod.ensureParticipantSynced();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(String(url)).toContain("/api/participants");
+    expect(JSON.parse(options.body)).toEqual({
+      anonymousId: "a1",
+      participantCode: "QWE-AB23",
+      group_code: "EXP",
+      installDate: BASE.installDate,
+    });
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.participantSynced).toBe(true);
+    expect(all.participantToken).toBe("tok");
+    expect(all.participantSyncFailure).toBeUndefined();
+  });
+
+  it("이미 등록된 상태면 요청을 보내지 않는다", async () => {
+    const mod = await loadBackground({ ...BASE, participantSynced: true });
+    global.fetch = respond(200);
+
+    await mod.ensureParticipantSynced();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("온보딩 전이면(group 없음) 요청을 보내지 않는다", async () => {
+    const mod = await loadBackground({ anonymousId: "a1" });
+    global.fetch = respond(200);
+
+    await mod.ensureParticipantSynced();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  // G1 — 이 작업의 본체. 참여자가 팝업을 한 번도 열지 않아도 다음 틱에 풀려야 한다.
+  it("503으로 실패해도 retryable로 남기고, 다음 틱에 성공하면 실패 기록을 지운다", async () => {
+    const mod = await loadBackground(BASE);
+
+    global.fetch = respond(503, { success: false });
+    await mod.ensureParticipantSynced();
+
+    let all = await global.chrome.storage.local.get(null);
+    expect(all.participantSynced).toBeFalsy();
+    expect(all.participantSyncFailure).toMatchObject({
+      kind: "retryable",
+      httpStatus: 503,
+      attempts: 1,
+    });
+
+    global.fetch = respond(200, {
+      success: true,
+      data: { participantToken: null },
+    });
+    await mod.ensureParticipantSynced();
+
+    all = await global.chrome.storage.local.get(null);
+    expect(all.participantSynced).toBe(true);
+    expect(all.participantToken).toBeNull();
+    expect(all.participantSyncFailure).toBeUndefined();
+  });
+
+  it("네트워크 오류·타임아웃도 retryable로 남기고 attempts를 누적한다", async () => {
+    const mod = await loadBackground(BASE);
+    global.fetch = vi.fn(async () => {
+      throw new Error("offline");
+    });
+
+    await mod.ensureParticipantSynced();
+    const first = (await global.chrome.storage.local.get(null))
+      .participantSyncFailure;
+
+    // 두 번째 실패의 lastFailedAt이 확실히 달라지도록 시계를 앞으로 돌린다
+    vi.setSystemTime(new Date(Date.now() + 60000));
+    await mod.ensureParticipantSynced();
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.participantSyncFailure).toMatchObject({
+      kind: "retryable",
+      httpStatus: null,
+      code: "network",
+      attempts: 2,
+    });
+    // 첫 실패 시각은 그대로 유지되고 마지막 시각만 갱신돼야, 연구자가 참여자 PC에서
+    // "이 상태가 얼마나 오래됐는지"를 두 값의 차이로 알 수 있다.
+    expect(all.participantSyncFailure.firstFailedAt).toBe(first.firstFailedAt);
+    expect(all.participantSyncFailure.lastFailedAt).not.toBe(
+      first.lastFailedAt,
+    );
+  });
+
+  // G2 — 400은 같은 요청을 다시 보내도 영원히 같은 답이 온다.
+  it("400이면 permanent로 표시하고 다음 틱에는 요청을 보내지 않는다", async () => {
+    const mod = await loadBackground(BASE);
+    global.fetch = respond(400, {
+      success: false,
+      code: "INVALID_FIELD_VALUE",
+    });
+
+    await mod.ensureParticipantSynced();
+
+    let all = await global.chrome.storage.local.get(null);
+    expect(all.participantSyncFailure).toMatchObject({
+      kind: "permanent",
+      httpStatus: 400,
+      code: "INVALID_FIELD_VALUE",
+    });
+
+    global.fetch = respond(400, {
+      success: false,
+      code: "INVALID_FIELD_VALUE",
+    });
+    await mod.ensureParticipantSynced();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    all = await global.chrome.storage.local.get(null);
+    expect(all.participantSyncFailure.attempts).toBe(1);
+  });
+
+  it("SERVER_URL 미설정 환경에서는 실패를 기록하지 않는다", async () => {
+    vi.resetModules();
+    vi.doMock("../config.js", () => ({ SERVER_URL: "YOUR_SERVER_URL_HERE" }));
+    try {
+      global.chrome = createChromeMock();
+      await global.chrome.storage.local.set(BASE);
+      global.fetch = respond(200);
+      const mod = await import("../background.js");
+
+      await mod.ensureParticipantSynced();
+
+      expect(global.fetch).not.toHaveBeenCalled();
+      const all = await global.chrome.storage.local.get(null);
+      expect(all.participantSyncFailure).toBeUndefined();
+    } finally {
+      vi.doUnmock("../config.js");
+      vi.resetModules();
+    }
+  });
+
+  // G4 — 게이트가 큐보다 먼저 끝나야 같은 틱에 밀린 데이터가 나간다.
+  it("알람 한 틱에서 등록을 먼저 끝내고 그다음 큐를 보낸다", async () => {
+    const order = [];
+    global.chrome = createChromeMock();
+    await global.chrome.storage.local.set({
+      ...BASE,
+      video__s1__e1: {
+        videoId: "v1",
+        watchedAt: "2026-01-10T11:00:00Z",
+        eventId: "e1",
+        sent: false,
+      },
+    });
+    global.fetch = vi.fn(async (url, options = {}) => {
+      order.push(`${options.method} ${new URL(String(url)).pathname}`);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, data: {} }),
+      };
+    });
+
+    vi.resetModules();
+    await import("../background.js");
+    const onAlarm = global.chrome.alarms.onAlarm.addListener.mock.calls[0][0];
+    onAlarm({ name: "SESSION_TIMEOUT_CHECK" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(order[0]).toBe("POST /api/participants");
+    expect(order).toContain("POST /api/video-events");
   });
 });

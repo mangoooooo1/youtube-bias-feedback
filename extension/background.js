@@ -11,6 +11,9 @@ import {
   getUnsentWatchStats,
   markWatchStatsSent,
   markWatchStatsInvalid,
+  getParticipantSyncState,
+  markParticipantSynced,
+  recordParticipantSyncFailure,
 } from "./storage.js";
 import { isBaselinePeriod } from "./pipeline/baseline.js";
 import { SERVER_URL } from "./config.js";
@@ -121,11 +124,16 @@ chrome.storage.local.set({ serverUrl: SERVER_URL });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== ALARM_NAME) return;
-  // 세션 재시도와 타임아웃 검사는 서로 순서가 보장되지 않는다.
-  retryUnsyncedSessions();
+  // 등록이 안 돼 있으면 모든 수집 API가 404이므로, 게이트를 먼저 연 뒤 큐를 돌린다.
+  // 게이트가 닫힌 상태에서도 큐는 어차피 한 틱에 1건만 보내고 중단하므로 기다리는 손해가
+  // 없고, 게이트가 열린 직후면 같은 틱에 밀린 데이터가 나가 오늘 리뷰의 시간 창을 지킨다.
+  ensureParticipantSynced().finally(() => {
+    retryUnsyncedSessions();
+    // 시청시간 PATCH는 영상 POST로 생긴 행을 갱신하므로 POST 재시도가 끝난 뒤 보낸다
+    retryUnsentVideoEvents().finally(() => retryUnsentWatchStats());
+  });
+  // 로컬 세션 종료 판정은 서버와 무관하므로 게이트를 기다리지 않는다.
   checkSessionTimeout();
-  // 시청시간 PATCH는 영상 POST로 생긴 행을 갱신하므로 POST 재시도가 끝난 뒤 보낸다
-  retryUnsentVideoEvents().finally(() => retryUnsentWatchStats());
 });
 
 // 알림 본문/버튼 클릭 모두 같은 동작 — notificationId가 곧 sessionId이므로 별도 매핑 없이 역추적한다.
@@ -294,6 +302,61 @@ async function syncSessionToServer(session, metrics = {}) {
     showFeedbackNotification(session);
   }
   return result;
+}
+
+/**
+ * participants 등록이 확인되지 않은 상태면 서버에 다시 등록한다.
+ *
+ * 등록은 원래 팝업(viewlens-popup.js의 syncParticipant)에만 있었고, 실패하면 참여자가
+ * 팝업을 다시 열 때까지 재시도 기회가 없었다. 그동안 모든 수집 API는 requireParticipant에서
+ * 404로 거부되고, 데이터는 로컬 큐에 보존되지만 그날의 피드백(개입)과 기간 리뷰는 시간 창이
+ * 지나 영구히 어긋난다. 대조군은 팝업을 열 동기가 없어 이 상태가 무기한 지속될 수 있다.
+ * 그래서 재시도 주체를 알람(1분)으로 옮겨, 참여자가 아무 조작을 하지 않아도 풀리게 한다.
+ *
+ * 서버는 anonymousId 기준으로 멱등하므로(registerParticipant의 선조회 + UNIQUE 충돌 처리)
+ * 팝업 쪽 호출과 겹쳐도 참여자가 중복 생성되지 않는다.
+ * @returns {Promise<void>}
+ */
+export function ensureParticipantSynced() {
+  return withQueueLock("participants", async () => {
+    const state = await getParticipantSyncState();
+    if (!state) return; // 온보딩 전이거나 필수 값 누락
+    if (state.synced) return; // 이미 등록됨
+    // 서버가 400으로 거부한 실패는 같은 요청을 다시 보내도 영원히 같은 답이 온다.
+    // 전송 큐의 kind:"item"과 같은 판단이며, 해제는 재온보딩·재설치 복구로만 이뤄진다.
+    if (state.failure?.kind === "permanent") return;
+
+    const attempts = (state.failure?.attempts ?? 0) + 1;
+    const result = await sendToServer("/api/participants", "POST", {
+      anonymousId: state.anonymousId,
+      participantCode: state.participantCode,
+      group_code: state.group,
+      installDate: state.installDate,
+    });
+
+    // config.js 미설정 환경에서는 요청 자체가 나가지 않는다. 실패로 기록하면 1분마다 storage만 쓰게 되므로 조용히 넘긴다.
+    if (result.code === "no_server_url") return;
+
+    if (result.ok) {
+      await markParticipantSynced(result.data?.participantToken ?? null);
+      console.log(
+        `[background] queue=participants result=synced attempts=${attempts}`,
+      );
+      return;
+    }
+
+    // sendToServer의 분류를 그대로 쓴다.
+    const kind = result.kind === "item" ? "permanent" : "retryable";
+    await recordParticipantSyncFailure(
+      kind,
+      result.status,
+      result.code,
+      state.failure,
+    );
+    console.warn(
+      `[background] queue=participants result=${kind} status=${result.status} code=${result.code} attempts=${attempts}`,
+    );
+  });
 }
 
 /**

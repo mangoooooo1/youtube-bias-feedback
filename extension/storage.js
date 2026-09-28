@@ -433,6 +433,79 @@ export async function getOnboarding() {
 }
 
 /**
+ * 참여자 등록 게이트(background.js의 ensureParticipantSynced)가 쓰는 상태만 모아 읽는다.
+ *
+ * getOnboarding()에 participantCode·participantSynced를 덧붙이지 않고 별도 접근자를 두는 이유:
+ * getOnboarding()은 세션·영상·시청시간 전송 등 다섯 곳이 공유하는데, 이 세 필드는 등록
+ * 게이트만 쓴다. 공유 접근자를 게이트 전용 필드로 부풀리지 않고, 게이트가 필요한 값을
+ * storage 한 번 읽기로 가져오게 한다.
+ *
+ * @returns {Promise<{anonymousId: string, group: string, installDate: string,
+ *   participantCode: string|null, synced: boolean, failure: object|null}|null>}
+ *   등록을 시도할 수 없는 상태(온보딩 전, 필수 값 누락)면 null
+ */
+export async function getParticipantSyncState() {
+  const stored = await chrome.storage.local.get([
+    "anonymousId",
+    "group",
+    "installDate",
+    "participantCode",
+    "participantSynced",
+    "participantSyncFailure",
+  ]);
+  // 팝업 boot의 재동기화 조건(viewlens-popup.js)과 같은 값 — 셋 중 하나라도 없으면
+  // registerParticipant가 missing_field 400을 돌려주므로 요청 자체를 보내지 않는다.
+  if (!stored.group || !stored.anonymousId || !stored.installDate) return null;
+  return {
+    anonymousId: stored.anonymousId,
+    group: stored.group,
+    installDate: stored.installDate,
+    participantCode: stored.participantCode ?? null,
+    synced: !!stored.participantSynced,
+    failure: stored.participantSyncFailure ?? null,
+  };
+}
+
+/**
+ * 등록 성공을 기록한다. 팝업의 syncParticipant와 같은 두 값을 쓰고, 남아 있던 실패 기록을 지운다.
+ * participantToken이 null인 것도 정상이다(서버 PARTICIPANT_TOKEN_SECRET 미설정).
+ * @param {string|null} participantToken
+ * @returns {Promise<void>}
+ */
+export async function markParticipantSynced(participantToken) {
+  await chrome.storage.local.set({ participantSynced: true, participantToken });
+  await chrome.storage.local.remove("participantSyncFailure");
+}
+
+/**
+ * 등록 실패를 기록한다. attempts와 firstFailedAt은 직전 기록에서 이어받아, 연구자가
+ * "이 상태가 얼마나 오래됐는지"를 참여자 PC에서 확인할 수 있게 한다.
+ * @param {"retryable"|"permanent"} kind - permanent면 이후 틱에서 재시도하지 않는다
+ * @param {number|null} httpStatus - 네트워크 오류·타임아웃이면 null
+ * @param {string|null} code - 서버 ERROR_CODES 또는 network/timeout
+ * @param {object|null} prev - 직전 participantSyncFailure
+ * @returns {Promise<void>}
+ */
+export async function recordParticipantSyncFailure(
+  kind,
+  httpStatus,
+  code,
+  prev,
+) {
+  const now = new Date().toISOString();
+  await chrome.storage.local.set({
+    participantSyncFailure: {
+      kind,
+      httpStatus,
+      code,
+      attempts: (prev?.attempts ?? 0) + 1,
+      firstFailedAt: prev?.firstFailedAt ?? now,
+      lastFailedAt: now,
+    },
+  });
+}
+
+/**
  * 참여자를 온보딩 처리한다 — anonymousId를 새로 발급하고 그룹·설치일을 저장한다.
  * @param {string} group - VALID_GROUPS 중 하나
  * @returns {Promise<void>}
