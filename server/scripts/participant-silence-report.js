@@ -86,6 +86,58 @@ function collectParticipantActivity(db) {
     .all(...TEST_CODES);
 }
 
+/**
+ * 발급은 됐지만 participants에 행이 없는 코드를 찾는다.
+ *
+ * 등록 자체에 실패한 참여자는 participants에 없어서 collectParticipantActivity의
+ * 검사 대상에서 통째로 빠진다. 게다가 서버에는 어떤 접촉 흔적도 남지 않는다.
+ */
+function collectUnregisteredCodes(db) {
+  const placeholders = [...TEST_CODES].map(() => "?").join(",");
+  return db
+    .prepare(
+      `
+      SELECT i.code, i.group_code AS groupCode
+        FROM issued_codes i
+        LEFT JOIN participants p ON p.participantCode = i.code
+       WHERE p.anonymousId IS NULL
+         AND i.code NOT IN (${placeholders})
+       ORDER BY i.code
+    `,
+    )
+    .all(...TEST_CODES);
+}
+
+/**
+ * 미등록 발급 코드 섹션을 출력한다. 시드 전(issued_codes가 빈 상태)이면 섹션 자체를 생략한다.
+ * @returns {{issuedCount: number, unregisteredCount: number}}
+ */
+function reportUnregisteredCodes(db) {
+  const issuedCount = db
+    .prepare("SELECT COUNT(*) AS c FROM issued_codes")
+    .get().c;
+  if (issuedCount === 0) return { issuedCount: 0, unregisteredCount: 0 };
+
+  const unregistered = collectUnregisteredCodes(db);
+  console.log(
+    `\n[participant-silence] 발급 코드 ${issuedCount}개 중 등록 ${issuedCount - unregistered.length}개, 미등록 ${unregistered.length}개.`,
+  );
+  if (unregistered.length === 0) return { issuedCount, unregisteredCount: 0 };
+
+  console.log(
+    `  미등록은 "아직 설치 전"일 수도, "등록 요청이 실패한 뒤 복구되지 않은" 상태일 수도 있습니다.\n` +
+      `  실제 모집 명단과 대조해 확인하세요.\n`,
+  );
+  for (const row of unregistered) {
+    // 참여코드는 사실상의 인증 수단이라 원본을 로그에 남기지 않는다(결측 섹션과 동일 원칙).
+    console.log(
+      `  code(지문)=${fingerprint(row.code)} groupCode=${row.groupCode}`,
+    );
+  }
+  console.log("");
+  return { issuedCount, unregisteredCount: unregistered.length };
+}
+
 function run(
   db,
   { now = Date.now(), thresholdDays = DEFAULT_THRESHOLD_DAYS } = {},
@@ -120,27 +172,35 @@ function run(
     console.log(
       `[participant-silence] 결측 의심 참여자 없음 — 연구 기간 중인 참여자 ${rows.length}명 확인, 임계값 ${thresholdDays}일.`,
     );
-    return { flaggedCount: 0, checkedCount: rows.length };
+  } else {
+    console.log(
+      `[participant-silence] 결측 의심 참여자 ${flagged.length}명 발견(임계값 ${thresholdDays}일 이상 무활동, 연구 기간 중인 참여자 ${rows.length}명 중). ` +
+        `아래 값은 원본이 아니라 일방향 해시(지문, 앞 10자)입니다 — 해당 지문에 대응하는 실제 참여자는 DB를 직접 조회해 확인하세요.\n`,
+    );
+    for (const { row, result } of flagged) {
+      console.log(
+        `participantCode(지문)=${fingerprint(row.participantCode)} groupCode=${row.groupCode}`,
+      );
+      console.log(`  anonymousId(지문) : ${fingerprint(row.anonymousId)}`);
+      console.log(`  installDate       : ${row.installDate}`);
+      console.log(
+        result.everActive
+          ? `  마지막 활동으로부터 : ${result.daysSinceActivity.toFixed(1)}일 경과`
+          : `  활동 기록 자체가 없음(설치 후 ${result.daysSinceActivity.toFixed(1)}일 경과)`,
+      );
+      console.log("");
+    }
   }
 
-  console.log(
-    `[participant-silence] 결측 의심 참여자 ${flagged.length}명 발견(임계값 ${thresholdDays}일 이상 무활동, 연구 기간 중인 참여자 ${rows.length}명 중). ` +
-      `아래 값은 원본이 아니라 일방향 해시(지문, 앞 10자)입니다 — 해당 지문에 대응하는 실제 참여자는 DB를 직접 조회해 확인하세요.\n`,
-  );
-  for (const { row, result } of flagged) {
-    console.log(
-      `participantCode(지문)=${fingerprint(row.participantCode)} groupCode=${row.groupCode}`,
-    );
-    console.log(`  anonymousId(지문) : ${fingerprint(row.anonymousId)}`);
-    console.log(`  installDate       : ${row.installDate}`);
-    console.log(
-      result.everActive
-        ? `  마지막 활동으로부터 : ${result.daysSinceActivity.toFixed(1)}일 경과`
-        : `  활동 기록 자체가 없음(설치 후 ${result.daysSinceActivity.toFixed(1)}일 경과)`,
-    );
-    console.log("");
-  }
-  return { flaggedCount: flagged.length, checkedCount: rows.length };
+  // "등록은 됐는데 조용한 참여자"와 "등록 자체가 안 된 코드"는 성격이 다르므로
+  // 섹션과 집계를 분리한다. flaggedCount에 섞으면 자연스러운 이탈과 전송 장애가 뭉개진다.
+  const codes = reportUnregisteredCodes(db);
+
+  return {
+    flaggedCount: flagged.length,
+    checkedCount: rows.length,
+    ...codes,
+  };
 }
 
 /**
@@ -185,7 +245,7 @@ async function main() {
   // 무관하게 "스크립트 자체가 정상 실행됐는지"만 ping한다(파일 상단 설명 참고).
   await pingSuccess(PING_ENV_VAR);
   console.log(
-    `[participant-silence] 완료 — 결측 의심 ${result.flaggedCount}명 / 검사 대상 ${result.checkedCount}명.`,
+    `[participant-silence] 완료 — 결측 의심 ${result.flaggedCount}명 / 검사 대상 ${result.checkedCount}명 / 미등록 코드 ${result.unregisteredCount}개.`,
   );
 }
 
@@ -200,6 +260,7 @@ module.exports = {
   run,
   evaluateParticipantSilence,
   collectParticipantActivity,
+  collectUnregisteredCodes,
   parseThresholdArg,
   DEFAULT_THRESHOLD_DAYS,
 };
