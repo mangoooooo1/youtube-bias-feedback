@@ -1181,6 +1181,7 @@ describe("알람 핸들러 — 시청시간 PATCH는 영상 POST 재시도가 �
       // 이 테스트의 관심사는 POST→PATCH 순서뿐이므로 등록 게이트는 열어 둔다
       // (게이트가 닫힌 채 알람이 도는 흐름은 "등록 게이트" describe에서 검증한다).
       participantSynced: true,
+      participantToken: "tok",
       video__s1__e1: {
         videoId: "v1",
         watchedAt: "2026-01-10T11:00:00Z",
@@ -1678,10 +1679,56 @@ describe("참여자 등록 게이트 — 팝업을 열지 않아도 알람이 �
   });
 
   it("이미 등록된 상태면 요청을 보내지 않는다", async () => {
-    const mod = await loadBackground({ ...BASE, participantSynced: true });
+    const mod = await loadBackground({
+      ...BASE,
+      participantSynced: true,
+      participantToken: "tok",
+    });
     global.fetch = respond(200);
 
     await mod.ensureParticipantSynced();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("토큰 기능 이전(2.2.0)에 등록돼 토큰 키가 없으면 재등록해 토큰을 받고, 다음 틱엔 보내지 않는다", async () => {
+    const mod = await loadBackground({ ...BASE, participantSynced: true });
+    global.fetch = respond(200, {
+      success: true,
+      data: { participantToken: "tok" },
+    });
+
+    await mod.ensureParticipantSynced();
+    await mod.ensureParticipantSynced();
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.participantSynced).toBe(true);
+    expect(all.participantToken).toBe("tok");
+  });
+
+  it("서버에 secret이 없어 토큰이 null로 저장된 경우는 매 틱 재등록하지 않는다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      participantSynced: true,
+      participantToken: null,
+    });
+    global.fetch = respond(200);
+
+    await mod.ensureParticipantSynced();
+
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("참여가 종료됐으면 토큰 키가 없어도 재등록하지 않는다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      installDate: new Date(FIXED_NOW - 20 * 86400000).toISOString(),
+      participantSynced: true,
+    });
+    global.fetch = respond(200);
+
+    await mod.runServerTasks();
 
     expect(global.fetch).not.toHaveBeenCalled();
   });

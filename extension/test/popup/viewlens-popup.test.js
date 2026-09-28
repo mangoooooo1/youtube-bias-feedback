@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -116,5 +116,148 @@ describe("mergeDist(팝업) ↔ mergeSessionDistributions(서버) 동치성", ()
     // 서버: videoCount ?? 1까지만 폴백(videos.length 미고려) → 가중치 1:1
     expect(serverResult.음악).toBeCloseTo(0.5, 9);
     expect(serverResult.게임).toBeCloseTo(0.5, 9);
+  });
+});
+
+// 팝업 사용 기록 큐 — 큐에 들어갈 때의 토큰이 아니라 보낼 때의 토큰을 써야, 토큰 기능 이전(2.2.0)이나
+// 등록 전에 쌓인 기록이 403에 막혀 큐 전체가 영원히 멈추지 않는다.
+describe("flushPendingPopupEvents — 팝업 사용 기록 큐 전송", () => {
+  const POST_DECL =
+    /async function postPopupEvent\(serverUrl, event\) \{[\s\S]*?\n\}/;
+  const FLUSH_DECL =
+    /async function flushPendingPopupEvents\(serverUrl\) \{[\s\S]*?\n\}/;
+  const ID = "697236fb-5dd0-420f-aaae-c42128e1950a";
+
+  function load(initialStorage, respond) {
+    const raw = readFileSync(VIEWLENS_POPUP_PATH, "utf8");
+    const src = [POST_DECL, FLUSH_DECL]
+      .map((re) => raw.match(re)[0])
+      .join("\n");
+    let store = { ...initialStorage };
+    const chrome = {
+      storage: {
+        local: {
+          get: async (keys) =>
+            Object.fromEntries([].concat(keys).map((k) => [k, store[k]])),
+          set: async (obj) => {
+            store = { ...store, ...structuredClone(obj) };
+          },
+        },
+      },
+    };
+    const sent = [];
+    const fetch = vi.fn(async (_url, options) => {
+      const body = JSON.parse(options.body);
+      sent.push(body);
+      return respond(body);
+    });
+    const console = { warn: vi.fn(), log: vi.fn() };
+    const flush = new Function(
+      "chrome",
+      "fetch",
+      "console",
+      `${src}\nreturn flushPendingPopupEvents;`,
+    )(chrome, fetch, console);
+    return { flush, sent, fetch, console, dump: () => store };
+  }
+
+  const ok = () => ({ ok: true, status: 201, json: async () => ({}) });
+  const events = (n, extra = {}) =>
+    Array.from({ length: n }, (_, i) => ({
+      eventId: `e${i}`,
+      anonymousId: ID,
+      ...extra,
+    }));
+
+  it("토큰 없이 쌓인 옛 기록(2.2.0)을 지금 토큰으로 보내 큐를 비운다", async () => {
+    const { flush, sent, dump } = load(
+      {
+        pendingPopupEvents: events(7),
+        anonymousId: ID,
+        participantToken: "tok",
+      },
+      ok,
+    );
+
+    await flush("https://srv.example");
+
+    expect(sent).toHaveLength(7);
+    expect(sent.every((e) => e.participantToken === "tok")).toBe(true);
+    expect(dump().pendingPopupEvents).toEqual([]);
+  });
+
+  it("다른 anonymousId로 쌓인 기록은 요청 없이 건너뛰고 뒤 기록은 정상 전송한다", async () => {
+    const { flush, sent, dump, console } = load(
+      {
+        pendingPopupEvents: [
+          { eventId: "old", anonymousId: "other-id" },
+          ...events(2),
+        ],
+        anonymousId: ID,
+        participantToken: "tok",
+      },
+      ok,
+    );
+
+    await flush("https://srv.example");
+
+    expect(sent.map((e) => e.eventId)).toEqual(["e0", "e1"]);
+    expect(dump().pendingPopupEvents).toEqual([]);
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("skip_foreign_identity eventId=old"),
+    );
+  });
+
+  it("403 INVALID_PARTICIPANT_TOKEN이면 등록 게이트가 토큰을 다시 받도록 되돌리고 큐는 남긴다", async () => {
+    const { flush, sent, dump } = load(
+      {
+        pendingPopupEvents: events(3),
+        anonymousId: ID,
+        participantSynced: true,
+      },
+      () => ({
+        ok: false,
+        status: 403,
+        json: async () => ({ code: "INVALID_PARTICIPANT_TOKEN" }),
+      }),
+    );
+
+    await flush("https://srv.example");
+
+    expect(sent).toHaveLength(1);
+    expect(dump().participantSynced).toBe(false);
+    expect(dump().pendingPopupEvents).toHaveLength(3);
+  });
+
+  it.each([
+    [
+      "404",
+      () => ({
+        ok: false,
+        status: 404,
+        json: async () => ({ code: "NOT_FOUND" }),
+      }),
+    ],
+    [
+      "네트워크 오류",
+      () => {
+        throw new TypeError("network down");
+      },
+    ],
+  ])("%s면 등록 상태는 그대로 두고 큐도 남긴다", async (_label, respond) => {
+    const { flush, dump } = load(
+      {
+        pendingPopupEvents: events(3),
+        anonymousId: ID,
+        participantToken: "tok",
+        participantSynced: true,
+      },
+      respond,
+    );
+
+    await flush("https://srv.example");
+
+    expect(dump().participantSynced).toBe(true);
+    expect(dump().pendingPopupEvents).toHaveLength(3);
   });
 });
