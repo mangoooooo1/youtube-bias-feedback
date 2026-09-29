@@ -81,6 +81,18 @@ function normalizeMessage(message) {
     .replace(/\d+/g, "#");
 }
 
+// Healthchecks.io로 보내는 알림 본문에서 참여자 식별자를 가린다.
+// 원본은 서버 PM2 로그에 남아 있으므로 추적이 필요하면 거기서 찾는다.
+function redactIdentifiers(message) {
+  return message
+    .replace(/anonymousId=(?:"(?:[^"\\]|\\.)*"|\S+)/g, "anonymousId=[redacted]")
+    .replace(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+      "[uuid]",
+    )
+    .replace(/(\/api\/(?:sessions|video-events)\/)[^/\s?]+/g, "$1[id]");
+}
+
 function fingerprint(message) {
   return crypto
     .createHash("sha256")
@@ -243,7 +255,10 @@ async function main() {
     );
   } else {
     const detail = alerts
-      .map((a) => `[${a.isNew ? "신규" : "재발"} x${a.count}] ${a.message}`)
+      .map(
+        (a) =>
+          `[${a.isNew ? "신규" : "재발"} x${a.count}] ${redactIdentifiers(a.message)}`,
+      )
       .join("\n");
     pingResult = await pingFail(PING_ENV_VAR, detail);
     console.error(
@@ -272,6 +287,7 @@ if (require.main === module) {
 module.exports = {
   extractErrorLines,
   normalizeMessage,
+  redactIdentifiers,
   fingerprint,
   readNewText,
   decideAlerts,

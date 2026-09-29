@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   extractErrorLines,
   fingerprint,
+  redactIdentifiers,
   readNewText,
   decideAlerts,
   shouldPersistState,
@@ -118,6 +119,46 @@ describe("fingerprint — 같은 종류의 에러는 동적 값이 달라도 같
     const b = "[Error] GET /api/video-events : no such table";
 
     expect(fingerprint(a)).not.toBe(fingerprint(b));
+  });
+});
+
+describe("redactIdentifiers — 외부 알림 본문에서 참여자 식별자를 가린다", () => {
+  it("접근 로그의 anonymousId 값을 가린다", () => {
+    expect(
+      redactIdentifiers(
+        '[access] POST /api/video-events 404 anonymousId="3f2b8c1e-1111-4222-8333-444455556666"',
+      ),
+    ).toBe("[access] POST /api/video-events 404 anonymousId=[redacted]");
+  });
+
+  it("UUID 형식이 아닌 anonymousId(이스케이프된 따옴표 포함)도 통째로 가린다", () => {
+    expect(
+      redactIdentifiers(
+        '[Error] POST /api/sessions : DB 오류 anonymousId="a\\"b c"',
+      ),
+    ).toBe("[Error] POST /api/sessions : DB 오류 anonymousId=[redacted]");
+  });
+
+  it("메시지 속 UUID를 가린다", () => {
+    expect(
+      redactIdentifiers(
+        "[Error] POST /api/video-events : dup eventId 11111111-1111-1111-1111-111111111111",
+      ),
+    ).toBe("[Error] POST /api/video-events : dup eventId [uuid]");
+  });
+
+  it("경로 속 타임스탬프 sessionId를 가린다", () => {
+    expect(
+      redactIdentifiers(
+        "[Error] PATCH /api/sessions/1759123456789/feedback-viewed : no row",
+      ),
+    ).toBe("[Error] PATCH /api/sessions/[id]/feedback-viewed : no row");
+  });
+
+  it("상태 코드 등 식별자가 아닌 숫자는 그대로 둔다", () => {
+    expect(redactIdentifiers("[youtube] API 오류: 403")).toBe(
+      "[youtube] API 오류: 403",
+    );
   });
 });
 
