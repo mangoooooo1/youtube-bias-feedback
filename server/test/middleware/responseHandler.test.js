@@ -150,4 +150,54 @@ describe("errorHandler", () => {
 
     consoleSpy.mockRestore();
   });
+
+  it("요청 본문에 anonymousId가 있으면 에러 로그에 함께 남긴다", () => {
+    const res = createMockRes();
+    const req = {
+      method: "POST",
+      path: "/api/sessions",
+      body: { anonymousId: "abc-123" },
+    };
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    errorHandler(new Error("DB 오류"), req, res, vi.fn());
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '[Error] POST /api/sessions : DB 오류 anonymousId="abc-123"',
+    );
+
+    consoleSpy.mockRestore();
+  });
+
+  it("anonymousId의 개행은 JSON 이스케이프되어 로그 한 줄을 넘지 않는다", () => {
+    const res = createMockRes();
+    const req = {
+      method: "POST",
+      path: "/api/sessions",
+      body: { anonymousId: "x\n[Error] 위조된 줄" },
+    };
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    errorHandler(new Error("DB 오류"), req, res, vi.fn());
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      '[Error] POST /api/sessions : DB 오류 anonymousId="x\\n[Error] 위조된 줄"',
+    );
+
+    consoleSpy.mockRestore();
+  });
+
+  it("본문이 없으면(JSON 파싱 실패 등) anonymousId 없이 남긴다", () => {
+    const res = createMockRes();
+    const req = { method: "POST", path: "/api/sessions" };
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    errorHandler(new Error("잘못된 JSON"), req, res, vi.fn());
+
+    expect(consoleSpy).toHaveBeenCalledWith(
+      "[Error] POST /api/sessions : 잘못된 JSON",
+    );
+
+    consoleSpy.mockRestore();
+  });
 });
