@@ -121,6 +121,27 @@ describe("fingerprint — 같은 종류의 에러는 동적 값이 달라도 같
 
     expect(fingerprint(a)).not.toBe(fingerprint(b));
   });
+
+  it("UUID가 아닌 anonymousId만 다른 두 줄은 같은 지문을 갖는다", () => {
+    const a = '[access] POST /api/video-events 404 anonymousId="abc-xyz"';
+    const b = '[access] POST /api/video-events 404 anonymousId="a\\"b c"';
+
+    expect(fingerprint(a)).toBe(fingerprint(b));
+  });
+
+  it("경로의 참여 코드만 다른 두 줄은 대소문자·길이와 무관하게 같은 지문을 갖는다", () => {
+    const a = "[access] GET /api/participants/QWE-K7M2 404";
+    const b = "[access] GET /api/participants/asd-xyzw9 404";
+
+    expect(fingerprint(a)).toBe(fingerprint(b));
+  });
+
+  it("식별자를 지운 뒤에도 경로가 다른 에러는 다른 지문을 갖는다", () => {
+    const a = '[access] POST /api/video-events 404 anonymousId="abc"';
+    const b = '[access] POST /api/popup-events 404 anonymousId="abc"';
+
+    expect(fingerprint(a)).not.toBe(fingerprint(b));
+  });
 });
 
 describe("summarizeAlertLine — 외부 알림에는 안전한 항목만 남긴다", () => {
