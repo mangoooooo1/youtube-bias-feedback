@@ -72,13 +72,51 @@ function classifyTier(message) {
 }
 
 // sessionId·videoId 같은 숫자·UUID를 지우면, 같은 종류의 에러는 매번 같은 문자열로 정규화된다.
+// 지문은 Healthchecks.io로 나가므로 anonymousId·참여 코드도 해시 전에 지운다.
 function normalizeMessage(message) {
   return message
+    .replace(/anonymousId=(?:"(?:[^"\\]|\\.)*"|\S+)/g, "anonymousId=#")
+    .replace(/\b(?:QWE|ASD)-[A-Z0-9]+/gi, "#")
     .replace(
       /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
       "#",
     )
     .replace(/\d+/g, "#");
+}
+
+const HTTP_METHODS = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+]);
+
+/**
+ * Healthchecks.io로 보낼 한 줄 요약
+ */
+function summarizeAlertLine(message) {
+  const prefix = ALL_PREFIXES.find((p) => message.startsWith(p));
+  const parts = [prefix ? prefix.trim() : "(unknown)"];
+
+  const tokens = message.slice(prefix?.length ?? 0).split(/\s+/);
+  if (HTTP_METHODS.has(tokens[0])) parts.push(tokens[0]);
+  const status = tokens.find((t) => /^[1-5]\d{2}$/.test(t));
+  if (status) parts.push(status);
+
+  return parts.join(" ");
+}
+
+/** Healthchecks.io ping 본문. 원문 없이 요약·횟수·지문만 담는다. */
+function buildAlertDetail(alerts) {
+  return alerts
+    .map(
+      (a) =>
+        `[${a.isNew ? "신규" : "재발"} x${a.count}] ${summarizeAlertLine(a.message)} (fp:${a.fingerprint})`,
+    )
+    .join("\n");
 }
 
 function fingerprint(message) {
@@ -242,12 +280,11 @@ async function main() {
       `[error-monitor] 새 에러 없음 (신규 라인 ${errorLines.length}줄 검사)`,
     );
   } else {
-    const detail = alerts
-      .map((a) => `[${a.isNew ? "신규" : "재발"} x${a.count}] ${a.message}`)
-      .join("\n");
-    pingResult = await pingFail(PING_ENV_VAR, detail);
+    pingResult = await pingFail(PING_ENV_VAR, buildAlertDetail(alerts));
+    // 원문은 서버 cron 로그에만 남긴다. 알림 메일의 fp로 여기서 찾는다
+    const raw = alerts.map((a) => `(fp:${a.fingerprint}) ${a.message}`);
     console.error(
-      `[error-monitor] 알림 대상 에러 ${alerts.length}건:\n${detail}`,
+      `[error-monitor] 알림 대상 에러 ${alerts.length}건:\n${raw.join("\n")}`,
     );
   }
 
@@ -272,6 +309,8 @@ if (require.main === module) {
 module.exports = {
   extractErrorLines,
   normalizeMessage,
+  summarizeAlertLine,
+  buildAlertDetail,
   fingerprint,
   readNewText,
   decideAlerts,

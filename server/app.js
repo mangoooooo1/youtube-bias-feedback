@@ -2,10 +2,7 @@
 require("dotenv").config();
 
 // dd-trace는 express 등을 require-hook으로 패치하므로 다른 모듈보다 먼저 초기화한다
-require("dd-trace").init({
-  service: "youtube-bias-server",
-  env: process.env.NODE_ENV || "development",
-});
+require("./tracing").initTracer(process.env.NODE_ENV || "development");
 
 const express = require("express");
 const cors = require("cors");

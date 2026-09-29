@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   extractErrorLines,
   fingerprint,
+  summarizeAlertLine,
+  buildAlertDetail,
   readNewText,
   decideAlerts,
   shouldPersistState,
@@ -118,6 +120,97 @@ describe("fingerprint — 같은 종류의 에러는 동적 값이 달라도 같
     const b = "[Error] GET /api/video-events : no such table";
 
     expect(fingerprint(a)).not.toBe(fingerprint(b));
+  });
+
+  it("UUID가 아닌 anonymousId만 다른 두 줄은 같은 지문을 갖는다", () => {
+    const a = '[access] POST /api/video-events 404 anonymousId="abc-xyz"';
+    const b = '[access] POST /api/video-events 404 anonymousId="a\\"b c"';
+
+    expect(fingerprint(a)).toBe(fingerprint(b));
+  });
+
+  it("경로의 참여 코드만 다른 두 줄은 대소문자·길이와 무관하게 같은 지문을 갖는다", () => {
+    const a = "[access] GET /api/participants/QWE-K7M2 404";
+    const b = "[access] GET /api/participants/asd-xyzw9 404";
+
+    expect(fingerprint(a)).toBe(fingerprint(b));
+  });
+
+  it("식별자를 지운 뒤에도 경로가 다른 에러는 다른 지문을 갖는다", () => {
+    const a = '[access] POST /api/video-events 404 anonymousId="abc"';
+    const b = '[access] POST /api/popup-events 404 anonymousId="abc"';
+
+    expect(fingerprint(a)).not.toBe(fingerprint(b));
+  });
+});
+
+describe("summarizeAlertLine — 외부 알림에는 안전한 항목만 남긴다", () => {
+  it("접근 로그는 접두사·메서드·상태 코드만 남긴다", () => {
+    expect(
+      summarizeAlertLine(
+        '[access] PATCH /api/sessions/1759123456789/feedback-viewed 404 anonymousId="3f2b8c1e-1111-4222-8333-444455556666"',
+      ),
+    ).toBe("[access] PATCH 404");
+  });
+
+  it("에러 로그는 접두사·메서드만 남기고 에러 문구는 버린다", () => {
+    expect(
+      summarizeAlertLine(
+        '[Error] POST /api/video-events : dup eventId 11111111-1111-1111-1111-111111111111 anonymousId="a\\"b c"',
+      ),
+    ).toBe("[Error] POST");
+  });
+
+  it("외부 API 실패는 상태 코드를 남긴다", () => {
+    expect(summarizeAlertLine("[youtube] API 오류: 403")).toBe(
+      "[youtube] API 오류: 403",
+    );
+  });
+
+  it("메서드·상태 코드가 없는 줄은 접두사만 남긴다", () => {
+    expect(
+      summarizeAlertLine("[sessions] 오늘 리뷰 생성 오류: QWE-K7M2 처리 실패"),
+    ).toBe("[sessions] 오늘 리뷰 생성 오류:");
+  });
+
+  it("알 수 없는 접두사는 원문 없이 (unknown)으로 표시한다", () => {
+    expect(summarizeAlertLine("something QWE-K7M2 GET 500")).toBe(
+      "(unknown) 500",
+    );
+  });
+});
+
+describe("buildAlertDetail — Healthchecks.io 본문에 식별자가 섞이지 않는다", () => {
+  it("식별자가 담긴 원문으로 만든 본문에도 식별자가 없다", () => {
+    const detail = buildAlertDetail([
+      {
+        fingerprint: "7d41f0c9a2",
+        count: 3,
+        isNew: true,
+        message:
+          '[access] GET /api/participants/QWE-K7M2 404 anonymousId="3f2b8c1e-1111-4222-8333-444455556666"',
+      },
+      {
+        fingerprint: "3a9c1e02bd",
+        count: 12,
+        isNew: false,
+        message:
+          "[Error] PATCH /api/sessions/1759123456789/feedback-viewed : asd-3f9q 없음",
+      },
+    ]);
+
+    for (const id of [
+      "3f2b8c1e-1111-4222-8333-444455556666",
+      "1759123456789",
+      "QWE-K7M2",
+      "asd-3f9q",
+      "/api/",
+    ]) {
+      expect(detail).not.toContain(id);
+    }
+    expect(detail).toBe(
+      "[신규 x3] [access] GET 404 (fp:7d41f0c9a2)\n[재발 x12] [Error] PATCH (fp:3a9c1e02bd)",
+    );
   });
 });
 

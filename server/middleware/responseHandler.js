@@ -58,7 +58,10 @@ function fail(
  * @returns {import("express").Response} fail()이 반환한 응답 객체
  */
 function errorHandler(err, req, res, _next) {
-  console.error(`[Error] ${req.method} ${req.path} : ${err.message}`);
+  const who = req.body?.anonymousId
+    ? ` anonymousId=${JSON.stringify(req.body.anonymousId)}`
+    : "";
+  console.error(`[Error] ${req.method} ${req.path} : ${err.message}${who}`);
 
   const status = err.status || 500;
   const code = err.code || ERROR_CODES.INTERNAL_SERVER_ERROR;
