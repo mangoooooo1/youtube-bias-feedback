@@ -81,16 +81,39 @@ function normalizeMessage(message) {
     .replace(/\d+/g, "#");
 }
 
-// Healthchecks.io로 보내는 알림 본문에서 참여자 식별자를 가린다.
-// 원본은 서버 PM2 로그에 남아 있으므로 추적이 필요하면 거기서 찾는다.
-function redactIdentifiers(message) {
-  return message
-    .replace(/anonymousId=(?:"(?:[^"\\]|\\.)*"|\S+)/g, "anonymousId=[redacted]")
-    .replace(
-      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
-      "[uuid]",
+const HTTP_METHODS = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "HEAD",
+  "OPTIONS",
+]);
+
+/**
+ * Healthchecks.io로 보낼 한 줄 요약
+ */
+function summarizeAlertLine(message) {
+  const prefix = ALL_PREFIXES.find((p) => message.startsWith(p));
+  const parts = [prefix ? prefix.trim() : "(unknown)"];
+
+  const tokens = message.slice(prefix?.length ?? 0).split(/\s+/);
+  if (HTTP_METHODS.has(tokens[0])) parts.push(tokens[0]);
+  const status = tokens.find((t) => /^[1-5]\d{2}$/.test(t));
+  if (status) parts.push(status);
+
+  return parts.join(" ");
+}
+
+/** Healthchecks.io ping 본문. 원문 없이 요약·횟수·지문만 담는다. */
+function buildAlertDetail(alerts) {
+  return alerts
+    .map(
+      (a) =>
+        `[${a.isNew ? "신규" : "재발"} x${a.count}] ${summarizeAlertLine(a.message)} (fp:${a.fingerprint})`,
     )
-    .replace(/(\/api\/(?:sessions|video-events)\/)[^/\s?]+/g, "$1[id]");
+    .join("\n");
 }
 
 function fingerprint(message) {
@@ -254,15 +277,11 @@ async function main() {
       `[error-monitor] 새 에러 없음 (신규 라인 ${errorLines.length}줄 검사)`,
     );
   } else {
-    const detail = alerts
-      .map(
-        (a) =>
-          `[${a.isNew ? "신규" : "재발"} x${a.count}] ${redactIdentifiers(a.message)}`,
-      )
-      .join("\n");
-    pingResult = await pingFail(PING_ENV_VAR, detail);
+    pingResult = await pingFail(PING_ENV_VAR, buildAlertDetail(alerts));
+    // 원문은 서버 cron 로그에만 남긴다. 알림 메일의 fp로 여기서 찾는다
+    const raw = alerts.map((a) => `(fp:${a.fingerprint}) ${a.message}`);
     console.error(
-      `[error-monitor] 알림 대상 에러 ${alerts.length}건:\n${detail}`,
+      `[error-monitor] 알림 대상 에러 ${alerts.length}건:\n${raw.join("\n")}`,
     );
   }
 
@@ -287,7 +306,8 @@ if (require.main === module) {
 module.exports = {
   extractErrorLines,
   normalizeMessage,
-  redactIdentifiers,
+  summarizeAlertLine,
+  buildAlertDetail,
   fingerprint,
   readNewText,
   decideAlerts,
