@@ -67,10 +67,15 @@ function parseArgs(argv) {
   const args = { exp: NaN, con: NaN, out: DEFAULT_OUT };
   for (let i = 0; i < argv.length; i += 2) {
     const [key, value] = [argv[i], argv[i + 1]];
+    if (!["--exp", "--con", "--out"].includes(key)) {
+      throw new Error(`알 수 없는 인자: ${key}`);
+    }
+    if (value === undefined || value.startsWith("--")) {
+      throw new Error(`${key} 뒤에 값이 필요합니다.`);
+    }
     if (key === "--exp") args.exp = Number(value);
     else if (key === "--con") args.con = Number(value);
-    else if (key === "--out") args.out = path.resolve(value);
-    else throw new Error(`알 수 없는 인자: ${key}`);
+    else args.out = path.resolve(value);
   }
   for (const key of ["exp", "con"]) {
     if (!Number.isInteger(args[key]) || args[key] < 0) {

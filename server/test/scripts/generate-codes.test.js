@@ -143,4 +143,20 @@ describe("parseArgs", () => {
   ])("잘못된 인자 %j는 거부한다", (argv) => {
     expect(() => parseArgs(argv)).toThrow();
   });
+
+  it("마지막 옵션의 값이 없으면 어떤 옵션인지 알려준다", () => {
+    expect(() => parseArgs(["--exp", "20", "--con", "20", "--out"])).toThrow(
+      "--out 뒤에 값이 필요합니다.",
+    );
+  });
+
+  it("값 자리에 다음 옵션이 오면 인자를 밀려 읽지 않고 알려준다", () => {
+    expect(() => parseArgs(["--exp", "--con", "20"])).toThrow(
+      "--exp 뒤에 값이 필요합니다.",
+    );
+  });
+
+  it("알 수 없는 옵션은 값 검사보다 먼저 알려준다", () => {
+    expect(() => parseArgs(["--grp"])).toThrow("알 수 없는 인자: --grp");
+  });
 });
