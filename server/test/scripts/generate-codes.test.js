@@ -9,6 +9,7 @@ import {
   writeCodesFile,
   parseArgs,
   CODE_CHARS,
+  CODE_SPACE,
 } from "../../scripts/generate-codes.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -63,6 +64,34 @@ describe("generateCodes", () => {
     const rows = generateCodes({ exp: 2, con: 0 }, () => sequence[i++]);
 
     expect(rows.map((r) => r.code)).toEqual(["QWE-AAAA", "QWE-BBBB"]);
+  });
+
+  it("그룹별 요청 개수가 코드 공간을 넘으면 생성 전에 오류를 낸다", () => {
+    let calls = 0;
+    const countingRandom = () => {
+      calls += 1;
+      return 0;
+    };
+
+    expect(() =>
+      generateCodes({ exp: 0, con: CODE_SPACE + 1 }, countingRandom),
+    ).toThrow(`CON 코드는 최대 ${CODE_SPACE}개까지`);
+    expect(calls).toBe(0);
+  });
+
+  it("코드 공간과 같은 개수는 모든 조합을 한 번씩 만들어 채운다", () => {
+    // 코드 번호를 CODE_CHARS 진법으로 한 자리씩 내어, 중복 없이 모든 조합을 차례로 만든다
+    let n = 0;
+    const sequentialRandom = (max) => {
+      const digit = n % 4;
+      const index = Math.floor(n / 4);
+      n += 1;
+      return Math.floor(index / max ** (3 - digit)) % max;
+    };
+
+    const rows = generateCodes({ exp: CODE_SPACE, con: 0 }, sequentialRandom);
+
+    expect(rows).toHaveLength(CODE_SPACE);
   });
 });
 

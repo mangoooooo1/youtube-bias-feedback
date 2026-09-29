@@ -17,6 +17,7 @@ const crypto = require("crypto");
 
 const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const CODE_LENGTH = 4;
+const CODE_SPACE = CODE_CHARS.length ** CODE_LENGTH;
 const PREFIX_BY_GROUP = { EXP: "QWE", CON: "ASD" };
 const DEFAULT_OUT = path.join(__dirname, "..", "codes.csv");
 
@@ -32,6 +33,11 @@ function generateCodes({ exp, con }, randomInt = crypto.randomInt) {
     ["EXP", exp],
     ["CON", con],
   ]) {
+    if (count > CODE_SPACE) {
+      throw new Error(
+        `${group} 코드는 최대 ${CODE_SPACE}개까지 만들 수 있습니다(요청: ${count}).`,
+      );
+    }
     let made = 0;
     while (made < count) {
       let suffix = "";
@@ -103,4 +109,5 @@ module.exports = {
   writeCodesFile,
   parseArgs,
   CODE_CHARS,
+  CODE_SPACE,
 };
