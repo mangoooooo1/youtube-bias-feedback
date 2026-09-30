@@ -32,31 +32,6 @@ function vlBadge({ text = "", tone = "accent", size = "md" } = {}) {
   return `<span style="display:inline-flex;align-items:center;gap:5px;${s};border-radius:999px;padding:${sm ? "2px 8px" : "4px 10px"};font-size:${sm ? 11 : 12}px;font-weight:700;line-height:1.2;white-space:nowrap">${text}</span>`;
 }
 
-// showValue:false: entropy 원값은 "얼마나 커야 좋은지" 기준을 알 수 없는 임의 숫자라
-// (다양성 등급 라벨과 함께 쓸 땐) 화살표+색으로만 방향을 보여주고 숫자는 감춘다.
-function vlDeltaChip({
-  value = 0,
-  unit = "",
-  invertColor = false,
-  showValue = true,
-} = {}) {
-  const up = value >= 0;
-  const good = invertColor ? !up : up;
-  const col =
-    value === 0
-      ? "var(--vl-ink-2)"
-      : good
-        ? "var(--vl-good)"
-        : "var(--vl-warn)";
-  const arrow = value === 0 ? "·" : up ? "▲" : "▼";
-  const valueText = showValue
-    ? `${up ? "+" : ""}${value.toFixed(2)}${unit}`
-    : "";
-  return `<span style="display:inline-flex;align-items:center;gap:4px;color:${col};;font-weight:600;font-size:var(--vl-fs-3)">
-    <span style="font-size:var(--vl-fs-1)">${arrow}</span>${valueText}
-  </span>`;
-}
-
 function vlBarChart({ data = [], maxVal, animate = true } = {}) {
   const top = maxVal || Math.max(...data.map((d) => d.p));
   return `<div style="display:flex;flex-direction:column;gap:11px">
@@ -314,6 +289,7 @@ function vlMiniLine({
 function vlReview({
   text = "",
   topic = "",
+  fact = null,
   title = "오늘 돌아보기",
   videos = [],
   videoListLabel = "분석한 영상",
@@ -341,6 +317,15 @@ function vlReview({
     ? `<p style="margin:0 0 10px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink);line-height:1.4;letter-spacing:-0.02em;text-wrap:pretty">
         당신은 '<span style="color:var(--vl-accent)">${vlEscapeHtml(topic)}</span>'에 관심이 많습니다!
       </p>`
+    : "";
+
+  // 기간별 리뷰 첫 줄 사실 문장({ main, note }, VL.periodFactSentence)
+  const factBlock = fact
+    ? `<p style="margin:0 0 10px;font-size:var(--vl-fs-4);font-weight:700;color:var(--vl-ink);line-height:1.5;text-wrap:pretty">${vlEscapeHtml(fact.main)}</p>${
+        fact.note
+          ? `<p style="margin:-4px 0 10px;font-size:var(--vl-fs-2);color:var(--vl-ink-3);line-height:1.5;text-wrap:pretty">${vlEscapeHtml(fact.note)}</p>`
+          : ""
+      }`
     : "";
 
   // 10개 넘으면 <details> 안에서 계속 스크롤하는 대신 10개씩 페이지로 나눠 가로로
@@ -399,6 +384,7 @@ function vlReview({
         <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">${title}</span>
       </div>
       ${topicBlock}
+      ${factBlock}
       <p style="margin:0;font-size:var(--vl-fs-3);line-height:1.65;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(text)}</p>
       ${videoList}
     </div>
@@ -442,7 +428,6 @@ function vlConfirmModal({
 window.vlCard = vlCard;
 window.vlSectionLabel = vlSectionLabel;
 window.vlBadge = vlBadge;
-window.vlDeltaChip = vlDeltaChip;
 window.vlBarChart = vlBarChart;
 window.vlStackedBar = vlStackedBar;
 window.vlDonut = vlDonut;

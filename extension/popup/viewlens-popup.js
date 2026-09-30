@@ -1,6 +1,7 @@
 window.buildDataForDate = buildDataForDate;
 window.koreanDateLabel = koreanDateLabel;
 window.findUnrevealedPastDate = findUnrevealedPastDate;
+window.addDaysKst = addDaysKst;
 const DEFAULT_TONE = "indigo";
 
 // ── Category name (Korean) → VL short key ─────────────────────────────────────
@@ -55,11 +56,6 @@ function koreanDateLabel(d) {
   const [y, m, day] = dateStr(d).split("-").map(Number);
   const weekday = new Date(Date.UTC(y, m - 1, day)).getUTCDay();
   return `${m}월 ${day}일 ${days[weekday]}요일`;
-}
-
-function koreanShortDate(d) {
-  const [, m, day] = dateStr(d).split("-").map(Number);
-  return `${m}월 ${day}일`;
 }
 
 /** Returns YYYY-MM-DD string for day offset from installDate */
@@ -135,8 +131,6 @@ function listSessionVideos(sessions) {
 
 /**
  * 특정 날짜의 하루 요약 데이터를 만든다.
- * hasPrevData(직전 기록 존재 여부)·prevIsYesterday(그 기록이 실제로 어제인지)를 함께 반환해,
- * "비교 데이터 없음"과 "진짜 0"을 구분하고 "어제"라는 표현을 오표기하지 않게 한다.
  * @param {Array<object>} allSessions - 전체 세션 목록
  * @param {Date} targetDate - 조회할 날짜
  */
@@ -158,10 +152,6 @@ function buildDataForDate(allSessions, targetDate) {
       videoCount: 0,
       sessionCount: 0,
       dist: [],
-      prevEntropy: 0,
-      prevDateLabel: "—",
-      hasPrevData: false,
-      prevIsYesterday: false,
       videos: [],
       review: "",
       sessionIds: [],
@@ -196,45 +186,11 @@ function buildDataForDate(allSessions, targetDate) {
 
   const videos = listSessionVideos(sourceSessions);
 
-  // Previous available day entropy
-  const prevSessions = allSessions
-    .filter(
-      (s) =>
-        s.endTime &&
-        dateStr(new Date(s.endTime)) !== sourceDateStr &&
-        new Date(s.endTime) < sourceDate &&
-        s.categoryDistribution &&
-        Object.keys(s.categoryDistribution).length > 0,
-    )
-    .sort((a, b) => new Date(b.endTime) - new Date(a.endTime));
-
-  let prevEntropy = 0;
-  let prevDateLabel = "—";
-  let hasPrevData = false;
-  let prevIsYesterday = false;
-  if (prevSessions.length > 0) {
-    const prevDate = new Date(prevSessions[0].endTime);
-    const prevDateStr = dateStr(prevDate);
-    const prevDay = prevSessions.filter(
-      (s) => dateStr(new Date(s.endTime)) === prevDateStr,
-    );
-    const prevDist = mergeDist(prevDay);
-    prevEntropy = VL.entropy(VL.dist(prevDist));
-    prevDateLabel = koreanShortDate(prevDate);
-    hasPrevData = true;
-    // 직전 기록이 항상 어제는 아니므로(며칠 공백 가능) 실제로 어제인지 확인한다.
-    prevIsYesterday = prevDateStr === dateStr(addDaysKst(sourceDate, -1));
-  }
-
   return {
     dateLabel: koreanDateLabel(sourceDate),
     videoCount,
     sessionCount: sourceSessions.length,
     dist: distArr,
-    prevEntropy,
-    prevDateLabel,
-    hasPrevData,
-    prevIsYesterday,
     videos,
     review,
     reviewTopic,
@@ -1513,6 +1469,7 @@ boot().catch((err) => {
   // Fallback: opened directly in browser without chrome APIs
   if (typeof chrome === "undefined" || !chrome?.storage) {
     const popEl = document.getElementById("vl-popup-root");
+    if (!popEl) return; // Studio는 자체적으로 마운트한다
     applyTokens(popEl, DEFAULT_TONE, false);
     const popup = new ViewLensPopup(popEl);
     popup.mount({
