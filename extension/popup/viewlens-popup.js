@@ -1465,6 +1465,22 @@ function _computeTimerText(lastWatchedAt) {
   return `피드백까지 ${mins}분 ${String(secs).padStart(2, "0")}초`;
 }
 
+/**
+ * 오류를 background에 넘겨 원격 보고에 모은다. 원본 에러·화면 내용은 넘기지 않는다.
+ * @param {string} code - error-report.js의 오류 코드
+ * @param {string} where - error-report.js의 발생 위치
+ * @returns {void}
+ */
+function reportClientError(code, where) {
+  try {
+    chrome.runtime
+      .sendMessage({ type: "client-error", code, where })
+      .catch(() => {});
+  } catch {
+    // 보고 실패로 팝업 흐름을 더 깨뜨리지 않는다
+  }
+}
+
 boot().catch((err) => {
   // Fallback: opened directly in browser without chrome APIs
   if (typeof chrome === "undefined" || !chrome?.storage) {
@@ -1480,5 +1496,7 @@ boot().catch((err) => {
     });
   } else {
     console.error("[ViewLens popup] boot error:", err);
+    // 참여자에게는 빈 팝업으로 보이지만 서버 로그에는 남지 않는다
+    reportClientError("POPUP_BOOT_FAILED", "popup.boot");
   }
 });
