@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import vm from "node:vm";
+import { BASELINE_DAYS as PIPELINE_BASELINE_DAYS } from "../pipeline/baseline.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCHEDULE_PATH = path.join(__dirname, "../study-schedule.js");
@@ -76,6 +77,14 @@ describe("getParticipationState — 참여 상태 경계", () => {
   });
 });
 
+// viewlens-data.js는 classic script라 import할 수 없어 소스에서 값을 읽는다
+function popupConstant(name) {
+  const source = readFileSync(VIEWLENS_DATA_PATH, "utf8");
+  const match = source.match(new RegExp(`const ${name} = (\\d+);`));
+  expect(match).not.toBeNull();
+  return Number(match[1]);
+}
+
 describe("연구 기간 상수 — 서버·팝업과 같은 값", () => {
   it("TOTAL_DAYS가 server/pipeline/study-constants.js와 같다", () => {
     expect(ViewLensStudy.TOTAL_DAYS).toBe(serverConstants.TOTAL_DAYS);
@@ -86,6 +95,17 @@ describe("연구 기간 상수 — 서버·팝업과 같은 값", () => {
     const match = source.match(/const TOTAL_DAYS = (\d+);/);
     expect(match).not.toBeNull();
     expect(ViewLensStudy.TOTAL_DAYS).toBe(Number(match[1]));
+  });
+
+  it("DAYS_PER_PERIOD가 서버와 popup/viewlens-data.js에서 같다", () => {
+    expect(popupConstant("DAYS_PER_PERIOD")).toBe(
+      serverConstants.DAYS_PER_PERIOD,
+    );
+  });
+
+  it("BASELINE_DAYS가 서버·popup/viewlens-data.js·pipeline/baseline.js에서 같다", () => {
+    expect(popupConstant("BASELINE_DAYS")).toBe(serverConstants.BASELINE_DAYS);
+    expect(PIPELINE_BASELINE_DAYS).toBe(serverConstants.BASELINE_DAYS);
   });
 
   it("END_GRACE_DAYS는 3일이다", () => {
