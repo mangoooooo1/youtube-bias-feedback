@@ -72,15 +72,12 @@ function screenOnboarding() {
 }
 
 // 참여 코드 파싱 → { group, code } 또는 null(형식 오류)
-// - 실전 코드: 난독 접두사(QWE=실험군, ASD=대조군) + 랜덤 4자, 예 "QWE-K7M2"
-// - 테스트 코드: "TEST-EXP" / "TEST-CON" (그룹으로 그대로 사용)
-// 접두사는 참여자에게 그룹(실험군/대조군)을 노출하지 않도록 난독화한 값이다.
+// 형식만 검사한다. 집단은 서버 발급 명단이 정한다(IRB: 코드만으로 집단을 알 수 없어야 함)
+// TEST-EXP/TEST-CON만 코드 자체가 그룹이다.
 function parseParticipantCode(raw) {
   const code = (raw || "").trim().toUpperCase();
   if (code === "TEST-EXP" || code === "TEST-CON") return { group: code, code };
-  const m = code.match(/^(QWE|ASD)-[A-Z2-9]{4}$/);
-  if (!m) return null;
-  return { group: m[1] === "QWE" ? "EXP" : "CON", code };
+  return /^[A-Z]{2,3}-[A-Z2-9]{4}$/.test(code) ? { group: null, code } : null;
 }
 
 function bindOnboarding(root, onSubmit) {
@@ -102,21 +99,26 @@ function bindOnboarding(root, onSubmit) {
       return;
     }
 
-    // 서버 발급 명단 검증 — 오프라인/서버 미설정 시엔 통과(폴백)
+    // 서버 발급 명단 검증 — 집단을 서버가 정하므로 확인 못 하면 진행하지 않는다
     btn.disabled = true;
     btn.textContent = "확인 중…";
     const check = window.validateParticipantCode
       ? await window.validateParticipantCode(parsed.code)
-      : { ok: true };
+      : { ok: false, reason: "unavailable" };
     btn.disabled = false;
     btn.textContent = btnLabel;
 
-    if (!check.ok) {
+    const group = check.ok ? check.group || parsed.group : null;
+    if (!check.ok && check.reason !== "unavailable") {
       showErr("발급되지 않은 코드예요. 연구자에게 받은 코드를 확인해 주세요.");
       return;
     }
-    // 서버가 그룹을 확정해 주면 그 값을 사용(권위), 아니면 코드 접두사 기준
-    const group = check.group || parsed.group;
+    if (!group) {
+      showErr(
+        "지금은 코드를 확인할 수 없어요. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
+      );
+      return;
+    }
 
     // 이 참여코드로 이미 등록된 이력이 있으면(TEST 코드는 서버가 항상 false를
     // 반환) 바로 신규 등록하지 않고 재설치 복구 여부를 먼저 확인한다.

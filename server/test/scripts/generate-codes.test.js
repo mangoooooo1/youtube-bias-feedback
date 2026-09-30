@@ -42,11 +42,11 @@ describe("generateCodes", () => {
     expect(new Set(rows.map((r) => r.code)).size).toBe(40);
   });
 
-  it("모든 코드가 확장 프로그램 온보딩 검증을 통과하고, 그 검증이 판정한 그룹과 같다", () => {
+  it("모든 코드가 확장 프로그램 온보딩 형식 검사를 통과하고, 코드만으로 그룹이 정해지지 않는다", () => {
     const parseParticipantCode = loadParseParticipantCode();
 
-    for (const { code, group } of generateCodes({ exp: 20, con: 20 })) {
-      expect(parseParticipantCode(code)).toEqual({ group, code });
+    for (const { code } of generateCodes({ exp: 20, con: 20 })) {
+      expect(parseParticipantCode(code)).toEqual({ group: null, code });
     }
   });
 
