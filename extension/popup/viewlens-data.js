@@ -44,36 +44,9 @@ function isTestGroup(group) {
 const H_MAX = 3.17;
 
 /**
- * 다양성 등급(편중/보통/다양) 경계 — H_MAX 대비 정확히 1/3, 2/3 지점.
- * [편중/보통 경계, 보통/다양 경계].
+ * 기간별 일별 추이 그래프의 경계선 — H_MAX 대비 1/3, 2/3 지점(그래프 교체 이슈에서 제거 예정).
  */
 const DIVERSITY_BAND_RATIOS = [1 / 3, 2 / 3];
-
-/**
- * entropy를 편중/보통/다양 3단계 등급으로 분류한다.
- * 원값을 그대로 보여주지 않는 이유: entropy는 "100%가 뭔지" 답할 수 없는 임의 숫자라,
- * 등급만 노출하고 절대적 기준은 참여자 자신의 과거 기간과의 비교로만 답한다.
- * @param {number} h - Shannon entropy 값
- * @returns {{label: string, tone: "warn"|"neutral"|"good"}}
- */
-function diversityLabel(h) {
-  const r = H_MAX > 0 ? h / H_MAX : 0;
-  if (r < DIVERSITY_BAND_RATIOS[0]) return { label: "편중", tone: "warn" };
-  if (r < DIVERSITY_BAND_RATIOS[1]) return { label: "보통", tone: "neutral" };
-  return { label: "다양", tone: "good" };
-}
-
-/**
- * 직전 대비 변화량을 %p(H_MAX 대비 비율의 차이) 단위로 반환한다.
- * 비율(%)이 아니라 %p라서 from이 0이어도 항상 정의되고, 값은 -100~100 사이로 묶인다.
- * @param {number} from - 이전 entropy
- * @param {number} to - 현재 entropy
- * @returns {number} %p 단위 변화량
- */
-function diversityDeltaPct(from, to) {
-  if (H_MAX <= 0) return 0;
-  return Math.round(((to - from) / H_MAX) * 100);
-}
 
 // 받침 유무로 조사를 고른다(한글이 아니면 받침 없음으로 본다)
 function josa(word, withBatchim, withoutBatchim) {
@@ -149,10 +122,6 @@ const today = {
     edu: 0.08,
     sci: 0.04,
   }),
-  prevEntropy: 1.72,
-  prevDateLabel: "6월 5일",
-  hasPrevData: true,
-  prevIsYesterday: false,
   videos: [
     { title: "2024 LCK 서머 결승 풀 하이라이트", cat: "game" },
     { title: "발로란트 신규 요원 200% 활용 공략", cat: "game" },
@@ -165,7 +134,7 @@ const today = {
     { title: "블랙홀은 정말 모든 걸 삼킬까? (다큐)", cat: "sci" },
   ],
   review:
-    "오늘은 게임 영상에 가장 오래 머무셨어요 — 특히 LCK 결승 하이라이트나 발로란트 공략처럼 e스포츠·경쟁 게임 쪽이 절반 가까이를 차지했네요. 음악은 아이유 신곡 MV나 라이브 클립 같은 최신 발매곡 위주였고요. 그래도 중간에 블랙홀 다큐와 미적분 개념 같은 과학·교육 영상을 챙겨 보신 점이 인상적이에요. 내일은 평소 잘 안 보던 분야 영상을 딱 하나만 더 곁들여 보면 편중에서 다양 쪽으로 한 걸음 더 갈 수 있어요.",
+    "오늘은 게임 영상에 가장 오래 머무셨어요 — 특히 LCK 결승 하이라이트나 발로란트 공략처럼 e스포츠·경쟁 게임 쪽이 절반 가까이를 차지했네요. 음악은 아이유 신곡 MV나 라이브 클립 같은 최신 발매곡 위주였고요. 중간에 블랙홀 다큐와 미적분 개념 같은 과학·교육 영상도 함께 보셨어요.",
 };
 
 const weeks = [
@@ -496,8 +465,6 @@ window.VL = {
   entropy,
   H_MAX,
   DIVERSITY_BAND_RATIOS,
-  diversityLabel,
-  diversityDeltaPct,
   periodFactSentence,
   today,
   weeks,
