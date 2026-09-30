@@ -779,7 +779,7 @@ class Studio {
         "timeline",
         Object.entries(tl).map(([k, v]) => ({ value: k, label: v.label })),
       )
-      .addHint("시점에 따라 열리는 주차 탭과 설문 팝업이 달라집니다.");
+      .addHint("시점에 따라 열리는 기간 탭과 설문 팝업이 달라집니다.");
 
     this._panel.open();
   }

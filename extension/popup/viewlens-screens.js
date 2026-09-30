@@ -526,7 +526,7 @@ function screenFeedback(currentWeek, selWeek) {
     ${vlCard({
       pad: 16,
       children: `
-      ${vlSectionLabel({ text: "주간 카테고리 분포" })}
+      ${vlSectionLabel({ text: `${w.label} 카테고리 분포` })}
       ${vlStackedBar({ data: w.dist })}
     `,
     })}
@@ -572,7 +572,7 @@ function screenControlHome(day, stats = {}) {
       </div>
       <div style="margin-top:16px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink)">시청 기록을 수집하고 있어요</div>
       <p style="margin:9px auto 0;max-width:250px;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty">
-        평소처럼 유튜브를 시청해 주세요. 연구 기간 동안 시청 데이터가 기기 안에 안전하게 기록돼요.
+        평소처럼 유튜브를 시청해 주세요. 시청 기록은 연구 목적으로 안전하게 수집·보관돼요.
       </p>
       ${
         // 베이스라인 중인 EXP에게만 보여주는 한 줄 — CON은 종료 후 일괄 제공(10-10)이라
@@ -592,7 +592,7 @@ function screenControlHome(day, stats = {}) {
       // 종료 안내 모달을 이미 본 뒤엔 이 자리가 상시 재진입 CTA로 바뀐다.
       stats.studyEndCtaReady
         ? `<button id="vl-study-end-cta" class="vl-press" style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:15px 16px;background:var(--vl-accent-soft);border:none;border-radius:13px;box-shadow:0 1px 3px color-mix(in oklab,var(--vl-accent) 10%,transparent),0 1px 2px rgba(0,0,0,.03);cursor:pointer;font-family:inherit;text-align:left">
-        <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">6주간의 시청 리뷰가 준비됐어요</span>
+        <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">${VL.studyDurationLabel()}의 시청 리뷰가 준비됐어요</span>
         <span style="font-size:var(--vl-fs-4);color:var(--vl-accent);flex-shrink:0">→</span>
       </button>`
         : `<div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card-2);border-radius:13px;box-shadow:var(--vl-shadow-card)">

@@ -68,3 +68,25 @@ describe("VL.isConGroup — pipeline/study-period.js와 동치성", () => {
     },
   );
 });
+
+// TOTAL_DAYS를 치환해 로드 — 실제 설정값과 무관하게 두 표기 분기를 고정 검증한다.
+function loadVLWithTotalDays(days) {
+  const src = readFileSync(VIEWLENS_DATA_PATH, "utf8").replace(
+    /const TOTAL_DAYS = \d+;/,
+    `const TOTAL_DAYS = ${days};`,
+  );
+  const sandbox = {};
+  sandbox.window = sandbox;
+  return new Function("window", `${src}
+return window.VL;`)(sandbox);
+}
+
+describe("VL.studyDurationLabel — 연구 기간 표기", () => {
+  it("7의 배수가 아니면(파일럿 12일) 일 단위로 표기한다", () => {
+    expect(loadVLWithTotalDays(12).studyDurationLabel()).toBe("12일간");
+  });
+
+  it("7의 배수(본 연구 42일)면 주 단위로 표기한다", () => {
+    expect(loadVLWithTotalDays(42).studyDurationLabel()).toBe("6주간");
+  });
+});
