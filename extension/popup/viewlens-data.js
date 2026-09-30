@@ -106,7 +106,7 @@ function periodFactSentence(w, prevW) {
   const pct = (d) => Math.round(d.p * 100);
   if (n === 1) {
     return {
-      main: `${w.label}에 본 영상 1개는 ${josa(cats[0].name, "관련 영상이었어요")}.`,
+      main: `${w.label}에 본 영상 1개는 ${cats[0].name} 관련 영상이었어요.`,
       note: null,
     };
   }
