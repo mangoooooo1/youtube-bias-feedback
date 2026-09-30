@@ -27,6 +27,7 @@ module.exports = [
     files: [
       "extension/background.js",
       "extension/storage.js",
+      "extension/error-report.js",
       "extension/pipeline/**/*.js",
     ],
     languageOptions: {
