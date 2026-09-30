@@ -1,6 +1,3 @@
-// viewlens-data.js — categories, entropy helpers, mock study data, tone presets
-// Exports (window): VL
-
 const VL_CATS = {
   game: { name: "게임", color: "oklch(0.67 0.15 32)" },
   music: { name: "음악", color: "oklch(0.66 0.14 300)" },
@@ -76,6 +73,68 @@ function diversityLabel(h) {
 function diversityDeltaPct(from, to) {
   if (H_MAX <= 0) return 0;
   return Math.round(((to - from) / H_MAX) * 100);
+}
+
+// 받침 유무로 조사를 고른다(한글이 아니면 받침 없음으로 본다)
+function josa(word, withBatchim, withoutBatchim) {
+  const code = word.charCodeAt(word.length - 1) - 0xac00;
+  const hasBatchim = code >= 0 && code <= 11171 && code % 28 !== 0;
+  return `${word}${hasBatchim ? withBatchim : withoutBatchim}`;
+}
+
+// 기간 비중이 이 영상 수 미만이면 영상 1개가 10%p 이상을 움직인다
+const FEW_VIDEOS = 10;
+
+/**
+ * 기간별 리뷰 첫 줄 사실 문장. 막대그래프와 같은 w.dist·w.videoCount로 계산한다.
+ * @param {{label: string, videoCount: number, dist: Array<{key: string, name: string, p: number}>}} w
+ * @param {object|null} prevW - 직전 기간(첫 기간이면 null)
+ * @returns {{main: string, note: string|null}}
+ */
+function periodFactSentence(w, prevW) {
+  const n = w.videoCount;
+  if (n === 0)
+    return { main: `${w.label}에는 시청 기록이 없어요.`, note: null };
+
+  // "기타"는 다른 분야가 없을 때만 쓴다
+  const shown = w.dist.filter((d) => d.p > 0);
+  const specific = shown.filter((d) => d.key !== "etc");
+  const cats = specific.length > 0 ? specific : shown;
+  if (cats.length === 0)
+    return { main: `${w.label}에 본 영상은 ${n}개예요.`, note: null };
+
+  const pct = (d) => Math.round(d.p * 100);
+  if (n === 1) {
+    return {
+      main: `${w.label}에 본 영상 1개는 ${josa(cats[0].name, "관련 영상이었어요")}.`,
+      note: null,
+    };
+  }
+
+  const parts = cats
+    .slice(0, 2)
+    .map((d) => `${josa(d.name, "이", "가")} ${pct(d)}%`);
+  let main = `${w.label}에 본 영상 ${n}개 중 ${parts.join(", ")}였어요.`;
+
+  const compared = prevW && prevW.videoCount > 0;
+  if (compared) {
+    const top = cats[0];
+    const prev = prevW.dist.find((d) => d.key === top.key);
+    const diff = pct(top) - (prev ? pct(prev) : 0);
+    main +=
+      diff === 0
+        ? ` ${top.name} 비중은 ${josa(prevW.label, "과", "와")} 같았어요.`
+        : ` ${prevW.label}보다 ${top.name} 비중이 ${Math.abs(diff)}%p ${diff > 0 ? "늘었어요" : "줄었어요"}.`;
+  }
+
+  let note = null;
+  if (n < FEW_VIDEOS) {
+    note =
+      "이 기간은 본 영상이 적어서, 비중이 평소 시청 경향과 다를 수 있어요.";
+  } else if (compared && prevW.videoCount < FEW_VIDEOS) {
+    note = `${josa(prevW.label, "은", "는")} 본 영상이 적어서, 변화 폭이 평소와 다를 수 있어요.`;
+  }
+  return { main, note };
 }
 
 const today = {
@@ -439,6 +498,7 @@ window.VL = {
   DIVERSITY_BAND_RATIOS,
   diversityLabel,
   diversityDeltaPct,
+  periodFactSentence,
   today,
   weeks,
   TIMELINE,
