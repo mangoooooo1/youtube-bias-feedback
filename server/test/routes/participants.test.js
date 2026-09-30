@@ -126,18 +126,41 @@ beforeEach(() => {
 });
 
 describe("POST /api/participants", () => {
-  it("발급 코드 명단이 비어 있으면(시드 전) 코드 없이도 등록된다", async () => {
+  it("발급 코드 명단이 비어 있어도 코드 없이는 등록되지 않는다", async () => {
     const res = await request(app).post("/api/participants").send({
       anonymousId: "a1",
       group_code: "EXP",
       installDate: "2026-08-13T00:00:00Z",
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({
+      code: "MISSING_REQUIRED_FIELD",
+      detail: "participantCode",
+    });
+  });
 
-    const row = db
-      .prepare("SELECT * FROM participants WHERE anonymousId = ?")
-      .get("a1");
-    expect(row.group_code).toBe("EXP");
+  it("발급 코드 명단이 비어 있으면 클라이언트가 주장한 그룹으로 등록하지 않는다", async () => {
+    const res = await request(app).post("/api/participants").send({
+      anonymousId: "a1",
+      group_code: "EXP",
+      installDate: "2026-08-13T00:00:00Z",
+      participantCode: "VL-K7M2",
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("INVALID_FIELD_VALUE");
+    expect(db.prepare("SELECT COUNT(*) AS c FROM participants").get().c).toBe(
+      0,
+    );
+  });
+
+  it("발급 코드 명단이 비어 있어도 TEST 코드는 등록된다", async () => {
+    const res = await request(app).post("/api/participants").send({
+      anonymousId: "a1",
+      group_code: "TEST-CON",
+      installDate: "2026-08-13T00:00:00Z",
+      participantCode: "TEST-CON",
+    });
+    expect(res.status).toBe(200);
   });
 
   it.each(["anonymousId", "group_code", "installDate"])(
@@ -277,16 +300,12 @@ describe("GET /api/participants/validate", () => {
     expect(res.body.code).toBe("MISSING_REQUIRED_FIELD");
   });
 
-  it("발급 명단이 비어 있으면(시드 전) permissive하게 valid:true를 반환한다", async () => {
+  it("발급 명단이 비어 있으면 TEST 코드가 아닌 코드는 valid:false다", async () => {
     const res = await request(app)
       .get("/api/participants/validate")
       .query({ code: "ANY-CODE" });
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual({
-      valid: true,
-      group_code: null,
-      previouslyRegistered: false,
-    });
+    expect(res.body.data).toEqual({ valid: false });
   });
 
   it("TEST 코드는 명단과 무관하게 항상 유효하고 previouslyRegistered는 항상 false다", async () => {
