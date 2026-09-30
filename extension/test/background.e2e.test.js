@@ -2471,3 +2471,70 @@ describe("오류 원격 보고 — 서버에서 안 보이는 확장 오류를 �
     expect(global.fetch).not.toHaveBeenCalled();
   });
 });
+
+describe("전송 정체 보고 — 재시도 큐가 오래 막히면 SYNC_STALLED를 모은다", () => {
+  const SEVEN_HOURS_AGO = FIXED_NOW.getTime() - 7 * 60 * 60 * 1000;
+
+  async function loadWithBacklog(extra = {}) {
+    global.chrome = createChromeMock();
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      participantToken: "t",
+      sessions: [
+        { sessionId: "s0", videos: [{ videoId: "v0" }], syncedToServer: false },
+      ],
+      ...extra,
+    });
+    vi.resetModules();
+    return import("../background.js");
+  }
+
+  function statusFetch(status) {
+    return vi.fn(async () => ({
+      ok: status < 400,
+      status,
+      json: async () => ({ success: status < 400, data: {} }),
+    }));
+  }
+
+  it("오래 막혀 있던 세션 큐가 또 실패하면 SYNC_STALLED를 큐 위치와 함께 모은다", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const mod = await loadWithBacklog({
+        syncStalls: {
+          sessions: { since: SEVEN_HOURS_AGO, failures: 29, reported: false },
+        },
+      });
+      global.fetch = statusFetch(502);
+
+      await mod.retryUnsyncedSessions();
+
+      const { pendingClientErrors } = await global.chrome.storage.local.get(
+        "pendingClientErrors",
+      );
+      expect(pendingClientErrors).toEqual({
+        "SYNC_STALLED|background.queue.sessions": expect.objectContaining({
+          count: 1,
+        }),
+      });
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("큐가 다시 성공하면 실패 구간을 지운다", async () => {
+    const mod = await loadWithBacklog({
+      syncStalls: {
+        sessions: { since: SEVEN_HOURS_AGO, failures: 10, reported: false },
+      },
+    });
+    global.fetch = statusFetch(200);
+
+    await mod.retryUnsyncedSessions();
+
+    const { syncStalls } = await global.chrome.storage.local.get("syncStalls");
+    expect(syncStalls).toEqual({});
+  });
+});

@@ -130,3 +130,56 @@ export function flushClientErrors(send, anonymousId, now = new Date()) {
     console.warn(`[error-report] 오류 보고 전송 중 예외: ${error?.message}`),
   );
 }
+
+const STALL_KEY = "syncStalls";
+export const STALL_MIN_MS = 6 * 60 * 60 * 1000;
+// 오프라인으로 잠든 PC가 깨어난 직후 한 번 실패한 것만으로 6시간이 찬 것처럼 보이지 않게, 실제 실패 횟수도 본다
+export const STALL_MIN_FAILURES = 30;
+// 재시도 큐 오류가 아니라 이 기기 설정·온보딩 상태라 전송 정체로 세지 않는다
+const NOT_A_STALL_CODES = new Set(["no_server_url", "no_anonymous_id"]);
+
+// 여러 큐가 같은 틱에 나란히 결과를 남기므로 따로 줄 세운다
+let stallChain = Promise.resolve();
+
+/**
+ * 재시도 큐 한 틱의 결과를 남기고, 실패가 STALL_MIN_MS·STALL_MIN_FAILURES를 모두 넘기면
+ * 연속 실패 구간마다 SYNC_STALLED를 한 번만 보고한다. 성공하면 구간을 끝낸다.
+ * @param {string} queue - withQueueLock의 큐 이름
+ * @param {{ok: boolean, code?: string|null}} outcome
+ * @param {Date} [now]
+ * @returns {Promise<void>}
+ */
+export function recordSyncOutcome(queue, outcome, now = new Date()) {
+  if (!outcome.ok && NOT_A_STALL_CODES.has(outcome.code)) {
+    return Promise.resolve();
+  }
+  const next = stallChain.then(async () => {
+    const { [STALL_KEY]: stalls = {} } =
+      await chrome.storage.local.get(STALL_KEY);
+    const prev = stalls[queue];
+    if (outcome.ok) {
+      if (!prev) return;
+      delete stalls[queue];
+      await chrome.storage.local.set({ [STALL_KEY]: stalls });
+      return;
+    }
+
+    const stall = prev
+      ? { ...prev, failures: prev.failures + 1 }
+      : { since: now.getTime(), failures: 1, reported: false };
+    const due =
+      !stall.reported &&
+      now.getTime() - stall.since >= STALL_MIN_MS &&
+      stall.failures >= STALL_MIN_FAILURES;
+    if (due) stall.reported = true;
+    stalls[queue] = stall;
+    await chrome.storage.local.set({ [STALL_KEY]: stalls });
+    if (due) {
+      await reportClientError("SYNC_STALLED", `background.queue.${queue}`, now);
+    }
+  });
+  stallChain = next.catch(() => {});
+  return next.catch((error) =>
+    console.warn(`[error-report] 전송 정체 기록 실패: ${error?.message}`),
+  );
+}

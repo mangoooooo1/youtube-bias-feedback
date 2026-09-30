@@ -17,7 +17,11 @@ import {
   invalidateParticipantSync,
 } from "./storage.js";
 import { isBaselinePeriod } from "./pipeline/baseline.js";
-import { reportClientError, flushClientErrors } from "./error-report.js";
+import {
+  reportClientError,
+  flushClientErrors,
+  recordSyncOutcome,
+} from "./error-report.js";
 import { SERVER_URL } from "./config.js";
 import "./study-schedule.js";
 
@@ -399,7 +403,10 @@ export function ensureParticipantSynced() {
   return withQueueLock("participants", async () => {
     const state = await getParticipantSyncState();
     if (!state) return; // 온보딩 전이거나 필수 값 누락
-    if (state.synced && !state.tokenMissing) return;
+    if (state.synced && !state.tokenMissing) {
+      await recordSyncOutcome("participants", { ok: true });
+      return;
+    }
     // 서버가 400으로 거부한 실패는 "같은 요청"을 다시 보내야 영원히 같은 답이 온다.
     if (
       state.failure?.kind === "permanent" &&
@@ -418,6 +425,7 @@ export function ensureParticipantSynced() {
 
     // config.js 미설정 환경에서는 요청 자체가 나가지 않는다. 실패로 기록하면 1분마다 storage만 쓰게 되므로 조용히 넘긴다.
     if (result.code === "no_server_url") return;
+    await recordSyncOutcome("participants", result);
 
     if (result.ok) {
       await markParticipantSynced(result.data?.participantToken ?? null);
@@ -564,7 +572,11 @@ async function withQueueLock(name, run) {
  * @returns {Promise<void>}
  */
 async function drainQueue(name, items, processItem, markInvalid) {
-  if (items.length === 0) return;
+  // 보낼 게 없으면 막힌 것도 아니다
+  if (items.length === 0) {
+    await recordSyncOutcome(name, { ok: true });
+    return;
+  }
 
   let sentThisTick = 0;
   let invalidThisTick = 0;
@@ -587,6 +599,7 @@ async function drainQueue(name, items, processItem, markInvalid) {
 
   const pending = items.length - sentThisTick - invalidThisTick;
   const summary = `pending=${pending} sentThisTick=${sentThisTick} invalidThisTick=${invalidThisTick}`;
+  await recordSyncOutcome(name, abortedBy ?? { ok: true });
   if (abortedBy) {
     // 서버가 토큰을 거부했다면 participantSynced는 더 이상 진실이 아니다. 내려두면 다음 알람 틱에 게이트가 재등록해 토큰을 다시 받아온다.
     if (

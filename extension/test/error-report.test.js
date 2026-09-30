@@ -287,3 +287,87 @@ describe("flushClientErrors — 묶어서 보내기", () => {
     ).toBe(1);
   });
 });
+
+describe("recordSyncOutcome — 오래 막힌 전송을 한 번만 보고한다", () => {
+  const FAIL = { ok: false, kind: "queue", code: "network" };
+  const hoursLater = (h) => minutesLater(h * 60);
+
+  async function failTimes(n, from, stepMinutes = 15) {
+    for (let i = 0; i < n; i += 1) {
+      await mod.recordSyncOutcome(
+        "sessions",
+        FAIL,
+        new Date(from.getTime() + i * stepMinutes * 60 * 1000),
+      );
+    }
+  }
+
+  function stalledReports() {
+    const pending = globalThis.chrome._store().pendingClientErrors ?? {};
+    return pending["SYNC_STALLED|background.queue.sessions"];
+  }
+
+  it("6시간·30회를 모두 넘기면 SYNC_STALLED를 한 번 모은다", async () => {
+    // 15분 간격 30회 = 7시간 15분
+    await failTimes(30, T0);
+
+    expect(stalledReports()).toEqual(
+      expect.objectContaining({ code: "SYNC_STALLED", count: 1 }),
+    );
+  });
+
+  it("6시간이 안 됐으면 30회를 넘어도 보고하지 않는다", async () => {
+    await failTimes(40, T0, 1);
+    expect(stalledReports()).toBeUndefined();
+  });
+
+  it("잠든 PC가 깨어난 직후처럼 시간만 지나고 실패 횟수가 적으면 보고하지 않는다", async () => {
+    await mod.recordSyncOutcome("sessions", FAIL, T0);
+    await failTimes(3, hoursLater(60), 1);
+
+    expect(stalledReports()).toBeUndefined();
+  });
+
+  it("같은 실패 구간에서는 더 실패해도 다시 보고하지 않는다", async () => {
+    await failTimes(60, T0);
+    expect(stalledReports().count).toBe(1);
+  });
+
+  it("성공하면 구간이 끝나고, 다시 오래 막히면 새로 보고한다", async () => {
+    await failTimes(30, T0);
+    await mod.recordSyncOutcome("sessions", { ok: true }, hoursLater(8));
+    expect(globalThis.chrome._store().syncStalls).toEqual({});
+
+    await failTimes(30, hoursLater(9));
+    expect(stalledReports().count).toBe(2);
+  });
+
+  it("큐마다 따로 센다", async () => {
+    await failTimes(30, T0);
+    await mod.recordSyncOutcome("watch_stats", FAIL, hoursLater(8));
+
+    expect(Object.keys(globalThis.chrome._store().syncStalls).sort()).toEqual([
+      "sessions",
+      "watch_stats",
+    ]);
+    expect(
+      globalThis.chrome._store().pendingClientErrors[
+        "SYNC_STALLED|background.queue.watch_stats"
+      ],
+    ).toBeUndefined();
+  });
+
+  it.each(["no_server_url", "no_anonymous_id"])(
+    "%s는 전송 정체로 세지 않는다",
+    async (code) => {
+      await mod.recordSyncOutcome("sessions", { ok: false, code }, T0);
+      expect(globalThis.chrome._store().syncStalls).toBeUndefined();
+    },
+  );
+
+  it("실패 기록이 없을 때 성공하면 storage에 쓰지 않는다", async () => {
+    const setSpy = vi.spyOn(globalThis.chrome.storage.local, "set");
+    await mod.recordSyncOutcome("sessions", { ok: true }, T0);
+    expect(setSpy).not.toHaveBeenCalled();
+  });
+});
