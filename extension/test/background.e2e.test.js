@@ -52,6 +52,7 @@ function createChromeMock() {
     runtime: {
       onMessage: { addListener: vi.fn() },
       getURL: (p) => `chrome-extension://fake/${p}`,
+      getManifest: () => ({ version: "2.4.1" }),
     },
     notifications: {
       create: vi.fn(),
@@ -2320,5 +2321,153 @@ describe("참여 기간 종료 — 전송 기간이 끝나면 서버 요청을 �
     expect(global.fetch).not.toHaveBeenCalled();
     const { sessions } = await global.chrome.storage.local.get("sessions");
     expect(sessions[0].syncedToServer).toBe(false);
+  });
+});
+
+describe("오류 원격 보고 — 서버에서 안 보이는 확장 오류를 모아 보낸다", () => {
+  const BASE = {
+    anonymousId: "a1",
+    group: "EXP",
+    participantCode: "QWE-AB23",
+    installDate: ACTIVE_INSTALL_DATE,
+  };
+
+  async function loadBackground(storage = BASE) {
+    global.chrome = createChromeMock();
+    await global.chrome.storage.local.set(storage);
+    vi.resetModules();
+    return import("../background.js");
+  }
+
+  async function pendingErrors() {
+    return (await global.chrome.storage.local.get("pendingClientErrors"))
+      .pendingClientErrors;
+  }
+
+  it("큐가 storage 실패로 깨지면 QUEUE_CRASHED를 큐 위치와 함께 모은다", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const mod = await loadBackground();
+      global.fetch = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, data: { participantToken: "t" } }),
+      }));
+      // 큐의 쓰기만 깨뜨리고 오류 버퍼 쓰기는 살려 둔다
+      const realSet = global.chrome.storage.local.set;
+      global.chrome.storage.local.set = (obj) =>
+        "pendingClientErrors" in obj
+          ? realSet(obj)
+          : Promise.reject(new Error("QUOTA_BYTES quota exceeded"));
+
+      await mod.ensureParticipantSynced();
+
+      const pending = await pendingErrors();
+      expect(Object.values(pending)).toEqual([
+        expect.objectContaining({
+          code: "QUEUE_CRASHED",
+          where: "background.queue.participants",
+          count: 1,
+        }),
+      ]);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("content·팝업이 보낸 client-error 메시지를 받아 모은다", async () => {
+    await loadBackground();
+    const [listener] =
+      global.chrome.runtime.onMessage.addListener.mock.calls[0];
+
+    listener({ type: "other" });
+    listener({
+      type: "client-error",
+      code: "RECORD_FAILED",
+      where: "content.recordVideo",
+    });
+
+    await vi.waitFor(async () =>
+      expect(await pendingErrors()).toEqual({
+        "RECORD_FAILED|content.recordVideo": expect.objectContaining({
+          count: 1,
+        }),
+      }),
+    );
+  });
+
+  it("등록이 실패하는 중에도 모인 오류를 허용 목록 필드로만 보낸다", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const mod = await loadBackground({
+        ...BASE,
+        pendingClientErrors: {
+          "RECORD_FAILED|content.recordVideo": {
+            code: "RECORD_FAILED",
+            where: "content.recordVideo",
+            count: 2,
+            firstAt: "2026-01-10T02:00:00.000Z",
+            lastAt: "2026-01-10T02:30:00.000Z",
+          },
+        },
+      });
+      const bodies = {};
+      global.fetch = vi.fn(async (url, options) => {
+        const path = new URL(url).pathname;
+        bodies[path] = JSON.parse(options.body);
+        const ok = path === "/api/client-errors";
+        return {
+          ok,
+          status: ok ? 200 : 500,
+          json: async () => ({ success: ok, data: null }),
+        };
+      });
+
+      await mod.runServerTasks();
+
+      expect(bodies["/api/participants"]).toBeDefined();
+      expect(bodies["/api/client-errors"]).toEqual({
+        anonymousId: "a1",
+        version: "2.4.1",
+        errors: [
+          {
+            code: "RECORD_FAILED",
+            where: "content.recordVideo",
+            count: 2,
+            firstAt: "2026-01-10T02:00:00.000Z",
+            lastAt: "2026-01-10T02:30:00.000Z",
+          },
+        ],
+      });
+      expect(await pendingErrors()).toEqual({});
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("참여 기간이 끝났으면 모인 오류도 보내지 않는다", async () => {
+    const ended = new Date(FIXED_NOW - 20 * 86400000).toISOString();
+    global.chrome = createChromeMock();
+    global.chrome.tabs = { create: vi.fn() };
+    await global.chrome.storage.local.set({
+      ...BASE,
+      installDate: ended,
+      pendingClientErrors: {
+        "TASK_CRASHED|background.serverTasks": {
+          code: "TASK_CRASHED",
+          where: "background.serverTasks",
+          count: 1,
+          firstAt: "2026-01-10T02:00:00.000Z",
+          lastAt: "2026-01-10T02:00:00.000Z",
+        },
+      },
+    });
+    vi.resetModules();
+    const mod = await import("../background.js");
+    global.fetch = vi.fn();
+
+    await mod.runServerTasks();
+
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

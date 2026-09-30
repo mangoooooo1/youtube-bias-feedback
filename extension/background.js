@@ -17,6 +17,7 @@ import {
   invalidateParticipantSync,
 } from "./storage.js";
 import { isBaselinePeriod } from "./pipeline/baseline.js";
+import { reportClientError, flushClientErrors } from "./error-report.js";
 import { SERVER_URL } from "./config.js";
 import "./study-schedule.js";
 
@@ -122,28 +123,35 @@ async function drawIconWithDot(size) {
 chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
 
 // content script가 읽을 수 있도록 SERVER_URL을 storage에 저장.
-chrome.storage.local
-  .set({ serverUrl: SERVER_URL })
-  .catch((error) =>
-    console.error(
-      `[background] task=persist_server_url result=crashed error=${error?.message}`,
-    ),
+chrome.storage.local.set({ serverUrl: SERVER_URL }).catch((error) => {
+  console.error(
+    `[background] task=persist_server_url result=crashed error=${error?.message}`,
   );
+  reportClientError("TASK_CRASHED", "background.persistServerUrl");
+});
+
+// content·팝업은 모듈이 아니라 error-report를 import하지 못해 메시지로 넘긴다
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type !== "client-error") return;
+  reportClientError(message.code, message.where);
+});
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== ALARM_NAME) return;
-  runServerTasks().catch((error) =>
+  runServerTasks().catch((error) => {
     console.error(
       `[background] task=server_tasks result=crashed error=${error?.message}`,
-    ),
-  );
+    );
+    reportClientError("TASK_CRASHED", "background.serverTasks");
+  });
   // 로컬 세션 종료 판정은 서버와 무관하므로 게이트를 기다리지 않는다.
   // 네 큐는 withQueueLock이 예외를 흡수하지만 이 경로는 그 밖이라 여기서 직접 받는다.
-  checkSessionTimeout().catch((error) =>
+  checkSessionTimeout().catch((error) => {
     console.error(
       `[background] task=session_timeout result=crashed error=${error?.message}`,
-    ),
-  );
+    );
+    reportClientError("TASK_CRASHED", "background.sessionTimeout");
+  });
 });
 
 /**
@@ -159,12 +167,16 @@ export async function runServerTasks() {
     await notifyParticipationEndedOnce();
     return;
   }
-  await ensureParticipantSynced().finally(() =>
-    Promise.all([
-      retryUnsyncedSessions(),
-      retryUnsentVideoEvents().finally(() => retryUnsentWatchStats()),
-    ]),
-  );
+  await Promise.all([
+    // 등록 전·등록이 막힌 동안의 오류도 보내야 하므로 등록 게이트를 기다리지 않는다
+    flushClientErrors(sendToServer, onboarding?.anonymousId ?? null),
+    ensureParticipantSynced().finally(() =>
+      Promise.all([
+        retryUnsyncedSessions(),
+        retryUnsentVideoEvents().finally(() => retryUnsentWatchStats()),
+      ]),
+    ),
+  ]);
 }
 
 const PARTICIPATION_ENDED_NOTIFICATION_ID = "viewlens-participation-ended";
@@ -536,6 +548,7 @@ async function withQueueLock(name, run) {
     console.error(
       `[background] queue=${name} result=crashed error=${error?.message}`,
     );
+    await reportClientError("QUEUE_CRASHED", `background.queue.${name}`);
   } finally {
     inFlightQueues.delete(name);
   }
