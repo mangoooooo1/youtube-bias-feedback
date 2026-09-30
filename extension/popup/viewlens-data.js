@@ -45,7 +45,7 @@ const H_MAX = 3.17;
 
 /**
  * 다양성 등급(편중/보통/다양) 경계 — H_MAX 대비 정확히 1/3, 2/3 지점.
- * [편중/보통 경계, 보통/다양 경계]. 바꾸면 viewlens-screens.js의 DIVERSITY_TIP 문구도 같이 수정.
+ * [편중/보통 경계, 보통/다양 경계].
  */
 const DIVERSITY_BAND_RATIOS = [1 / 3, 2 / 3];
 

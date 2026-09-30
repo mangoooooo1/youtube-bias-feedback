@@ -189,21 +189,6 @@ function isRealReview(text) {
   );
 }
 
-// "하루 돌아보기"·"기간별 돌아보기" 공용 다양성 등급 설명 — 한 곳에서만 관리한다.
-// 당연한 얘기("쏠리면 편중")는 빼고, 실제 경계 기준(정확히 3등분, viewlens-data.js
-// DIVERSITY_BAND_RATIOS)만 밝힌다. 절대 수치는 여전히 노출하지 않는다.
-const DIVERSITY_TIP =
-  "카테고리 다양성 지수가 이론상 최댓값의 1/3, 2/3 지점을 기준으로 편중·보통·다양 세 구간으로 나뉘어요.";
-
-/**
- * 다양성 등급 옆 정보 아이콘. 호버 영역을 아이콘 자체로 좁혀 정확히 뭘 가리켜야
- * 설명이 뜨는지 분명히 하고, 클릭 동작이 없어 help 대신 default 커서를 쓴다.
- * @returns {string} HTML
- */
-function _diversityInfoIcon() {
-  return `<span class="vl-tip" data-tip="${DIVERSITY_TIP}" style="display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border-radius:50%;background:var(--vl-ink-3);color:var(--vl-card);font-size:9px;font-weight:700;line-height:1;vertical-align:middle;margin-left:4px;cursor:default">i</span>`;
-}
-
 function _collectingBanner(count) {
   if (!count) return "";
   const timerText = VL.today?.collectingTimer || "";
@@ -254,17 +239,6 @@ function screenToday() {
     const isToday = d.dateLabel === koreanDateLabel(new Date());
     return screenTodayEmpty(d.dateLabel, d.collectingCount, isToday);
   }
-  const h = VL.entropy(d.dist);
-  const delta = h - d.prevEntropy;
-  const NEAR_ZERO = 0.15;
-  const todayLabel = VL.diversityLabel(h);
-  const prevLabel = d.hasPrevData ? VL.diversityLabel(d.prevEntropy) : null;
-  const toneColor = (tone) =>
-    ({ warn: "var(--vl-warn)", good: "var(--vl-good)" })[tone] ||
-    "var(--vl-ink-2)";
-  const prevLabelText = d.prevIsYesterday ? "어제" : d.prevDateLabel;
-  const pctChange = VL.diversityDeltaPct(d.prevEntropy, h);
-
   // 도넛 조각이 채워지는 타이밍에 맞춰 자기 카테고리가 다 찰 때 해당 줄이 나타난다
   // (트리거는 _animateCharts, viewlens-app.js). d.dist가 이미 비율 내림차순이라 누적
   // 비율만 계산하면 된다.
@@ -322,44 +296,6 @@ function screenToday() {
 
     ${vlCard({
       pad: 16,
-      children: d.hasPrevData
-        ? `
-      <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);font-weight:600;margin-bottom:11px">${prevLabelText} 대비 다양성${_diversityInfoIcon()}</div>
-      <div style="display:flex;align-items:center;justify-content:center;gap:20px">
-        <div style="text-align:center">
-          <div style=";font-size:var(--vl-fs-5);font-weight:700;color:${toneColor(prevLabel.tone)};line-height:1">${prevLabel.label}</div>
-          <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:4px">${prevLabelText}</div>
-        </div>
-        <span style="font-size:var(--vl-fs-4);color:var(--vl-ink-3)">→</span>
-        <div style="text-align:center">
-          <div style=";font-size:var(--vl-fs-6);font-weight:700;color:${toneColor(todayLabel.tone)};line-height:1">${todayLabel.label}</div>
-          <div style="font-size:var(--vl-fs-2);color:var(--vl-accent);margin-top:4px;font-weight:700">오늘</div>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;justify-content:center;gap:5px;margin-top:12px;padding-top:12px;border-top:1px solid var(--vl-line);white-space:nowrap">
-        ${vlDeltaChip({ value: Math.abs(delta) < NEAR_ZERO ? 0 : delta, showValue: false })}
-        <span style="font-size:var(--vl-fs-2);font-weight:700;color:${Math.abs(delta) < NEAR_ZERO ? "var(--vl-ink-2)" : delta > 0 ? "var(--vl-good)" : "var(--vl-warn)"}">${
-          Math.abs(delta) < NEAR_ZERO
-            ? "지난 기록과 비슷해요"
-            : delta > 0
-              ? `${Math.abs(pctChange)}%p 더 다양해졌어요`
-              : `${Math.abs(pctChange)}%p 더 편중됐어요`
-        }</span>
-      </div>
-    `
-        : `
-      <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);font-weight:600;margin-bottom:11px">오늘의 다양성${_diversityInfoIcon()}</div>
-      <div style="display:flex;align-items:center;gap:13px">
-        <div style="text-align:center">
-          <div style=";font-size:var(--vl-fs-6);font-weight:700;color:${toneColor(todayLabel.tone)};line-height:1">${todayLabel.label}</div>
-        </div>
-        <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3)">비교할 이전 시청 기록이 없어요</span>
-      </div>
-    `,
-    })}
-
-    ${vlCard({
-      pad: 16,
       children: `
       <div style="display:flex;align-items:center;gap:16px">
         ${vlDonut({ data: d.dist, size: 124 })}
@@ -414,14 +350,6 @@ function _todayCumulativeCard(isToday, d, locked) {
 function screenFeedback(currentWeek, selWeek) {
   const w = VL.weeks[selWeek - 1];
   const prevW = selWeek >= 2 ? VL.weeks[selWeek - 2] : null;
-  const NEAR_ZERO = 0.15;
-  const rawVsPrev = prevW ? w.entropy - prevW.entropy : 0;
-  const vsPrev = Math.abs(rawVsPrev) < NEAR_ZERO ? 0 : rawVsPrev;
-  const vsPrevPct = prevW ? VL.diversityDeltaPct(prevW.entropy, w.entropy) : 0;
-  const scoreLabel = VL.diversityLabel(w.entropy);
-  const toneColor = (tone) =>
-    ({ warn: "var(--vl-warn)", good: "var(--vl-good)" })[tone] ||
-    "var(--vl-ink)";
   // 이 기간(선택된 주차) 안의 날짜별 값
   // w.daily는 로컬 데이터로 실제 계산 가능할 때만 채워진다(null이면 일별 데이터를 알 수 없다는 뜻, 가짜로 채우지 않는다).
   const dailyPoints = w.daily || [];
@@ -451,22 +379,6 @@ function screenFeedback(currentWeek, selWeek) {
     })
     .join("");
 
-  const vsBaseContent = prevW
-    ? `<div>
-        <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-bottom:4px">직전 기간(${prevW.label}) 대비</div>
-        <div style="display:flex;align-items:center;gap:7px">
-          ${vlDeltaChip({ value: vsPrev, showValue: false })}
-          <span style="font-size:var(--vl-fs-3);color:var(--vl-ink-2)">${
-            vsPrev === 0
-              ? "비슷해요"
-              : vsPrev > 0
-                ? `${Math.abs(vsPrevPct)}%p 더 다양해요`
-                : `${Math.abs(vsPrevPct)}%p 덜 다양해요`
-          }</span>
-        </div>
-      </div>`
-    : `<p style="margin:0;font-size:var(--vl-fs-3);line-height:1.55;color:var(--vl-ink-2)">첫 기간이라 비교할 데이터가 없어요.</p>`;
-
   return `<div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
     <!-- 버튼 라벨이 가운데 정렬이라 박스 왼쪽 끝보다 더 오른쪽에서 시작한다(실측
     약 13.6px) — 아래 제목과 맞추려고 줄 전체를 그만큼 왼쪽으로 당긴다. -->
@@ -484,15 +396,6 @@ function screenFeedback(currentWeek, selWeek) {
     ${vlCard({
       pad: 16,
       children: `
-      <div style="display:flex;align-items:center;gap:14px">
-        <div style="text-align:center;flex-shrink:0">
-          <div style="font-weight:700;font-size:var(--vl-fs-7);color:${toneColor(scoreLabel.tone)};line-height:1;letter-spacing:-0.02em">${scoreLabel.label}</div>
-          <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:4px;font-weight:600">다양성${_diversityInfoIcon()}</div>
-        </div>
-        <div style="width:1px;align-self:stretch;background:var(--vl-line)"></div>
-        <div style="flex:1">${vsBaseContent}</div>
-      </div>
-      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--vl-line)">
         ${vlSectionLabel({ text: "일별 다양성 추이" })}
         ${
           dailyPoints.length > 0
@@ -519,7 +422,6 @@ function screenFeedback(currentWeek, selWeek) {
               })
             : `<p style="margin:0;font-size:var(--vl-fs-3);line-height:1.55;color:var(--vl-ink-2)">이 기간은 일별 데이터를 볼 수 없어요.</p>`
         }
-      </div>
     `,
     })}
 
