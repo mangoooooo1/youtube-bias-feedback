@@ -42,18 +42,36 @@ describe("generateCodes", () => {
     expect(new Set(rows.map((r) => r.code)).size).toBe(40);
   });
 
-  it("모든 코드가 확장 프로그램 온보딩 검증을 통과하고, 그 검증이 판정한 그룹과 같다", () => {
+  it("모든 코드가 확장 프로그램 온보딩 형식 검사를 통과하고, 코드만으로 그룹이 정해지지 않는다", () => {
     const parseParticipantCode = loadParseParticipantCode();
 
-    for (const { code, group } of generateCodes({ exp: 20, con: 20 })) {
-      expect(parseParticipantCode(code)).toEqual({ group, code });
+    for (const { code } of generateCodes({ exp: 20, con: 20 })) {
+      expect(parseParticipantCode(code)).toEqual({ group: null, code });
     }
+  });
+
+  it("두 그룹 모두 같은 접두사를 써서 코드만으로 그룹을 알 수 없다", () => {
+    for (const { code } of generateCodes({ exp: 20, con: 20 })) {
+      expect(code).toMatch(/^VL-[A-Z2-9]{4}$/);
+    }
+  });
+
+  it("그룹이 달라도 같은 코드를 두 번 발급하지 않는다", () => {
+    // EXP의 첫 코드와 같은 코드를 CON에서 한 번 더 내다가 그다음부터 다른 코드를 낸다
+    const sequence = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1];
+    let i = 0;
+    const rows = generateCodes({ exp: 1, con: 1 }, () => sequence[i++]);
+
+    expect(rows).toEqual([
+      { code: "VL-AAAA", group: "EXP" },
+      { code: "VL-BBBB", group: "CON" },
+    ]);
   });
 
   it("손으로 입력할 때 헷갈리는 문자(0·1·I·L·O)를 쓰지 않는다", () => {
     expect(CODE_CHARS).not.toMatch(/[01ILO]/);
     for (const { code } of generateCodes({ exp: 50, con: 50 })) {
-      expect(code.slice(4)).not.toMatch(/[01ILO]/);
+      expect(code.slice(3)).not.toMatch(/[01ILO]/);
     }
   });
 
@@ -63,20 +81,18 @@ describe("generateCodes", () => {
     let i = 0;
     const rows = generateCodes({ exp: 2, con: 0 }, () => sequence[i++]);
 
-    expect(rows.map((r) => r.code)).toEqual(["QWE-AAAA", "QWE-BBBB"]);
+    expect(rows.map((r) => r.code)).toEqual(["VL-AAAA", "VL-BBBB"]);
   });
 
-  it("그룹별 요청 개수가 코드 공간을 넘으면 생성 전에 오류를 낸다", () => {
-    let calls = 0;
-    const countingRandom = () => {
-      calls += 1;
-      return 0;
+  it("두 그룹 합계가 코드 공간을 넘으면 생성 전에 오류를 낸다", () => {
+    // 검사가 빠지면 같은 코드만 나와 무한 루프가 되므로, 난수를 뽑는 순간 실패시킨다
+    const neverCalled = () => {
+      throw new Error("생성 전에 막혀야 합니다");
     };
 
     expect(() =>
-      generateCodes({ exp: 0, con: CODE_SPACE + 1 }, countingRandom),
-    ).toThrow(`CON 코드는 최대 ${CODE_SPACE}개까지`);
-    expect(calls).toBe(0);
+      generateCodes({ exp: 1, con: CODE_SPACE }, neverCalled),
+    ).toThrow(`두 그룹 합쳐 최대 ${CODE_SPACE}개까지`);
   });
 
   it("코드 공간과 같은 개수는 모든 조합을 한 번씩 만들어 채운다", () => {

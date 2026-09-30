@@ -5,8 +5,8 @@
 //
 // codes.csv 형식 (첫 줄 헤더):
 //   code,group
-//   QWE-K7M2,EXP
-//   ASD-3F9Q,CON
+//   VL-K7M2,EXP
+//   VL-3F9Q,CON
 //
 // - INSERT OR IGNORE 이므로 이미 있는 code는 무시된다(재실행 안전).
 // - 코드를 추가 발급하면 CSV에 덧붙여 다시 실행하면 된다.

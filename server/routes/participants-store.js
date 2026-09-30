@@ -50,25 +50,19 @@ function registerParticipant(db, body) {
     return { status: "registered", anonymousId };
   }
 
-  // 발급 코드 검증: issued_codes 명단이 등록돼 있으면(시드 후) 신규 등록 시 참여 코드가 필수이며,
-  // 명단에 있는 코드만 허용하고 그룹은 명단(issued_codes)을 권위로 사용한다. TEST 코드는 예외.
-  // 명단이 비어 있으면(시드 전) 검증을 건너뛴다.
-  const issuedCodeCount = db
-    .prepare("SELECT COUNT(*) AS c FROM issued_codes")
-    .get().c;
-  if (issuedCodeCount > 0) {
-    if (!participantCode) {
-      return { status: "missing_participant_code" };
+  // 발급 코드 검증: 신규 등록은 참여 코드가 필수이며, 명단(issued_codes)에 있는 코드만 허용하고
+  // 그룹은 명단을 권위로 사용한다. TEST 코드는 예외.
+  if (!participantCode) {
+    return { status: "missing_participant_code" };
+  }
+  if (!TEST_CODES.has(participantCode)) {
+    const issued = db
+      .prepare("SELECT group_code FROM issued_codes WHERE code = ?")
+      .get(participantCode);
+    if (!issued) {
+      return { status: "invalid_participant_code" };
     }
-    if (!TEST_CODES.has(participantCode)) {
-      const issued = db
-        .prepare("SELECT group_code FROM issued_codes WHERE code = ?")
-        .get(participantCode);
-      if (!issued) {
-        return { status: "invalid_participant_code" };
-      }
-      group_code = issued.group_code;
-    }
+    group_code = issued.group_code;
   }
 
   try {
@@ -104,13 +98,6 @@ function validateParticipantCode(db, code) {
 
   if (TEST_CODES.has(code)) {
     return { valid: true, group_code: code, previouslyRegistered };
-  }
-
-  const issuedCodeCount = db
-    .prepare("SELECT COUNT(*) AS c FROM issued_codes")
-    .get().c;
-  if (issuedCodeCount === 0) {
-    return { valid: true, group_code: null, previouslyRegistered }; // 시드 전 permissive
   }
 
   const issued = db

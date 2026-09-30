@@ -52,10 +52,14 @@ beforeEach(() => {
 
 describe("실제 server/routes/participants.js 라우터 배선", () => {
   it("POST /api/participants — 파일을 그대로 로드해도 정상 등록된다", async () => {
+    db.prepare(
+      "INSERT INTO issued_codes (code, group_code) VALUES (?, ?)",
+    ).run("WIRE-CODE", "EXP");
     const res = await request(app).post("/api/participants").send({
       anonymousId: "wiring-a1",
       group_code: "EXP",
       installDate: "2026-08-13T00:00:00Z",
+      participantCode: "WIRE-CODE",
     });
     expect(res.status).toBe(200);
 
@@ -89,7 +93,7 @@ describe("실제 server/routes/participants.js 라우터 배선", () => {
       .get("/api/participants/validate")
       .query({ code: "ANY-CODE" });
     expect(res.status).toBe(200);
-    expect(res.body.data.valid).toBe(true);
+    expect(res.body.data.valid).toBe(false);
   });
 
   it("GET /api/participants/validate — code 파라미터 없으면 400", async () => {
@@ -160,6 +164,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
       anonymousId: "no-token-user",
       group_code: "EXP",
       installDate: "2026-08-13T00:00:00Z",
+      participantCode: "TEST-EXP",
     });
     expect(res.status).toBe(200);
     expect(res.body.data.participantToken).toBeNull();
@@ -171,6 +176,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
       anonymousId: "token-user",
       group_code: "EXP",
       installDate: "2026-08-13T00:00:00Z",
+      participantCode: "TEST-EXP",
     });
     expect(res.status).toBe(200);
 
@@ -190,6 +196,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
       anonymousId: "  user-1  ",
       group_code: "EXP",
       installDate: "2026-08-13T00:00:00Z",
+      participantCode: "TEST-EXP",
     });
     expect(res.status).toBe(200);
 
@@ -226,6 +233,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
       anonymousId: "resync-user",
       group_code: "EXP",
       installDate: "2026-08-13T00:00:00Z",
+      participantCode: "TEST-EXP",
     };
     const first = await request(app).post("/api/participants").send(payload);
     const second = await request(app).post("/api/participants").send(payload);

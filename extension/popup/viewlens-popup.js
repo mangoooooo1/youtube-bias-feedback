@@ -673,15 +673,16 @@ async function resolveTodayCumulative(eligible, reviews, todaySessionIds) {
 }
 
 // 온보딩 코드 서버 검증 — 발급 명단(issued_codes)과 대조 (등록 없이 확인만).
-// 반환: { ok:true, group } 통과 / { ok:false } 미발급 / 오류·오프라인·서버미설정 시 { ok:true } 폴백 통과
+// 반환: { ok:true, group } 통과 / { ok:false } 미발급 / 오류·오프라인·서버미설정 시 { ok:false, reason:"unavailable" }
 async function validateParticipantCode(code) {
+  const unavailable = { ok: false, reason: "unavailable" };
   const { serverUrl } = await chrome.storage.local.get("serverUrl");
-  if (!serverUrl || serverUrl.startsWith("YOUR_")) return { ok: true };
+  if (!serverUrl || serverUrl.startsWith("YOUR_")) return unavailable;
   try {
     const res = await fetch(
       `${serverUrl.replace(/\/$/, "")}/api/participants/validate?code=${encodeURIComponent(code)}`,
     );
-    if (!res.ok) return { ok: true }; // 서버 오류 → 폴백 통과
+    if (!res.ok) return unavailable;
     const json = await res.json();
     const data = json.data ?? json;
     if (data.valid === false) return { ok: false };
@@ -691,7 +692,7 @@ async function validateParticipantCode(code) {
       previouslyRegistered: !!data.previouslyRegistered,
     };
   } catch {
-    return { ok: true }; // 네트워크 오류 → 폴백 통과
+    return unavailable;
   }
 }
 window.validateParticipantCode = validateParticipantCode;
