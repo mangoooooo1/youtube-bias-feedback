@@ -527,11 +527,20 @@ function screenFeedback(currentWeek, selWeek) {
       pad: 16,
       children: `
       ${vlSectionLabel({ text: `${w.label} 카테고리 분포` })}
-      ${vlStackedBar({ data: w.dist })}
+      ${
+        // 영상이 없으면 빈 분포 대신 넣어 둔 "기타 100%"를 그리지 않는다
+        w.videoCount > 0
+          ? vlStackedBar({ data: w.dist })
+          : `<p style="margin:0;font-size:var(--vl-fs-3);line-height:1.55;color:var(--vl-ink-2)">이 기간에는 시청 기록이 없어요.</p>`
+      }
     `,
     })}
 
-    ${vlReview({ text: w.review, title: `${w.label} 돌아보기` })}
+    ${vlReview({
+      text: w.review,
+      fact: VL.periodFactSentence(w, prevW),
+      title: `${w.label} 돌아보기`,
+    })}
   </div>`;
 }
 

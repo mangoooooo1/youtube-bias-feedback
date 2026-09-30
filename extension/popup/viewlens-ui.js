@@ -314,6 +314,7 @@ function vlMiniLine({
 function vlReview({
   text = "",
   topic = "",
+  fact = null,
   title = "오늘 돌아보기",
   videos = [],
   videoListLabel = "분석한 영상",
@@ -341,6 +342,15 @@ function vlReview({
     ? `<p style="margin:0 0 10px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink);line-height:1.4;letter-spacing:-0.02em;text-wrap:pretty">
         당신은 '<span style="color:var(--vl-accent)">${vlEscapeHtml(topic)}</span>'에 관심이 많습니다!
       </p>`
+    : "";
+
+  // 기간별 리뷰 첫 줄 사실 문장({ main, note }, VL.periodFactSentence)
+  const factBlock = fact
+    ? `<p style="margin:0 0 10px;font-size:var(--vl-fs-4);font-weight:700;color:var(--vl-ink);line-height:1.5;text-wrap:pretty">${vlEscapeHtml(fact.main)}</p>${
+        fact.note
+          ? `<p style="margin:-4px 0 10px;font-size:var(--vl-fs-2);color:var(--vl-ink-3);line-height:1.5;text-wrap:pretty">${vlEscapeHtml(fact.note)}</p>`
+          : ""
+      }`
     : "";
 
   // 10개 넘으면 <details> 안에서 계속 스크롤하는 대신 10개씩 페이지로 나눠 가로로
@@ -399,6 +409,7 @@ function vlReview({
         <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">${title}</span>
       </div>
       ${topicBlock}
+      ${factBlock}
       <p style="margin:0;font-size:var(--vl-fs-3);line-height:1.65;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(text)}</p>
       ${videoList}
     </div>
