@@ -126,13 +126,55 @@ const weeks = [
       edu: 0.03,
     }),
     daily: [
-      { dateStr: "2024-06-01", label: "6/1", entropy: 1.55, videoCount: 9, categoryCount: 3 },
-      { dateStr: "2024-06-02", label: "6/2", entropy: 1.8, videoCount: 12, categoryCount: 3 },
-      { dateStr: "2024-06-03", label: "6/3", entropy: 1.68, videoCount: 8, categoryCount: 3 },
-      { dateStr: "2024-06-04", label: "6/4", entropy: 2.02, videoCount: 14, categoryCount: 4 },
-      { dateStr: "2024-06-05", label: "6/5", entropy: 1.74, videoCount: 10, categoryCount: 3 },
-      { dateStr: "2024-06-06", label: "6/6", entropy: 1.96, videoCount: 13, categoryCount: 4 },
-      { dateStr: "2024-06-07", label: "6/7", entropy: 1.88, videoCount: 12, categoryCount: 4 },
+      {
+        dateStr: "2024-06-01",
+        label: "6/1",
+        entropy: 1.55,
+        videoCount: 9,
+        categoryCount: 3,
+      },
+      {
+        dateStr: "2024-06-02",
+        label: "6/2",
+        entropy: 1.8,
+        videoCount: 12,
+        categoryCount: 3,
+      },
+      {
+        dateStr: "2024-06-03",
+        label: "6/3",
+        entropy: 1.68,
+        videoCount: 8,
+        categoryCount: 3,
+      },
+      {
+        dateStr: "2024-06-04",
+        label: "6/4",
+        entropy: 2.02,
+        videoCount: 14,
+        categoryCount: 4,
+      },
+      {
+        dateStr: "2024-06-05",
+        label: "6/5",
+        entropy: 1.74,
+        videoCount: 10,
+        categoryCount: 3,
+      },
+      {
+        dateStr: "2024-06-06",
+        label: "6/6",
+        entropy: 1.96,
+        videoCount: 13,
+        categoryCount: 4,
+      },
+      {
+        dateStr: "2024-06-07",
+        label: "6/7",
+        entropy: 1.88,
+        videoCount: 12,
+        categoryCount: 4,
+      },
     ],
     review:
       "첫 주 동안의 시청 습관을 기준선으로 담아 두었어요. 게임이 절반 가까이를 차지했지만, 이건 평가가 아니라 출발점이에요. 다음 주부터 어떤 변화가 생기는지 저와 함께 천천히 지켜봐요.",
@@ -153,13 +195,55 @@ const weeks = [
       ent: 0.09,
     }),
     daily: [
-      { dateStr: "2024-06-08", label: "6/8", entropy: 1.98, videoCount: 10, categoryCount: 4 },
-      { dateStr: "2024-06-09", label: "6/9", entropy: 2.21, videoCount: 11, categoryCount: 4 },
-      { dateStr: "2024-06-10", label: "6/10", entropy: 2.34, videoCount: 9, categoryCount: 5 },
-      { dateStr: "2024-06-11", label: "6/11", entropy: 2.18, videoCount: 8, categoryCount: 4 },
-      { dateStr: "2024-06-12", label: "6/12", entropy: 2.46, videoCount: 12, categoryCount: 5 },
-      { dateStr: "2024-06-13", label: "6/13", entropy: 2.4, videoCount: 10, categoryCount: 5 },
-      { dateStr: "2024-06-14", label: "6/14", entropy: 2.55, videoCount: 11, categoryCount: 5 },
+      {
+        dateStr: "2024-06-08",
+        label: "6/8",
+        entropy: 1.98,
+        videoCount: 10,
+        categoryCount: 4,
+      },
+      {
+        dateStr: "2024-06-09",
+        label: "6/9",
+        entropy: 2.21,
+        videoCount: 11,
+        categoryCount: 4,
+      },
+      {
+        dateStr: "2024-06-10",
+        label: "6/10",
+        entropy: 2.34,
+        videoCount: 9,
+        categoryCount: 5,
+      },
+      {
+        dateStr: "2024-06-11",
+        label: "6/11",
+        entropy: 2.18,
+        videoCount: 8,
+        categoryCount: 4,
+      },
+      {
+        dateStr: "2024-06-12",
+        label: "6/12",
+        entropy: 2.46,
+        videoCount: 12,
+        categoryCount: 5,
+      },
+      {
+        dateStr: "2024-06-13",
+        label: "6/13",
+        entropy: 2.4,
+        videoCount: 10,
+        categoryCount: 5,
+      },
+      {
+        dateStr: "2024-06-14",
+        label: "6/14",
+        entropy: 2.55,
+        videoCount: 11,
+        categoryCount: 5,
+      },
     ],
     review:
       "베이스라인 기간의 두 번째 주예요. 교육과 과학·기술 영상이 조금 늘었지만, 이 시기는 평가가 아니라 계속 기준선을 담아 두는 과정이에요.",
@@ -180,13 +264,55 @@ const weeks = [
       ent: 0.1,
     }),
     daily: [
-      { dateStr: "2024-06-15", label: "6/15", entropy: 2.41, videoCount: 9, categoryCount: 5 },
-      { dateStr: "2024-06-16", label: "6/16", entropy: 2.58, videoCount: 11, categoryCount: 5 },
-      { dateStr: "2024-06-17", label: "6/17", entropy: 2.52, videoCount: 8, categoryCount: 5 },
-      { dateStr: "2024-06-18", label: "6/18", entropy: 2.71, videoCount: 12, categoryCount: 6 },
-      { dateStr: "2024-06-19", label: "6/19", entropy: 2.63, videoCount: 10, categoryCount: 5 },
-      { dateStr: "2024-06-20", label: "6/20", entropy: 2.78, videoCount: 10, categoryCount: 6 },
-      { dateStr: "2024-06-21", label: "6/21", entropy: 2.69, videoCount: 9, categoryCount: 6 },
+      {
+        dateStr: "2024-06-15",
+        label: "6/15",
+        entropy: 2.41,
+        videoCount: 9,
+        categoryCount: 5,
+      },
+      {
+        dateStr: "2024-06-16",
+        label: "6/16",
+        entropy: 2.58,
+        videoCount: 11,
+        categoryCount: 5,
+      },
+      {
+        dateStr: "2024-06-17",
+        label: "6/17",
+        entropy: 2.52,
+        videoCount: 8,
+        categoryCount: 5,
+      },
+      {
+        dateStr: "2024-06-18",
+        label: "6/18",
+        entropy: 2.71,
+        videoCount: 12,
+        categoryCount: 6,
+      },
+      {
+        dateStr: "2024-06-19",
+        label: "6/19",
+        entropy: 2.63,
+        videoCount: 10,
+        categoryCount: 5,
+      },
+      {
+        dateStr: "2024-06-20",
+        label: "6/20",
+        entropy: 2.78,
+        videoCount: 10,
+        categoryCount: 6,
+      },
+      {
+        dateStr: "2024-06-21",
+        label: "6/21",
+        entropy: 2.69,
+        videoCount: 9,
+        categoryCount: 6,
+      },
     ],
     review:
       "3주 동안 정말 꾸준히 해오셨어요. 시청 다양성이 기준선보다 눈에 띄게 높아졌고, 어느 한 카테고리에 치우치지 않는 균형이 보여요. 지금의 리듬을 가볍게 이어가시면 충분해요.",
@@ -200,6 +326,11 @@ const TOTAL_DAYS = 12;
 // 탭을 며칠 단위로 나눌지 — 4일 단위로 기간을 구분한다.
 const DAYS_PER_PERIOD = 4;
 const TOTAL_WEEKS = Math.ceil(TOTAL_DAYS / DAYS_PER_PERIOD);
+
+// 연구 기간 표기
+function studyDurationLabel() {
+  return TOTAL_DAYS % 7 === 0 ? `${TOTAL_DAYS / 7}주간` : `${TOTAL_DAYS}일간`;
+}
 
 function periodLabel(n) {
   if (DAYS_PER_PERIOD === 1) return `${n}일차`;
@@ -315,6 +446,7 @@ window.VL = {
   DAYS_PER_PERIOD,
   TOTAL_WEEKS,
   periodLabel,
+  studyDurationLabel,
   GROUPS,
   TONES,
   BASELINE_DAYS,

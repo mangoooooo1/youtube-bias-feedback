@@ -68,3 +68,21 @@ describe("VL.isConGroup — pipeline/study-period.js와 동치성", () => {
     },
   );
 });
+
+describe("VL.studyDurationLabel — 연구 기간 표기", () => {
+  it("현재 설정(12일)은 일 단위로 표기한다", () => {
+    expect(loadVL().studyDurationLabel()).toBe(`${loadVL().TOTAL_DAYS}일간`);
+  });
+
+  it("7의 배수(본 연구 42일)면 주 단위로 표기한다", () => {
+    const src = readFileSync(VIEWLENS_DATA_PATH, "utf8").replace(
+      /const TOTAL_DAYS = \d+;/,
+      "const TOTAL_DAYS = 42;",
+    );
+    const sandbox = {};
+    sandbox.window = sandbox;
+    const VL = new Function("window", `${src}\nreturn window.VL;`)(sandbox);
+
+    expect(VL.studyDurationLabel()).toBe("6주간");
+  });
+});

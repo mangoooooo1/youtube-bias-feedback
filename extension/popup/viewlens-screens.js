@@ -526,7 +526,7 @@ function screenFeedback(currentWeek, selWeek) {
     ${vlCard({
       pad: 16,
       children: `
-      ${vlSectionLabel({ text: "주간 카테고리 분포" })}
+      ${vlSectionLabel({ text: `${w.label} 카테고리 분포` })}
       ${vlStackedBar({ data: w.dist })}
     `,
     })}
@@ -592,7 +592,7 @@ function screenControlHome(day, stats = {}) {
       // 종료 안내 모달을 이미 본 뒤엔 이 자리가 상시 재진입 CTA로 바뀐다.
       stats.studyEndCtaReady
         ? `<button id="vl-study-end-cta" class="vl-press" style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:15px 16px;background:var(--vl-accent-soft);border:none;border-radius:13px;box-shadow:0 1px 3px color-mix(in oklab,var(--vl-accent) 10%,transparent),0 1px 2px rgba(0,0,0,.03);cursor:pointer;font-family:inherit;text-align:left">
-        <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">6주간의 시청 리뷰가 준비됐어요</span>
+        <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">${VL.studyDurationLabel()}의 시청 리뷰가 준비됐어요</span>
         <span style="font-size:var(--vl-fs-4);color:var(--vl-accent);flex-shrink:0">→</span>
       </button>`
         : `<div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card-2);border-radius:13px;box-shadow:var(--vl-shadow-card)">
