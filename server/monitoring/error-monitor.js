@@ -73,10 +73,11 @@ function classifyTier(message) {
 
 // sessionId·videoId 같은 숫자·UUID를 지우면, 같은 종류의 에러는 매번 같은 문자열로 정규화된다.
 // 지문은 Healthchecks.io로 나가므로 anonymousId·참여 코드도 해시 전에 지운다.
+// 참여 코드 접두사는 VL(이전 발급분 QWE/ASD). 경로는 입력 그대로라 대소문자·길이 무관하게 지운다.
 function normalizeMessage(message) {
   return message
     .replace(/anonymousId=(?:"(?:[^"\\]|\\.)*"|\S+)/g, "anonymousId=#")
-    .replace(/\b(?:QWE|ASD)-[A-Z0-9]+/gi, "#")
+    .replace(/\b(?:VL|QWE|ASD)-[A-Z0-9]+/gi, "#")
     .replace(
       /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
       "#",

@@ -136,6 +136,20 @@ describe("fingerprint — 같은 종류의 에러는 동적 값이 달라도 같
     expect(fingerprint(a)).toBe(fingerprint(b));
   });
 
+  it("새 형식(VL) 참여 코드도 이전 코드와 같은 지문으로 지운다", () => {
+    const a = "[access] GET /api/participants/VL-K7M2 404";
+    const b = "[access] GET /api/participants/qwe-k7m2 404";
+
+    expect(fingerprint(a)).toBe(fingerprint(b));
+  });
+
+  it("참여 코드가 아닌 짧은 단어+하이픈 경로는 지우지 않는다", () => {
+    const a = "[access] POST /api/participants/study-end-review-event 404";
+    const b = "[access] POST /api/participants/study-foo-review-event 404";
+
+    expect(fingerprint(a)).not.toBe(fingerprint(b));
+  });
+
   it("식별자를 지운 뒤에도 경로가 다른 에러는 다른 지문을 갖는다", () => {
     const a = '[access] POST /api/video-events 404 anonymousId="abc"';
     const b = '[access] POST /api/popup-events 404 anonymousId="abc"';
