@@ -1817,3 +1817,64 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
     },
   );
 });
+
+describe("content.js recordVideo — 기록 실패를 오류 보고로 넘긴다", () => {
+  let recordVideoFactory;
+
+  beforeAll(() => {
+    recordVideoFactory = loadRecordVideoFactory();
+  });
+
+  function makeFailingTab({ invalidateOnFailure = false } = {}) {
+    const chromeMock = {
+      runtime: {
+        id: "fake-extension-id",
+        sendMessage: vi.fn(() => Promise.resolve()),
+      },
+      storage: {
+        local: {
+          get: () => {
+            if (invalidateOnFailure) delete chromeMock.runtime.id;
+            return Promise.reject(new Error("QUOTA_BYTES quota exceeded"));
+          },
+          set: () => Promise.resolve(),
+        },
+      },
+    };
+    const consoleMock = { log: () => {}, warn: () => {} };
+    const recordVideo = recordVideoFactory(
+      chromeMock,
+      () => Promise.resolve({ ok: true }),
+      consoleMock,
+    );
+    return { recordVideo, sendMessage: chromeMock.runtime.sendMessage };
+  }
+
+  it("storage 실패면 RECORD_FAILED를 코드·위치만 담아 background에 보낸다", async () => {
+    const { recordVideo, sendMessage } = makeFailingTab();
+
+    await recordVideo("v1", "민감한 영상 제목", "www.google.com", null);
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0][0]).toEqual({
+      type: "client-error",
+      code: "RECORD_FAILED",
+      where: "content.recordVideo",
+    });
+    const sent = JSON.stringify(sendMessage.mock.calls);
+    expect(sent).not.toContain("민감한");
+    expect(sent).not.toContain("v1");
+    expect(sent).not.toContain("google");
+    expect(sent).not.toContain("QUOTA");
+  });
+
+  it("컨텍스트가 무효화돼 실패했으면 보고하지 않는다", async () => {
+    const { recordVideo, sendMessage } = makeFailingTab({
+      invalidateOnFailure: true,
+    });
+
+    await recordVideo("v1", "영상1");
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+});
