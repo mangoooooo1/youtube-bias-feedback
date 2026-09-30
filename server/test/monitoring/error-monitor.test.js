@@ -93,6 +93,14 @@ describe("classifyTier", () => {
     expect(classifyTier("[today-review-llm] API error body: x")).toBe(2);
   });
 
+  it("[client-error]는 Tier 1이다", () => {
+    expect(
+      classifyTier(
+        '[client-error] code=QUEUE_CRASHED where=background.queue.sessions count=3 version=2.4.1 firstAt=2026-09-30T01:00:00.000Z lastAt=2026-09-30T01:10:00.000Z anonymousId="3f2b8c1e-1111-4222-8333-444455556666"',
+      ),
+    ).toBe(1);
+  });
+
   it("알려지지 않은 접두사는 방어적으로 Tier 1로 취급한다", () => {
     expect(classifyTier("[뭔가 새로운 실패]")).toBe(1);
   });
@@ -158,7 +166,44 @@ describe("fingerprint — 같은 종류의 에러는 동적 값이 달라도 같
   });
 });
 
+describe("[client-error] — 추출·지문", () => {
+  it("추출 대상에 포함된다", () => {
+    expect(
+      extractErrorLines(
+        '[client-error] code=QUEUE_CRASHED where=background.queue.sessions count=3 version=2.4.1 firstAt=2026-09-30T01:00:00.000Z lastAt=2026-09-30T01:10:00.000Z anonymousId="3f2b8c1e-1111-4222-8333-444455556666"\n일반 로그',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("참여자·횟수·시각만 다른 같은 오류는 같은 지문을 갖는다", () => {
+    const a =
+      '[client-error] code=QUEUE_CRASHED where=background.queue.sessions count=3 version=2.4.1 firstAt=2026-09-30T01:00:00.000Z lastAt=2026-09-30T01:10:00.000Z anonymousId="3f2b8c1e-1111-4222-8333-444455556666"';
+    const b = a
+      .replace("count=3", "count=17")
+      .replace(/2026-09-30T01/g, "2026-10-02T13")
+      .replace(/anonymousId=.*$/, 'anonymousId="other-user"');
+
+    expect(fingerprint(a)).toBe(fingerprint(b));
+  });
+
+  it("where가 다르면 다른 지문을 갖는다", () => {
+    const a =
+      '[client-error] code=QUEUE_CRASHED where=background.queue.sessions count=3 version=2.4.1 firstAt=2026-09-30T01:00:00.000Z lastAt=2026-09-30T01:10:00.000Z anonymousId="3f2b8c1e-1111-4222-8333-444455556666"';
+    const b = a.replace("queue.sessions", "queue.watch_stats");
+
+    expect(fingerprint(a)).not.toBe(fingerprint(b));
+  });
+});
+
 describe("summarizeAlertLine — 외부 알림에는 안전한 항목만 남긴다", () => {
+  it("확장 오류는 접두사·code·where만 남기고 anonymousId·시각은 버린다", () => {
+    expect(
+      summarizeAlertLine(
+        '[client-error] code=QUEUE_CRASHED where=background.queue.sessions count=3 version=2.4.1 firstAt=2026-09-30T01:00:00.000Z lastAt=2026-09-30T01:10:00.000Z anonymousId="3f2b8c1e-1111-4222-8333-444455556666"',
+      ),
+    ).toBe("[client-error] code=QUEUE_CRASHED where=background.queue.sessions");
+  });
+
   it("접근 로그는 접두사·메서드·상태 코드만 남긴다", () => {
     expect(
       summarizeAlertLine(
