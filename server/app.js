@@ -63,6 +63,7 @@ const API_ROUTES = [
   ["/api/period-reviews", require("./routes/period-reviews")],
   ["/api/today-reviews", require("./routes/today-reviews")],
   ["/api/study-end-code", require("./routes/study-end-code")],
+  ["/api/client-errors", require("./routes/client-errors")],
 ];
 
 app.use(createAccessLog(API_ROUTES.map(([mountPath]) => mountPath)));

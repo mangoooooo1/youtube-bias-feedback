@@ -5,7 +5,10 @@ import path from "node:path";
 import { mergeSessionDistributions } from "../../../server/pipeline/period-boundaries.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const VIEWLENS_POPUP_PATH = path.join(__dirname, "../../popup/viewlens-popup.js");
+const VIEWLENS_POPUP_PATH = path.join(
+  __dirname,
+  "../../popup/viewlens-popup.js",
+);
 
 // viewlens-popup.js는 DOM/전역 VL 객체에 크게 의존하는 1200줄짜리 classic script라
 // 파일 전체를 그대로 실행할 수 없다(document 접근, 이벤트 리스너 등록 등으로 즉시 예외).
@@ -61,7 +64,10 @@ describe("mergeDist(팝업) ↔ mergeSessionDistributions(서버) 동치성", ()
       { videoCount: 2, categoryDistribution: { 음악: 0.5, 게임: 0.5 } },
       // "코미디"/"영화 & 애니메이션"은 둘 다 toVlKey로 "ent"에 묶인다 —
       // 병합 순서(축약 후 합산 vs 합산 후 축약)가 결과에 영향 없는지 검증
-      { videoCount: 3, categoryDistribution: { 코미디: 0.4, "영화 & 애니메이션": 0.6 } },
+      {
+        videoCount: 3,
+        categoryDistribution: { 코미디: 0.4, "영화 & 애니메이션": 0.6 },
+      },
       { videoCount: 1, categoryDistribution: { 존재하지않는카테고리: 1 } }, // toVlKey 폴백("etc") 검증
     ];
 
@@ -112,7 +118,8 @@ describe("mergeDist(팝업) ↔ mergeSessionDistributions(서버) 동치성", ()
     expect(popupResult.music).toBeCloseTo(0.75, 9);
     expect(popupResult.game).toBeCloseTo(0.25, 9);
 
-    const serverResult = mergeSessionDistributions(sessions).categoryDistribution;
+    const serverResult =
+      mergeSessionDistributions(sessions).categoryDistribution;
     // 서버: videoCount ?? 1까지만 폴백(videos.length 미고려) → 가중치 1:1
     expect(serverResult.음악).toBeCloseTo(0.5, 9);
     expect(serverResult.게임).toBeCloseTo(0.5, 9);
@@ -259,5 +266,64 @@ describe("flushPendingPopupEvents — 팝업 사용 기록 큐 전송", () => {
 
     expect(dump().participantSynced).toBe(true);
     expect(dump().pendingPopupEvents).toHaveLength(3);
+  });
+});
+
+// boot().catch 블록과 보고 함수만 떼어 내고, boot는 인자로 바꿔 끼워 실패를 재현한다
+const REPORT_CLIENT_ERROR_DECL =
+  /function reportClientError\(code, where\) \{[\s\S]*?\n\}/;
+const BOOT_CATCH_DECL = /boot\(\)\.catch\(\(err\) => \{[\s\S]*?\n\}\);/;
+
+function runBootCatch({ chrome, bootError }) {
+  const raw = readFileSync(VIEWLENS_POPUP_PATH, "utf8");
+  const blocks = [REPORT_CLIENT_ERROR_DECL, BOOT_CATCH_DECL].map((re) => {
+    const match = raw.match(re);
+    if (!match) {
+      throw new Error(
+        `${re}에 매칭되는 선언을 찾지 못했습니다 — viewlens-popup.js 구조가 바뀌었을 수 있습니다.`,
+      );
+    }
+    return match[0];
+  });
+  const consoleMock = { error: vi.fn() };
+  new Function("chrome", "console", "boot", blocks.join("\n"))(
+    chrome,
+    consoleMock,
+    () => Promise.reject(bootError),
+  );
+  return consoleMock;
+}
+
+describe("boot 실패 — 빈 팝업을 오류 보고로 넘긴다", () => {
+  it("POPUP_BOOT_FAILED를 코드·위치만 담아 background에 보낸다", async () => {
+    const sendMessage = vi.fn(() => Promise.resolve());
+    const chrome = { storage: { local: {} }, runtime: { sendMessage } };
+
+    runBootCatch({
+      chrome,
+      bootError: new Error("render failed: 참여코드 VL-ABCD 민감한 영상 제목"),
+    });
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+
+    expect(sendMessage.mock.calls[0][0]).toEqual({
+      type: "client-error",
+      code: "POPUP_BOOT_FAILED",
+      where: "popup.boot",
+    });
+    const sent = JSON.stringify(sendMessage.mock.calls);
+    expect(sent).not.toContain("VL-ABCD");
+    expect(sent).not.toContain("민감한");
+  });
+
+  it("메시지 전송이 실패해도 예외가 새어 나가지 않는다", async () => {
+    const sendMessage = vi.fn(() => {
+      throw new Error("Could not establish connection");
+    });
+    const chrome = { storage: { local: {} }, runtime: { sendMessage } };
+
+    const consoleMock = runBootCatch({ chrome, bootError: new Error("x") });
+    await vi.waitFor(() => expect(sendMessage).toHaveBeenCalled());
+
+    expect(consoleMock.error).toHaveBeenCalledTimes(1);
   });
 });

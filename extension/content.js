@@ -256,6 +256,24 @@ async function finalizePreviousWatchStats(target, stats) {
 }
 
 /**
+ * 오류를 background에 넘겨 원격 보고에 모은다. 원본 에러·시청 콘텐츠는 넘기지 않는다.
+ * @param {string} code - error-report.js의 오류 코드
+ * @param {string} where - error-report.js의 발생 위치
+ * @returns {void}
+ */
+function reportClientError(code, where) {
+  // 무효화된 컨텍스트(확장 리로드·업데이트)는 보낼 수도 없고 버그도 아니다
+  if (!chrome.runtime?.id) return;
+  try {
+    chrome.runtime
+      .sendMessage({ type: "client-error", code, where })
+      .catch(() => {});
+  } catch {
+    // 보고 실패가 기록 흐름을 깨뜨리면 안 된다
+  }
+}
+
+/**
  * 새 영상 감지를 로컬 저장소에 기록하고 서버로 전송한다. 탭마다 독립된 콘텐츠 스크립트가
  * 돌아 큐만으로는 다중 탭 동시 시청 시 경합을 못 막는다.
  * @param {string} videoId - 감지된 videoId
@@ -400,6 +418,7 @@ function recordVideo(
     } catch (error) {
       // 컨텍스트가 호출 도중 무효화된 경우 등 — 조용히 삼키지 않고 원인을 남긴다.
       console.warn("[content] 영상 기록 실패:", error.message);
+      reportClientError("RECORD_FAILED", "content.recordVideo");
     }
   });
   return writeQueue;

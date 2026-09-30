@@ -3,6 +3,7 @@
  * PM2 에러 로그 무음 실패 감시 (cron 실행용)
  *
  * - Tier 1(즉시): [Error] (errorHandler) + [sessions] 오늘 리뷰 생성 오류 + [access] (API 경로 4xx)
+ *   + [client-error] (확장이 보고한 저장·기록 실패, 장시간 전송 실패, 팝업 빈 화면)
  *   이미 안쪽에 fallback/방어 로직이 있는데도 뚫고 올라온 구조적 실패라 1건만 나와도 알린다.
  * - Tier 2(임계값): [youtube] API 오류:/[youtube] 네트워크 오류/[today-review-llm] API error body
  *   이미 fallback 경로가 있는 외부 API 호출 실패라, 1건은 일시적 네트워크 blip일 수 있어 노이즈가 된다.
@@ -33,12 +34,16 @@ const PING_ENV_VAR = "ERROR_MONITOR_PING_URL";
 const STATE_NAME = "error-monitor";
 const DEFAULT_COOLDOWN_MS = 30 * 60 * 1000;
 
+const CLIENT_ERROR_PREFIX = "[client-error] ";
+
 // Tier 1: 구조적 실패 — 1건만 나와도 즉시 알린다.
 const TIER1_PREFIXES = [
   "[Error] ",
   "[sessions] 오늘 리뷰 생성 오류:",
   // "[access"로 줄이면 API 밖 경로의 [access-other](스캐너 봇 소음)까지 잡힌다
   "[access] ",
+  // 확장이 이미 묶어 보낸 구조적 실패라 1건도 의미가 있다
+  CLIENT_ERROR_PREFIX,
 ];
 
 // Tier 2: 이미 fallback 경로가 있는 외부 API 호출 실패
@@ -106,6 +111,10 @@ function summarizeAlertLine(message) {
   if (HTTP_METHODS.has(tokens[0])) parts.push(tokens[0]);
   const status = tokens.find((t) => /^[1-5]\d{2}$/.test(t));
   if (status) parts.push(status);
+  // code·where는 서버가 고정 목록으로 검증한 값이라 외부로 보내도 안전하다
+  if (prefix === CLIENT_ERROR_PREFIX) {
+    parts.push(...tokens.filter((t) => /^(code|where)=[\w.]+$/.test(t)));
+  }
 
   return parts.join(" ");
 }

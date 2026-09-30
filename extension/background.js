@@ -17,6 +17,11 @@ import {
   invalidateParticipantSync,
 } from "./storage.js";
 import { isBaselinePeriod } from "./pipeline/baseline.js";
+import {
+  reportClientError,
+  flushClientErrors,
+  recordSyncOutcome,
+} from "./error-report.js";
 import { SERVER_URL } from "./config.js";
 import "./study-schedule.js";
 
@@ -122,28 +127,35 @@ async function drawIconWithDot(size) {
 chrome.alarms.create(ALARM_NAME, { periodInMinutes: 1 });
 
 // content script가 읽을 수 있도록 SERVER_URL을 storage에 저장.
-chrome.storage.local
-  .set({ serverUrl: SERVER_URL })
-  .catch((error) =>
-    console.error(
-      `[background] task=persist_server_url result=crashed error=${error?.message}`,
-    ),
+chrome.storage.local.set({ serverUrl: SERVER_URL }).catch((error) => {
+  console.error(
+    `[background] task=persist_server_url result=crashed error=${error?.message}`,
   );
+  reportClientError("TASK_CRASHED", "background.persistServerUrl");
+});
+
+// content·팝업은 모듈이 아니라 error-report를 import하지 못해 메시지로 넘긴다
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type !== "client-error") return;
+  reportClientError(message.code, message.where);
+});
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== ALARM_NAME) return;
-  runServerTasks().catch((error) =>
+  runServerTasks().catch((error) => {
     console.error(
       `[background] task=server_tasks result=crashed error=${error?.message}`,
-    ),
-  );
+    );
+    reportClientError("TASK_CRASHED", "background.serverTasks");
+  });
   // 로컬 세션 종료 판정은 서버와 무관하므로 게이트를 기다리지 않는다.
   // 네 큐는 withQueueLock이 예외를 흡수하지만 이 경로는 그 밖이라 여기서 직접 받는다.
-  checkSessionTimeout().catch((error) =>
+  checkSessionTimeout().catch((error) => {
     console.error(
       `[background] task=session_timeout result=crashed error=${error?.message}`,
-    ),
-  );
+    );
+    reportClientError("TASK_CRASHED", "background.sessionTimeout");
+  });
 });
 
 /**
@@ -159,12 +171,16 @@ export async function runServerTasks() {
     await notifyParticipationEndedOnce();
     return;
   }
-  await ensureParticipantSynced().finally(() =>
-    Promise.all([
-      retryUnsyncedSessions(),
-      retryUnsentVideoEvents().finally(() => retryUnsentWatchStats()),
-    ]),
-  );
+  await Promise.all([
+    // 등록 전·등록이 막힌 동안의 오류도 보내야 하므로 등록 게이트를 기다리지 않는다
+    flushClientErrors(sendToServer, onboarding?.anonymousId ?? null),
+    ensureParticipantSynced().finally(() =>
+      Promise.all([
+        retryUnsyncedSessions(),
+        retryUnsentVideoEvents().finally(() => retryUnsentWatchStats()),
+      ]),
+    ),
+  ]);
 }
 
 const PARTICIPATION_ENDED_NOTIFICATION_ID = "viewlens-participation-ended";
@@ -387,7 +403,10 @@ export function ensureParticipantSynced() {
   return withQueueLock("participants", async () => {
     const state = await getParticipantSyncState();
     if (!state) return; // 온보딩 전이거나 필수 값 누락
-    if (state.synced && !state.tokenMissing) return;
+    if (state.synced && !state.tokenMissing) {
+      await recordSyncOutcome("participants", { ok: true });
+      return;
+    }
     // 서버가 400으로 거부한 실패는 "같은 요청"을 다시 보내야 영원히 같은 답이 온다.
     if (
       state.failure?.kind === "permanent" &&
@@ -406,6 +425,7 @@ export function ensureParticipantSynced() {
 
     // config.js 미설정 환경에서는 요청 자체가 나가지 않는다. 실패로 기록하면 1분마다 storage만 쓰게 되므로 조용히 넘긴다.
     if (result.code === "no_server_url") return;
+    await recordSyncOutcome("participants", result);
 
     if (result.ok) {
       await markParticipantSynced(result.data?.participantToken ?? null);
@@ -536,6 +556,7 @@ async function withQueueLock(name, run) {
     console.error(
       `[background] queue=${name} result=crashed error=${error?.message}`,
     );
+    await reportClientError("QUEUE_CRASHED", `background.queue.${name}`);
   } finally {
     inFlightQueues.delete(name);
   }
@@ -551,7 +572,11 @@ async function withQueueLock(name, run) {
  * @returns {Promise<void>}
  */
 async function drainQueue(name, items, processItem, markInvalid) {
-  if (items.length === 0) return;
+  // 보낼 게 없으면 막힌 것도 아니다
+  if (items.length === 0) {
+    await recordSyncOutcome(name, { ok: true });
+    return;
+  }
 
   let sentThisTick = 0;
   let invalidThisTick = 0;
@@ -574,6 +599,7 @@ async function drainQueue(name, items, processItem, markInvalid) {
 
   const pending = items.length - sentThisTick - invalidThisTick;
   const summary = `pending=${pending} sentThisTick=${sentThisTick} invalidThisTick=${invalidThisTick}`;
+  await recordSyncOutcome(name, abortedBy ?? { ok: true });
   if (abortedBy) {
     // 서버가 토큰을 거부했다면 participantSynced는 더 이상 진실이 아니다. 내려두면 다음 알람 틱에 게이트가 재등록해 토큰을 다시 받아온다.
     if (
