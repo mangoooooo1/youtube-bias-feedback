@@ -1513,6 +1513,7 @@ boot().catch((err) => {
   // Fallback: opened directly in browser without chrome APIs
   if (typeof chrome === "undefined" || !chrome?.storage) {
     const popEl = document.getElementById("vl-popup-root");
+    if (!popEl) return; // Studio는 자체적으로 마운트한다
     applyTokens(popEl, DEFAULT_TONE, false);
     const popup = new ViewLensPopup(popEl);
     popup.mount({

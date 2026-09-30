@@ -280,7 +280,8 @@ class ViewLensPopup {
     );
     const selWeek = Math.min(this._selWeek, currentWeek);
 
-    if (this._tab === "today") {
+    // 실제 세션이 없는 Studio에서는 예시 데이터(VL.today)를 그대로 쓴다
+    if (this._tab === "today" && VL._allSessions) {
       const d = buildDataForDate(VL._allSessions || [], this._selectedDate);
       const isToday = dateStr(this._selectedDate) === dateStr(new Date());
       d.collectingCount = isToday ? (VL.today?.collectingCount ?? 0) : 0;
