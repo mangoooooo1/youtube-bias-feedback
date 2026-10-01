@@ -436,6 +436,39 @@ describe("generate-period-reviews.js — run()", () => {
     expect(shouldFail(summary)).toBe(true);
   });
 
+  it("Gemini를 실제로 부른 기간만 메트릭으로 기록하고, 참여자 정보는 넘기지 않는다", async () => {
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run("metric-user", INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+    ).run(
+      "metric-user",
+      JSON.stringify({ 음악: 1 }),
+      5,
+      "2026-06-01T10:00:00+09:00",
+    );
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      text: async () => "quota",
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const recordMetric = vi.fn();
+
+    await run(db, "fake-key", { recordMetric });
+
+    // 1구간만 세션이 있어 호출했고, 2·3구간은 세션이 없어 호출을 생략했다
+    expect(recordMetric).toHaveBeenCalledTimes(1);
+    expect(recordMetric.mock.calls[0][0]).toEqual({
+      kind: "period",
+      llmStatus: "fallback",
+      failureReason: "http_error",
+      geminiMs: expect.any(Number),
+      calledGemini: true,
+    });
+  });
+
   describe("fallback 재시도 정책 (periodEnd 기준 3일 이내)", () => {
     // 1구간(offset 0-3, periodEnd=2026-06-04) 하나만 완료되도록 고정 — 나머지 기간은
     // 이 테스트들과 무관하니 아직 진행 중인 채로 둔다.
