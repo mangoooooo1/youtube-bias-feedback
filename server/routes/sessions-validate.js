@@ -185,4 +185,4 @@ function validateSession(body) {
   return null;
 }
 
-module.exports = { validateSession };
+module.exports = { validateSession, LLM_STATUSES, FAILURE_REASONS };
