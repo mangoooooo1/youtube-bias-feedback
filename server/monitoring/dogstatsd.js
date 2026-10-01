@@ -81,11 +81,11 @@ function createDogStatsd({
         console.warn(`[dogstatsd] 잘못된 메트릭 버림: ${name}`);
         return;
       }
-      pending += 1;
       getSocket().send(line, port, host, () => {
         pending -= 1;
         if (pending === 0 && onDrained) onDrained();
       });
+      pending += 1;
     } catch (err) {
       console.warn(`[dogstatsd] 전송 실패: ${err.message}`);
     }

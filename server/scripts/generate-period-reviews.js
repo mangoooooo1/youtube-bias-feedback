@@ -357,7 +357,6 @@ async function main() {
     summary = await run(db, apiKey);
   } finally {
     db.close();
-    await closeLlmMetrics();
   }
 
   if (shouldFail(summary)) {
@@ -366,6 +365,8 @@ async function main() {
     );
     process.exitCode = 1;
   }
+
+  await closeLlmMetrics();
 }
 
 if (require.main === module) {

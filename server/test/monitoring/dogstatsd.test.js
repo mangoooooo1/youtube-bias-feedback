@@ -152,6 +152,36 @@ describe("createDogStatsd", () => {
     expect(() => client.send("viewlens.llm.calls", 1, "c")).not.toThrow();
   });
 
+  it("소켓 생성이 예외를 던져도 close는 끝난다", async () => {
+    const client = createDogStatsd({
+      enabled: true,
+      allowedTags: ALLOWED,
+      createSocket: () => {
+        throw new Error("EMFILE");
+      },
+    });
+
+    client.send("viewlens.llm.calls", 1, "c");
+
+    await expect(client.close()).resolves.toBeUndefined();
+  });
+
+  it("socket.send가 동기 예외를 던져도 close는 끝난다", async () => {
+    const socket = fakeSocket();
+    socket.send = vi.fn(() => {
+      throw new Error("ERR_SOCKET_DGRAM_NOT_RUNNING");
+    });
+    const client = createDogStatsd({
+      enabled: true,
+      allowedTags: ALLOWED,
+      createSocket: () => socket,
+    });
+
+    client.send("viewlens.llm.calls", 1, "c");
+
+    await expect(client.close()).resolves.toBeUndefined();
+  });
+
   it("close는 보내는 중인 패킷이 끝난 뒤 소켓을 닫는다", async () => {
     const socket = fakeSocket();
     const client = createDogStatsd({
