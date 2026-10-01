@@ -2,6 +2,8 @@
 
 /**
  * 검증을 통과한 세션 데이터를 sessions 테이블에 저장한다.
+ * LLM 생성 결과 칸(llmStatus~promptVersion)은 서버가 recordSessionReview로만 채운다.
+ * 클라이언트가 보낸 값은 위조될 수 있어 받지 않는다.
  * @param {import("better-sqlite3").Database} db - DB 커넥션
  * @param {object} body - 세션 필드를 담은 요청 본문 (validateSession 통과 후 호출)
  * @returns {void}
@@ -20,22 +22,13 @@ function insertSession(db, body) {
     validVideoCount,
     totalMs,
     youtubeMs,
-    geminiMs,
-    llmStatus,
-    failureReason,
-    httpStatus,
-    timedOut,
     feedbackNotifiedAt,
-    review,
-    reviewTopic,
-    source,
-    promptVersion,
   } = body;
 
   db.prepare(
     `
-    INSERT INTO sessions (anonymousId, sessionId, startTime, endTime, videoCount, categoryDistribution, entropy, weightedEntropy, weightedCategoryDistribution, validVideoCount, totalMs, youtubeMs, geminiMs, llmStatus, failureReason, httpStatus, timedOut, feedbackNotifiedAt, review, reviewTopic, source, promptVersion)
-    VALUES (@anonymousId, @sessionId, @startTime, @endTime, @videoCount, @categoryDistribution, @entropy, @weightedEntropy, @weightedCategoryDistribution, @validVideoCount, @totalMs, @youtubeMs, @geminiMs, @llmStatus, @failureReason, @httpStatus, @timedOut, @feedbackNotifiedAt, @review, @reviewTopic, @source, @promptVersion)
+    INSERT INTO sessions (anonymousId, sessionId, startTime, endTime, videoCount, categoryDistribution, entropy, weightedEntropy, weightedCategoryDistribution, validVideoCount, totalMs, youtubeMs, feedbackNotifiedAt)
+    VALUES (@anonymousId, @sessionId, @startTime, @endTime, @videoCount, @categoryDistribution, @entropy, @weightedEntropy, @weightedCategoryDistribution, @validVideoCount, @totalMs, @youtubeMs, @feedbackNotifiedAt)
   `,
   ).run({
     anonymousId,
@@ -56,16 +49,35 @@ function insertSession(db, body) {
     validVideoCount: validVideoCount ?? null,
     totalMs: totalMs ?? null,
     youtubeMs: youtubeMs ?? null,
-    geminiMs: geminiMs ?? null,
-    llmStatus: llmStatus ?? null,
-    failureReason: failureReason ?? null,
-    httpStatus: httpStatus ?? null,
-    timedOut: timedOut ?? null,
     feedbackNotifiedAt: feedbackNotifiedAt ?? null,
-    review: review ?? null,
-    reviewTopic: reviewTopic ?? null,
-    source: source ?? null,
-    promptVersion: promptVersion ?? null,
+  });
+}
+
+/**
+ * 이 세션 종료로 생성한 오늘 리뷰 결과를 세션 행에 남긴다.
+ * today_reviews는 날짜당 최신본만 남기므로, 생성마다의 성공·폴백과 노출 문장은 여기에만 남는다.
+ * @param {import("better-sqlite3").Database} db - DB 커넥션
+ * @param {string} sessionId - 이번 요청으로 저장한 세션 id
+ * @param {object} generated - generateAndStoreTodayReview 반환값
+ * @returns {void}
+ */
+function recordSessionReview(db, sessionId, generated) {
+  db.prepare(
+    `UPDATE sessions SET geminiMs = @geminiMs, llmStatus = @llmStatus, failureReason = @failureReason,
+       httpStatus = @httpStatus, timedOut = @timedOut, review = @review, reviewTopic = @reviewTopic,
+       source = @source, promptVersion = @promptVersion
+     WHERE sessionId = @sessionId`,
+  ).run({
+    sessionId,
+    geminiMs: generated.geminiMs ?? null,
+    llmStatus: generated.llmStatus ?? null,
+    failureReason: generated.failureReason ?? null,
+    httpStatus: generated.httpStatus ?? null,
+    timedOut: generated.timedOut ?? null,
+    review: generated.review ?? null,
+    reviewTopic: generated.reviewTopic ?? null,
+    source: generated.source ?? null,
+    promptVersion: generated.promptVersion ?? null,
   });
 }
 
@@ -94,4 +106,8 @@ function recordFeedbackTimestamp(db, column, sessionId, anonymousId) {
   return "recorded";
 }
 
-module.exports = { insertSession, recordFeedbackTimestamp };
+module.exports = {
+  insertSession,
+  recordSessionReview,
+  recordFeedbackTimestamp,
+};

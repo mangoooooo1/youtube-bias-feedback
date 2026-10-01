@@ -2,7 +2,11 @@ const express = require("express");
 const { db } = require("../db");
 const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const { validateSession } = require("./sessions-validate");
-const { insertSession, recordFeedbackTimestamp } = require("./sessions-store");
+const {
+  insertSession,
+  recordSessionReview,
+  recordFeedbackTimestamp,
+} = require("./sessions-store");
 const { requireParticipant } = require("../middleware/requireParticipant");
 const { generateAndStoreTodayReview } = require("./today-review-generate");
 const { isTodayReviewEligible } = require("./today-reviews-query");
@@ -187,6 +191,14 @@ router.post("/", requireParticipant, async (req, res, next) => {
       apiKey: process.env.TODAY_REVIEW_GEMINI_API_KEY,
     });
     if (generated) {
+      try {
+        recordSessionReview(db, req.body.sessionId, generated);
+      } catch (err) {
+        console.error(
+          "[sessions] 오늘 리뷰 생성 오류: 세션 행 기록 실패",
+          err.message,
+        );
+      }
       const participant = db
         .prepare(
           "SELECT group_code, installDate, studyEndCodeVerifiedAt FROM participants WHERE anonymousId = ?",

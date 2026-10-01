@@ -194,6 +194,8 @@ describe("generateAndStoreTodayReview", () => {
     expect(result.source).toBe("fallback");
     expect(result.llmStatus).toBe("fallback");
     expect(result.failureReason).toBe("http_error");
+    expect(result.httpStatus).toBe(500);
+    expect(result.timedOut).toBeNull();
   });
 
   it("같은 날짜에 재호출하면 genCount가 1씩 증가하고 최신본으로 덮어쓴다", async () => {

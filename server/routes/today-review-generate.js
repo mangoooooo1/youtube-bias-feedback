@@ -54,6 +54,8 @@ async function generateAndStoreTodayReview(
   let result;
   let llmStatus = "success";
   let failureReason = null;
+  let httpStatus = null;
+  let timedOut = null;
   const startedAt = Date.now();
   if (!apiKey) {
     // 키 미설정(예: 로컬 개발 환경) — Gemini를 부르지 않고 바로 폴백.
@@ -66,6 +68,8 @@ async function generateAndStoreTodayReview(
       result = generateTodayFallbackReview(aggregate);
       llmStatus = "fallback";
       failureReason = err.failureReason ?? "network_error";
+      httpStatus = err.httpStatus ?? null;
+      timedOut = err.timedOut ? 1 : null;
     }
   }
   const geminiMs = Date.now() - startedAt;
@@ -99,6 +103,8 @@ async function generateAndStoreTodayReview(
     promptVersion: result.promptVersion,
     llmStatus,
     failureReason,
+    httpStatus,
+    timedOut,
     geminiMs,
     genCount,
     generatedAt,
