@@ -60,11 +60,12 @@ function execSchema() {
       videoCount           INTEGER,
       categoryDistribution TEXT,
       entropy              REAL,
-      -- 세션 처리 지연시간 () — 확장이 측정해 전송, ms 단위
+      -- 세션 처리 지연시간, ms 단위. totalMs는 확장이 측정해 전송, youtubeMs·geminiMs는 서버가 측정
       totalMs              INTEGER,
       youtubeMs            INTEGER,
       geminiMs             INTEGER,
-      -- LLM 성공/폴백 로깅 () — 확장의 폴백 분기(background.js/llm.js)와 대응
+      -- LLM 성공/폴백 로깅 — geminiMs~promptVersion은 서버가 오늘 리뷰 생성 직후 recordSessionReview로 기록한다.
+      -- 2026-09-01(서버 생성 전환)부터 이 기록이 추가되기 전까지의 행은 이 칸들이 NULL이다(복구 불가).
       llmStatus            TEXT,     -- 'success' | 'fallback'
       failureReason        TEXT,     -- timeout | http_error | empty_response | parse_error | network_error | policy_filtered (성공 시 NULL)
       httpStatus           INTEGER,  -- failureReason='http_error'일 때만 (429 쿼터 vs 5xx 장애 구분)
@@ -77,17 +78,18 @@ function execSchema() {
       -- isValidWatch() 필터를 통과한(클릭성 이탈로 판정되지 않은) 영상 수 — entropy/weightedEntropy
       -- 계산에 실제로 쓰인 영상 개수를 투명하게 남겨, 소표본 왜곡 여부를 사후에 판별할 수 있게 한다.
       validVideoCount              INTEGER,
-      -- 실제 생성된 피드백 텍스트 (Story 10-11) — 면담·로그·설문 삼각검증 및 처치 충실도 판정에 필요
+      -- 실제 생성된 피드백 텍스트 (Story 10-11) — 면담·로그·설문 삼각검증 및 처치 충실도 판정에 필요.
+      -- 자격(그룹·베이스라인)과 무관하게 항상 기록되므로, 실제 노출 여부는 그룹·기간과 함께 판정한다.
       -- "오늘" 탭 리뷰 카드 통합 이후로는 이 세션 하나만의 격리된 관찰치가 아니라,
       -- 그 세션 종료 시점까지의 "오늘 누적" 스냅샷이다(세션 경계마다 찍힌 시계열) — 생성 당시
       -- today_reviews에 기록된 그 날짜 최신 스냅샷과 같은 계산 결과를 공유한다(한 번의 생성으로
       -- 두 테이블에 나눠 저장). 이후 같은 날 세션이 추가로 끝나면 today_reviews는 그 다음
       -- 스냅샷으로 갱신되므로, 과거 sessions.review는 today_reviews의 "현재" 최신본과 값이
       -- 갈라진다 — 두 테이블을 조인해 비교할 때는 이 시점 차이를 반드시 감안할 것.
-      review               TEXT,     -- 사용자에게 노출된 피드백 문장 (llm 성공 또는 fallback 결과)
+      review               TEXT,     -- 생성된 피드백 문장 (llm 성공 또는 fallback 결과)
       reviewTopic          TEXT,     -- 같은 응답의 topic
       source               TEXT,     -- 'llm' | 'fallback' — 어느 경로로 생성됐는지
-      promptVersion        TEXT,     -- extension/pipeline/llm.js TODAY_PROMPT_VERSION — 파일럿/본조사 처치 동일성 추적용
+      promptVersion        TEXT,     -- server/pipeline/today-review-llm.js TODAY_PROMPT_VERSION — 파일럿/본조사 처치 동일성 추적용
       -- 피드백 알림·열람·확인 시점 (Story 10-6) — 측정 퍼널: 생성 → 알림(feedbackNotifiedAt)
       -- → 클릭(feedbackViewedAt, 알림 클릭 기준) → 확인(feedbackConfirmedAt, 블러 해제 버튼 클릭 기준 — 가장 엄격한 신호)
       feedbackNotifiedAt   TEXT,     -- 분석 완료 알림을 표시한 시각 (미대상/미전달이면 NULL)

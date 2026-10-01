@@ -6,6 +6,7 @@ const {
   generateTodayFallbackReview,
 } = require("../pipeline/today-review-llm");
 const { upsertTodayReview } = require("./today-reviews-upsert");
+const { recordLlmCall } = require("../monitoring/llm-metrics");
 
 /** 같은 (anonymousId, reviewDate)의 기존 genCount보다 1 큰 값을 계산한다(없으면 1). */
 function nextGenCount(db, anonymousId, reviewDate) {
@@ -25,7 +26,7 @@ function nextGenCount(db, anonymousId, reviewDate) {
  */
 async function generateAndStoreTodayReview(
   db,
-  { anonymousId, apiKey, now = new Date() },
+  { anonymousId, apiKey, now = new Date(), recordMetric = recordLlmCall },
 ) {
   const rawSessions = db
     .prepare(
@@ -54,6 +55,8 @@ async function generateAndStoreTodayReview(
   let result;
   let llmStatus = "success";
   let failureReason = null;
+  let httpStatus = null;
+  let timedOut = null;
   const startedAt = Date.now();
   if (!apiKey) {
     // 키 미설정(예: 로컬 개발 환경) — Gemini를 부르지 않고 바로 폴백.
@@ -66,9 +69,18 @@ async function generateAndStoreTodayReview(
       result = generateTodayFallbackReview(aggregate);
       llmStatus = "fallback";
       failureReason = err.failureReason ?? "network_error";
+      httpStatus = err.httpStatus ?? null;
+      timedOut = err.timedOut ? 1 : null;
     }
   }
   const geminiMs = Date.now() - startedAt;
+  recordMetric({
+    kind: "today",
+    llmStatus,
+    failureReason,
+    geminiMs,
+    calledGemini: Boolean(apiKey),
+  });
 
   const genCount = nextGenCount(db, anonymousId, aggregate.reviewDate);
   const generatedAt = new Date().toISOString();
@@ -99,6 +111,8 @@ async function generateAndStoreTodayReview(
     promptVersion: result.promptVersion,
     llmStatus,
     failureReason,
+    httpStatus,
+    timedOut,
     geminiMs,
     genCount,
     generatedAt,

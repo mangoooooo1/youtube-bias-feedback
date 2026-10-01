@@ -36,6 +36,7 @@ const {
   DAYS_PER_PERIOD,
   BASELINE_DAYS,
 } = require("../pipeline/study-constants");
+const { recordLlmCall, closeLlmMetrics } = require("../monitoring/llm-metrics");
 const {
   isValidWatch,
   calculateWeightedDistribution,
@@ -111,6 +112,7 @@ function computeWeightedPeriodDistribution(db, eventsInRange) {
 async function processPeriod({
   db,
   apiKey,
+  recordMetric = recordLlmCall,
   anonymousId,
   period,
   allSessions,
@@ -176,6 +178,14 @@ async function processPeriod({
     } finally {
       geminiMs = Date.now() - startedAt;
     }
+    // 세션이 없어 호출을 생략한 fallback은 Gemini 호출이 아니라 세지 않는다
+    recordMetric({
+      kind: "period",
+      llmStatus,
+      failureReason,
+      geminiMs,
+      calledGemini: true,
+    });
   }
 
   insertPeriodReview.run({
@@ -222,7 +232,7 @@ function shouldFail({ skipped, llmFailures, created }) {
   return skipped > 0 || (llmFailures > 0 && created === 0);
 }
 
-async function run(db, apiKey) {
+async function run(db, apiKey, { recordMetric } = {}) {
   const selectParticipants = db.prepare(`
     SELECT anonymousId, installDate FROM participants
     WHERE group_code IN (${ELIGIBLE_GROUPS.map(() => "?").join(",")})
@@ -300,6 +310,7 @@ async function run(db, apiKey) {
         const { llmStatus, failureReason } = await processPeriod({
           db,
           apiKey,
+          recordMetric,
           anonymousId,
           period,
           allSessions,
@@ -354,6 +365,8 @@ async function main() {
     );
     process.exitCode = 1;
   }
+
+  await closeLlmMetrics();
 }
 
 if (require.main === module) {

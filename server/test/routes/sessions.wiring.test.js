@@ -506,3 +506,139 @@ describe("POST /api/sessions — 오늘 누적 리뷰 생성·자격 게이팅",
     ).toBe(0);
   });
 });
+
+describe("POST /api/sessions — 오늘 리뷰 생성 결과를 세션 행에 기록", () => {
+  const originalFetch = global.fetch;
+  const originalYoutubeKey = process.env.YOUTUBE_API_KEY;
+  const originalGeminiKey = process.env.TODAY_REVIEW_GEMINI_API_KEY;
+  let geminiResponses;
+
+  function geminiOk(topic, feedback) {
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        candidates: [
+          {
+            content: { parts: [{ text: JSON.stringify({ topic, feedback }) }] },
+          },
+        ],
+      }),
+    };
+  }
+
+  beforeEach(() => {
+    process.env.YOUTUBE_API_KEY = "wiring-test-key";
+    process.env.TODAY_REVIEW_GEMINI_API_KEY = "wiring-gemini-key";
+    geminiResponses = [];
+    global.fetch = vi.fn((url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/videos")) {
+        const ids = parsed.searchParams.get("id").split(",");
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            items: ids.map((id) => ({
+              id,
+              snippet: { categoryId: "20", title: id },
+            })),
+          }),
+        });
+      }
+      if (parsed.hostname === "generativelanguage.googleapis.com") {
+        return Promise.resolve(geminiResponses.shift());
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ items: [] }) });
+    });
+  });
+
+  afterEach(() => {
+    db.exec("DELETE FROM today_reviews");
+    global.fetch = originalFetch;
+    process.env.YOUTUBE_API_KEY = originalYoutubeKey;
+    process.env.TODAY_REVIEW_GEMINI_API_KEY = originalGeminiKey;
+  });
+
+  function sessionRow(sessionId) {
+    return db
+      .prepare(
+        `SELECT llmStatus, failureReason, httpStatus, timedOut, geminiMs,
+                review, reviewTopic, source, promptVersion
+         FROM sessions WHERE sessionId = ?`,
+      )
+      .get(sessionId);
+  }
+
+  it("같은 날 두 세션의 성공·폴백이 각자의 행에 남는다(today_reviews는 최신본만)", async () => {
+    geminiResponses.push(
+      { ok: false, status: 429, text: async () => "quota" },
+      geminiOk("게임", "오늘은 게임 영상을 주로 보셨네요."),
+    );
+    const endTime = new Date().toISOString();
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await request(app)
+        .post("/api/sessions")
+        .send(basePayload({ sessionId: "rec-s1", endTime }));
+      await request(app)
+        .post("/api/sessions")
+        .send(basePayload({ sessionId: "rec-s2", endTime }));
+    } finally {
+      vi.restoreAllMocks();
+    }
+
+    expect(sessionRow("rec-s1")).toMatchObject({
+      llmStatus: "fallback",
+      failureReason: "http_error",
+      httpStatus: 429,
+      source: "fallback",
+    });
+    expect(sessionRow("rec-s1").review).toEqual(expect.any(String));
+    expect(sessionRow("rec-s2")).toMatchObject({
+      llmStatus: "success",
+      failureReason: null,
+      httpStatus: null,
+      source: "llm",
+      review: "오늘은 게임 영상을 주로 보셨네요.",
+      reviewTopic: "게임",
+    });
+    expect(sessionRow("rec-s2").geminiMs).toEqual(expect.any(Number));
+    expect(sessionRow("rec-s2").promptVersion).toEqual(expect.any(String));
+
+    const latest = db
+      .prepare("SELECT llmStatus FROM today_reviews WHERE anonymousId = ?")
+      .get("wiring-user");
+    expect(latest.llmStatus).toBe("success");
+  });
+
+  it("클라이언트가 보낸 LLM 값은 저장하지 않는다", async () => {
+    // 카테고리 조회 실패로 리뷰가 생성되지 않는 경우라 서버가 덮어쓰지도 않는다
+    process.env.YOUTUBE_API_KEY = "";
+
+    await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "forged-s1",
+          llmStatus: "success",
+          failureReason: "timeout",
+          geminiMs: 1,
+          review: "위조된 리뷰",
+          source: "llm",
+          promptVersion: "forged",
+        }),
+      );
+
+    expect(sessionRow("forged-s1")).toEqual({
+      llmStatus: null,
+      failureReason: null,
+      httpStatus: null,
+      timedOut: null,
+      geminiMs: null,
+      review: null,
+      reviewTopic: null,
+      source: null,
+      promptVersion: null,
+    });
+  });
+});

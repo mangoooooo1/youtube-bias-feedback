@@ -194,6 +194,8 @@ describe("generateAndStoreTodayReview", () => {
     expect(result.source).toBe("fallback");
     expect(result.llmStatus).toBe("fallback");
     expect(result.failureReason).toBe("http_error");
+    expect(result.httpStatus).toBe(500);
+    expect(result.timedOut).toBeNull();
   });
 
   it("같은 날짜에 재호출하면 genCount가 1씩 증가하고 최신본으로 덮어쓴다", async () => {
@@ -253,5 +255,80 @@ describe("generateAndStoreTodayReview", () => {
     });
 
     expect(result).toBeNull();
+  });
+});
+
+describe("generateAndStoreTodayReview — LLM 호출 메트릭", () => {
+  function seed(db, anonymousId) {
+    insertSession(db, {
+      anonymousId,
+      sessionId: `${anonymousId}-s1`,
+      endTime: "2026-03-10T10:00:00+09:00",
+      videoCount: 3,
+      categoryDistribution: { 음악: 1 },
+    });
+  }
+  const now = new Date("2026-03-10T20:00:00+09:00");
+
+  it("Gemini 실패도 호출 1건으로 사유와 함께 기록하고, 참여자 정보는 넘기지 않는다", async () => {
+    const db = createTestDb();
+    seed(db, "m1");
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      text: async () => "quota",
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const recordMetric = vi.fn();
+
+    await generateAndStoreTodayReview(db, {
+      anonymousId: "m1",
+      apiKey: "fake-key",
+      now,
+      recordMetric,
+    });
+    vi.restoreAllMocks();
+
+    expect(recordMetric).toHaveBeenCalledTimes(1);
+    const [call] = recordMetric.mock.calls[0];
+    expect(call).toEqual({
+      kind: "today",
+      llmStatus: "fallback",
+      failureReason: "http_error",
+      geminiMs: expect.any(Number),
+      calledGemini: true,
+    });
+  });
+
+  it("키가 없으면 calledGemini:false로 기록한다", async () => {
+    const db = createTestDb();
+    seed(db, "m2");
+    const recordMetric = vi.fn();
+
+    await generateAndStoreTodayReview(db, {
+      anonymousId: "m2",
+      apiKey: undefined,
+      now,
+      recordMetric,
+    });
+
+    expect(recordMetric.mock.calls[0][0]).toMatchObject({
+      llmStatus: "fallback",
+      calledGemini: false,
+    });
+  });
+
+  it("오늘 세션이 없어 생성하지 않으면 기록하지 않는다", async () => {
+    const db = createTestDb();
+    const recordMetric = vi.fn();
+
+    await generateAndStoreTodayReview(db, {
+      anonymousId: "nobody",
+      apiKey: "fake-key",
+      now,
+      recordMetric,
+    });
+
+    expect(recordMetric).not.toHaveBeenCalled();
   });
 });
