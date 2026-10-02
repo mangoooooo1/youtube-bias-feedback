@@ -9,8 +9,11 @@ import {
   parseThresholdArg,
   formatSilenceSummary,
   reportToHealthchecks,
+  sendSilenceGauges,
+  GAUGES,
   DEFAULT_THRESHOLD_DAYS,
 } from "../../scripts/participant-silence-report.js";
+import { formatMetric } from "../../monitoring/dogstatsd.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const TOTAL_DAYS = 12; // server/pipeline/study-constants.js의 값과 동일
@@ -607,6 +610,64 @@ describe("Healthchecks 본문과 ping 정책 — 외부로는 인원수만", () 
         expect(body).not.toContain(secret);
       }
       expect(body).toBe("결측 의심 1명(신규 0명) / 검사 1명 / 미등록 1개");
+    } finally {
+      logSpy.mockRestore();
+      db.close();
+    }
+  });
+});
+
+describe("Datadog gauge — 태그 없이 인원수만", () => {
+  function capture(result) {
+    const client = { send: vi.fn() };
+    sendSilenceGauges(result, client);
+    // 실제 전송 줄로 바꿔 본다. 허용 목록은 main()과 같은 빈 객체.
+    return client.send.mock.calls.map(([name, value, type, tags]) =>
+      formatMetric(name, value, type, tags, {}),
+    );
+  }
+
+  it("gauge 4개를 태그 없이 보낸다", () => {
+    const lines = capture({
+      flaggedCount: 2,
+      newCount: 1,
+      checkedCount: 7,
+      unregisteredCount: 0,
+    });
+    expect(lines).toEqual([
+      "viewlens.participant_silence.flagged:2|g",
+      "viewlens.participant_silence.new:1|g",
+      "viewlens.participant_silence.checked:7|g",
+      "viewlens.participant_silence.unregistered:0|g",
+    ]);
+    expect(Object.values(GAUGES)).toHaveLength(4);
+  });
+
+  it("실제 DB 결과로 만든 메트릭 줄에 anonymousId·participantCode·지문이 없다", () => {
+    const db = createTestDb();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const now = Date.now();
+      insertParticipant(db, {
+        anonymousId: "sensitive-anon-id",
+        participantCode: "SECRET-CODE-1",
+        groupCode: "EXP",
+        installDate: new Date(now - 4.5 * DAY).toISOString(),
+      });
+      insertIssuedCode(db, "UNREG-CODE-1", "EXP");
+
+      const text = capture(run(db, { now })).join("\n");
+      for (const secret of [
+        "sensitive-anon-id",
+        "SECRET-CODE-1",
+        "UNREG-CODE-1",
+        sha10("sensitive-anon-id"),
+        sha10("SECRET-CODE-1"),
+        sha10("UNREG-CODE-1"),
+      ]) {
+        expect(text).not.toContain(secret);
+      }
+      expect(text).not.toContain("|#");
     } finally {
       logSpy.mockRestore();
       db.close();

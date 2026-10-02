@@ -8,6 +8,7 @@
  * 알림: 결측 의심이 1명 이상이면 Healthchecks.io에 /fail, 0명이면 success를 보낸다.
  * 외부로는 인원수 본문만 보내고, 누구인지(지문·그룹·경과일)는 서버 monitoring.log에만 남긴다.
  * 실행 실패도 Down이 되므로 본문 첫머리("실행 실패:" / "결측 의심")로 구분한다.
+ * 같은 인원수를 Datadog gauge(태그 없음)로도 보내 추이를 보고, 신규가 생기면 Monitor가 알린다.
  *
  * 읽기 전용 — DB를 수정하지 않는다.
  *
@@ -22,6 +23,7 @@ const { fingerprint } = require("./fingerprint");
 const { TEST_CODES } = require("../routes/participant-recovery");
 const { TOTAL_DAYS } = require("../pipeline/study-constants");
 const { pingSuccess, pingFail } = require("../monitoring/healthchecks-ping");
+const { createDogStatsd } = require("../monitoring/dogstatsd");
 
 const PING_ENV_VAR = "PARTICIPANT_SILENCE_PING_URL";
 // 1차 파일럿 활동 간격 분포(참여자별 최대 간격)로 정한 값. 근거는 관측체계 P00·1 기록 문서.
@@ -268,6 +270,20 @@ function reportToHealthchecks(
   return ping.pingSuccess(PING_ENV_VAR, { method: "POST", body });
 }
 
+const GAUGES = {
+  flaggedCount: "viewlens.participant_silence.flagged",
+  newCount: "viewlens.participant_silence.new",
+  checkedCount: "viewlens.participant_silence.checked",
+  unregisteredCount: "viewlens.participant_silence.unregistered",
+};
+
+/** @param {{send: Function}} client */
+function sendSilenceGauges(result, client) {
+  for (const [key, name] of Object.entries(GAUGES)) {
+    client.send(name, result[key], "g");
+  }
+}
+
 async function main() {
   let thresholdDays;
   try {
@@ -291,6 +307,10 @@ async function main() {
 
   await reportToHealthchecks(result);
   console.log(`[participant-silence] 완료 — ${formatSilenceSummary(result)}.`);
+
+  const metrics = createDogStatsd({ allowedTags: {} });
+  sendSilenceGauges(result, metrics);
+  await metrics.close();
 }
 
 if (require.main === module) {
@@ -308,6 +328,8 @@ module.exports = {
   parseThresholdArg,
   formatSilenceSummary,
   reportToHealthchecks,
+  sendSilenceGauges,
+  GAUGES,
   DEFAULT_THRESHOLD_DAYS,
   RUN_INTERVAL_DAYS,
 };
