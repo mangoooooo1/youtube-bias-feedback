@@ -26,11 +26,15 @@ const { pingSuccess, pingFail } = require("../monitoring/healthchecks-ping");
 const PING_ENV_VAR = "PARTICIPANT_SILENCE_PING_URL";
 // 1차 파일럿 활동 간격 분포(참여자별 최대 간격)로 정한 값. 근거는 관측체계 P00·1 기록 문서.
 const DEFAULT_THRESHOLD_DAYS = 4;
+// crontab 실행 주기(매일 1회). 신규 판정 구간의 폭이다.
+const RUN_INTERVAL_DAYS = 1;
 
 /**
  * 순수 판정 함수(DB 접근 없이 테스트 가능).
  * lastActivityMs: video_events/sessions 중 가장 최근 활동 시각(ms). 활동이 한 번도 없으면 null.
- * @returns {{flagged: boolean, reason?: string, daysSinceActivity?: number, everActive: boolean}}
+ * newlyFlagged: 직전 실행 이후 처음 임계값을 넘었는지. 매일 실행이면 각 결측은 한 번만 신규로 잡혀,
+ * 상태 파일 없이 "이미 Down인 동안 생긴 새 결측"을 셀 수 있다.
+ * @returns {{flagged: boolean, newlyFlagged?: boolean, reason?: string, daysSinceActivity?: number, everActive: boolean}}
  */
 function evaluateParticipantSilence({
   now,
@@ -38,6 +42,7 @@ function evaluateParticipantSilence({
   lastActivityMs,
   totalDays = TOTAL_DAYS,
   thresholdDays = DEFAULT_THRESHOLD_DAYS,
+  runIntervalDays = RUN_INTERVAL_DAYS,
 }) {
   const studyEndMs = installDateMs + totalDays * 86400000;
   if (now >= studyEndMs) {
@@ -55,7 +60,8 @@ function evaluateParticipantSilence({
   const daysSinceActivity = (now - referenceMs) / 86400000;
 
   if (daysSinceActivity >= thresholdDays) {
-    return { flagged: true, daysSinceActivity, everActive };
+    const newlyFlagged = daysSinceActivity < thresholdDays + runIntervalDays;
+    return { flagged: true, newlyFlagged, daysSinceActivity, everActive };
   }
   return { flagged: false, daysSinceActivity, everActive };
 }
@@ -208,6 +214,8 @@ function run(
           ? `  마지막 활동으로부터 : ${result.daysSinceActivity.toFixed(1)}일 경과`
           : `  활동 기록 자체가 없음(설치 후 ${result.daysSinceActivity.toFixed(1)}일 경과)`,
       );
+      if (result.newlyFlagged)
+        console.log("  신규(이번 실행에서 처음 임계값을 넘음)");
       console.log("");
     }
   }
@@ -218,6 +226,7 @@ function run(
 
   return {
     flaggedCount: flagged.length,
+    newCount: flagged.filter(({ result }) => result.newlyFlagged).length,
     checkedCount,
     ...codes,
   };
@@ -239,10 +248,11 @@ function parseThresholdArg(rawArg) {
 /** Healthchecks.io 본문. 인원수만 담는다(식별자를 받지 않는다). */
 function formatSilenceSummary({
   flaggedCount,
+  newCount,
   checkedCount,
   unregisteredCount,
 }) {
-  return `결측 의심 ${flaggedCount}명 / 검사 ${checkedCount}명 / 미등록 ${unregisteredCount}개`;
+  return `결측 의심 ${flaggedCount}명(신규 ${newCount}명) / 검사 ${checkedCount}명 / 미등록 ${unregisteredCount}개`;
 }
 
 /**
@@ -299,4 +309,5 @@ module.exports = {
   formatSilenceSummary,
   reportToHealthchecks,
   DEFAULT_THRESHOLD_DAYS,
+  RUN_INTERVAL_DAYS,
 };

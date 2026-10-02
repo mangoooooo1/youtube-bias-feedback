@@ -93,6 +93,57 @@ describe("evaluateParticipantSilence — 순수 판정 로직", () => {
     expect(result.daysSinceActivity).toBeCloseTo(4, 5);
   });
 
+  it("임계값을 넘은 지 실행 주기(1일) 안이면 신규로 표시한다", () => {
+    const now = 100 * DAY;
+    const result = evaluateParticipantSilence({
+      now,
+      installDateMs: now - 6 * DAY,
+      lastActivityMs: now - 4.5 * DAY,
+      thresholdDays: 4,
+    });
+    expect(result).toMatchObject({ flagged: true, newlyFlagged: true });
+  });
+
+  it("임계값 + 실행 주기를 넘으면 이미 지난 실행에서 잡힌 것으로 보고 신규가 아니다", () => {
+    const now = 100 * DAY;
+    const result = evaluateParticipantSilence({
+      now,
+      installDateMs: now - 8 * DAY,
+      lastActivityMs: now - 5 * DAY, // 정확히 4 + 1일 → 신규 아님(<)
+      thresholdDays: 4,
+    });
+    expect(result).toMatchObject({ flagged: true, newlyFlagged: false });
+  });
+
+  it("매일 실행하면 한 결측은 정확히 한 번만 신규로 잡힌다", () => {
+    const lastActivityMs = 0;
+    const runs = [2.3, 3.3, 4.3, 5.3, 6.3].map((d) =>
+      evaluateParticipantSilence({
+        now: d * DAY,
+        installDateMs: -1 * DAY,
+        lastActivityMs,
+        thresholdDays: 4,
+      }),
+    );
+    expect(runs.filter((r) => r.newlyFlagged)).toHaveLength(1);
+    expect(runs[2]).toMatchObject({ flagged: true, newlyFlagged: true });
+  });
+
+  it("활동이 없는 참여자도 설치일 기준으로 신규를 판정한다", () => {
+    const now = 100 * DAY;
+    const result = evaluateParticipantSilence({
+      now,
+      installDateMs: now - 4.2 * DAY,
+      lastActivityMs: null,
+      thresholdDays: 4,
+    });
+    expect(result).toMatchObject({
+      flagged: true,
+      newlyFlagged: true,
+      everActive: false,
+    });
+  });
+
   it("기본 임계값은 4일이다(1차 파일럿 활동 간격 분포 근거)", () => {
     expect(DEFAULT_THRESHOLD_DAYS).toBe(4);
   });
@@ -238,6 +289,7 @@ describe("run", () => {
 
     expect(result).toEqual({
       flaggedCount: 0,
+      newCount: 0,
       checkedCount: 1,
       issuedCount: 0,
       unregisteredCount: 0,
@@ -259,6 +311,7 @@ describe("run", () => {
 
     expect(result).toEqual({
       flaggedCount: 1,
+      newCount: 0, // 4일 경과 ≥ 임계값 3일 + 실행 주기 1일 → 이미 지난 실행에서 잡혔어야 할 사람
       checkedCount: 1,
       issuedCount: 0,
       unregisteredCount: 0,
@@ -268,6 +321,27 @@ describe("run", () => {
     expect(output).toContain(`participantCode(지문)=${sha10("QWE-K7M2")}`);
     expect(output).toContain(sha10("silent-user"));
     expect(output).toContain("마지막 활동으로부터");
+  });
+
+  it("이번 실행에서 처음 임계값을 넘은 참여자만 신규로 세고 로그에 표시한다", () => {
+    const now = Date.now();
+    insertParticipant(db, {
+      anonymousId: "new-silent",
+      groupCode: "EXP",
+      installDate: new Date(now - 6 * DAY).toISOString(),
+    });
+    insertVideoEvent(db, "new-silent", new Date(now - 4.5 * DAY).toISOString());
+    insertParticipant(db, {
+      anonymousId: "old-silent",
+      groupCode: "EXP",
+      installDate: new Date(now - 8 * DAY).toISOString(),
+    });
+    insertVideoEvent(db, "old-silent", new Date(now - 6 * DAY).toISOString());
+
+    const result = run(db, { now, thresholdDays: 4 });
+
+    expect(result).toMatchObject({ flaggedCount: 2, newCount: 1 });
+    expect(loggedOutput().match(/신규\(이번 실행/g)).toHaveLength(1);
   });
 
   it("연구 기간이 끝난 참여자는 조용해도 목록에서 제외한다", () => {
@@ -316,6 +390,7 @@ describe("run", () => {
 
     expect(result).toEqual({
       flaggedCount: 0,
+      newCount: 0,
       checkedCount: 0,
       issuedCount: 0,
       unregisteredCount: 0,
@@ -461,7 +536,12 @@ describe("미등록 발급 코드 — 등록 자체가 안 된 참여자를 찾�
 });
 
 describe("Healthchecks 본문과 ping 정책 — 외부로는 인원수만", () => {
-  const SUMMARY = { flaggedCount: 2, checkedCount: 7, unregisteredCount: 1 };
+  const SUMMARY = {
+    flaggedCount: 2,
+    newCount: 1,
+    checkedCount: 7,
+    unregisteredCount: 1,
+  };
 
   function fakePing() {
     return {
@@ -470,10 +550,10 @@ describe("Healthchecks 본문과 ping 정책 — 외부로는 인원수만", () 
     };
   }
 
-  it("본문은 숫자 3개만 담는다", () => {
+  it("본문은 인원수 4개만 담는다", () => {
     const body = formatSilenceSummary(SUMMARY);
-    expect(body).toBe("결측 의심 2명 / 검사 7명 / 미등록 1개");
-    expect(body.match(/\d+/g)).toEqual(["2", "7", "1"]);
+    expect(body).toBe("결측 의심 2명(신규 1명) / 검사 7명 / 미등록 1개");
+    expect(body.match(/\d+/g)).toEqual(["2", "1", "7", "1"]);
   });
 
   it("결측 의심이 1명 이상이면 fail을 인원수 본문과 함께 보낸다", async () => {
@@ -482,7 +562,7 @@ describe("Healthchecks 본문과 ping 정책 — 외부로는 인원수만", () 
     expect(ping.pingSuccess).not.toHaveBeenCalled();
     expect(ping.pingFail).toHaveBeenCalledWith(
       "PARTICIPANT_SILENCE_PING_URL",
-      "결측 의심 2명 / 검사 7명 / 미등록 1개",
+      "결측 의심 2명(신규 1명) / 검사 7명 / 미등록 1개",
     );
   });
 
@@ -492,7 +572,10 @@ describe("Healthchecks 본문과 ping 정책 — 외부로는 인원수만", () 
     expect(ping.pingFail).not.toHaveBeenCalled();
     expect(ping.pingSuccess).toHaveBeenCalledWith(
       "PARTICIPANT_SILENCE_PING_URL",
-      { method: "POST", body: "결측 의심 0명 / 검사 7명 / 미등록 1개" },
+      {
+        method: "POST",
+        body: "결측 의심 0명(신규 1명) / 검사 7명 / 미등록 1개",
+      },
     );
   });
 
@@ -523,7 +606,7 @@ describe("Healthchecks 본문과 ping 정책 — 외부로는 인원수만", () 
       ]) {
         expect(body).not.toContain(secret);
       }
-      expect(body).toBe("결측 의심 1명 / 검사 1명 / 미등록 1개");
+      expect(body).toBe("결측 의심 1명(신규 0명) / 검사 1명 / 미등록 1개");
     } finally {
       logSpy.mockRestore();
       db.close();
