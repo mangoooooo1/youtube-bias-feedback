@@ -49,6 +49,18 @@ function fail(
 }
 
 /**
+ * 스택을 로그 한 줄 끝에 붙일 문자열로 만든다. JSON 이스케이프로 줄바꿈을 \n 문자로 바꿔
+ * Datadog에서 한 예외가 여러 로그로 흩어지지 않게 하고, 스택 속 문자열의 줄 위조도 막는다.
+ * @param {unknown} err
+ * @returns {string} 스택이 없으면 빈 문자열
+ */
+function formatStack(err) {
+  return err instanceof Error && err.stack
+    ? ` stack=${JSON.stringify(err.stack)}`
+    : "";
+}
+
+/**
  * Express 에러 핸들링 미들웨어. err에 담긴 status/code/message/detail을 fail() 응답으로 변환한다.
  * next는 사용하지 않지만 Express가 인자 개수(4개)로 에러 핸들러 미들웨어를 판별하므로 시그니처에서 제거할 수 없다.
  * @param {Error & { status?: number, code?: string, detail?: * }} err - 발생한 에러 객체
@@ -61,13 +73,17 @@ function errorHandler(err, req, res, _next) {
   const who = req.body?.anonymousId
     ? ` anonymousId=${JSON.stringify(req.body.anonymousId)}`
     : "";
-  console.error(`[Error] ${req.method} ${req.path} : ${err.message}${who}`);
-
   const status = err.status || 500;
+  // 4xx는 예상된 입력 오류라 스택이 잡음이다. 예상 못 한 5xx만 남긴다.
+  const stack = status >= 500 ? formatStack(err) : "";
+  console.error(
+    `[Error] ${req.method} ${req.path} : ${err.message}${who}${stack}`,
+  );
+
   const code = err.code || ERROR_CODES.INTERNAL_SERVER_ERROR;
   const message = err.message || "서버 오류가 발생했습니다.";
 
   return fail(res, status, code, message, err.detail || null);
 }
 
-module.exports = { success, fail, errorHandler, ERROR_CODES };
+module.exports = { success, fail, errorHandler, formatStack, ERROR_CODES };

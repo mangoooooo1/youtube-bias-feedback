@@ -3,8 +3,14 @@ import {
   success,
   fail,
   errorHandler,
+  formatStack,
   ERROR_CODES,
 } from "../../middleware/responseHandler.js";
+
+// 500 응답 로그는 끝에 스택이 붙으므로 그 앞부분만 비교한다
+function withoutStack(line) {
+  return line.split(" stack=")[0];
+}
 
 function createMockRes() {
   const res = {
@@ -162,7 +168,7 @@ describe("errorHandler", () => {
 
     errorHandler(new Error("DB 오류"), req, res, vi.fn());
 
-    expect(consoleSpy).toHaveBeenCalledWith(
+    expect(withoutStack(consoleSpy.mock.calls[0][0])).toBe(
       '[Error] POST /api/sessions : DB 오류 anonymousId="abc-123"',
     );
 
@@ -180,7 +186,7 @@ describe("errorHandler", () => {
 
     errorHandler(new Error("DB 오류"), req, res, vi.fn());
 
-    expect(consoleSpy).toHaveBeenCalledWith(
+    expect(withoutStack(consoleSpy.mock.calls[0][0])).toBe(
       '[Error] POST /api/sessions : DB 오류 anonymousId="x\\n[Error] 위조된 줄"',
     );
 
@@ -192,12 +198,63 @@ describe("errorHandler", () => {
     const req = { method: "POST", path: "/api/sessions" };
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    errorHandler(new Error("잘못된 JSON"), req, res, vi.fn());
+    // body-parser의 JSON 파싱 실패는 status 400이라 스택이 붙지 않는다
+    const err = Object.assign(new Error("잘못된 JSON"), { status: 400 });
+
+    errorHandler(err, req, res, vi.fn());
 
     expect(consoleSpy).toHaveBeenCalledWith(
       "[Error] POST /api/sessions : 잘못된 JSON",
     );
 
     consoleSpy.mockRestore();
+  });
+
+  it("500 응답이면 스택을 줄바꿈 없이 한 줄로 끝에 붙인다", () => {
+    const res = createMockRes();
+    const req = { method: "POST", path: "/api/sessions", body: {} };
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const err = new Error("DB 오류");
+
+    errorHandler(err, req, res, vi.fn());
+
+    const line = consoleSpy.mock.calls[0][0];
+    expect(line).not.toContain("\n");
+    expect(line).toBe(
+      `[Error] POST /api/sessions : DB 오류 stack=${JSON.stringify(err.stack)}`,
+    );
+
+    consoleSpy.mockRestore();
+  });
+
+  it("4xx 응답이면 스택을 남기지 않는다(예상된 입력 오류)", () => {
+    const res = createMockRes();
+    const req = { method: "POST", path: "/api/sessions" };
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const err = Object.assign(new Error("참여자 없음"), { status: 404 });
+
+    errorHandler(err, req, res, vi.fn());
+
+    expect(consoleSpy.mock.calls[0][0]).not.toContain("stack=");
+
+    consoleSpy.mockRestore();
+  });
+});
+
+describe("formatStack — 전역 예외 핸들러와 같이 쓰는 스택 형식", () => {
+  it("Error가 아니거나 스택이 없으면 빈 문자열이다", () => {
+    expect(formatStack("문자열 reject")).toBe("");
+    expect(formatStack(undefined)).toBe("");
+    const noStack = new Error("x");
+    noStack.stack = undefined;
+    expect(formatStack(noStack)).toBe("");
+  });
+
+  it("스택 속 줄바꿈이 이스케이프되어 다른 로그 줄을 위조할 수 없다", () => {
+    const err = new Error("x");
+    err.stack = "Error: x\n[Error] 위조된 줄";
+    const suffix = formatStack(err);
+    expect(suffix).not.toContain("\n");
+    expect(suffix).toBe(' stack="Error: x\\n[Error] 위조된 줄"');
   });
 });

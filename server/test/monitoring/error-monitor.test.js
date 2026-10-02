@@ -220,6 +220,14 @@ describe("summarizeAlertLine — 외부 알림에는 안전한 항목만 남긴�
     ).toBe("[Error] POST");
   });
 
+  it("스택이 붙은 에러 로그도 스택 없이 접두사·메서드만 남긴다", () => {
+    expect(
+      summarizeAlertLine(
+        '[Error] POST /api/sessions : DB 오류 stack="Error: DB 오류\\n    at handler (/home/ubuntu/youtube-bias-feedback/server/routes/sessions.js:120:11)"',
+      ),
+    ).toBe("[Error] POST");
+  });
+
   it("외부 API 실패는 상태 코드를 남긴다", () => {
     expect(summarizeAlertLine("[youtube] API 오류: 403")).toBe(
       "[youtube] API 오류: 403",
