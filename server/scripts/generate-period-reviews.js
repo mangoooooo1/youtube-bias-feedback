@@ -117,7 +117,7 @@ async function processPeriod({
   period,
   allSessions,
   allEvents,
-  insertPeriodReview,
+  savePeriodReview,
 }) {
   const sessionsInRange = allSessions.filter((s) =>
     inRange(
@@ -188,7 +188,7 @@ async function processPeriod({
     });
   }
 
-  insertPeriodReview.run({
+  savePeriodReview({
     anonymousId,
     periodIndex: period.periodIndex,
     periodStart: period.periodStart,
@@ -268,6 +268,22 @@ async function run(db, apiKey, { recordMetric } = {}) {
        @weightedEntropy, @validVideoCount, @review, @reviewTopic, @source,
        @promptVersion, @llmStatus, @failureReason, @geminiMs, @generatedAt)
   `);
+  const insertPeriodReviewVersion = db.prepare(`
+    INSERT INTO period_review_versions
+      (anonymousId, periodIndex, periodStart, periodEnd, isBaseline, sessionCount,
+       videoCount, categoryDistribution, entropy, weightedCategoryDistribution,
+       weightedEntropy, validVideoCount, review, reviewTopic, source,
+       promptVersion, llmStatus, failureReason, geminiMs, generatedAt)
+    VALUES
+      (@anonymousId, @periodIndex, @periodStart, @periodEnd, @isBaseline, @sessionCount,
+       @videoCount, @categoryDistribution, @entropy, @weightedCategoryDistribution,
+       @weightedEntropy, @validVideoCount, @review, @reviewTopic, @source,
+       @promptVersion, @llmStatus, @failureReason, @geminiMs, @generatedAt)
+  `);
+  const savePeriodReview = db.transaction((row) => {
+    insertPeriodReview.run(row);
+    insertPeriodReviewVersion.run(row);
+  });
 
   const participants = selectParticipants.all(...ELIGIBLE_GROUPS);
   let created = 0;
@@ -315,7 +331,7 @@ async function run(db, apiKey, { recordMetric } = {}) {
           period,
           allSessions,
           allEvents,
-          insertPeriodReview,
+          savePeriodReview,
         });
         if (llmStatus === "success") created++;
         // failureReason이 있으면 Gemini를 실제로 호출했다가 실패한 것(세션이 없어
