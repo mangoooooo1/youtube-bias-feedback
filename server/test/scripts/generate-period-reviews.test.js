@@ -56,6 +56,29 @@ function createTestDb() {
     );
     CREATE UNIQUE INDEX idx_period_reviews_participant_period
       ON period_reviews(anonymousId, periodIndex);
+    CREATE TABLE period_review_versions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      anonymousId TEXT NOT NULL,
+      periodIndex INTEGER NOT NULL,
+      periodStart TEXT NOT NULL,
+      periodEnd TEXT NOT NULL,
+      isBaseline INTEGER NOT NULL,
+      sessionCount INTEGER,
+      videoCount INTEGER,
+      categoryDistribution TEXT,
+      entropy REAL,
+      weightedEntropy REAL,
+      weightedCategoryDistribution TEXT,
+      validVideoCount INTEGER,
+      review TEXT,
+      reviewTopic TEXT,
+      source TEXT,
+      promptVersion TEXT,
+      llmStatus TEXT,
+      failureReason TEXT,
+      geminiMs INTEGER,
+      generatedAt TEXT NOT NULL
+    );
   `);
   return db;
 }
@@ -393,6 +416,27 @@ describe("generate-period-reviews.js — run()", () => {
     expect(indexes).toEqual([1, 2, 3]);
   });
 
+  it("이력 기록이 실패하면 최신본도 저장하지 않는다(한 트랜잭션)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run("tx-user", INSTALL_DATE);
+    // 이력 INSERT만 실패하게 만든다
+    db.exec(`
+      CREATE TRIGGER fail_version_insert BEFORE INSERT ON period_review_versions
+      BEGIN SELECT RAISE(ABORT, 'version insert failed'); END;
+    `);
+
+    const summary = await run(db, "fake-key");
+
+    const latest = db
+      .prepare("SELECT COUNT(*) AS c FROM period_reviews WHERE anonymousId = ?")
+      .get("tx-user").c;
+    expect(latest).toBe(0);
+    // 실패한 기간은 처리 실패로 집계돼 cron이 실패로 끝난다
+    expect(summary.skipped).toBe(3);
+  });
+
   it("Gemini 호출 실패 시 fallback으로 대체 저장하고 failureReason을 기록한다", async () => {
     db.prepare(
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
@@ -514,6 +558,13 @@ describe("generate-period-reviews.js — run()", () => {
         )
         .get("locked-success-user");
       expect(row.llmStatus).toBe("success");
+      // 다시 생성하지 않았으니 이력도 1건이다
+      const versions = db
+        .prepare(
+          "SELECT COUNT(*) AS c FROM period_review_versions WHERE anonymousId = ? AND periodIndex = 1",
+        )
+        .get("locked-success-user").c;
+      expect(versions).toBe(1);
     });
 
     it("fallback 기간은 periodEnd로부터 3일 이내면 재시도해 성공으로 갱신될 수 있다", async () => {
@@ -569,6 +620,16 @@ describe("generate-period-reviews.js — run()", () => {
         )
         .all("retry-user");
       expect(rows.length).toBe(1);
+
+      // 참여자가 먼저 봤을 수 있는 fallback 문장도 이력에는 남아 있어야 한다
+      const versions = db
+        .prepare(
+          "SELECT llmStatus, review FROM period_review_versions WHERE anonymousId = ? AND periodIndex = 1 ORDER BY generatedAt, id",
+        )
+        .all("retry-user");
+      expect(versions.map((v) => v.llmStatus)).toEqual(["fallback", "success"]);
+      expect(versions[1].review).toBe("복구된 리뷰");
+      expect(versions[0].review).not.toBe("복구된 리뷰");
     });
 
     it("fallback 기간이 재시도 기한(periodEnd+3일)을 지나면 더 이상 재시도하지 않는다", async () => {

@@ -61,3 +61,64 @@ describe("addColumn", () => {
     );
   });
 });
+
+describe("period_review_versions — 기간 리뷰 생성 이력(append-only)", () => {
+  function upsertLatest(anonymousId, { review, llmStatus, generatedAt }) {
+    db.prepare(
+      `INSERT OR REPLACE INTO period_reviews
+         (anonymousId, periodIndex, periodStart, periodEnd, isBaseline, review, llmStatus, generatedAt)
+       VALUES (?, 1, '2026-06-01', '2026-06-04', 1, ?, ?, ?)`,
+    ).run(anonymousId, review, llmStatus, generatedAt);
+  }
+
+  function versions(anonymousId) {
+    return db
+      .prepare(
+        "SELECT review, llmStatus, generatedAt FROM period_review_versions WHERE anonymousId = ? ORDER BY generatedAt",
+      )
+      .all(anonymousId);
+  }
+
+  it("이력에 없는 최신본을 옮기고, 여러 번 기동해도 중복으로 넣지 않는다", () => {
+    upsertLatest("backfill-user", {
+      review: "기존 리뷰",
+      llmStatus: "success",
+      generatedAt: "2026-06-05T04:00:00.000Z",
+    });
+
+    initializeDB();
+    initializeDB();
+
+    expect(versions("backfill-user")).toEqual([
+      {
+        review: "기존 리뷰",
+        llmStatus: "success",
+        generatedAt: "2026-06-05T04:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("최신본이 덮어써져도 이전 버전은 이력에 남는다", () => {
+    upsertLatest("replaced-user", {
+      review: "fallback 문장",
+      llmStatus: "fallback",
+      generatedAt: "2026-06-05T04:00:00.000Z",
+    });
+    initializeDB();
+    upsertLatest("replaced-user", {
+      review: "복구된 리뷰",
+      llmStatus: "success",
+      generatedAt: "2026-06-06T04:00:00.000Z",
+    });
+    initializeDB();
+
+    const latest = db
+      .prepare("SELECT COUNT(*) AS c FROM period_reviews WHERE anonymousId = ?")
+      .get("replaced-user").c;
+    expect(latest).toBe(1);
+    expect(versions("replaced-user").map((v) => v.review)).toEqual([
+      "fallback 문장",
+      "복구된 리뷰",
+    ]);
+  });
+});
