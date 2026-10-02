@@ -7,6 +7,8 @@ import {
   collectParticipantActivity,
   collectUnregisteredCodes,
   parseThresholdArg,
+  formatSilenceSummary,
+  reportToHealthchecks,
   DEFAULT_THRESHOLD_DAYS,
 } from "../../scripts/participant-silence-report.js";
 
@@ -91,8 +93,8 @@ describe("evaluateParticipantSilence — 순수 판정 로직", () => {
     expect(result.daysSinceActivity).toBeCloseTo(4, 5);
   });
 
-  it("기본 임계값은 3일이다", () => {
-    expect(DEFAULT_THRESHOLD_DAYS).toBe(3);
+  it("기본 임계값은 4일이다(1차 파일럿 활동 간격 분포 근거)", () => {
+    expect(DEFAULT_THRESHOLD_DAYS).toBe(4);
   });
 });
 
@@ -280,6 +282,8 @@ describe("run", () => {
     const result = run(db, { now, thresholdDays: 3 });
 
     expect(result.flaggedCount).toBe(0);
+    // 판정하지 않은 사람은 "검사" 인원에도 넣지 않는다
+    expect(result.checkedCount).toBe(0);
   });
 
   it("출력에 원본 anonymousId/participantCode가 그대로 노출되지 않는다", () => {
@@ -453,5 +457,76 @@ describe("미등록 발급 코드 — 등록 자체가 안 된 참여자를 찾�
     expect(collectUnregisteredCodes(db)).toEqual([
       { code: "ASD-BBBB", groupCode: "CON" },
     ]);
+  });
+});
+
+describe("Healthchecks 본문과 ping 정책 — 외부로는 인원수만", () => {
+  const SUMMARY = { flaggedCount: 2, checkedCount: 7, unregisteredCount: 1 };
+
+  function fakePing() {
+    return {
+      pingSuccess: vi.fn(async () => ({ ok: true })),
+      pingFail: vi.fn(async () => ({ ok: true })),
+    };
+  }
+
+  it("본문은 숫자 3개만 담는다", () => {
+    const body = formatSilenceSummary(SUMMARY);
+    expect(body).toBe("결측 의심 2명 / 검사 7명 / 미등록 1개");
+    expect(body.match(/\d+/g)).toEqual(["2", "7", "1"]);
+  });
+
+  it("결측 의심이 1명 이상이면 fail을 인원수 본문과 함께 보낸다", async () => {
+    const ping = fakePing();
+    await reportToHealthchecks(SUMMARY, { ping });
+    expect(ping.pingSuccess).not.toHaveBeenCalled();
+    expect(ping.pingFail).toHaveBeenCalledWith(
+      "PARTICIPANT_SILENCE_PING_URL",
+      "결측 의심 2명 / 검사 7명 / 미등록 1개",
+    );
+  });
+
+  it("0명이면 success를 인원수 본문과 함께 보낸다", async () => {
+    const ping = fakePing();
+    await reportToHealthchecks({ ...SUMMARY, flaggedCount: 0 }, { ping });
+    expect(ping.pingFail).not.toHaveBeenCalled();
+    expect(ping.pingSuccess).toHaveBeenCalledWith(
+      "PARTICIPANT_SILENCE_PING_URL",
+      { method: "POST", body: "결측 의심 0명 / 검사 7명 / 미등록 1개" },
+    );
+  });
+
+  it("실제 DB 결과로 만든 본문에 anonymousId·participantCode·지문이 없다", async () => {
+    const db = createTestDb();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const now = Date.now();
+      insertParticipant(db, {
+        anonymousId: "sensitive-anon-id",
+        participantCode: "SECRET-CODE-1",
+        groupCode: "EXP",
+        installDate: new Date(now - 5 * DAY).toISOString(),
+      });
+      insertIssuedCode(db, "UNREG-CODE-1", "EXP");
+      const ping = fakePing();
+
+      await reportToHealthchecks(run(db, { now }), { ping });
+
+      const body = ping.pingFail.mock.calls[0][1];
+      for (const secret of [
+        "sensitive-anon-id",
+        "SECRET-CODE-1",
+        "UNREG-CODE-1",
+        sha10("sensitive-anon-id"),
+        sha10("SECRET-CODE-1"),
+        sha10("UNREG-CODE-1"),
+      ]) {
+        expect(body).not.toContain(secret);
+      }
+      expect(body).toBe("결측 의심 1명 / 검사 1명 / 미등록 1개");
+    } finally {
+      logSpy.mockRestore();
+      db.close();
+    }
   });
 });
