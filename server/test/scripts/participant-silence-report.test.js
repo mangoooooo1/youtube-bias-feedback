@@ -7,8 +7,13 @@ import {
   collectParticipantActivity,
   collectUnregisteredCodes,
   parseThresholdArg,
+  formatSilenceSummary,
+  reportToHealthchecks,
+  sendSilenceGauges,
+  GAUGES,
   DEFAULT_THRESHOLD_DAYS,
 } from "../../scripts/participant-silence-report.js";
+import { formatMetric } from "../../monitoring/dogstatsd.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const TOTAL_DAYS = 12; // server/pipeline/study-constants.js의 값과 동일
@@ -91,8 +96,59 @@ describe("evaluateParticipantSilence — 순수 판정 로직", () => {
     expect(result.daysSinceActivity).toBeCloseTo(4, 5);
   });
 
-  it("기본 임계값은 3일이다", () => {
-    expect(DEFAULT_THRESHOLD_DAYS).toBe(3);
+  it("임계값을 넘은 지 실행 주기(1일) 안이면 신규로 표시한다", () => {
+    const now = 100 * DAY;
+    const result = evaluateParticipantSilence({
+      now,
+      installDateMs: now - 6 * DAY,
+      lastActivityMs: now - 4.5 * DAY,
+      thresholdDays: 4,
+    });
+    expect(result).toMatchObject({ flagged: true, newlyFlagged: true });
+  });
+
+  it("임계값 + 실행 주기를 넘으면 이미 지난 실행에서 잡힌 것으로 보고 신규가 아니다", () => {
+    const now = 100 * DAY;
+    const result = evaluateParticipantSilence({
+      now,
+      installDateMs: now - 8 * DAY,
+      lastActivityMs: now - 5 * DAY, // 정확히 4 + 1일 → 신규 아님(<)
+      thresholdDays: 4,
+    });
+    expect(result).toMatchObject({ flagged: true, newlyFlagged: false });
+  });
+
+  it("매일 실행하면 한 결측은 정확히 한 번만 신규로 잡힌다", () => {
+    const lastActivityMs = 0;
+    const runs = [2.3, 3.3, 4.3, 5.3, 6.3].map((d) =>
+      evaluateParticipantSilence({
+        now: d * DAY,
+        installDateMs: -1 * DAY,
+        lastActivityMs,
+        thresholdDays: 4,
+      }),
+    );
+    expect(runs.filter((r) => r.newlyFlagged)).toHaveLength(1);
+    expect(runs[2]).toMatchObject({ flagged: true, newlyFlagged: true });
+  });
+
+  it("활동이 없는 참여자도 설치일 기준으로 신규를 판정한다", () => {
+    const now = 100 * DAY;
+    const result = evaluateParticipantSilence({
+      now,
+      installDateMs: now - 4.2 * DAY,
+      lastActivityMs: null,
+      thresholdDays: 4,
+    });
+    expect(result).toMatchObject({
+      flagged: true,
+      newlyFlagged: true,
+      everActive: false,
+    });
+  });
+
+  it("기본 임계값은 4일이다(1차 파일럿 활동 간격 분포 근거)", () => {
+    expect(DEFAULT_THRESHOLD_DAYS).toBe(4);
   });
 });
 
@@ -236,6 +292,7 @@ describe("run", () => {
 
     expect(result).toEqual({
       flaggedCount: 0,
+      newCount: 0,
       checkedCount: 1,
       issuedCount: 0,
       unregisteredCount: 0,
@@ -257,6 +314,7 @@ describe("run", () => {
 
     expect(result).toEqual({
       flaggedCount: 1,
+      newCount: 0, // 4일 경과 ≥ 임계값 3일 + 실행 주기 1일 → 이미 지난 실행에서 잡혔어야 할 사람
       checkedCount: 1,
       issuedCount: 0,
       unregisteredCount: 0,
@@ -266,6 +324,27 @@ describe("run", () => {
     expect(output).toContain(`participantCode(지문)=${sha10("QWE-K7M2")}`);
     expect(output).toContain(sha10("silent-user"));
     expect(output).toContain("마지막 활동으로부터");
+  });
+
+  it("이번 실행에서 처음 임계값을 넘은 참여자만 신규로 세고 로그에 표시한다", () => {
+    const now = Date.now();
+    insertParticipant(db, {
+      anonymousId: "new-silent",
+      groupCode: "EXP",
+      installDate: new Date(now - 6 * DAY).toISOString(),
+    });
+    insertVideoEvent(db, "new-silent", new Date(now - 4.5 * DAY).toISOString());
+    insertParticipant(db, {
+      anonymousId: "old-silent",
+      groupCode: "EXP",
+      installDate: new Date(now - 8 * DAY).toISOString(),
+    });
+    insertVideoEvent(db, "old-silent", new Date(now - 6 * DAY).toISOString());
+
+    const result = run(db, { now, thresholdDays: 4 });
+
+    expect(result).toMatchObject({ flaggedCount: 2, newCount: 1 });
+    expect(loggedOutput().match(/신규\(이번 실행/g)).toHaveLength(1);
   });
 
   it("연구 기간이 끝난 참여자는 조용해도 목록에서 제외한다", () => {
@@ -280,6 +359,8 @@ describe("run", () => {
     const result = run(db, { now, thresholdDays: 3 });
 
     expect(result.flaggedCount).toBe(0);
+    // 판정하지 않은 사람은 "검사" 인원에도 넣지 않는다
+    expect(result.checkedCount).toBe(0);
   });
 
   it("출력에 원본 anonymousId/participantCode가 그대로 노출되지 않는다", () => {
@@ -312,6 +393,7 @@ describe("run", () => {
 
     expect(result).toEqual({
       flaggedCount: 0,
+      newCount: 0,
       checkedCount: 0,
       issuedCount: 0,
       unregisteredCount: 0,
@@ -453,5 +535,142 @@ describe("미등록 발급 코드 — 등록 자체가 안 된 참여자를 찾�
     expect(collectUnregisteredCodes(db)).toEqual([
       { code: "ASD-BBBB", groupCode: "CON" },
     ]);
+  });
+});
+
+describe("Healthchecks 본문과 ping 정책 — 외부로는 인원수만", () => {
+  const SUMMARY = {
+    flaggedCount: 2,
+    newCount: 1,
+    checkedCount: 7,
+    unregisteredCount: 1,
+  };
+
+  function fakePing() {
+    return {
+      pingSuccess: vi.fn(async () => ({ ok: true })),
+      pingFail: vi.fn(async () => ({ ok: true })),
+    };
+  }
+
+  it("본문은 인원수 4개만 담는다", () => {
+    const body = formatSilenceSummary(SUMMARY);
+    expect(body).toBe("결측 의심 2명(신규 1명) / 검사 7명 / 미등록 1개");
+    expect(body.match(/\d+/g)).toEqual(["2", "1", "7", "1"]);
+  });
+
+  it("결측 의심이 1명 이상이면 fail을 인원수 본문과 함께 보낸다", async () => {
+    const ping = fakePing();
+    await reportToHealthchecks(SUMMARY, { ping });
+    expect(ping.pingSuccess).not.toHaveBeenCalled();
+    expect(ping.pingFail).toHaveBeenCalledWith(
+      "PARTICIPANT_SILENCE_PING_URL",
+      "결측 의심 2명(신규 1명) / 검사 7명 / 미등록 1개",
+    );
+  });
+
+  it("0명이면 success를 인원수 본문과 함께 보낸다", async () => {
+    const ping = fakePing();
+    await reportToHealthchecks({ ...SUMMARY, flaggedCount: 0 }, { ping });
+    expect(ping.pingFail).not.toHaveBeenCalled();
+    expect(ping.pingSuccess).toHaveBeenCalledWith(
+      "PARTICIPANT_SILENCE_PING_URL",
+      {
+        method: "POST",
+        body: "결측 의심 0명(신규 1명) / 검사 7명 / 미등록 1개",
+      },
+    );
+  });
+
+  it("실제 DB 결과로 만든 본문에 anonymousId·participantCode·지문이 없다", async () => {
+    const db = createTestDb();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const now = Date.now();
+      insertParticipant(db, {
+        anonymousId: "sensitive-anon-id",
+        participantCode: "SECRET-CODE-1",
+        groupCode: "EXP",
+        installDate: new Date(now - 5 * DAY).toISOString(),
+      });
+      insertIssuedCode(db, "UNREG-CODE-1", "EXP");
+      const ping = fakePing();
+
+      await reportToHealthchecks(run(db, { now }), { ping });
+
+      const body = ping.pingFail.mock.calls[0][1];
+      for (const secret of [
+        "sensitive-anon-id",
+        "SECRET-CODE-1",
+        "UNREG-CODE-1",
+        sha10("sensitive-anon-id"),
+        sha10("SECRET-CODE-1"),
+        sha10("UNREG-CODE-1"),
+      ]) {
+        expect(body).not.toContain(secret);
+      }
+      expect(body).toBe("결측 의심 1명(신규 0명) / 검사 1명 / 미등록 1개");
+    } finally {
+      logSpy.mockRestore();
+      db.close();
+    }
+  });
+});
+
+describe("Datadog gauge — 태그 없이 인원수만", () => {
+  function capture(result) {
+    const client = { send: vi.fn() };
+    sendSilenceGauges(result, client);
+    // 실제 전송 줄로 바꿔 본다. 허용 목록은 main()과 같은 빈 객체.
+    return client.send.mock.calls.map(([name, value, type, tags]) =>
+      formatMetric(name, value, type, tags, {}),
+    );
+  }
+
+  it("gauge 4개를 태그 없이 보낸다", () => {
+    const lines = capture({
+      flaggedCount: 2,
+      newCount: 1,
+      checkedCount: 7,
+      unregisteredCount: 0,
+    });
+    expect(lines).toEqual([
+      "viewlens.participant_silence.flagged:2|g",
+      "viewlens.participant_silence.new:1|g",
+      "viewlens.participant_silence.checked:7|g",
+      "viewlens.participant_silence.unregistered:0|g",
+    ]);
+    expect(Object.values(GAUGES)).toHaveLength(4);
+  });
+
+  it("실제 DB 결과로 만든 메트릭 줄에 anonymousId·participantCode·지문이 없다", () => {
+    const db = createTestDb();
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const now = Date.now();
+      insertParticipant(db, {
+        anonymousId: "sensitive-anon-id",
+        participantCode: "SECRET-CODE-1",
+        groupCode: "EXP",
+        installDate: new Date(now - 4.5 * DAY).toISOString(),
+      });
+      insertIssuedCode(db, "UNREG-CODE-1", "EXP");
+
+      const text = capture(run(db, { now })).join("\n");
+      for (const secret of [
+        "sensitive-anon-id",
+        "SECRET-CODE-1",
+        "UNREG-CODE-1",
+        sha10("sensitive-anon-id"),
+        sha10("SECRET-CODE-1"),
+        sha10("UNREG-CODE-1"),
+      ]) {
+        expect(text).not.toContain(secret);
+      }
+      expect(text).not.toContain("|#");
+    } finally {
+      logSpy.mockRestore();
+      db.close();
+    }
   });
 });

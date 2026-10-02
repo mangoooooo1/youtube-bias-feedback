@@ -2,11 +2,13 @@
 /**
  * 개별 참여자 결측(시청 활동 공백) 리포트
  *
- * "아직 연구 관찰 기간 중인" 참여자 중, 마지막 활동으로부터 임계값(기본 3일) 이상 지난 사람을 찾아 보고한다.
+ * "아직 연구 관찰 기간 중인" 참여자 중, 마지막 활동으로부터 임계값(기본 4일) 이상 지난 사람을 찾아 보고한다.
  * 연구 종료 시점(installDate + TOTAL_DAYS)이 지난 참여자는 조용해도 정상이므로 제외한다.
  *
- * 개별 참여자 비활성은 "연구 장애"라기보다 자연스러운 이탈일 수도 있어, 기존 모니터처럼
- * 매번 Healthchecks.io에 실패 신호를 보내지 않는다.
+ * 알림: 결측 의심이 1명 이상이면 Healthchecks.io에 /fail, 0명이면 success를 보낸다.
+ * 외부로는 인원수 본문만 보내고, 누구인지(지문·그룹·경과일)는 서버 monitoring.log에만 남긴다.
+ * 실행 실패도 Down이 되므로 본문 첫머리("실행 실패:" / "결측 의심")로 구분한다.
+ * 같은 인원수를 Datadog gauge(태그 없음)로도 보내 추이를 보고, 신규가 생기면 Monitor가 알린다.
  *
  * 읽기 전용 — DB를 수정하지 않는다.
  *
@@ -21,14 +23,20 @@ const { fingerprint } = require("./fingerprint");
 const { TEST_CODES } = require("../routes/participant-recovery");
 const { TOTAL_DAYS } = require("../pipeline/study-constants");
 const { pingSuccess, pingFail } = require("../monitoring/healthchecks-ping");
+const { createDogStatsd } = require("../monitoring/dogstatsd");
 
 const PING_ENV_VAR = "PARTICIPANT_SILENCE_PING_URL";
-const DEFAULT_THRESHOLD_DAYS = 3;
+// 1차 파일럿 활동 간격 분포(참여자별 최대 간격)로 정한 값. 근거는 관측체계 P00·1 기록 문서.
+const DEFAULT_THRESHOLD_DAYS = 4;
+// crontab 실행 주기(매일 1회). 신규 판정 구간의 폭이다.
+const RUN_INTERVAL_DAYS = 1;
 
 /**
  * 순수 판정 함수(DB 접근 없이 테스트 가능).
  * lastActivityMs: video_events/sessions 중 가장 최근 활동 시각(ms). 활동이 한 번도 없으면 null.
- * @returns {{flagged: boolean, reason?: string, daysSinceActivity?: number, everActive: boolean}}
+ * newlyFlagged: 직전 실행 이후 처음 임계값을 넘었는지. 매일 실행이면 각 결측은 한 번만 신규로 잡혀,
+ * 상태 파일 없이 "이미 Down인 동안 생긴 새 결측"을 셀 수 있다.
+ * @returns {{flagged: boolean, newlyFlagged?: boolean, reason?: string, daysSinceActivity?: number, everActive: boolean}}
  */
 function evaluateParticipantSilence({
   now,
@@ -36,6 +44,7 @@ function evaluateParticipantSilence({
   lastActivityMs,
   totalDays = TOTAL_DAYS,
   thresholdDays = DEFAULT_THRESHOLD_DAYS,
+  runIntervalDays = RUN_INTERVAL_DAYS,
 }) {
   const studyEndMs = installDateMs + totalDays * 86400000;
   if (now >= studyEndMs) {
@@ -53,7 +62,8 @@ function evaluateParticipantSilence({
   const daysSinceActivity = (now - referenceMs) / 86400000;
 
   if (daysSinceActivity >= thresholdDays) {
-    return { flagged: true, daysSinceActivity, everActive };
+    const newlyFlagged = daysSinceActivity < thresholdDays + runIntervalDays;
+    return { flagged: true, newlyFlagged, daysSinceActivity, everActive };
   }
   return { flagged: false, daysSinceActivity, everActive };
 }
@@ -160,6 +170,7 @@ function run(
   const rows = collectParticipantActivity(db);
 
   const flagged = [];
+  let checkedCount = 0;
   for (const row of rows) {
     const installDateMs = Date.parse(row.installDate);
     if (!Number.isFinite(installDateMs)) continue; // 손상된 값 — 이 리포트가 아니라 별도로 다룰 문제
@@ -178,6 +189,8 @@ function run(
       lastActivityMs,
       thresholdDays,
     });
+    if (result.reason === "study_ended") continue;
+    checkedCount += 1;
     if (result.flagged) {
       flagged.push({ row, result });
     }
@@ -185,11 +198,11 @@ function run(
 
   if (flagged.length === 0) {
     console.log(
-      `[participant-silence] 결측 의심 참여자 없음 — 연구 기간 중인 참여자 ${rows.length}명 확인, 임계값 ${thresholdDays}일.`,
+      `[participant-silence] 결측 의심 참여자 없음 — 연구 기간 중인 참여자 ${checkedCount}명 확인, 임계값 ${thresholdDays}일.`,
     );
   } else {
     console.log(
-      `[participant-silence] 결측 의심 참여자 ${flagged.length}명 발견(임계값 ${thresholdDays}일 이상 무활동, 연구 기간 중인 참여자 ${rows.length}명 중). ` +
+      `[participant-silence] 결측 의심 참여자 ${flagged.length}명 발견(임계값 ${thresholdDays}일 이상 무활동, 연구 기간 중인 참여자 ${checkedCount}명 중). ` +
         `아래 값은 원본이 아니라 일방향 해시(지문, 앞 10자)입니다 — 해당 지문에 대응하는 실제 참여자는 DB를 직접 조회해 확인하세요.\n`,
     );
     for (const { row, result } of flagged) {
@@ -203,6 +216,8 @@ function run(
           ? `  마지막 활동으로부터 : ${result.daysSinceActivity.toFixed(1)}일 경과`
           : `  활동 기록 자체가 없음(설치 후 ${result.daysSinceActivity.toFixed(1)}일 경과)`,
       );
+      if (result.newlyFlagged)
+        console.log("  신규(이번 실행에서 처음 임계값을 넘음)");
       console.log("");
     }
   }
@@ -213,7 +228,8 @@ function run(
 
   return {
     flaggedCount: flagged.length,
-    checkedCount: rows.length,
+    newCount: flagged.filter(({ result }) => result.newlyFlagged).length,
+    checkedCount,
     ...codes,
   };
 }
@@ -231,6 +247,43 @@ function parseThresholdArg(rawArg) {
   return parsed;
 }
 
+/** Healthchecks.io 본문. 인원수만 담는다(식별자를 받지 않는다). */
+function formatSilenceSummary({
+  flaggedCount,
+  newCount,
+  checkedCount,
+  unregisteredCount,
+}) {
+  return `결측 의심 ${flaggedCount}명(신규 ${newCount}명) / 검사 ${checkedCount}명 / 미등록 ${unregisteredCount}개`;
+}
+
+/**
+ * 결측 의심이 있으면 fail, 없으면 success를 보낸다. 둘 다 인원수 본문을 싣는다.
+ * Healthchecks.io는 상태가 바뀔 때만 메일을 보내므로 같은 사람이 계속 조용해도 매일 오지 않는다.
+ */
+function reportToHealthchecks(
+  result,
+  { ping = { pingSuccess, pingFail } } = {},
+) {
+  const body = formatSilenceSummary(result);
+  if (result.flaggedCount > 0) return ping.pingFail(PING_ENV_VAR, body);
+  return ping.pingSuccess(PING_ENV_VAR, { method: "POST", body });
+}
+
+const GAUGES = {
+  flaggedCount: "viewlens.participant_silence.flagged",
+  newCount: "viewlens.participant_silence.new",
+  checkedCount: "viewlens.participant_silence.checked",
+  unregisteredCount: "viewlens.participant_silence.unregistered",
+};
+
+/** @param {{send: Function}} client */
+function sendSilenceGauges(result, client) {
+  for (const [key, name] of Object.entries(GAUGES)) {
+    client.send(name, result[key], "g");
+  }
+}
+
 async function main() {
   let thresholdDays;
   try {
@@ -246,22 +299,18 @@ async function main() {
   try {
     result = run(db, { thresholdDays });
   } catch (err) {
-    // 결측 참여자 유무와 무관하게, 스크립트 실행 자체가 실패했다는 것과는 구분해서 알린다.
-    await pingFail(
-      PING_ENV_VAR,
-      `participant-silence-report 실행 실패: ${err.message}`,
-    );
+    await pingFail(PING_ENV_VAR, `실행 실패: ${err.message}`);
     throw err;
   } finally {
     db.close();
   }
 
-  // 개별 참여자 결측은 "연구 장애"가 아니라 정기적으로 사람이 검토할 참고 정보라, 결측 유무와
-  // 무관하게 "스크립트 자체가 정상 실행됐는지"만 ping한다(파일 상단 설명 참고).
-  await pingSuccess(PING_ENV_VAR);
-  console.log(
-    `[participant-silence] 완료 — 결측 의심 ${result.flaggedCount}명 / 검사 대상 ${result.checkedCount}명 / 미등록 코드 ${result.unregisteredCount}개.`,
-  );
+  await reportToHealthchecks(result);
+  console.log(`[participant-silence] 완료 — ${formatSilenceSummary(result)}.`);
+
+  const metrics = createDogStatsd({ allowedTags: {} });
+  sendSilenceGauges(result, metrics);
+  await metrics.close();
 }
 
 if (require.main === module) {
@@ -277,5 +326,10 @@ module.exports = {
   collectParticipantActivity,
   collectUnregisteredCodes,
   parseThresholdArg,
+  formatSilenceSummary,
+  reportToHealthchecks,
+  sendSilenceGauges,
+  GAUGES,
   DEFAULT_THRESHOLD_DAYS,
+  RUN_INTERVAL_DAYS,
 };
