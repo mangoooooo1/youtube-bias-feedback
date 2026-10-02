@@ -5,10 +5,12 @@
  * "아직 연구 관찰 기간 중인" 참여자 중, 마지막 활동으로부터 임계값(기본 4일) 이상 지난 사람을 찾아 보고한다.
  * 연구 종료 시점(installDate + TOTAL_DAYS)이 지난 참여자는 조용해도 정상이므로 제외한다.
  *
- * 알림: 결측 의심이 1명 이상이면 Healthchecks.io에 /fail, 0명이면 success를 보낸다.
- * 외부로는 인원수 본문만 보내고, 누구인지(지문·그룹·경과일)는 서버 monitoring.log에만 남긴다.
- * 실행 실패도 Down이 되므로 본문 첫머리("실행 실패:" / "결측 의심")로 구분한다.
- * 같은 인원수를 Datadog gauge(태그 없음)로도 보내 추이를 보고, 신규가 생기면 Monitor가 알린다.
+ * 알림 역할:
+ * - Healthchecks.io: 이 감지 자체가 매일 돌았는지만 본다. 실행이 끝나면 결측 유무와 무관하게
+ *   success(인원수 본문 포함), 실행이 실패하면 /fail. 참여자가 많으면 결측 의심 1명 이상이 평소
+ *   상태라, 결측으로 fail을 보내면 늘 Down이 되어 실행 실패·cron 중단 메일이 오지 않는다.
+ * - Datadog: 같은 인원수를 gauge(태그 없음)로 보내고, 신규 결측이 생기면 Monitor가 알린다.
+ * 외부로는 인원수만 보내고, 누구인지(지문·그룹·경과일)는 서버 monitoring.log에만 남긴다.
  *
  * 읽기 전용 — DB를 수정하지 않는다.
  *
@@ -257,17 +259,12 @@ function formatSilenceSummary({
   return `결측 의심 ${flaggedCount}명(신규 ${newCount}명) / 검사 ${checkedCount}명 / 미등록 ${unregisteredCount}개`;
 }
 
-/**
- * 결측 의심이 있으면 fail, 없으면 success를 보낸다. 둘 다 인원수 본문을 싣는다.
- * Healthchecks.io는 상태가 바뀔 때만 메일을 보내므로 같은 사람이 계속 조용해도 매일 오지 않는다.
- */
-function reportToHealthchecks(
-  result,
-  { ping = { pingSuccess, pingFail } } = {},
-) {
-  const body = formatSilenceSummary(result);
-  if (result.flaggedCount > 0) return ping.pingFail(PING_ENV_VAR, body);
-  return ping.pingSuccess(PING_ENV_VAR, { method: "POST", body });
+/** 실행 완료를 알린다. 결측 의심이 있어도 success다(결측 알림은 Datadog 몫, 파일 상단 참고). */
+function reportToHealthchecks(result, { ping = { pingSuccess } } = {}) {
+  return ping.pingSuccess(PING_ENV_VAR, {
+    method: "POST",
+    body: formatSilenceSummary(result),
+  });
 }
 
 const GAUGES = {

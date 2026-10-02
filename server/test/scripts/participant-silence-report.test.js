@@ -559,28 +559,22 @@ describe("Healthchecks 본문과 ping 정책 — 외부로는 인원수만", () 
     expect(body.match(/\d+/g)).toEqual(["2", "1", "7", "1"]);
   });
 
-  it("결측 의심이 1명 이상이면 fail을 인원수 본문과 함께 보낸다", async () => {
-    const ping = fakePing();
-    await reportToHealthchecks(SUMMARY, { ping });
-    expect(ping.pingSuccess).not.toHaveBeenCalled();
-    expect(ping.pingFail).toHaveBeenCalledWith(
-      "PARTICIPANT_SILENCE_PING_URL",
-      "결측 의심 2명(신규 1명) / 검사 7명 / 미등록 1개",
-    );
-  });
-
-  it("0명이면 success를 인원수 본문과 함께 보낸다", async () => {
-    const ping = fakePing();
-    await reportToHealthchecks({ ...SUMMARY, flaggedCount: 0 }, { ping });
-    expect(ping.pingFail).not.toHaveBeenCalled();
-    expect(ping.pingSuccess).toHaveBeenCalledWith(
-      "PARTICIPANT_SILENCE_PING_URL",
-      {
-        method: "POST",
-        body: "결측 의심 0명(신규 1명) / 검사 7명 / 미등록 1개",
-      },
-    );
-  });
+  // 결측으로 fail을 보내면 참여자가 많을 때 늘 Down이라 실행 실패·cron 중단 메일이 묻힌다
+  it.each([
+    [0, "결측 의심 0명(신규 1명) / 검사 7명 / 미등록 1개"],
+    [2, "결측 의심 2명(신규 1명) / 검사 7명 / 미등록 1개"],
+  ])(
+    "결측 의심 %i명이어도 fail이 아니라 success를 인원수 본문과 함께 보낸다",
+    async (flaggedCount, body) => {
+      const ping = fakePing();
+      await reportToHealthchecks({ ...SUMMARY, flaggedCount }, { ping });
+      expect(ping.pingFail).not.toHaveBeenCalled();
+      expect(ping.pingSuccess).toHaveBeenCalledWith(
+        "PARTICIPANT_SILENCE_PING_URL",
+        { method: "POST", body },
+      );
+    },
+  );
 
   it("실제 DB 결과로 만든 본문에 anonymousId·participantCode·지문이 없다", async () => {
     const db = createTestDb();
@@ -598,7 +592,7 @@ describe("Healthchecks 본문과 ping 정책 — 외부로는 인원수만", () 
 
       await reportToHealthchecks(run(db, { now }), { ping });
 
-      const body = ping.pingFail.mock.calls[0][1];
+      const { body } = ping.pingSuccess.mock.calls[0][1];
       for (const secret of [
         "sensitive-anon-id",
         "SECRET-CODE-1",
