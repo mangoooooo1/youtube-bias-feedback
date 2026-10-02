@@ -32,6 +32,7 @@ db.pragma("foreign_keys = ON");
 function initializeDB() {
   try {
     execSchema();
+    backfillPeriodReviewVersions();
   } catch (err) {
     // 이 저장소는 addColumn()으로 기존 DB를 소급 마이그레이션하는 대신, 스키마 변경마다
     // DB 파일을 백업 후 삭제하고 재기동해 새로 만드는 것을 전제로 한다. 그 사전 절차를 잊고 예전
@@ -242,6 +243,38 @@ function execSchema() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_period_reviews_participant_period
       ON period_reviews(anonymousId, periodIndex);
 
+    -- 기간 리뷰 생성 이력 (append-only — UPDATE·DELETE 금지)
+    -- period_reviews는 fallback 재시도 때 REPLACE로 덮어써서 참여자가 이미 본 문장이 사라진다.
+    -- 생성할 때마다 여기에 한 행씩 쌓아 "그 시점에 무엇이 보였나"를 재구성할 수 있게 한다.
+    -- 시각 t에 보이던 버전 = generatedAt <= t 인 가장 최근 행. 같은 기간에 여러 행이 있으므로 UNIQUE를 걸지 않는다.
+    CREATE TABLE IF NOT EXISTS period_review_versions (
+      id                           INTEGER PRIMARY KEY AUTOINCREMENT,
+      anonymousId                  TEXT    NOT NULL,
+      periodIndex                  INTEGER NOT NULL,
+      periodStart                  TEXT    NOT NULL,
+      periodEnd                    TEXT    NOT NULL,
+      isBaseline                   INTEGER NOT NULL,
+      sessionCount                 INTEGER,
+      videoCount                   INTEGER,
+      categoryDistribution         TEXT,
+      entropy                      REAL,
+      weightedEntropy              REAL,
+      weightedCategoryDistribution TEXT,
+      validVideoCount              INTEGER,
+      review                       TEXT,
+      reviewTopic                  TEXT,
+      source                       TEXT,
+      promptVersion                TEXT,
+      llmStatus                    TEXT,
+      failureReason                TEXT,
+      geminiMs                     INTEGER,
+      generatedAt                  TEXT    NOT NULL,
+      createdAt                    TEXT    DEFAULT (datetime('now'))  -- 이관된 행은 이관 시각이라 generatedAt보다 늦다
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_period_review_versions_participant_period
+      ON period_review_versions(anonymousId, periodIndex, generatedAt);
+
     -- "오늘" 탭 누적 리뷰 — 클라이언트 백그라운드 워커가 오늘 세션 전체를 병합 집계해 생성한 리뷰
     CREATE TABLE IF NOT EXISTS today_reviews (
       id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -267,6 +300,29 @@ function execSchema() {
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_today_reviews_participant_date
       ON today_reviews(anonymousId, reviewDate);
+  `);
+}
+
+const PERIOD_REVIEW_VERSION_COLUMNS = `anonymousId, periodIndex, periodStart, periodEnd, isBaseline,
+  sessionCount, videoCount, categoryDistribution, entropy, weightedEntropy,
+  weightedCategoryDistribution, validVideoCount, review, reviewTopic, source,
+  promptVersion, llmStatus, failureReason, geminiMs, generatedAt`;
+
+/**
+ * 이력에 없는 period_reviews 최신본을 복사한다. 매 기동마다 돌아도 같은 행을 두 번 넣지 않는다.
+ * 이력 테이블 도입 전 행을 옮기고, 이후에는 "최신본은 항상 이력에도 있다"를 지키는 안전장치로 남는다.
+ * 도입 전에 이미 덮어쓴 버전은 되살릴 수 없다.
+ */
+function backfillPeriodReviewVersions() {
+  db.exec(`
+    INSERT INTO period_review_versions (${PERIOD_REVIEW_VERSION_COLUMNS})
+    SELECT ${PERIOD_REVIEW_VERSION_COLUMNS} FROM period_reviews p
+     WHERE NOT EXISTS (
+       SELECT 1 FROM period_review_versions v
+        WHERE v.anonymousId = p.anonymousId
+          AND v.periodIndex = p.periodIndex
+          AND v.generatedAt = p.generatedAt
+     )
   `);
 }
 
