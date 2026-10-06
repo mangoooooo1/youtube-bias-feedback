@@ -185,6 +185,19 @@ describe("lookup — 참여자 찾기와 상태 모으기", () => {
     expect(formatDetail(d)).not.toContain("생성");
   });
 
+  it("연구 종료 단계 시각을 출력하고, 없으면 기록 없음으로 표시한다", () => {
+    insertParticipant(db, { group: "CON" });
+    db.prepare(
+      "UPDATE participants SET studyEndModalShownAt = ?, studyEndCodeVerifiedAt = ? WHERE anonymousId = ?",
+    ).run("2026-06-13T00:10:00.000Z", "2026-06-13T00:12:00.000Z", UUID);
+
+    const text = formatDetail(lookup(db, UUID, { now: NOW }).matches[0]);
+
+    expect(text).toContain("종료 안내 표시   : 2026-06-13T00:10:00.000Z");
+    expect(text).toContain("종료 코드 확인   : 2026-06-13T00:12:00.000Z");
+    expect(text).toContain("누적 리뷰 열람   : (기록 없음)");
+  });
+
   it("TEST 그룹은 분석·감시 대상이 아니라고 표시한다", () => {
     insertParticipant(db, { code: "TEST-EXP", group: "TEST-EXP" });
     const [d] = lookup(db, UUID, { now: NOW }).matches;
