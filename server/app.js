@@ -6,11 +6,8 @@ require("./tracing").initTracer(process.env.NODE_ENV || "development");
 
 const express = require("express");
 const cors = require("cors");
-const {
-  success,
-  errorHandler,
-  formatStack,
-} = require("./middleware/responseHandler");
+const { success, errorHandler } = require("./middleware/responseHandler");
+const { oneLine, formatStack } = require("./log-line");
 const { createAccessLog } = require("./middleware/accessLog");
 const { db, initializeDB } = require("./db");
 const { buildHealthPayload } = require("./routes/health");
@@ -18,14 +15,14 @@ const { buildHealthPayload } = require("./routes/health");
 // Express 흐름 밖 예외를 [Error] 포맷으로 남기고 프로세스를 종료해 PM2가 재시작하게 한다
 process.on("uncaughtException", (err) => {
   console.error(
-    `[Error] uncaught exception: ${err?.message ?? String(err)}${formatStack(err)}`,
+    `[Error] uncaught exception: ${oneLine(err?.message ?? err)}${formatStack(err)}`,
   );
   process.exit(1);
 });
 process.on("unhandledRejection", (reason) => {
   const message = reason instanceof Error ? reason.message : String(reason);
   console.error(
-    `[Error] unhandled rejection: ${message}${formatStack(reason)}`,
+    `[Error] unhandled rejection: ${oneLine(message)}${formatStack(reason)}`,
   );
   process.exit(1);
 });

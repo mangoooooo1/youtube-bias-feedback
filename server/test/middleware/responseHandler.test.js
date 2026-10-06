@@ -3,7 +3,6 @@ import {
   success,
   fail,
   errorHandler,
-  formatStack,
   ERROR_CODES,
 } from "../../middleware/responseHandler.js";
 
@@ -239,22 +238,26 @@ describe("errorHandler", () => {
 
     consoleSpy.mockRestore();
   });
-});
 
-describe("formatStack — 전역 예외 핸들러와 같이 쓰는 스택 형식", () => {
-  it("Error가 아니거나 스택이 없으면 빈 문자열이다", () => {
-    expect(formatStack("문자열 reject")).toBe("");
-    expect(formatStack(undefined)).toBe("");
-    const noStack = new Error("x");
-    noStack.stack = undefined;
-    expect(formatStack(noStack)).toBe("");
-  });
+  it("오류 메시지 속 줄바꿈으로 가짜 [Error] 줄을 만들 수 없다(잘못된 JSON 요청 재현)", () => {
+    const res = createMockRes();
+    const req = { method: "POST", path: "/api/sessions" };
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Node 22 JSON 파싱 오류는 요청 본문 일부를 그대로 담는다
+    let parseError;
+    try {
+      JSON.parse("x\n[Error] POST /api/sessions : 위조");
+    } catch (e) {
+      parseError = Object.assign(e, { status: 400 });
+    }
 
-  it("스택 속 줄바꿈이 이스케이프되어 다른 로그 줄을 위조할 수 없다", () => {
-    const err = new Error("x");
-    err.stack = "Error: x\n[Error] 위조된 줄";
-    const suffix = formatStack(err);
-    expect(suffix).not.toContain("\n");
-    expect(suffix).toBe(' stack="Error: x\\n[Error] 위조된 줄"');
+    errorHandler(parseError, req, res, vi.fn());
+
+    const line = consoleSpy.mock.calls[0][0];
+    expect(line).not.toMatch(/[\r\n]/);
+    expect(line.startsWith("[Error] POST /api/sessions : ")).toBe(true);
+    expect(line.indexOf("[Error]", 1)).toBeGreaterThan(0); // 위조 시도는 줄 중간에 문자로만 남는다
+
+    consoleSpy.mockRestore();
   });
 });
