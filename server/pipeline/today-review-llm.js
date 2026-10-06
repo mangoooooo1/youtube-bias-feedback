@@ -1,9 +1,12 @@
 // "오늘" 탭 누적 리뷰 생성 파이프라인
 const { SENSITIVE_PATTERN } = require("./sensitive-pattern");
+const { oneLine } = require("../log-line");
 
 const GEMINI_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 const TIMEOUT_MS = 10000;
+// Gemini 오류 응답은 여러 줄 JSON이고 길이를 알 수 없어 한 줄로 만들고 자른다
+const ERROR_BODY_MAX_LENGTH = 1000;
 
 // 다양성 변화로 인정할 최소 entropy 변화량(bits)
 const ENTROPY_DELTA_EPS = 0.1;
@@ -166,7 +169,10 @@ async function generateTodayReview(prompt, apiKey) {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error("[today-review-llm] API error body:", errorBody);
+      console.error(
+        "[today-review-llm] API error body:",
+        oneLine(errorBody, { maxLength: ERROR_BODY_MAX_LENGTH }),
+      );
       throw llmError("http_error", `Gemini API error: ${response.status}`, {
         httpStatus: response.status,
       });

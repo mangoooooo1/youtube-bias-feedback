@@ -8,6 +8,7 @@ const {
   recordFeedbackTimestamp,
 } = require("./sessions-store");
 const { requireParticipant } = require("../middleware/requireParticipant");
+const { oneLine } = require("../log-line");
 const { generateAndStoreTodayReview } = require("./today-review-generate");
 const { isTodayReviewEligible } = require("./today-reviews-query");
 const {
@@ -196,7 +197,7 @@ router.post("/", requireParticipant, async (req, res, next) => {
       } catch (err) {
         console.error(
           "[sessions] 오늘 리뷰 생성 오류: 세션 행 기록 실패",
-          err.message,
+          oneLine(err.message),
         );
       }
       const participant = db
@@ -209,7 +210,7 @@ router.post("/", requireParticipant, async (req, res, next) => {
       }
     }
   } catch (err) {
-    console.error("[sessions] 오늘 리뷰 생성 오류:", err.message);
+    console.error("[sessions] 오늘 리뷰 생성 오류:", oneLine(err.message));
   }
 
   // categoryDistribution/entropy를 응답에 실어 돌려준다.

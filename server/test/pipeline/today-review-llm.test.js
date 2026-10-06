@@ -205,6 +205,27 @@ describe("generateTodayReview — 실패 사유 분류 (failureReason 태깅)", 
     });
   });
 
+  it("여러 줄 오류 본문은 한 줄로, 길면 잘라서 로그에 남긴다", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const body = `{\n  "error": {\n    "message": "${"x".repeat(2000)}"\n  }\n}`;
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => body,
+    });
+
+    await expect(
+      generateTodayReview("prompt", "fake-api-key"),
+    ).rejects.toMatchObject({
+      failureReason: "http_error",
+    });
+
+    const logged = errorSpy.mock.calls[0].join(" ");
+    expect(logged).not.toMatch(/[\r\n]/);
+    expect(logged).toContain(`자 중 1000자)`);
+    errorSpy.mockRestore();
+  });
+
   it("응답에 텍스트가 없으면 empty_response로 분류한다", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,

@@ -10,6 +10,15 @@ describe("oneLine — 외부 문자열을 로그 한 줄로", () => {
     expect(oneLine('DB 오류: "x" 실패')).toBe('DB 오류: "x" 실패');
   });
 
+  it("상한을 주면 넘는 부분을 자르고 원래 길이를 표시한다", () => {
+    expect(oneLine("abcdef", { maxLength: 3 })).toBe("abc…(6자 중 3자)");
+    expect(oneLine("abc", { maxLength: 3 })).toBe("abc");
+  });
+
+  it("자른 뒤에도 줄바꿈은 \\n 문자로 바뀐다", () => {
+    expect(oneLine("a\nb\nc\nd", { maxLength: 3 })).toBe("a\\nb…(7자 중 3자)");
+  });
+
   it("문자열이 아니어도 문자열로 바꿔 처리한다", () => {
     expect(oneLine(undefined)).toBe("undefined");
     expect(oneLine(42)).toBe("42");

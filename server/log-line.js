@@ -5,10 +5,15 @@
 /**
  * 줄바꿈을 \n 문자로 바꿔 한 줄로 만든다. 줄바꿈이 없는 문자열은 그대로라 기존 로그 모양과 지문이 바뀌지 않는다.
  * @param {unknown} text
+ * @param {{maxLength?: number}} [options] - 외부 응답 본문처럼 길이를 모르는 값은 상한을 둔다
  * @returns {string}
  */
-function oneLine(text) {
-  return String(text).replace(/\r\n|\r|\n/g, "\\n");
+function oneLine(text, { maxLength } = {}) {
+  let value = String(text);
+  if (maxLength != null && value.length > maxLength) {
+    value = `${value.slice(0, maxLength)}…(${value.length}자 중 ${maxLength}자)`;
+  }
+  return value.replace(/\r\n|\r|\n/g, "\\n");
 }
 
 /**
