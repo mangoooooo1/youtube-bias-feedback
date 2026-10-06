@@ -213,8 +213,15 @@ describe("lookup — 참여자 찾기와 상태 모으기", () => {
   it("Datadog Logs·APM에서 같은 참여자를 찾는 검색식을 붙인다", () => {
     insertParticipant(db);
     const [d] = lookup(db, UUID, { now: NOW }).matches;
-    const out = formatDetail(d);
-    expect(out).toContain(`Logs 검색창: "${UUID}"`);
-    expect(out).toContain(`APM Trace Explorer: @usr.id:${UUID}`);
+    const lines = formatDetail(d).split("\n");
+    const logs = lines.find(
+      (l) => l.includes(`"${UUID}"`) && l.includes("Logs"),
+    );
+    const apm = lines.find((l) => l.includes(`@usr.id:${UUID}`));
+    // Agent 마스킹 해제는 Logs에만 해당하고, APM은 서버 배포 시점부터 조회된다
+    expect(logs).toContain("Agent 마스킹 해제 이후");
+    expect(apm).toContain("서버 배포 이후");
+    expect(apm).toContain("보존 필터");
+    expect(apm).not.toContain("마스킹");
   });
 });
