@@ -107,6 +107,22 @@ describe("classifyTier", () => {
 });
 
 describe("fingerprint — 같은 종류의 에러는 동적 값이 달라도 같은 지문", () => {
+  it("trace ID만 다른 줄은 같은 지문이다(16진수·10진수 모두)", () => {
+    const base = '[Error] POST /api/sessions : DB 오류 anonymousId="a"';
+    expect(
+      fingerprint(
+        `${base} dd.trace_id=69a1b2c3d4e5f60718293a4b5c6d7e8f dd.span_id=111`,
+      ),
+    ).toBe(
+      fingerprint(
+        `${base} dd.trace_id=ffeeddccbbaa99887766554433221100 dd.span_id=222`,
+      ),
+    );
+    expect(fingerprint(`${base} dd.trace_id=123456789 dd.span_id=1`)).toBe(
+      fingerprint(base),
+    );
+  });
+
   it("숫자만 다른 두 에러 메시지는 같은 지문을 갖는다", () => {
     const a = "[Error] PATCH /api/sessions/12345/feedback-viewed : no row";
     const b = "[Error] PATCH /api/sessions/98765/feedback-viewed : no row";
@@ -226,6 +242,14 @@ describe("summarizeAlertLine — 외부 알림에는 안전한 항목만 남긴�
         '[Error] POST /api/sessions : DB 오류 stack="Error: DB 오류\\n    at handler (/home/ubuntu/youtube-bias-feedback/server/routes/sessions.js:120:11)"',
       ),
     ).toBe("[Error] POST");
+  });
+
+  it("trace ID는 외부 알림 요약에 나가지 않는다", () => {
+    expect(
+      summarizeAlertLine(
+        "[access] POST /api/sessions 404 dd.trace_id=69a1b2c3d4e5f60718293a4b5c6d7e8f dd.span_id=111",
+      ),
+    ).toBe("[access] POST 404");
   });
 
   it("외부 API 실패는 상태 코드를 남긴다", () => {

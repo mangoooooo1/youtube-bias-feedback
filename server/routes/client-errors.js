@@ -2,6 +2,7 @@ const express = require("express");
 const { success, fail } = require("../middleware/responseHandler");
 const { rateLimiter } = require("../middleware/rateLimiter");
 const { validateClientErrors } = require("./client-errors-validate");
+const { traceRef } = require("../tracing");
 
 const router = express.Router();
 
@@ -15,7 +16,7 @@ const clientErrorsRateLimit = rateLimiter({
  * 오류 1건을 error-monitor가 읽는 한 줄로 만든다. 허용 목록 필드만 쓴다.
  * 시각은 toISOString으로 다시 찍어 클라이언트 문자열이 그대로 남지 않게 한다.
  */
-function formatClientErrorLine(entry, { anonymousId, version }) {
+function formatClientErrorLine(entry, { anonymousId, version }, trace = "") {
   const who = anonymousId
     ? ` anonymousId=${JSON.stringify(anonymousId.trim())}`
     : "";
@@ -23,7 +24,7 @@ function formatClientErrorLine(entry, { anonymousId, version }) {
     `[client-error] code=${entry.code} where=${entry.where} count=${entry.count}` +
     ` version=${version}` +
     ` firstAt=${new Date(entry.firstAt).toISOString()}` +
-    ` lastAt=${new Date(entry.lastAt).toISOString()}${who}`
+    ` lastAt=${new Date(entry.lastAt).toISOString()}${who}${trace}`
   );
 }
 
@@ -40,8 +41,9 @@ router.post("/", clientErrorsRateLimit, (req, res) => {
     );
   }
 
+  const trace = traceRef();
   for (const entry of req.body.errors) {
-    console.error(formatClientErrorLine(entry, req.body));
+    console.error(formatClientErrorLine(entry, req.body, trace));
   }
 
   return success(res);

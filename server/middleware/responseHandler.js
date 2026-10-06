@@ -1,3 +1,5 @@
+const { traceRef } = require("../tracing");
+
 // API 응답의 success:false 케이스에서 공통으로 쓰는 에러 식별 코드 모음.
 const ERROR_CODES = {
   MISSING_REQUIRED_FIELD: "MISSING_REQUIRED_FIELD",
@@ -77,7 +79,7 @@ function errorHandler(err, req, res, _next) {
   // 4xx는 예상된 입력 오류라 스택이 잡음이다. 예상 못 한 5xx만 남긴다.
   const stack = status >= 500 ? formatStack(err) : "";
   console.error(
-    `[Error] ${req.method} ${req.path} : ${err.message}${who}${stack}`,
+    `[Error] ${req.method} ${req.path} : ${err.message}${who}${traceRef()}${stack}`,
   );
 
   const code = err.code || ERROR_CODES.INTERNAL_SERVER_ERROR;
