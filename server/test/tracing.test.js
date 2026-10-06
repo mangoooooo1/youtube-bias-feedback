@@ -123,6 +123,17 @@ describe("tagUserId", () => {
     expect(span.tags).not.toHaveProperty("usr.id");
   });
 
+  it("문자열이 아닌 anonymousId는 예외 없이 무시한다", () => {
+    const span = createSpan({});
+    // JSON 본문으로 보낼 수 있는 값들. toString이 null이면 정규화 중 예외가 나 APM 플러그인이 꺼진다
+    const values = [JSON.parse('{"toString":null}'), 123, [UUID], true];
+
+    for (const anonymousId of values) {
+      expect(() => tagUserId(span, { body: { anonymousId } })).not.toThrow();
+    }
+    expect(span.tags).not.toHaveProperty("usr.id");
+  });
+
   it("span이 없으면 아무것도 하지 않는다", () => {
     expect(() =>
       tagUserId(undefined, { body: { anonymousId: UUID } }),
