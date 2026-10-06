@@ -1,13 +1,8 @@
 // dd-trace(Datadog APM) 초기화
 // APM의 http.url에는 실제 요청 URL(참여 코드 쿼리스트링, 경로 속 sessionId·eventId)이 그대로 남는다.
-// 참여 코드는 사람과 연결되는 키이고 경로 식별자는 조사에 필요 없으므로, 라우트 패턴으로 바꿔서 보낸다.
-// 익명 식별자(무작위 UUID)는 장애·결측 원인 조사를 위해 usr.id 태그로 보낸다.
-
-const { normalizeAnonymousId } = require("./routes/anonymous-id");
+// IRB 문서는 외부 전송에 참여자 식별자를 넣지 않기로 했으므로, 라우트 패턴으로 바꿔서 보낸다.
 
 const UNMATCHED_PATH = "/(unmatched)";
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // initTracer가 만든 tracer. 초기화 전(테스트·스크립트)에는 null이라 traceRef가 빈 문자열을 돌려준다.
 let currentTracer = null;
@@ -36,28 +31,6 @@ function redactHttpUrl(span) {
 }
 
 /**
- * 본문의 anonymousId를 usr.id 태그로 붙인다. Datadog APM에서 @usr.id로 참여자 요청을 찾는 데 쓴다.
- * 인증 전·실패 요청도 "주장한 ID"로 태그한다.
- * APM 태그는 Agent 로그 마스킹을 거치지 않으므로, 참여 코드 등 다른 값이 새지 않게 UUID 형식만 붙인다.
- * 문자열만 다룬다. {"toString":null} 같은 본문에서 예외가 나면 dd-trace가 http 플러그인을 꺼서
- * 재시작 전까지 APM 추적이 멈추기 때문이다.
- * @param {import("dd-trace").Span} span
- * @param {import("express").Request} req
- */
-function tagUserId(span, req) {
-  const raw = req?.body?.anonymousId;
-  if (!span || typeof raw !== "string") return;
-  const anonymousId = normalizeAnonymousId(raw);
-  if (UUID_PATTERN.test(anonymousId)) span.setTag("usr.id", anonymousId);
-}
-
-/** express request hook. 응답이 끝날 때 호출되므로 req.body와 http.route가 채워져 있다. */
-function onRequestFinish(span, req) {
-  redactHttpUrl(span);
-  tagUserId(span, req);
-}
-
-/**
  * express 등을 require-hook으로 패치하므로 다른 모듈보다 먼저 호출해야 한다.
  * @param {string} env - Datadog env 태그
  */
@@ -66,7 +39,7 @@ function initTracer(env) {
     service: "youtube-bias-server",
     env,
   });
-  tracer.use("express", { hooks: { request: onRequestFinish } });
+  tracer.use("express", { hooks: { request: redactHttpUrl } });
   useTracer(tracer);
   return tracer;
 }
@@ -101,8 +74,6 @@ function traceRef(tracer = currentTracer) {
 module.exports = {
   initTracer,
   redactHttpUrl,
-  tagUserId,
-  onRequestFinish,
   useTracer,
   traceRef,
   UNMATCHED_PATH,

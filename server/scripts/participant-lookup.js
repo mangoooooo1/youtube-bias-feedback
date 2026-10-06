@@ -209,9 +209,6 @@ function formatDetail(d) {
     "",
     "같은 참여자의 서버 로그:",
     `  grep -h 'anonymousId="${d.anonymousId}"' ~/.pm2/logs/youtube-bias-server-*.log | tail -50`,
-    "Datadog에서 같은 참여자 찾기:",
-    `  Logs(Agent 마스킹 해제 이후 기록분, 보관 15일): "${d.anonymousId}"`,
-    `  APM Trace Explorer(서버 배포 이후 기록분, 15분 지나면 보존 필터에 남은 span만): @usr.id:${d.anonymousId}`,
   ];
   return lines.join("\n");
 }
