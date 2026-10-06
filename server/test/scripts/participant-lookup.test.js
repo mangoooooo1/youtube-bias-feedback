@@ -209,4 +209,12 @@ describe("lookup — 참여자 찾기와 상태 모으기", () => {
     const [d] = lookup(db, UUID, { now: NOW }).matches;
     expect(formatDetail(d)).toContain(`grep -h 'anonymousId="${UUID}"'`);
   });
+
+  it("Datadog Logs·APM에서 같은 참여자를 찾는 검색식을 붙인다", () => {
+    insertParticipant(db);
+    const [d] = lookup(db, UUID, { now: NOW }).matches;
+    const out = formatDetail(d);
+    expect(out).toContain(`Logs 검색창: "${UUID}"`);
+    expect(out).toContain(`APM Trace Explorer: @usr.id:${UUID}`);
+  });
 });
