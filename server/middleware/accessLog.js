@@ -1,3 +1,5 @@
+const { traceRef } = require("../tracing");
+
 // 4xx 응답 접근 로그
 // fail()은 req 정보 없이 상태코드만 응답하므로, 어떤 요청이 왜 거부됐는지 남기려면 응답 완료 시점에 공통으로 기록해야 한다.
 
@@ -28,6 +30,8 @@ function isMonitoredPath(path, mountPaths) {
  */
 function createAccessLog(mountPaths) {
   return (req, res, next) => {
+    // finish 콜백에서는 활성 span이 남아 있다는 보장이 없어 요청 진입 시점에 잡아 둔다(trace ID는 요청 내내 같다)
+    const trace = traceRef();
     res.on("finish", () => {
       if (res.statusCode < 400 || res.statusCode >= 500) return;
       const path = fullPath(req);
@@ -37,7 +41,9 @@ function createAccessLog(mountPaths) {
       const who = req.body?.anonymousId
         ? ` anonymousId=${JSON.stringify(req.body.anonymousId)}`
         : "";
-      console.warn(`${tag} ${req.method} ${path} ${res.statusCode}${who}`);
+      console.warn(
+        `${tag} ${req.method} ${path} ${res.statusCode}${who}${trace}`,
+      );
     });
     next();
   };
