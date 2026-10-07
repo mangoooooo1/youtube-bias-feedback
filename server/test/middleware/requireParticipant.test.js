@@ -104,6 +104,19 @@ describe("checkParticipant", () => {
     );
   });
 
+  it("secret 설정 시 문자열이 아닌 토큰은 예외 없이 invalid_token", () => {
+    const db = createTestDb();
+    db.prepare("INSERT INTO participants (anonymousId) VALUES (?)").run(
+      "user-1",
+    );
+    const token = computeToken("user-1", "top-secret");
+    for (const value of [JSON.parse('{"toString":null}'), 123, [token], true]) {
+      expect(checkParticipant(db, "top-secret", "user-1", value)).toBe(
+        "invalid_token",
+      );
+    }
+  });
+
   it("secret 설정 시 틀린 토큰(다른 참여자 것 포함)이면 invalid_token", () => {
     const db = createTestDb();
     db.prepare("INSERT INTO participants (anonymousId) VALUES (?), (?)").run(

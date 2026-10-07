@@ -36,7 +36,7 @@ function checkParticipant(db, secret, anonymousId, token) {
   if (!exists) return "not_found";
 
   if (!secret) return "ok";
-  const normalizedToken = (token || "").toString().trim();
+  const normalizedToken = typeof token === "string" ? token.trim() : "";
   const expected = computeToken(normalizedId, secret);
   const expectedBuf = Buffer.from(expected, "hex");
   const tokenBuf = Buffer.from(normalizedToken, "hex");

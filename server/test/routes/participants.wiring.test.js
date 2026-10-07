@@ -272,4 +272,20 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
       .digest("hex");
     expect(res.body.data.participantToken).toBe(expected);
   });
+
+  it('보호된 라우트에 participantToken으로 {"toString":null}을 보내면 500이 아니라 403', async () => {
+    process.env.PARTICIPANT_TOKEN_SECRET = "object-token-secret";
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
+    ).run("object-token-user", "EXP", "2026-08-13T00:00:00Z");
+
+    const res = await request(app)
+      .post("/api/period-reviews")
+      .send({
+        anonymousId: "object-token-user",
+        participantToken: { toString: null },
+      });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe("INVALID_PARTICIPANT_TOKEN");
+  });
 });
