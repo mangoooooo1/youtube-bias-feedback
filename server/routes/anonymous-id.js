@@ -6,8 +6,10 @@
 // server/db.js를 require해 모듈 로드 시점에 실제 암호화 DB 커넥션을 연다. participants-store.js가
 // 이 함수 하나만 쓰려고 requireParticipant.js를 require하면 그 부작용까지 함께 끌려와,
 // DB_ENCRYPTION_KEY 없이 participants-store.js만 불러오는 테스트가 전부 깨진다.
+//
+// 문자열만 받는다. JSON 본문의 {"toString":null} 같은 객체에 toString()을 부르면 예외가 나 500이 된다.
 function normalizeAnonymousId(anonymousId) {
-  return (anonymousId || "").toString().trim();
+  return typeof anonymousId === "string" ? anonymousId.trim() : "";
 }
 
 module.exports = { normalizeAnonymousId };

@@ -139,6 +139,14 @@ describe("실제 server/routes/participants.js 라우터 배선", () => {
     expect(res.body.code).toBe("INVALID_FIELD_VALUE");
   });
 
+  it('보호된 라우트에 anonymousId로 {"toString":null}을 보내면 500이 아니라 400', async () => {
+    const res = await request(app)
+      .post("/api/period-reviews")
+      .send({ anonymousId: { toString: null } });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("MISSING_REQUIRED_FIELD");
+  });
+
   it("등록되지 않은 경로는 404 — 예기치 않은 라우트가 실수로 노출되지 않았는지 확인", async () => {
     const res = await request(app).get("/api/participants/no-such-route");
     expect(res.status).toBe(404);
