@@ -5,6 +5,7 @@ const {
   isPreviouslyRegistered,
 } = require("./participant-recovery");
 const { normalizeAnonymousId } = require("./anonymous-id");
+const { normalizeParticipantCode } = require("./participant-code");
 
 /**
  * 참여자 등록.
@@ -24,7 +25,7 @@ function registerParticipant(db, body) {
   const installDate = body.installDate;
   // GET /validate·POST /recover와 동일하게 정규화
   const participantCode =
-    (body.participantCode || "").toString().trim().toUpperCase() || undefined;
+    normalizeParticipantCode(body.participantCode) || undefined;
 
   for (const field of ["anonymousId", "group_code", "installDate"]) {
     const value = body[field];

@@ -147,6 +147,36 @@ describe("실제 server/routes/participants.js 라우터 배선", () => {
     expect(res.body.code).toBe("MISSING_REQUIRED_FIELD");
   });
 
+  it('등록에 participantCode로 {"toString":null}을 보내면 500이 아니라 400', async () => {
+    const res = await request(app)
+      .post("/api/participants")
+      .send({
+        anonymousId: "object-code-user",
+        group_code: "EXP",
+        installDate: "2026-08-13T00:00:00Z",
+        participantCode: { toString: null },
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("MISSING_REQUIRED_FIELD");
+    expect(res.body.detail).toBe("participantCode");
+  });
+
+  it('복구에 participantCode로 {"toString":null}을 보내면 500이 아니라 400', async () => {
+    const res = await request(app)
+      .post("/api/participants/recover")
+      .send({ participantCode: { toString: null } });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("INVALID_FIELD_VALUE");
+  });
+
+  it("GET /validate에 code를 여러 번 보내면(배열) 400", async () => {
+    const res = await request(app)
+      .get("/api/participants/validate")
+      .query("code=A&code=B");
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("MISSING_REQUIRED_FIELD");
+  });
+
   it("등록되지 않은 경로는 404 — 예기치 않은 라우트가 실수로 노출되지 않았는지 확인", async () => {
     const res = await request(app).get("/api/participants/no-such-route");
     expect(res.status).toBe(404);

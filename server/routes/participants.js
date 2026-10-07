@@ -10,6 +10,7 @@ const {
   registerParticipant,
   validateParticipantCode,
 } = require("./participants-store");
+const { normalizeParticipantCode } = require("./participant-code");
 const { rateLimiter } = require("../middleware/rateLimiter");
 const {
   requireParticipant,
@@ -79,7 +80,7 @@ router.post("/", (req, res, next) => {
 // 참여 코드 유효성 확인. 발급 명단과 대조만 하고 등록은 하지 않는다.
 // 응답 data: { valid: boolean, group_code?: string, previouslyRegistered?: boolean }
 router.get("/validate", (req, res) => {
-  const code = (req.query.code || "").toString().trim().toUpperCase();
+  const code = normalizeParticipantCode(req.query.code);
   if (!code) {
     return fail(
       res,
@@ -95,10 +96,7 @@ router.get("/validate", (req, res) => {
 // 재설치한 참여자를 참여 코드로 복구. 기존 등록 이력을 찾아 참여자 토큰을 재발급한다.
 // 응답 data: { anonymousId, installDate, group_code }
 router.post("/recover", recoverRateLimit, (req, res) => {
-  const participantCode = (req.body.participantCode || "")
-    .toString()
-    .trim()
-    .toUpperCase();
+  const participantCode = normalizeParticipantCode(req.body.participantCode);
 
   if (!participantCode || TEST_CODES.has(participantCode)) {
     return fail(
