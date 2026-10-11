@@ -139,6 +139,93 @@ describe("실제 server/routes/participants.js 라우터 배선", () => {
     expect(res.body.code).toBe("INVALID_FIELD_VALUE");
   });
 
+  it('보호된 라우트에 anonymousId로 {"toString":null}을 보내면 500이 아니라 400', async () => {
+    const res = await request(app)
+      .post("/api/period-reviews")
+      .send({ anonymousId: { toString: null } });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("MISSING_REQUIRED_FIELD");
+  });
+
+  it('등록에 participantCode로 {"toString":null}을 보내면 500이 아니라 400', async () => {
+    const res = await request(app)
+      .post("/api/participants")
+      .send({
+        anonymousId: "object-code-user",
+        group_code: "EXP",
+        installDate: "2026-08-13T00:00:00Z",
+        participantCode: { toString: null },
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("MISSING_REQUIRED_FIELD");
+    expect(res.body.detail).toBe("participantCode");
+  });
+
+  it('복구에 participantCode로 {"toString":null}을 보내면 500이 아니라 400', async () => {
+    const res = await request(app)
+      .post("/api/participants/recover")
+      .send({ participantCode: { toString: null } });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("INVALID_FIELD_VALUE");
+  });
+
+  // 배열은 발급된 코드를 담아 보낸다 — 예전 toString() 정규화로는 ["CODE"]가 "CODE"가 돼 통과했다
+  it.each([
+    { label: "숫자", value: 123 },
+    { label: "boolean", value: true },
+    { label: "발급된 코드를 담은 배열", value: ["WIRE-CODE"] },
+  ])(
+    "등록에 participantCode로 $label을 보내면 400이고 등록되지 않는다",
+    async ({ value }) => {
+      db.prepare(
+        "INSERT INTO issued_codes (code, group_code) VALUES (?, ?)",
+      ).run("WIRE-CODE", "EXP");
+      const res = await request(app).post("/api/participants").send({
+        anonymousId: "non-string-code-user",
+        group_code: "EXP",
+        installDate: "2026-08-13T00:00:00Z",
+        participantCode: value,
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe("MISSING_REQUIRED_FIELD");
+      expect(res.body.detail).toBe("participantCode");
+      expect(
+        db
+          .prepare("SELECT 1 FROM participants WHERE anonymousId = ?")
+          .get("non-string-code-user"),
+      ).toBeUndefined();
+    },
+  );
+
+  // /recover는 IP당 15분 5회 제한이라, 이 파일의 다른 복구 요청과 한도를 나누지 않게 케이스마다 X-Real-IP를 다르게 준다
+  it.each([
+    { label: "숫자", value: 123, ip: "10.0.0.1" },
+    { label: "boolean", value: true, ip: "10.0.0.2" },
+    { label: "등록된 코드를 담은 배열", value: ["RECOVER-ME"], ip: "10.0.0.3" },
+  ])(
+    "복구에 participantCode로 $label을 보내면 400이고 anonymousId가 나가지 않는다",
+    async ({ value, ip }) => {
+      db.prepare(
+        "INSERT INTO participants (anonymousId, participantCode, group_code, installDate) VALUES (?, ?, ?, ?)",
+      ).run("recover-target", "RECOVER-ME", "EXP", "2026-08-13T00:00:00Z");
+      const res = await request(app)
+        .post("/api/participants/recover")
+        .set("X-Real-IP", ip)
+        .send({ participantCode: value });
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe("INVALID_FIELD_VALUE");
+      expect(JSON.stringify(res.body)).not.toContain("recover-target");
+    },
+  );
+
+  it("GET /validate에 code를 여러 번 보내면(배열) 400", async () => {
+    const res = await request(app)
+      .get("/api/participants/validate")
+      .query("code=A&code=B");
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("MISSING_REQUIRED_FIELD");
+  });
+
   it("등록되지 않은 경로는 404 — 예기치 않은 라우트가 실수로 노출되지 않았는지 확인", async () => {
     const res = await request(app).get("/api/participants/no-such-route");
     expect(res.status).toBe(404);
@@ -263,5 +350,21 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
       .update("recovered-user")
       .digest("hex");
     expect(res.body.data.participantToken).toBe(expected);
+  });
+
+  it('보호된 라우트에 participantToken으로 {"toString":null}을 보내면 500이 아니라 403', async () => {
+    process.env.PARTICIPANT_TOKEN_SECRET = "object-token-secret";
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
+    ).run("object-token-user", "EXP", "2026-08-13T00:00:00Z");
+
+    const res = await request(app)
+      .post("/api/period-reviews")
+      .send({
+        anonymousId: "object-token-user",
+        participantToken: { toString: null },
+      });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe("INVALID_PARTICIPANT_TOKEN");
   });
 });

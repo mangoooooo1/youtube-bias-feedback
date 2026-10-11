@@ -18,9 +18,10 @@ fs.rmSync(TEST_DB_PATH, { force: true });
 process.env.DB_ENCRYPTION_KEY = "vitest-in-memory-only";
 process.env.DB_PATH = TEST_DB_PATH;
 
-const { checkParticipant, issueParticipantToken } = require(
-  "../../middleware/requireParticipant.js",
-);
+const {
+  checkParticipant,
+  issueParticipantToken,
+} = require("../../middleware/requireParticipant.js");
 const { db: realDb } = require("../../db.js");
 
 afterAll(() => {
@@ -52,6 +53,16 @@ describe("checkParticipant", () => {
     expect(checkParticipant(db, "secret", "   ", null)).toBe(
       "missing_anonymous_id",
     );
+  });
+
+  it("문자열이 아닌 anonymousId는 예외 없이 missing_anonymous_id", () => {
+    const db = createTestDb();
+    db.prepare("INSERT INTO participants (anonymousId) VALUES (?)").run("u1");
+    for (const value of [JSON.parse('{"toString":null}'), 123, ["u1"], true]) {
+      expect(checkParticipant(db, null, value, null)).toBe(
+        "missing_anonymous_id",
+      );
+    }
   });
 
   it("등록되지 않은 anonymousId는 secret 설정 여부와 무관하게 not_found", () => {
@@ -93,19 +104,33 @@ describe("checkParticipant", () => {
     );
   });
 
+  it("secret 설정 시 문자열이 아닌 토큰은 예외 없이 invalid_token", () => {
+    const db = createTestDb();
+    db.prepare("INSERT INTO participants (anonymousId) VALUES (?)").run(
+      "user-1",
+    );
+    const token = computeToken("user-1", "top-secret");
+    for (const value of [JSON.parse('{"toString":null}'), 123, [token], true]) {
+      expect(checkParticipant(db, "top-secret", "user-1", value)).toBe(
+        "invalid_token",
+      );
+    }
+  });
+
   it("secret 설정 시 틀린 토큰(다른 참여자 것 포함)이면 invalid_token", () => {
     const db = createTestDb();
-    db.prepare(
-      "INSERT INTO participants (anonymousId) VALUES (?), (?)",
-    ).run("user-1", "user-2");
+    db.prepare("INSERT INTO participants (anonymousId) VALUES (?), (?)").run(
+      "user-1",
+      "user-2",
+    );
     const otherUsersToken = computeToken("user-2", "top-secret");
 
-    expect(
-      checkParticipant(db, "top-secret", "user-1", otherUsersToken),
-    ).toBe("invalid_token");
-    expect(
-      checkParticipant(db, "top-secret", "user-1", "not-even-hex!!"),
-    ).toBe("invalid_token");
+    expect(checkParticipant(db, "top-secret", "user-1", otherUsersToken)).toBe(
+      "invalid_token",
+    );
+    expect(checkParticipant(db, "top-secret", "user-1", "not-even-hex!!")).toBe(
+      "invalid_token",
+    );
   });
 
   it("secret 설정 시 다른 secret으로 계산된 토큰(비밀키 로테이션 등)은 invalid_token", () => {

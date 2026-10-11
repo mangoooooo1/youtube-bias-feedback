@@ -12,6 +12,7 @@ import {
   registerParticipant,
   validateParticipantCode,
 } from "../../routes/participants-store.js";
+import { normalizeParticipantCode } from "../../routes/participant-code.js";
 
 // participants.js도 sessions.js와 동일한 이유(모듈 최상단에서 실제 DB 싱글턴을 열고,
 // 네이티브 모듈이 vi.mock을 우회함, server/test/routes/sessions.test.js 참고)로 그대로
@@ -87,7 +88,7 @@ function buildTestRouter() {
   });
 
   router.get("/validate", (req, res) => {
-    const code = (req.query.code || "").toString().trim().toUpperCase();
+    const code = normalizeParticipantCode(req.query.code);
     if (!code) {
       return fail(
         res,
