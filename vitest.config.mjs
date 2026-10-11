@@ -17,6 +17,8 @@ export default defineConfig({
         "server/test/**",
         "extension/config.js",
         "extension/config.example.js",
+        // 배포 zip에서 빠지는 개발용 디자인 도구(release-extension.yml의 --exclude "studio/*")
+        "extension/studio/**",
         // 연구자가 필요할 때 수동으로 한 번씩 돌리는 임베딩 검증·평정 분석 스크립트
         // 프로덕션 파이프라인(cron)에서 호출되지 않아 자동 테스트 대상이 아니다.
         "server/scripts/analyze-human-ratings.js",
