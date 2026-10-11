@@ -62,3 +62,25 @@ jobs:
       - name: Write coverage summary
         if: always()
         run: node scripts/coverage-summary.js >> "$GITHUB_STEP_SUMMARY"
+
+  # 연구 분석용 Python 포팅(metrics.py)이 프로덕션 JS 계산과 일치하는지 검증한다
+  research:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: research/synthetic-rehearsal
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: research/synthetic-rehearsal/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run research tests
+        run: python -m unittest test_metrics test_run_analysis -v
