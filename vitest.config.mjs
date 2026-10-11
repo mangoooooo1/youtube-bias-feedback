@@ -35,13 +35,26 @@ export default defineConfig({
         "server/scripts/sample-embedding-validation-sessions.js",
       ],
       reporter: ["text", "json-summary", "html"],
-      // 현재 실측치(2026-09, statements 40.21%)보다 낮게 잡은 회귀 방지용 바닥선.
+      // 2026-10-11 실측치(로컬 Windows/Node 22와 CI Ubuntu/Node 24 중 낮은 값)보다 2%p 낮게 잡은 회귀 방지용 바닥선.
+      // 폴더별 값은 그 폴더 파일들을 합친 수치로 검사한다.
       // "이 정도는 유지하자"는 최소선이지 목표치가 아니다 — 값을 낮추는 수정은 지양.
       thresholds: {
-        statements: 38,
-        branches: 34,
-        functions: 35,
-        lines: 38,
+        statements: 52,
+        branches: 47,
+        functions: 53,
+        lines: 52,
+        "server/routes/**": {
+          statements: 91,
+          branches: 89,
+          functions: 96,
+          lines: 91,
+        },
+        "server/pipeline/**": {
+          statements: 94,
+          branches: 91,
+          functions: 96,
+          lines: 96,
+        },
       },
     },
   },
