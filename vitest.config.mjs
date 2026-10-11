@@ -4,6 +4,9 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["extension/test/**/*.test.js", "server/test/**/*.test.js"],
+    // 서버 CJS를 import(vite 변환)와 require(Node)로 섞어 불러오면 커버리지 병합이 깨져 Node 경로로 통일한다.
+    // 한계: Node 경로는 일부 파일(dogstatsd, llm-metrics)에서 줄·분기 매핑이 몇 줄 밀린다.
+    server: { deps: { external: [/[\\/]server[\\/](?!test[\\/])/] } },
     coverage: {
       provider: "v8",
       all: true,
