@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  afterAll,
+  vi,
+} from "vitest";
 import crypto from "crypto";
 import request from "supertest";
 import express from "express";
@@ -52,9 +60,10 @@ beforeEach(() => {
 
 describe("실제 server/routes/participants.js 라우터 배선", () => {
   it("POST /api/participants — 파일을 그대로 로드해도 정상 등록된다", async () => {
-    db.prepare(
-      "INSERT INTO issued_codes (code, group_code) VALUES (?, ?)",
-    ).run("WIRE-CODE", "EXP");
+    db.prepare("INSERT INTO issued_codes (code, group_code) VALUES (?, ?)").run(
+      "WIRE-CODE",
+      "EXP",
+    );
     const res = await request(app).post("/api/participants").send({
       anonymousId: "wiring-a1",
       group_code: "EXP",
@@ -70,9 +79,10 @@ describe("실제 server/routes/participants.js 라우터 배선", () => {
   });
 
   it("소문자 participantCode — GET /validate가 통과시키면 POST /도 동일 코드로 등록에 성공한다(회귀)", async () => {
-    db.prepare(
-      "INSERT INTO issued_codes (code, group_code) VALUES (?, ?)",
-    ).run("REAL-CODE", "CON");
+    db.prepare("INSERT INTO issued_codes (code, group_code) VALUES (?, ?)").run(
+      "REAL-CODE",
+      "CON",
+    );
 
     const validateRes = await request(app)
       .get("/api/participants/validate")
@@ -333,12 +343,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
     process.env.PARTICIPANT_TOKEN_SECRET = "recover-test-secret";
     db.prepare(
       "INSERT INTO participants (anonymousId, participantCode, group_code, installDate) VALUES (?, ?, ?, ?)",
-    ).run(
-      "recovered-user",
-      "RECOVER-CODE",
-      "EXP",
-      "2026-08-13T00:00:00Z",
-    );
+    ).run("recovered-user", "RECOVER-CODE", "EXP", "2026-08-13T00:00:00Z");
 
     const res = await request(app)
       .post("/api/participants/recover")
@@ -367,4 +372,127 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
     expect(res.status).toBe(403);
     expect(res.body.code).toBe("INVALID_PARTICIPANT_TOKEN");
   });
+});
+
+// 연구 종료 리뷰 이벤트의 결과별 경로. 핸들러의 not_found 분기와 catch는 requireParticipant가
+// 미등록 참여자를 먼저 거르고 DB 오류가 나야만 실행되므로 HTTP로는 도달하지 않는다.
+describe("실제 server/routes/participants.js — POST /study-end-review-event 결과별 경로", () => {
+  // 설치일 + 12일 다음 날 09:00 KST가 이미 지났다. 리뷰 3구간이 모두 있으면 잠금 해제
+  const ENDED_INSTALL_DATE = "2026-01-01T00:00:00+09:00";
+  const NOT_ENDED_INSTALL_DATE = "2099-01-01T00:00:00+09:00";
+
+  function insertParticipant(anonymousId, groupCode, installDate) {
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
+    ).run(anonymousId, groupCode, installDate);
+  }
+
+  function insertAllPeriodReviews(anonymousId) {
+    for (const periodIndex of [1, 2, 3]) {
+      db.prepare(
+        `INSERT INTO period_reviews
+          (anonymousId, periodIndex, periodStart, periodEnd, isBaseline, generatedAt)
+         VALUES (?, ?, '2026-01-01', '2026-01-04', 0, '2026-01-14T04:00:00+09:00')`,
+      ).run(anonymousId, periodIndex);
+    }
+  }
+
+  function eventColumns(anonymousId) {
+    return db
+      .prepare(
+        "SELECT studyEndModalShownAt, studyEndReviewViewedAt FROM participants WHERE anonymousId = ?",
+      )
+      .get(anonymousId);
+  }
+
+  function sendEvent(anonymousId, event) {
+    return request(app)
+      .post("/api/participants/study-end-review-event")
+      .send({ anonymousId, event });
+  }
+
+  beforeEach(() => {
+    db.exec("DELETE FROM period_reviews");
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // 이 404는 핸들러가 아니라 requireParticipant가 보낸다(위 "라우트가 등록돼 있다" 테스트와 같은 경로)
+  it("등록되지 않은 참여자는 404 NOT_FOUND", async () => {
+    const res = await sendEvent("no-such-participant", "review_viewed");
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe("NOT_FOUND");
+  });
+
+  it.each([
+    {
+      label: "EXP 그룹",
+      group: "EXP",
+      installDate: ENDED_INSTALL_DATE,
+      withReviews: true,
+    },
+    {
+      label: "연구 기간이 끝나지 않은 CON",
+      group: "CON",
+      installDate: NOT_ENDED_INSTALL_DATE,
+      withReviews: true,
+    },
+    {
+      label: "기간 리뷰가 다 생성되지 않은 CON",
+      group: "CON",
+      installDate: ENDED_INSTALL_DATE,
+      withReviews: false,
+    },
+  ])(
+    "$label은 403 NOT_ELIGIBLE이고 컬럼이 바뀌지 않는다",
+    async ({ group, installDate, withReviews }) => {
+      insertParticipant("event-user", group, installDate);
+      if (withReviews) insertAllPeriodReviews("event-user");
+
+      for (const event of ["modal_shown", "review_viewed"]) {
+        const res = await sendEvent("event-user", event);
+        expect(res.status).toBe(403);
+        expect(res.body.code).toBe("NOT_ELIGIBLE");
+      }
+      expect(eventColumns("event-user")).toEqual({
+        studyEndModalShownAt: null,
+        studyEndReviewViewedAt: null,
+      });
+    },
+  );
+
+  it.each([
+    {
+      event: "modal_shown",
+      column: "studyEndModalShownAt",
+      other: "studyEndReviewViewedAt",
+    },
+    {
+      event: "review_viewed",
+      column: "studyEndReviewViewedAt",
+      other: "studyEndModalShownAt",
+    },
+  ])(
+    "잠금 해제된 CON의 $event는 200이고 $column만 기록되며, 재호출해도 최초 시각이 유지된다",
+    async ({ event, column, other }) => {
+      insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
+      insertAllPeriodReviews("con-user");
+      // 두 호출이 같은 밀리초에 끝나면 COALESCE가 없어도 통과하므로 호출 사이에 시각을 옮긴다
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-10-01T00:00:00.000Z"));
+
+      const first = await sendEvent("con-user", event);
+      expect(first.status).toBe(200);
+      expect(eventColumns("con-user")[column]).toBe("2026-10-01T00:00:00.000Z");
+      expect(eventColumns("con-user")[other]).toBeNull();
+
+      vi.setSystemTime(new Date("2026-10-02T00:00:00.000Z"));
+      const second = await sendEvent("con-user", event);
+      expect(second.status).toBe(200);
+      expect(eventColumns("con-user")[column]).toBe("2026-10-01T00:00:00.000Z");
+      expect(eventColumns("con-user")[other]).toBeNull();
+    },
+  );
 });
