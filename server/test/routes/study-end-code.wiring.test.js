@@ -43,7 +43,7 @@ function buildApp() {
 const app = buildApp();
 
 const REVEAL_CODE = "SURVEY2026";
-// 설치일 + 12일 다음 날 09:00 KST가 이미 지났다 — 리뷰 3구간이 모두 있으면 잠금 해제
+// 설치일 + 12일 다음 날 09:00 KST가 이미 지났다. 리뷰 3구간이 모두 있으면 잠금 해제
 const ENDED_INSTALL_DATE = "2026-01-01T00:00:00+09:00";
 const NOT_ENDED_INSTALL_DATE = "2099-01-01T00:00:00+09:00";
 
