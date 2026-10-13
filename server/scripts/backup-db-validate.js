@@ -11,4 +11,14 @@ function isValidRemoteRetention(remoteRetention) {
   return Number.isInteger(remoteRetention) && remoteRetention >= 0;
 }
 
-module.exports = { isValidRemoteDir, isValidRemoteRetention };
+// 로컬 보관일수(RETENTION_DAYS) 검증. 0은 방금 만든 백업까지, 음수는 전부 지우고
+// NaN은 아무것도 지우지 않으므로 1 이상의 정수만 허용한다.
+function isValidRetentionDays(retentionDays) {
+  return Number.isInteger(retentionDays) && retentionDays >= 1;
+}
+
+module.exports = {
+  isValidRemoteDir,
+  isValidRemoteRetention,
+  isValidRetentionDays,
+};

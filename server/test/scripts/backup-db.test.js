@@ -136,6 +136,48 @@ describe("main — 암호화 백업", () => {
   });
 });
 
+describe("main — 잘못된 보관일수(RETENTION_DAYS)", () => {
+  let dbPath;
+
+  beforeEach(() => {
+    dbPath = path.join(tmpDir, "source.db");
+    openWithKey(dbPath, KEY).close();
+    fs.mkdirSync(backupDir);
+  });
+
+  // RETENTION_DAYS 환경변수 "0"·"-1"·"1.5"·"abc"를 Number()로 바꾼 값
+  it.each([0, -1, 1.5, NaN])(
+    "%s이면 백업은 남기고 로테이션을 건너뛴 뒤 실패로 끝낸다",
+    async (retentionDays) => {
+      const old = "youtube_bias-20250101-000000.db";
+      touch(backupDir, old, Date.now() - 400 * DAY);
+      const exec = vi.fn();
+
+      await main({
+        dbPath,
+        backupDir,
+        retentionDays,
+        encryptionKey: KEY,
+        offsite: { env: { E1_BACKUP_HOST: "203.0.113.9" }, exec },
+      });
+
+      const files = backupFiles(backupDir);
+      expect(files).toHaveLength(2);
+      expect(files).toContain(old);
+      expect(errorSpy).toHaveBeenCalledWith(
+        `[backup] 로테이션 건너뜀: RETENTION_DAYS가 1 이상의 정수가 아닙니다 (값: ${retentionDays})`,
+      );
+      expect(process.exitCode).toBe(1);
+      // 로테이션 설정 오류와 무관하게 오프사이트 복사본은 만든다
+      expect(exec).toHaveBeenCalledWith(
+        "scp",
+        expect.any(Array),
+        expect.any(Object),
+      );
+    },
+  );
+});
+
 describe("rotateBackups — 보관 기간 지난 백업 삭제", () => {
   const NOW = Date.parse("2026-10-13T00:00:00Z");
 
