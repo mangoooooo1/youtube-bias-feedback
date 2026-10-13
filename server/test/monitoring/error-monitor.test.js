@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import {
   extractErrorLines,
   fingerprint,
@@ -8,6 +11,7 @@ import {
   decideAlerts,
   shouldPersistState,
   classifyTier,
+  main,
 } from "../../monitoring/error-monitor.js";
 
 describe("extractErrorLines", () => {
@@ -555,5 +559,81 @@ describe("shouldPersistState — ping이 진짜로 성공/스킵했을 때만 �
     expect(
       shouldPersistState({ skipped: false, ok: false, error: "network down" }),
     ).toBe(false);
+  });
+});
+
+describe("main — 로그 판정·ping·상태 저장 조합", () => {
+  const PING_URL = "https://hc.test/errors";
+  let tmpDir;
+  let logPath;
+  let fetchMock;
+  let prevExitCode;
+
+  function stubPing(status) {
+    fetchMock = vi.fn(async () => ({ ok: status < 400, status }));
+    vi.stubGlobal("fetch", fetchMock);
+  }
+
+  function readSavedState() {
+    const file = path.join(tmpDir, "state", "error-monitor.json");
+    return fs.existsSync(file)
+      ? JSON.parse(fs.readFileSync(file, "utf8"))
+      : null;
+  }
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "viewlens-error-monitor-"));
+    logPath = path.join(tmpDir, "server-error.log");
+    vi.stubEnv("MONITOR_STATE_DIR", path.join(tmpDir, "state"));
+    vi.stubEnv("ERROR_LOG_PATH", logPath);
+    vi.stubEnv("ERROR_MONITOR_PING_URL", PING_URL);
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    prevExitCode = process.exitCode;
+  });
+
+  afterEach(() => {
+    process.exitCode = prevExitCode;
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("새 에러가 없으면 성공 ping을 보내고 cursor를 파일 끝으로 옮긴다", async () => {
+    fs.writeFileSync(logPath, "server listening on 3000\n");
+    stubPing(200);
+
+    await main();
+
+    expect(fetchMock.mock.calls[0][0]).toBe(PING_URL);
+    expect(readSavedState().cursor.offset).toBe(fs.statSync(logPath).size);
+    expect(process.exitCode).toBe(prevExitCode);
+  });
+
+  it("새 에러가 있으면 /fail로 알리고 cursor·fingerprints를 저장한다", async () => {
+    fs.writeFileSync(logPath, "[Error] POST /api/sessions : boom\n");
+    stubPing(200);
+
+    await main();
+
+    const [url, opts] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${PING_URL}/fail`);
+    expect(opts.method).toBe("POST");
+    const saved = readSavedState();
+    expect(saved.cursor.offset).toBe(fs.statSync(logPath).size);
+    expect(Object.keys(saved.fingerprints)).toHaveLength(1);
+  });
+
+  // 저장하면 다음 실행이 이 에러를 건너뛰어 알림이 영영 누락된다
+  it("ping이 실패하면 cursor·fingerprints를 저장하지 않고 exitCode=1로 끝낸다", async () => {
+    fs.writeFileSync(logPath, "[Error] POST /api/sessions : boom\n");
+    stubPing(500);
+
+    await main();
+
+    expect(readSavedState()).toBeNull();
+    expect(process.exitCode).toBe(1);
   });
 });

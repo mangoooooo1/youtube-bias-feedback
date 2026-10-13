@@ -1,4 +1,12 @@
-import { describe, it, expect, afterAll, beforeEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  afterAll,
+  afterEach,
+  beforeEach,
+  vi,
+} from "vitest";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -147,7 +155,9 @@ describe("collectRecentActivity — 실제 DB 배선", () => {
 
   const { db, initializeDB } = require("../../db.js");
   initializeDB();
-  const { collectRecentActivity } = require("../../monitoring/research-pipeline-monitor.js");
+  const {
+    collectRecentActivity,
+  } = require("../../monitoring/research-pipeline-monitor.js");
 
   afterAll(() => {
     db.close();
@@ -161,7 +171,10 @@ describe("collectRecentActivity — 실제 DB 배선", () => {
   });
 
   function toSqliteDatetime(ms) {
-    return new Date(ms).toISOString().replace("T", " ").replace(/\.\d+Z$/, "");
+    return new Date(ms)
+      .toISOString()
+      .replace("T", " ")
+      .replace(/\.\d+Z$/, "");
   }
 
   it("참여자가 없으면 hasParticipants=false다", () => {
@@ -286,5 +299,118 @@ describe("collectRecentActivity — 실제 DB 배선", () => {
     const { events } = collectRecentActivity(db, now, lookbackMs);
 
     expect(events).toHaveLength(0);
+  });
+
+  // main()은 db.js 싱글턴을 쓰므로 같은 임시 DB를 공유하도록 이 블록 안에 둔다
+  describe("main — 판정·ping·상태 저장 조합", () => {
+    const { main } = require("../../monitoring/research-pipeline-monitor.js");
+    const PING_URL = "https://hc.test/research";
+    const NOW = Date.parse("2026-08-30T12:00:00Z");
+    let stateDir;
+    let fetchMock;
+    let prevExitCode;
+
+    function stubPing(status) {
+      fetchMock = vi.fn(async () => ({ ok: status < 400, status }));
+      vi.stubGlobal("fetch", fetchMock);
+    }
+
+    function readSavedState() {
+      const file = path.join(stateDir, "research-pipeline.json");
+      return fs.existsSync(file)
+        ? JSON.parse(fs.readFileSync(file, "utf8"))
+        : null;
+    }
+
+    function addParticipant(installMs) {
+      db.prepare(
+        "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
+      ).run("p1", "EXP", new Date(installMs).toISOString());
+    }
+
+    beforeEach(() => {
+      stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "viewlens-monitor-"));
+      vi.stubEnv("MONITOR_STATE_DIR", stateDir);
+      vi.stubEnv("RESEARCH_PIPELINE_PING_URL", PING_URL);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+      vi.spyOn(console, "log").mockImplementation(() => {});
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      prevExitCode = process.exitCode;
+    });
+
+    afterEach(() => {
+      process.exitCode = prevExitCode;
+      vi.useRealTimers();
+      vi.restoreAllMocks();
+      vi.unstubAllEnvs();
+      vi.unstubAllGlobals();
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    });
+
+    it("7일 전 같은 시간대엔 활동이 있었는데 지금 침묵하면 /fail로 사유를 보내고 상태를 저장한다", async () => {
+      addParticipant(NOW - 30 * DAY);
+      db.prepare(
+        "INSERT INTO video_events (anonymousId, videoId, watchedAt) VALUES (?, ?, ?)",
+      ).run("p1", "v1", new Date(NOW - 7 * DAY - 2 * HOUR).toISOString());
+      stubPing(200);
+
+      await main();
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const [url, opts] = fetchMock.mock.calls[0];
+      expect(url).toBe(`${PING_URL}/fail`);
+      expect(opts.method).toBe("POST");
+      expect(opts.body).toContain("flatline_vs_7_days_ago");
+      expect(readSavedState()).toEqual({
+        consecutiveZero: 0,
+        lastEvaluatedAt: NOW,
+      });
+      expect(process.exitCode).toBe(prevExitCode);
+    });
+
+    it("ping이 HTTP 500이면 상태를 저장하지 않고 exitCode=1로 끝낸다", async () => {
+      addParticipant(NOW - 3 * DAY);
+      stubPing(500);
+
+      await main();
+
+      expect(readSavedState()).toBeNull();
+      expect(process.exitCode).toBe(1);
+    });
+
+    it("ping URL이 없으면 전송을 건너뛰고 상태는 저장한다", async () => {
+      addParticipant(NOW - 3 * DAY);
+      vi.stubEnv("RESEARCH_PIPELINE_PING_URL", "");
+      stubPing(200);
+
+      await main();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(readSavedState()).toEqual({
+        consecutiveZero: 1,
+        lastEvaluatedAt: NOW,
+      });
+      expect(process.exitCode).toBe(prevExitCode);
+    });
+
+    // 연속 침묵 횟수는 상태 파일로만 이어지므로, 첫 실행의 저장이 빠지면 두 번째 경보가 누락된다
+    it("설치 7일 미만 참여자만 있고 침묵이 이어지면 첫 실행은 보류, 6시간 뒤 실행에서 경보한다", async () => {
+      addParticipant(NOW - 3 * DAY);
+      stubPing(200);
+
+      await main();
+      expect(fetchMock.mock.calls[0][0]).toBe(PING_URL);
+      expect(readSavedState().consecutiveZero).toBe(1);
+
+      vi.setSystemTime(NOW + 6 * HOUR);
+      await main();
+
+      const [url, opts] = fetchMock.mock.calls[1];
+      expect(url).toBe(`${PING_URL}/fail`);
+      expect(opts.body).toContain("flatline_consecutive_windows");
+      expect(readSavedState().consecutiveZero).toBe(2);
+    });
   });
 });

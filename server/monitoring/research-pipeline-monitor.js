@@ -234,4 +234,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { evaluatePipelineHealth, collectRecentActivity };
+module.exports = { evaluatePipelineHealth, collectRecentActivity, main };
