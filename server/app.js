@@ -5,8 +5,8 @@ require("dotenv").config();
 require("./tracing").initTracer(process.env.NODE_ENV || "development");
 
 const express = require("express");
-const cors = require("cors");
 const { success, errorHandler } = require("./middleware/responseHandler");
+const { createCorsPolicy } = require("./middleware/corsPolicy");
 const { oneLine, formatStack } = require("./log-line");
 const { createAccessLog } = require("./middleware/accessLog");
 const { db, initializeDB } = require("./db");
@@ -31,33 +31,7 @@ initializeDB();
 
 const app = express();
 
-// 임의의 확장이 아니라 실제 게시된 ViewLens 확장 ID로만 한정한다.
-const VIEWLENS_EXTENSION_ID = "hdoachgdmhdlbgbacaffihocdjagjecp";
-const ALLOWED_ORIGIN_PATTERNS = [
-  `chrome-extension://${VIEWLENS_EXTENSION_ID}`,
-  /^https:\/\/([a-z0-9-]+\.)*youtube\.com$/,
-  "https://viewlens.site",
-];
-// 로컬 개발용 압축해제 확장 ID는 production이 아닐 때만 허용 목록에 추가한다
-if (process.env.NODE_ENV !== "production" && process.env.DEV_EXTENSION_ID) {
-  ALLOWED_ORIGIN_PATTERNS.push(
-    `chrome-extension://${process.env.DEV_EXTENSION_ID}`,
-  );
-}
-app.use(
-  cors({
-    origin(origin, callback) {
-      // origin 없는 요청(curl, 헬스체크 등)은 CORS 검사 없이 통과시킨다
-      if (!origin) return callback(null, true);
-      const allowed = ALLOWED_ORIGIN_PATTERNS.some((p) =>
-        p instanceof RegExp ? p.test(origin) : p === origin,
-      );
-      callback(null, allowed);
-    },
-    // sendBeacon은 credentials를 끌 수 없어 항상 포함되므로 Allow-Credentials를 켜둔다
-    credentials: true,
-  }),
-);
+app.use(createCorsPolicy());
 // 마운트와 접근 로그 감시 대상을 같은 목록에서 만든다
 const API_ROUTES = [
   ["/api/participants", require("./routes/participants")],
