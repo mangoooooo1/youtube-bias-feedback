@@ -140,15 +140,16 @@ function offsitePush(dest, { env = process.env, exec = execFileSync } = {}) {
 
   // remoteDir/remoteRetention은 원격 쉘 명령(mkdir/find)에 삽입되므로 검증한다.
   // 쉘 메타문자·공백 유입 시 원격에서 의도치 않은 실행/구문 오류 방지. (실패해도 로컬 백업은 유효)
+  // 설정 오류도 복사본이 안 생기므로 backup-checked.sh가 찾는 "오프사이트 전송 실패" 문구로 알린다
   if (!isValidRemoteDir(remoteDir)) {
     console.warn(
-      "[backup] 오프사이트 건너뜀: E1_BACKUP_DIR에 허용되지 않는 문자가 있습니다.",
+      "[backup] 오프사이트 전송 실패(설정 오류, 로컬 백업은 정상): E1_BACKUP_DIR에 허용되지 않는 문자가 있습니다.",
     );
     return;
   }
   if (!isValidRemoteRetention(remoteRetention)) {
     console.warn(
-      "[backup] 오프사이트 건너뜀: E1_RETENTION_DAYS가 0 이상의 정수가 아닙니다.",
+      "[backup] 오프사이트 전송 실패(설정 오류, 로컬 백업은 정상): E1_RETENTION_DAYS가 0 이상의 정수가 아닙니다.",
     );
     return;
   }

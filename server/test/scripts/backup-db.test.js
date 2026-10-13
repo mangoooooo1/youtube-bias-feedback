@@ -247,24 +247,41 @@ describe("offsitePush — 오프사이트 전송", () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["E1_BACKUP_DIR", "a;rm -rf ~", "E1_BACKUP_DIR에 허용되지 않는 문자"],
-    ["E1_BACKUP_DIR", "a b", "E1_BACKUP_DIR에 허용되지 않는 문자"],
-    ["E1_RETENTION_DAYS", "-1", "E1_RETENTION_DAYS가 0 이상의 정수가 아닙니다"],
-    [
-      "E1_RETENTION_DAYS",
-      "1.5",
-      "E1_RETENTION_DAYS가 0 이상의 정수가 아닙니다",
-    ],
-  ])("%s=%j이면 원격 명령 없이 경고만 남긴다", (name, value, reason) => {
-    const exec = vi.fn();
-    offsitePush(DEST, { env: { ...BASE_ENV, [name]: value }, exec });
+  const DIR_REASON = "E1_BACKUP_DIR에 허용되지 않는 문자가 있습니다.";
+  const RETENTION_REASON = "E1_RETENTION_DAYS가 0 이상의 정수가 아닙니다.";
+  const INVALID_OFFSITE_ENV = [
+    ["E1_BACKUP_DIR", "a;rm -rf ~", DIR_REASON],
+    ["E1_BACKUP_DIR", "a b", DIR_REASON],
+    ["E1_RETENTION_DAYS", "-1", RETENTION_REASON],
+    ["E1_RETENTION_DAYS", "1.5", RETENTION_REASON],
+  ];
 
-    expect(exec).not.toHaveBeenCalled();
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining(`[backup] 오프사이트 건너뜀: ${reason}`),
-    );
-  });
+  it.each(INVALID_OFFSITE_ENV)(
+    "%s=%j이면 원격 명령 없이 경고만 남긴다",
+    (name, value, reason) => {
+      const exec = vi.fn();
+      offsitePush(DEST, { env: { ...BASE_ENV, [name]: value }, exec });
+
+      expect(exec).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        `[backup] 오프사이트 전송 실패(설정 오류, 로컬 백업은 정상): ${reason}`,
+      );
+    },
+  );
+
+  // 설정 오류로 복사본이 안 생겨도 backup-checked.sh가 Healthchecks에 실패로 보고해야 한다
+  it.each(INVALID_OFFSITE_ENV)(
+    "%s=%j이면 출력에 backup-checked.sh가 찾는 '오프사이트 전송 실패'가 있다",
+    (name, value) => {
+      offsitePush(DEST, { env: { ...BASE_ENV, [name]: value }, exec: vi.fn() });
+
+      const output = warnSpy.mock.calls
+        .map((args) => args.join(" "))
+        .join("\n");
+      expect(output).toContain("오프사이트 전송 실패");
+      expect(process.exitCode).toBe(prevExitCode);
+    },
+  );
 
   it("mkdir → scp → 원격 로테이션 순으로 타임아웃을 걸어 실행한다", () => {
     const exec = vi.fn();
