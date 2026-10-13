@@ -328,4 +328,5 @@ module.exports = {
   decideAlerts,
   shouldPersistState,
   classifyTier,
+  main,
 };

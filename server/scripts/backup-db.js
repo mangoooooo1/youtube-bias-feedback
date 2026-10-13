@@ -10,7 +10,8 @@
  * - 백업 대상 : server/youtube_bias.db
  * - 저장 위치 : BACKUP_DIR (기본 ~/db-backups) — repo 밖에 둬 git pull/배포와 분리
  * - 파일명    : youtube_bias-YYYYMMDD-HHMMSS.db
- * - 로테이션  : RETENTION_DAYS(기본 30일) 지난 백업 자동 삭제
+ * - 로테이션  : RETENTION_DAYS(기본 30일, 1 이상 정수) 지난 백업 자동 삭제
+ *               값이 잘못되면 백업은 남기고 로테이션만 건너뛴 뒤 실패(exit 1)로 끝낸다
  *
  * 오프사이트 복사(선택): E1_BACKUP_HOST가 설정된 경우에만, 백업 후 원격 서버로 scp 전송한다.
  * 단일 디스크 장애 대비. best-effort라 전송 실패해도 로컬 백업은 유효(스크립트 성공).
@@ -34,6 +35,7 @@ const Database = require("better-sqlite3-multiple-ciphers");
 const {
   isValidRemoteDir,
   isValidRemoteRetention,
+  isValidRetentionDays,
 } = require("./backup-db-validate");
 
 // cron으로 실행될 때는 server/.env가 자동으로 로드되지 않으므로 명시적으로 불러온다.
@@ -54,36 +56,60 @@ function timestamp() {
   );
 }
 
-async function main() {
-  if (!fs.existsSync(DB_PATH)) {
-    console.error(`[backup] DB 파일 없음: ${DB_PATH}`);
-    process.exit(1);
+// 경로·키·오프사이트 주입점은 인자로 줄 수 있다(테스트용). 생략하면 cron 실행과 같은 기본값을 쓴다.
+async function main({
+  dbPath = DB_PATH,
+  backupDir = BACKUP_DIR,
+  retentionDays = RETENTION_DAYS,
+  encryptionKey = DB_ENCRYPTION_KEY,
+  offsite = {},
+} = {}) {
+  // process.exit 대신 exitCode. 출력 문구와 종료 코드는 그대로 두고 테스트에서 불러올 수 있게 한다
+  if (!fs.existsSync(dbPath)) {
+    console.error(`[backup] DB 파일 없음: ${dbPath}`);
+    process.exitCode = 1;
+    return;
   }
-  if (!DB_ENCRYPTION_KEY) {
+  if (!encryptionKey) {
     console.error("[backup] DB_ENCRYPTION_KEY 환경변수가 필요합니다.");
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+  fs.mkdirSync(backupDir, { recursive: true });
 
-  const dest = path.join(BACKUP_DIR, `youtube_bias-${timestamp()}.db`);
-  const db = new Database(DB_PATH);
+  const dest = path.join(backupDir, `youtube_bias-${timestamp()}.db`);
+  const db = new Database(dbPath);
   db.pragma("cipher = 'sqlcipher'"); // db.js와 동일 cipher(AES-256)로 맞춰야 키가 들어맞는다
-  db.key(Buffer.from(DB_ENCRYPTION_KEY)); // 문자열 보간 대신 바인딩 API — db.js와 동일 이유
+  db.key(Buffer.from(encryptionKey)); // 문자열 보간 대신 바인딩 API. db.js와 동일 이유
   try {
     db.pragma("wal_checkpoint(TRUNCATE)"); // WAL 내용을 메인 파일에 전부 반영
   } finally {
     db.close();
   }
-  fs.copyFileSync(DB_PATH, dest); // 암호화된 바이트를 그대로 복사 — 대상 파일도 자동으로 동일하게 암호화됨
+  fs.copyFileSync(dbPath, dest); // 암호화된 바이트를 그대로 복사. 대상 파일도 자동으로 동일하게 암호화됨
   const sizeKb = Math.round(fs.statSync(dest).size / 1024);
   console.log(`[backup] 완료: ${dest} (${sizeKb} KB)`);
 
-  // 로테이션 — RETENTION_DAYS 지난 백업 삭제
-  const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  // 설정 오류로 백업을 잃지 않도록 로테이션만 건너뛰고, 종료 코드로 backup-checked.sh가 실패를 보고하게 한다
+  if (isValidRetentionDays(retentionDays)) {
+    rotateBackups(backupDir, retentionDays);
+  } else {
+    console.error(
+      `[backup] 로테이션 건너뜀: RETENTION_DAYS가 1 이상의 정수가 아닙니다 (값: ${retentionDays})`,
+    );
+    process.exitCode = 1;
+  }
+
+  offsitePush(dest, offsite);
+}
+
+// 로테이션 retentionDays 지난 백업 삭제
+function rotateBackups(backupDir, retentionDays, now = Date.now()) {
+  const cutoff = now - retentionDays * 24 * 60 * 60 * 1000;
   let removed = 0;
-  for (const name of fs.readdirSync(BACKUP_DIR)) {
+  for (const name of fs.readdirSync(backupDir)) {
     if (!/^youtube_bias-\d{8}-\d{6}\.db$/.test(name)) continue;
-    const full = path.join(BACKUP_DIR, name);
+    const full = path.join(backupDir, name);
     // 개별 파일 정리 실패(권한·레이스 등)가 성공한 백업 전체를 실패로 만들지 않도록 방어
     try {
       if (fs.statSync(full).mtimeMs < cutoff) {
@@ -96,35 +122,34 @@ async function main() {
   }
   if (removed)
     console.log(
-      `[backup] 로테이션: 오래된 백업 ${removed}개 삭제 (>${RETENTION_DAYS}일)`,
+      `[backup] 로테이션: 오래된 백업 ${removed}개 삭제 (>${retentionDays}일)`,
     );
-
-  offsitePush(dest);
 }
 
 // 오프사이트 복사 — E1_BACKUP_HOST가 설정된 경우에만 동작.
 // best-effort: 전송/원격정리 실패해도 로컬 백업은 이미 성공했으므로 경고만 남기고 넘어간다.
-function offsitePush(dest) {
-  const host = process.env.E1_BACKUP_HOST;
+// env·exec는 테스트에서 원격 명령을 가로채기 위한 주입점이다(서버 모듈은 vi.mock이 닿지 않음).
+function offsitePush(dest, { env = process.env, exec = execFileSync } = {}) {
+  const host = env.E1_BACKUP_HOST;
   if (!host) return; // 미설정 → 오프사이트 비활성화
 
-  const user = process.env.E1_BACKUP_USER || "ubuntu";
-  const key =
-    process.env.E1_BACKUP_KEY || path.join(os.homedir(), ".ssh", "e1_backup");
-  const remoteDir = process.env.E1_BACKUP_DIR || "db-backups";
-  const remoteRetention = Number(process.env.E1_RETENTION_DAYS || 14);
+  const user = env.E1_BACKUP_USER || "ubuntu";
+  const key = env.E1_BACKUP_KEY || path.join(os.homedir(), ".ssh", "e1_backup");
+  const remoteDir = env.E1_BACKUP_DIR || "db-backups";
+  const remoteRetention = Number(env.E1_RETENTION_DAYS || 14);
 
   // remoteDir/remoteRetention은 원격 쉘 명령(mkdir/find)에 삽입되므로 검증한다.
   // 쉘 메타문자·공백 유입 시 원격에서 의도치 않은 실행/구문 오류 방지. (실패해도 로컬 백업은 유효)
+  // 설정 오류도 복사본이 안 생기므로 backup-checked.sh가 찾는 "오프사이트 전송 실패" 문구로 알린다
   if (!isValidRemoteDir(remoteDir)) {
     console.warn(
-      "[backup] 오프사이트 건너뜀: E1_BACKUP_DIR에 허용되지 않는 문자가 있습니다.",
+      "[backup] 오프사이트 전송 실패(설정 오류, 로컬 백업은 정상): E1_BACKUP_DIR에 허용되지 않는 문자가 있습니다.",
     );
     return;
   }
   if (!isValidRemoteRetention(remoteRetention)) {
     console.warn(
-      "[backup] 오프사이트 건너뜀: E1_RETENTION_DAYS가 0 이상의 정수가 아닙니다.",
+      "[backup] 오프사이트 전송 실패(설정 오류, 로컬 백업은 정상): E1_RETENTION_DAYS가 0 이상의 정수가 아닙니다.",
     );
     return;
   }
@@ -137,18 +162,10 @@ function offsitePush(dest) {
   const execOpts = { stdio: "pipe", timeout: 30000 };
 
   try {
-    execFileSync(
-      "ssh",
-      [...sshOpts, target, `mkdir -p ${remoteDir}`],
-      execOpts,
-    );
-    execFileSync(
-      "scp",
-      [...sshOpts, dest, `${target}:${remoteDir}/`],
-      execOpts,
-    );
+    exec("ssh", [...sshOpts, target, `mkdir -p ${remoteDir}`], execOpts);
+    exec("scp", [...sshOpts, dest, `${target}:${remoteDir}/`], execOpts);
     // 원격 로테이션 — remoteRetention일 지난 백업 삭제
-    execFileSync(
+    exec(
       "ssh",
       [
         ...sshOpts,
@@ -167,7 +184,11 @@ function offsitePush(dest) {
   }
 }
 
-main().catch((err) => {
-  console.error("[backup] 실패:", err.message);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error("[backup] 실패:", err.message);
+    process.exit(1);
+  });
+}
+
+module.exports = { main, rotateBackups, offsitePush };

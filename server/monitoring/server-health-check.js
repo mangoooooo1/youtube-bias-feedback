@@ -75,4 +75,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { checkHealth };
+module.exports = { checkHealth, main };
