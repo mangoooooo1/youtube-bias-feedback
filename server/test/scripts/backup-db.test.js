@@ -6,7 +6,7 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { main, rotateBackups } from "../../scripts/backup-db.js";
+import { main, rotateBackups, offsitePush } from "../../scripts/backup-db.js";
 
 const require = createRequire(import.meta.url);
 const Database = require("better-sqlite3-multiple-ciphers");
@@ -183,5 +183,86 @@ describe("rotateBackups — 보관 기간 지난 백업 삭제", () => {
     expect(logSpy).toHaveBeenCalledWith(
       "[backup] 로테이션: 오래된 백업 1개 삭제 (>30일)",
     );
+  });
+});
+
+describe("offsitePush — 오프사이트 전송", () => {
+  const DEST = "/backups/youtube_bias-20261013-000000.db";
+  const SSH_OPTS = [
+    "-i",
+    "/keys/e1",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=10",
+  ];
+  const EXEC_OPTS = { stdio: "pipe", timeout: 30000 };
+  const BASE_ENV = { E1_BACKUP_HOST: "203.0.113.9", E1_BACKUP_KEY: "/keys/e1" };
+
+  it("E1_BACKUP_HOST가 없으면 원격 명령을 실행하지 않는다", () => {
+    const exec = vi.fn();
+    offsitePush(DEST, { env: {}, exec });
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["E1_BACKUP_DIR", "a;rm -rf ~", "E1_BACKUP_DIR에 허용되지 않는 문자"],
+    ["E1_BACKUP_DIR", "a b", "E1_BACKUP_DIR에 허용되지 않는 문자"],
+    ["E1_RETENTION_DAYS", "-1", "E1_RETENTION_DAYS가 0 이상의 정수가 아닙니다"],
+    [
+      "E1_RETENTION_DAYS",
+      "1.5",
+      "E1_RETENTION_DAYS가 0 이상의 정수가 아닙니다",
+    ],
+  ])("%s=%j이면 원격 명령 없이 경고만 남긴다", (name, value, reason) => {
+    const exec = vi.fn();
+    offsitePush(DEST, { env: { ...BASE_ENV, [name]: value }, exec });
+
+    expect(exec).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(`[backup] 오프사이트 건너뜀: ${reason}`),
+    );
+  });
+
+  it("mkdir → scp → 원격 로테이션 순으로 타임아웃을 걸어 실행한다", () => {
+    const exec = vi.fn();
+    offsitePush(DEST, { env: { ...BASE_ENV, E1_RETENTION_DAYS: "7" }, exec });
+
+    const target = "ubuntu@203.0.113.9";
+    expect(exec.mock.calls).toEqual([
+      ["ssh", [...SSH_OPTS, target, "mkdir -p db-backups"], EXEC_OPTS],
+      ["scp", [...SSH_OPTS, DEST, `${target}:db-backups/`], EXEC_OPTS],
+      [
+        "ssh",
+        [
+          ...SSH_OPTS,
+          target,
+          "find db-backups -maxdepth 1 -name 'youtube_bias-*.db' -mtime +7 -delete",
+        ],
+        EXEC_OPTS,
+      ],
+    ]);
+    expect(logSpy).toHaveBeenCalledWith(
+      `[backup] 오프사이트 전송 완료: ${target}:db-backups/ (보관 7일)`,
+    );
+  });
+
+  // backup-checked.sh는 이 문구가 출력에 있어야 Healthchecks에 실패로 보고한다
+  it("scp가 실패하면 '오프사이트 전송 실패'와 stderr를 남기고 예외를 던지지 않는다", () => {
+    const exec = vi.fn((cmd) => {
+      if (cmd !== "scp") return;
+      const err = new Error("Command failed: scp");
+      err.stderr = Buffer.from("ssh: connect to host 203.0.113.9: timed out\n");
+      throw err;
+    });
+
+    expect(() => offsitePush(DEST, { env: BASE_ENV, exec })).not.toThrow();
+
+    expect(exec).toHaveBeenCalledTimes(2); // 원격 로테이션까지 가지 않는다
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[backup] 오프사이트 전송 실패(로컬 백업은 정상):",
+      "ssh: connect to host 203.0.113.9: timed out",
+    );
+    expect(process.exitCode).toBe(prevExitCode);
   });
 });
