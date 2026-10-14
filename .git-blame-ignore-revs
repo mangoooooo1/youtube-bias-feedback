@@ -1,0 +1,5 @@
+# git blame에서 건너뛸 형식 전용 커밋. GitHub는 자동 적용,
+# 로컬은 git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: prettier 형식에 어긋난 테스트·스크립트·문서 12개를 pnpm format으로 일괄 정리
+474d0653be133ecc75fa0512f42c2dadd77c8b92
