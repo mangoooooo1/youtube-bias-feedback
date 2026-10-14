@@ -35,9 +35,10 @@ export default defineConfig({
         "server/scripts/sample-embedding-validation-sessions.js",
       ],
       reporter: ["text", "json-summary", "html"],
-      // 2026-10-11 실측치(로컬 Windows/Node 22와 CI Ubuntu/Node 24 중 낮은 값)보다 2%p 낮게 잡은 회귀 방지용 바닥선.
-      // 폴더별 값은 그 폴더 파일들을 합친 수치로 검사한다.
-      // "이 정도는 유지하자"는 최소선이지 목표치가 아니다 — 값을 낮추는 수정은 지양.
+      // 2026-10-11 실측치보다 2%p 낮게 잡은 회귀 방지용 바닥선.
+      // 당시 로컬이 CI보다 B·F가 약 0.1%p 낮았는데 원인은 Node 버전이 아니라 로컬 CRLF 파일이었다.
+      // .gitattributes(eol=lf) 적용 후 두 환경 수치가 같다. 폴더별 값은 그 폴더 파일들을 합친 수치로 검사한다.
+      // "이 정도는 유지하자"는 최소선이지 목표치가 아니다. 값을 낮추는 수정은 지양.
       thresholds: {
         statements: 52,
         branches: 47,
