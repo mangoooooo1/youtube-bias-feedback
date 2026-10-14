@@ -103,10 +103,12 @@ describe("POST /api/today-reviews — PARTICIPANT_TOKEN_SECRET 설정 시 소유
   }
 
   it("유효한 토큰이면 200", async () => {
-    const res = await request(app).post("/api/today-reviews").send({
-      anonymousId: "token-owner",
-      participantToken: tokenFor("token-owner"),
-    });
+    const res = await request(app)
+      .post("/api/today-reviews")
+      .send({
+        anonymousId: "token-owner",
+        participantToken: tokenFor("token-owner"),
+      });
     expect(res.status).toBe(200);
   });
 
@@ -119,10 +121,12 @@ describe("POST /api/today-reviews — PARTICIPANT_TOKEN_SECRET 설정 시 소유
   });
 
   it("다른 참여자의 토큰이면 403(IDOR 시나리오 그대로 재현)", async () => {
-    const res = await request(app).post("/api/today-reviews").send({
-      anonymousId: "token-owner",
-      participantToken: tokenFor("someone-else"),
-    });
+    const res = await request(app)
+      .post("/api/today-reviews")
+      .send({
+        anonymousId: "token-owner",
+        participantToken: tokenFor("someone-else"),
+      });
     expect(res.status).toBe(403);
   });
 });

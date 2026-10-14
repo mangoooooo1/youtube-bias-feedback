@@ -77,8 +77,11 @@ function loadVLWithTotalDays(days) {
   );
   const sandbox = {};
   sandbox.window = sandbox;
-  return new Function("window", `${src}
-return window.VL;`)(sandbox);
+  return new Function(
+    "window",
+    `${src}
+return window.VL;`,
+  )(sandbox);
 }
 
 describe("VL.studyDurationLabel — 연구 기간 표기", () => {

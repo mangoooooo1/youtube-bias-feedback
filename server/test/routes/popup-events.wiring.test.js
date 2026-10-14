@@ -81,9 +81,9 @@ describe("실제 server/routes/popup-events.js 라우터 배선", () => {
     const res = await request(app).post("/api/popup-events").send(payload);
     expect(res.status).toBe(400);
     expect(res.body.code).toBe("MISSING_REQUIRED_FIELD");
-    expect(
-      db.prepare("SELECT COUNT(*) AS c FROM popup_events").get().c,
-    ).toBe(0);
+    expect(db.prepare("SELECT COUNT(*) AS c FROM popup_events").get().c).toBe(
+      0,
+    );
   });
 
   it("같은 eventId로 재전송해도 한 행만 남는다(OR IGNORE 멱등성)", async () => {
@@ -114,9 +114,7 @@ describe("실제 server/routes/popup-events.js 라우터 배선", () => {
   });
 
   it("등록되지 않은 경로는 404 — 예기치 않은 라우트가 실수로 노출되지 않았는지 확인", async () => {
-    const res = await request(app).get(
-      "/api/popup-events/no-such-route",
-    );
+    const res = await request(app).get("/api/popup-events/no-such-route");
     expect(res.status).toBe(404);
   });
 
@@ -127,8 +125,8 @@ describe("실제 server/routes/popup-events.js 라우터 배선", () => {
 
     expect(res.status).toBe(404);
     expect(res.body.code).toBe("NOT_FOUND");
-    expect(
-      db.prepare("SELECT COUNT(*) AS c FROM popup_events").get().c,
-    ).toBe(0);
+    expect(db.prepare("SELECT COUNT(*) AS c FROM popup_events").get().c).toBe(
+      0,
+    );
   });
 });

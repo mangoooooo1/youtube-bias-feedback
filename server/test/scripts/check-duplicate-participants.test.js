@@ -30,7 +30,11 @@ function insertParticipant(
 }
 
 function sha10(value) {
-  return crypto.createHash("sha256").update(String(value)).digest("hex").slice(0, 10);
+  return crypto
+    .createHash("sha256")
+    .update(String(value))
+    .digest("hex")
+    .slice(0, 10);
 }
 
 describe("fingerprint", () => {
@@ -46,12 +50,9 @@ describe("fingerprint", () => {
     expect(fingerprint("QWE-K7M2")).toBe(sha10("QWE-K7M2"));
   });
 
-  it.each([null, undefined, ""])(
-    "빈 값(%s)은 (none)을 반환한다",
-    (value) => {
-      expect(fingerprint(value)).toBe("(none)");
-    },
-  );
+  it.each([null, undefined, ""])("빈 값(%s)은 (none)을 반환한다", (value) => {
+    expect(fingerprint(value)).toBe("(none)");
+  });
 });
 
 describe("run", () => {

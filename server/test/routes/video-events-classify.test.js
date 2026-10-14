@@ -5,21 +5,24 @@ describe("classifyReferrerType — entryPath 자체가 없는 경우", () => {
   it.each([
     [null, null],
     ["www.youtube.com", null], // entryHost만 있고 entryPath가 없는 비정상 조합도 unknown 우선
-  ])("entryHost=%s, entryPath=%s이면 unknown을 반환한다", (entryHost, entryPath) => {
-    expect(classifyReferrerType(entryHost, entryPath, null)).toEqual({
-      referrerType: "unknown",
-      relatedTrigger: null,
-    });
-  });
+  ])(
+    "entryHost=%s, entryPath=%s이면 unknown을 반환한다",
+    (entryHost, entryPath) => {
+      expect(classifyReferrerType(entryHost, entryPath, null)).toEqual({
+        referrerType: "unknown",
+        relatedTrigger: null,
+      });
+    },
+  );
 });
 
 describe("classifyReferrerType — 외부 유입", () => {
   it("유튜브가 아닌 도메인이면 external을 반환한다", () => {
-    expect(
-      classifyReferrerType("www.google.com", "/search", null),
-    ).toEqual({ referrerType: "external", relatedTrigger: null });
+    expect(classifyReferrerType("www.google.com", "/search", null)).toEqual({
+      referrerType: "external",
+      relatedTrigger: null,
+    });
   });
-
 });
 
 describe("classifyReferrerType — entryPath는 있는데 entryHost가 없는 경우", () => {
@@ -35,9 +38,10 @@ describe("classifyReferrerType — entryPath는 있는데 entryHost가 없는 �
 
 describe("classifyReferrerType — 직접 검색", () => {
   it("/results면 direct_search를 반환한다", () => {
-    expect(
-      classifyReferrerType("www.youtube.com", "/results", null),
-    ).toEqual({ referrerType: "direct_search", relatedTrigger: null });
+    expect(classifyReferrerType("www.youtube.com", "/results", null)).toEqual({
+      referrerType: "direct_search",
+      relatedTrigger: null,
+    });
   });
 });
 
@@ -52,9 +56,10 @@ describe("classifyReferrerType — 홈 화면 추천", () => {
 
 describe("classifyReferrerType — 관련 동영상 추천(자동재생/클릭 구분)", () => {
   it("/watch + navigationTrigger='ended'면 related/autoplay를 반환한다", () => {
-    expect(
-      classifyReferrerType("www.youtube.com", "/watch", "ended"),
-    ).toEqual({ referrerType: "related", relatedTrigger: "autoplay" });
+    expect(classifyReferrerType("www.youtube.com", "/watch", "ended")).toEqual({
+      referrerType: "related",
+      relatedTrigger: "autoplay",
+    });
   });
 
   it("/watch + navigationTrigger='interaction'이면 related/click을 반환한다", () => {
@@ -81,9 +86,10 @@ describe("classifyReferrerType — 4분류 밖의 경로", () => {
   it.each(["/feed/subscriptions", "/channel/UCxxxx", "/@someChannel"])(
     "%s처럼 매핑되지 않는 경로는 unknown을 반환한다",
     (entryPath) => {
-      expect(
-        classifyReferrerType("www.youtube.com", entryPath, null),
-      ).toEqual({ referrerType: "unknown", relatedTrigger: null });
+      expect(classifyReferrerType("www.youtube.com", entryPath, null)).toEqual({
+        referrerType: "unknown",
+        relatedTrigger: null,
+      });
     },
   );
 });
