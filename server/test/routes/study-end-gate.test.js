@@ -9,117 +9,51 @@ import {
 } from "vitest";
 import request from "supertest";
 import express from "express";
-import Database from "better-sqlite3-multiple-ciphers";
-import {
-  success,
-  fail,
-  ERROR_CODES,
-  errorHandler,
-} from "../../middleware/responseHandler.js";
-import { rateLimiter } from "../../middleware/rateLimiter.js";
-import { verifyAndRecordStudyEndCode } from "../../routes/study-end-code-validation.js";
-import { getPeriodReviews } from "../../routes/period-reviews-query.js";
+import { createRequire } from "node:module";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
-// 대조군 종료 게이트 통합 흐름
+// 대조군 종료 게이트 통합 흐름 — 코드 검증(study-end-code.js) 후 기간 리뷰 조회(period-reviews.js)가
+// 실제로 열리는지를 두 실제 라우터와 실제 db.js 스키마로 검증한다.
+// 단일 API 동작은 study-end-code.wiring.test.js·period-reviews.wiring.test.js가 맡는다.
+const require = createRequire(import.meta.url);
+const TEST_DB_PATH = path.join(
+  os.tmpdir(),
+  `viewlens-study-end-gate-${process.pid}.db`,
+);
+fs.rmSync(TEST_DB_PATH, { force: true });
+process.env.DB_ENCRYPTION_KEY = "vitest-in-memory-only";
+process.env.DB_PATH = TEST_DB_PATH;
 
-process.env.STUDY_END_REVEAL_CODE = "SURVEY2026";
+const { db, initializeDB } = require("../../db.js");
+initializeDB();
 
-const db = new Database(":memory:");
-db.exec(`
-  CREATE TABLE participants (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    anonymousId TEXT NOT NULL UNIQUE,
-    group_code TEXT NOT NULL,
-    installDate TEXT NOT NULL,
-    studyEndCodeVerifiedAt TEXT
-  );
-  CREATE TABLE period_reviews (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    anonymousId TEXT NOT NULL,
-    periodIndex INTEGER NOT NULL,
-    periodStart TEXT NOT NULL,
-    periodEnd TEXT NOT NULL,
-    isBaseline INTEGER NOT NULL,
-    sessionCount INTEGER,
-    videoCount INTEGER,
-    categoryDistribution TEXT,
-    entropy REAL,
-    review TEXT,
-    reviewTopic TEXT,
-    source TEXT,
-    promptVersion TEXT,
-    llmStatus TEXT,
-    failureReason TEXT,
-    geminiMs INTEGER,
-    generatedAt TEXT NOT NULL
-  );
-`);
-
-afterAll(() => {
-  db.close();
-});
+const { errorHandler } = require("../../middleware/responseHandler.js");
+const {
+  issueParticipantToken,
+} = require("../../middleware/requireParticipant.js");
+const studyEndCodeRouter = require("../../routes/study-end-code.js");
+const periodReviewsRouter = require("../../routes/period-reviews.js");
 
 function buildApp() {
   const app = express();
   app.use(express.json());
-
-  const studyEndCodeRouter = express.Router();
-  const validateRateLimit = rateLimiter({ windowMs: 15 * 60 * 1000, max: 5 });
-  studyEndCodeRouter.post("/validate", validateRateLimit, (req, res) => {
-    const { code, anonymousId } = req.body;
-    if (typeof code !== "string" || !code.trim()) {
-      return fail(
-        res,
-        400,
-        ERROR_CODES.MISSING_REQUIRED_FIELD,
-        "code 필드가 필요합니다.",
-        "code",
-      );
-    }
-    if (typeof anonymousId !== "string" || !anonymousId.trim()) {
-      return fail(
-        res,
-        400,
-        ERROR_CODES.MISSING_REQUIRED_FIELD,
-        "anonymousId 필드가 필요합니다.",
-        "anonymousId",
-      );
-    }
-    const valid = verifyAndRecordStudyEndCode(
-      db,
-      anonymousId,
-      code,
-      process.env.STUDY_END_REVEAL_CODE,
-    );
-    return success(res, { valid });
-  });
   app.use("/api/study-end-code", studyEndCodeRouter);
-
-  const periodReviewsRouter = express.Router();
-  periodReviewsRouter.post("/", (req, res) => {
-    const anonymousId = (req.body?.anonymousId || "").toString().trim();
-    if (!anonymousId) {
-      return fail(
-        res,
-        400,
-        ERROR_CODES.MISSING_REQUIRED_FIELD,
-        "anonymousId 파라미터가 필요합니다.",
-        "anonymousId",
-      );
-    }
-    return success(res, getPeriodReviews(db, anonymousId));
-  });
   app.use("/api/period-reviews", periodReviewsRouter);
-
   app.use(errorHandler);
   return app;
 }
 
 const app = buildApp();
 
-// +6일(TOTAL_DAYS, 파일럿값) 지나 FIXED_NOW 기준 이미 종료된 것으로 판정되는 설치일
-const ENDED_INSTALL_DATE = "2026-05-25T00:00:00+09:00"; // +12일(TOTAL_DAYS) = 6/6 → 종료됨
+// +12일(TOTAL_DAYS) = 6/6 → FIXED_NOW 기준 이미 종료됨
+const ENDED_INSTALL_DATE = "2026-05-25T00:00:00+09:00";
 const FIXED_NOW = new Date("2026-06-10T10:00:00+09:00");
+
+// 레이트리밋 상태가 라우터 모듈 단위라 테스트끼리 한도를 나누지 않게 테스트마다 IP를 다르게 준다
+let ipSeq = 0;
+const nextIp = () => `10.30.0.${++ipSeq}`;
 
 function insertParticipant(anonymousId, group_code, installDate) {
   db.prepare(
@@ -135,15 +69,33 @@ function insertPeriodReview(anonymousId, periodIndex) {
   ).run(anonymousId, periodIndex);
 }
 
+const originalRevealCode = process.env.STUDY_END_REVEAL_CODE;
+const originalTokenSecret = process.env.PARTICIPANT_TOKEN_SECRET;
+
+function restoreEnv(key, value) {
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+}
+
+afterAll(() => {
+  db.close();
+  fs.rmSync(TEST_DB_PATH, { force: true });
+});
+
 beforeEach(() => {
   db.exec("DELETE FROM participants");
   db.exec("DELETE FROM period_reviews");
-  vi.useFakeTimers();
+  process.env.STUDY_END_REVEAL_CODE = "SURVEY2026";
+  delete process.env.PARTICIPANT_TOKEN_SECRET;
+  // 실제 HTTP·DB를 쓰므로 날짜만 고정하고 타이머는 그대로 둔다
+  vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(FIXED_NOW);
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  restoreEnv("STUDY_END_REVEAL_CODE", originalRevealCode);
+  restoreEnv("PARTICIPANT_TOKEN_SECRET", originalTokenSecret);
 });
 
 describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", () => {
@@ -156,6 +108,7 @@ describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", ()
     const res = await request(app)
       .post("/api/period-reviews")
       .send({ anonymousId: "con-user" });
+    expect(res.status).toBe(200);
     expect(res.body.data).toEqual([]);
   });
 
@@ -167,12 +120,14 @@ describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", ()
 
     const validateRes = await request(app)
       .post("/api/study-end-code/validate")
+      .set("X-Real-IP", nextIp())
       .send({ code: "WRONG-CODE", anonymousId: "con-user" });
     expect(validateRes.body.data).toEqual({ valid: false });
 
     const reviewsRes = await request(app)
       .post("/api/period-reviews")
       .send({ anonymousId: "con-user" });
+    expect(reviewsRes.status).toBe(200);
     expect(reviewsRes.body.data).toEqual([]);
   });
 
@@ -184,6 +139,7 @@ describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", ()
 
     const validateRes = await request(app)
       .post("/api/study-end-code/validate")
+      .set("X-Real-IP", nextIp())
       .send({ code: "survey2026", anonymousId: "con-user" }); // 대소문자 무시 확인
     expect(validateRes.body.data).toEqual({ valid: true });
 
@@ -200,60 +156,32 @@ describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", ()
     expect(reviewsRes.body.data.map((r) => r.periodIndex)).toEqual([1, 2, 3]);
   });
 
-  it("아직 연구가 종료되지 않은 대조군은 올바른 코드를 보내도 검증되지 않는다", async () => {
-    const notEndedInstallDate = "2026-06-08T00:00:00+09:00"; // +6일 = 6/14, FIXED_NOW(6/10) 이전이라 진행 중
-    insertParticipant("con-early", "CON", notEndedInstallDate);
+  // 운영과 같은 조건: 등록 때 받은 participantToken을 매 요청에 함께 보낸다
+  it("PARTICIPANT_TOKEN_SECRET이 설정돼 있어도 토큰을 함께 보내면 같은 흐름으로 열린다", async () => {
+    process.env.PARTICIPANT_TOKEN_SECRET = "study-end-gate-secret";
+    insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
+    insertPeriodReview("con-user", 1);
+    insertPeriodReview("con-user", 2);
+    insertPeriodReview("con-user", 3);
+    const participantToken = issueParticipantToken("con-user");
 
-    const res = await request(app)
-      .post("/api/study-end-code/validate")
-      .send({ code: "SURVEY2026", anonymousId: "con-early" });
-    expect(res.body.data).toEqual({ valid: false });
-  });
-
-  it("EXP 참여자는 코드 검증 절차와 무관하게 항상 열람 가능하다(회귀 확인)", async () => {
-    insertParticipant("exp-user", "EXP", "2026-01-01T00:00:00+09:00");
-    insertPeriodReview("exp-user", 1);
-
-    const res = await request(app)
+    // secret이 실제로 적용되는지 확인. 토큰 없이 조회하면 거부된다
+    const noTokenRes = await request(app)
       .post("/api/period-reviews")
-      .send({ anonymousId: "exp-user" });
-    expect(res.body.data).toHaveLength(1);
-  });
-
-  it("코드 필드가 없으면 400을 반환하고 아무것도 기록하지 않는다", async () => {
-    insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
-
-    const res = await request(app)
-      .post("/api/study-end-code/validate")
       .send({ anonymousId: "con-user" });
-    expect(res.status).toBe(400);
+    expect(noTokenRes.status).toBe(403);
+    expect(noTokenRes.body.code).toBe("INVALID_PARTICIPANT_TOKEN");
 
-    const row = db
-      .prepare(
-        "SELECT studyEndCodeVerifiedAt FROM participants WHERE anonymousId = ?",
-      )
-      .get("con-user");
-    expect(row.studyEndCodeVerifiedAt).toBeNull();
-  });
-
-  it("15분에 5회를 초과해 검증을 시도하면 429를 반환한다(레이트리밋 배선 확인)", async () => {
-    insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
-
-    // 공유 app(모듈 최상단에서 buildApp()을 한 번만 호출)을 쓰면 앞선 테스트들의 POST가
-    // 같은 IP의 할당량을 이미 소비해, max가 5가 아니라 1이어도 이 테스트가 우연히
-    // 통과할 수 있다 — buildApp()을 다시 호출해 이 테스트 전용 rate limiter 인스턴스를 쓴다.
-    const isolatedApp = buildApp();
-
-    for (let i = 0; i < 5; i++) {
-      const res = await request(isolatedApp)
-        .post("/api/study-end-code/validate")
-        .send({ code: "WRONG", anonymousId: "con-user" });
-      expect(res.status).toBe(200);
-    }
-
-    const sixthRes = await request(isolatedApp)
+    const validateRes = await request(app)
       .post("/api/study-end-code/validate")
-      .send({ code: "WRONG", anonymousId: "con-user" });
-    expect(sixthRes.status).toBe(429);
+      .set("X-Real-IP", nextIp())
+      .send({ code: "SURVEY2026", anonymousId: "con-user", participantToken });
+    expect(validateRes.body.data).toEqual({ valid: true });
+
+    const reviewsRes = await request(app)
+      .post("/api/period-reviews")
+      .send({ anonymousId: "con-user", participantToken });
+    expect(reviewsRes.status).toBe(200);
+    expect(reviewsRes.body.data.map((r) => r.periodIndex)).toEqual([1, 2, 3]);
   });
 });

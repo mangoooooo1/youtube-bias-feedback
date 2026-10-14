@@ -58,6 +58,29 @@ describe("실제 server/routes/period-reviews.js 라우터 배선", () => {
     expect(res.body.data).toEqual([]);
   });
 
+  // 쿼리 단위 테스트(period-reviews.test.js)와 달리 실제 라우터(requireParticipant 포함)를 거친다
+  it("POST /api/period-reviews — EXP는 연구가 끝나지 않았어도 쌓인 기간 리뷰를 periodIndex 순으로 받는다", async () => {
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
+    ).run("wiring-exp", "EXP", "2099-01-01T00:00:00+09:00");
+    for (const periodIndex of [2, 1]) {
+      db.prepare(
+        `INSERT INTO period_reviews
+          (anonymousId, periodIndex, periodStart, periodEnd, isBaseline, review, generatedAt)
+         VALUES (?, ?, '2099-01-01', '2099-01-04', 0, ?, '2099-01-05T04:00:00+09:00')`,
+      ).run("wiring-exp", periodIndex, `리뷰 ${periodIndex}`);
+    }
+
+    const res = await request(app)
+      .post("/api/period-reviews")
+      .send({ anonymousId: "wiring-exp" });
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((r) => [r.periodIndex, r.review])).toEqual([
+      [1, "리뷰 1"],
+      [2, "리뷰 2"],
+    ]);
+  });
+
   it("POST /api/period-reviews — anonymousId 없으면 400", async () => {
     const res = await request(app).post("/api/period-reviews").send({});
     expect(res.status).toBe(400);

@@ -146,6 +146,8 @@ router.post("/study-end-review-event", requireParticipant, (req, res, next) => {
     return next(err);
   }
 
+  // requireParticipant가 미등록 참여자를 먼저 404로 막아 보통은 도달하지 않는다.
+  // 미들웨어 순서가 바뀌거나 확인과 기록 사이에 참여자가 지워지는 경우를 위한 방어 코드라 남겨 둔다.
   if (result === "not_found") {
     return fail(
       res,
