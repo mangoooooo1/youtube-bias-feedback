@@ -37,13 +37,17 @@ function resolveFiles() {
       "K 환경변수(평균 낼 클러스터 수) 또는 FILES(콤마로 구분된 파일 경로 목록)를 지정하세요.",
     );
   }
-  const re = new RegExp(`^embedding-cluster-diversity-.*-k${K}-seed\\d+-\\d+\\.json$`);
+  const re = new RegExp(
+    `^embedding-cluster-diversity-.*-k${K}-seed\\d+-\\d+\\.json$`,
+  );
   const files = fs
     .readdirSync(OUTPUT_DIR)
     .filter((f) => re.test(f))
     .map((f) => path.join(OUTPUT_DIR, f));
   if (files.length === 0) {
-    fail(`k=${K}로 실행된 embedding-cluster-diversity-*.json을 찾지 못했습니다.`);
+    fail(
+      `k=${K}로 실행된 embedding-cluster-diversity-*.json을 찾지 못했습니다.`,
+    );
   }
   return files;
 }
@@ -55,7 +59,9 @@ function round3(x) {
 function main() {
   const files = resolveFiles();
   if (files.length < 3) {
-    console.warn(`[average] 경고: 시드 ${files.length}개로 평균 — 3개 이상을 권장합니다.`);
+    console.warn(
+      `[average] 경고: 시드 ${files.length}개로 평균 — 3개 이상을 권장합니다.`,
+    );
   }
   console.log(`[average] 평균 낼 파일 ${files.length}개:`);
   for (const f of files) console.log(`  - ${f}`);
@@ -64,11 +70,15 @@ function main() {
 
   const ks = new Set(runs.map((r) => r.k));
   if (ks.size > 1) {
-    fail(`서로 다른 k가 섞여 있습니다: ${[...ks].join(", ")} — 같은 k끼리만 평균 낼 수 있습니다.`);
+    fail(
+      `서로 다른 k가 섞여 있습니다: ${[...ks].join(", ")} — 같은 k끼리만 평균 낼 수 있습니다.`,
+    );
   }
   const models = new Set(runs.map((r) => r.model));
   if (models.size > 1) {
-    console.warn(`[average] 경고: 서로 다른 모델이 섞여 있습니다: ${[...models].join(", ")}`);
+    console.warn(
+      `[average] 경고: 서로 다른 모델이 섞여 있습니다: ${[...models].join(", ")}`,
+    );
   }
 
   const byRatingId = new Map();
@@ -85,7 +95,8 @@ function main() {
     const meanRichness =
       list.reduce((a, b) => a + b.clusterRichness, 0) / list.length;
     const sd = Math.sqrt(
-      entropies.reduce((a, b) => a + (b - meanEntropy) ** 2, 0) / entropies.length,
+      entropies.reduce((a, b) => a + (b - meanEntropy) ** 2, 0) /
+        entropies.length,
     );
     return {
       ratingId,
@@ -112,7 +123,9 @@ function main() {
   fs.writeFileSync(outPath, JSON.stringify(output, null, 2));
 
   console.log("\n[average] 세션별 평균 clusterEntropy(표준편차, n=시드 수):");
-  for (const s of [...sessions].sort((a, b) => a.ratingId.localeCompare(b.ratingId))) {
+  for (const s of [...sessions].sort((a, b) =>
+    a.ratingId.localeCompare(b.ratingId),
+  )) {
     console.log(
       `  ${s.ratingId}: mean=${s.clusterEntropy} (sd=${s.clusterEntropySd}, n=${s.runCount})`,
     );

@@ -110,17 +110,15 @@ describe("verifyAndRecordStudyEndCode", () => {
   });
 
   it("등록되지 않은 anonymousId는 코드가 맞아도 false를 반환한다", () => {
-    expect(
-      verifyAndRecordStudyEndCode(db, "unknown-user", CODE, CODE),
-    ).toBe(false);
+    expect(verifyAndRecordStudyEndCode(db, "unknown-user", CODE, CODE)).toBe(
+      false,
+    );
   });
 
   it("EXP는 코드가 맞아도 false를 반환한다(이 게이트는 대조군 전용)", () => {
     insertParticipant(db, "exp-user", "EXP", ENDED_INSTALL_DATE);
     insertPeriodReview(db, "exp-user", 1);
-    expect(verifyAndRecordStudyEndCode(db, "exp-user", CODE, CODE)).toBe(
-      false,
-    );
+    expect(verifyAndRecordStudyEndCode(db, "exp-user", CODE, CODE)).toBe(false);
     expect(getVerifiedAt(db, "exp-user")).toBeNull();
   });
 
@@ -129,17 +127,17 @@ describe("verifyAndRecordStudyEndCode", () => {
     insertPeriodReview(db, "con-not-ended", 1);
     insertPeriodReview(db, "con-not-ended", 2);
     insertPeriodReview(db, "con-not-ended", 3);
-    expect(
-      verifyAndRecordStudyEndCode(db, "con-not-ended", CODE, CODE),
-    ).toBe(false);
+    expect(verifyAndRecordStudyEndCode(db, "con-not-ended", CODE, CODE)).toBe(
+      false,
+    );
   });
 
   it("종료됐지만 전체 기간 리뷰가 미완성이면 false를 반환한다", () => {
     insertParticipant(db, "con-incomplete", "CON", ENDED_INSTALL_DATE);
     insertPeriodReview(db, "con-incomplete", 1);
-    expect(
-      verifyAndRecordStudyEndCode(db, "con-incomplete", CODE, CODE),
-    ).toBe(false);
+    expect(verifyAndRecordStudyEndCode(db, "con-incomplete", CODE, CODE)).toBe(
+      false,
+    );
   });
 
   it("코드 일치 + 대조군 + 종료 + 완결 조건을 모두 만족하면 true를 반환하고 시각을 기록한다", () => {

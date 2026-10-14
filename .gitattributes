@@ -1,0 +1,4 @@
+# 텍스트 파일은 OS와 관계없이 LF로 저장·체크아웃한다(Windows core.autocrlf=true도 덮어씀).
+# text=auto라 바이너리 판정은 Git에 맡긴다
+# db-encryption.test.js처럼 NUL 바이트가 든 파일도 그대로 둔다.
+* text=auto eol=lf

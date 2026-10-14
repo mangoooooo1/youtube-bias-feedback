@@ -8,6 +8,7 @@
     "server:dev": "pnpm --filter server dev",
     "lint": "eslint . extension/**/*.js server/**/*.js",
     "format": "prettier --write . extension/**/*.js server/**/*.js",
+    "format:check": "prettier --check . extension/**/*.js server/**/*.js",
     "test": "node scripts/ensure-config.js && vitest run",
     "test:watch": "node scripts/ensure-config.js && vitest",
     "test:coverage": "node scripts/ensure-config.js && vitest run --coverage"

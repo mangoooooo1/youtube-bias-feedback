@@ -23,13 +23,16 @@ describe("validatePopupEvent — 잘못된 형태의 body", () => {
     ["배열", []],
     ["문자열", "not-an-object"],
     ["숫자", 42],
-  ])("body가 %s이면 예외 없이 INVALID_FIELD_VALUE(field: body)를 반환한다", (_label, body) => {
-    expect(() => validatePopupEvent(body)).not.toThrow();
-    expect(validatePopupEvent(body)).toEqual({
-      code: ERROR_CODES.INVALID_FIELD_VALUE,
-      field: "body",
-    });
-  });
+  ])(
+    "body가 %s이면 예외 없이 INVALID_FIELD_VALUE(field: body)를 반환한다",
+    (_label, body) => {
+      expect(() => validatePopupEvent(body)).not.toThrow();
+      expect(validatePopupEvent(body)).toEqual({
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "body",
+      });
+    },
+  );
 });
 
 describe("validatePopupEvent — anonymousId", () => {
@@ -43,12 +46,15 @@ describe("validatePopupEvent — anonymousId", () => {
     ["빈 문자열", ""],
     ["공백만", "   "],
     ["숫자", 123],
-  ])("anonymousId가 %s이면 MISSING_REQUIRED_FIELD를 반환한다", (_label, value) => {
-    expect(validatePopupEvent(basePayload({ anonymousId: value }))).toEqual({
-      code: ERROR_CODES.MISSING_REQUIRED_FIELD,
-      field: "anonymousId",
-    });
-  });
+  ])(
+    "anonymousId가 %s이면 MISSING_REQUIRED_FIELD를 반환한다",
+    (_label, value) => {
+      expect(validatePopupEvent(basePayload({ anonymousId: value }))).toEqual({
+        code: ERROR_CODES.MISSING_REQUIRED_FIELD,
+        field: "anonymousId",
+      });
+    },
+  );
 });
 
 describe("validatePopupEvent — 카운트 필드 (dwellMs/tabTodayClicks/tabWeekClicks)", () => {
@@ -109,7 +115,9 @@ describe("validatePopupEvent — todayFeedbackViewed/periodFeedbackViewed", () =
   it.each(["todayFeedbackViewed", "periodFeedbackViewed"])(
     "%s는 undefined/null이면 통과한다(하위호환)",
     (field) => {
-      expect(validatePopupEvent(basePayload({ [field]: undefined }))).toBeNull();
+      expect(
+        validatePopupEvent(basePayload({ [field]: undefined })),
+      ).toBeNull();
       expect(validatePopupEvent(basePayload({ [field]: null }))).toBeNull();
     },
   );
@@ -142,14 +150,18 @@ describe("validatePopupEvent — openedAt", () => {
 
   it("파싱 가능한 날짜 문자열이면 통과한다", () => {
     expect(
-      validatePopupEvent(basePayload({ openedAt: "2026-08-13T10:00:00+09:00" })),
+      validatePopupEvent(
+        basePayload({ openedAt: "2026-08-13T10:00:00+09:00" }),
+      ),
     ).toBeNull();
   });
 
   it("파싱 불가능한 문자열이면 거부한다", () => {
-    expect(validatePopupEvent(basePayload({ openedAt: "not-a-date" }))).toEqual({
-      code: ERROR_CODES.INVALID_FIELD_VALUE,
-      field: "openedAt",
-    });
+    expect(validatePopupEvent(basePayload({ openedAt: "not-a-date" }))).toEqual(
+      {
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "openedAt",
+      },
+    );
   });
 });
