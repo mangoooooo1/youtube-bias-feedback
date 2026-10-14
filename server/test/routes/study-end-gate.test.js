@@ -30,6 +30,9 @@ const { db, initializeDB } = require("../../db.js");
 initializeDB();
 
 const { errorHandler } = require("../../middleware/responseHandler.js");
+const {
+  issueParticipantToken,
+} = require("../../middleware/requireParticipant.js");
 const studyEndCodeRouter = require("../../routes/study-end-code.js");
 const periodReviewsRouter = require("../../routes/period-reviews.js");
 
@@ -150,6 +153,35 @@ describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", ()
     const reviewsRes = await request(app)
       .post("/api/period-reviews")
       .send({ anonymousId: "con-user" });
+    expect(reviewsRes.body.data.map((r) => r.periodIndex)).toEqual([1, 2, 3]);
+  });
+
+  // 운영과 같은 조건: 등록 때 받은 participantToken을 매 요청에 함께 보낸다
+  it("PARTICIPANT_TOKEN_SECRET이 설정돼 있어도 토큰을 함께 보내면 같은 흐름으로 열린다", async () => {
+    process.env.PARTICIPANT_TOKEN_SECRET = "study-end-gate-secret";
+    insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
+    insertPeriodReview("con-user", 1);
+    insertPeriodReview("con-user", 2);
+    insertPeriodReview("con-user", 3);
+    const participantToken = issueParticipantToken("con-user");
+
+    // secret이 실제로 적용되는지 확인. 토큰 없이 조회하면 거부된다
+    const noTokenRes = await request(app)
+      .post("/api/period-reviews")
+      .send({ anonymousId: "con-user" });
+    expect(noTokenRes.status).toBe(403);
+    expect(noTokenRes.body.code).toBe("INVALID_PARTICIPANT_TOKEN");
+
+    const validateRes = await request(app)
+      .post("/api/study-end-code/validate")
+      .set("X-Real-IP", nextIp())
+      .send({ code: "SURVEY2026", anonymousId: "con-user", participantToken });
+    expect(validateRes.body.data).toEqual({ valid: true });
+
+    const reviewsRes = await request(app)
+      .post("/api/period-reviews")
+      .send({ anonymousId: "con-user", participantToken });
+    expect(reviewsRes.status).toBe(200);
     expect(reviewsRes.body.data.map((r) => r.periodIndex)).toEqual([1, 2, 3]);
   });
 });
