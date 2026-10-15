@@ -56,7 +56,7 @@ jobs:
       # 최소선 미달로 위 단계가 실패해도 리포트를 남긴다
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage/
