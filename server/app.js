@@ -40,6 +40,7 @@ const API_ROUTES = [
   ["/api/popup-events", require("./routes/popup-events")],
   ["/api/period-reviews", require("./routes/period-reviews")],
   ["/api/today-reviews", require("./routes/today-reviews")],
+  ["/api/viewing-summary", require("./routes/viewing-summary")],
   ["/api/study-end-code", require("./routes/study-end-code")],
   ["/api/client-errors", require("./routes/client-errors")],
 ];
