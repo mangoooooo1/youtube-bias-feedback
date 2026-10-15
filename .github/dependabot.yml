@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # 워크플로(.github/workflows)의 action 버전이 오르면 업데이트 PR을 연다
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    # 작업 흐름이 develop → main이라 기본 브랜치(main) 대신 develop으로 PR을 연다
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+    # release-drafter "🧰 Maintenance" 분류용 (기본 라벨 대신 적용됨)
+    labels:
+      - "chore"
+    commit-message:
+      prefix: "chore"
