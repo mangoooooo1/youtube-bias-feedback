@@ -164,6 +164,7 @@ describe("aggregateViewing — 세션 병합 없이 영상 기록에서 직접 �
     ]);
 
     expect(result.countDistribution).toEqual({ 음악: 1 });
+    expect(result.analysisDistribution).toEqual({ 음악: 0.5, 게임: 0.5 });
     expect(result.entropy).toBe(1); // 음악 50% · 게임 50%
     expect(result.weightedEntropy).toBe(0); // 시간을 아는 음악만
   });

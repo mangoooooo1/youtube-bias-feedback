@@ -64,7 +64,8 @@ function aggregateViewing(entries) {
     analysisWeighted.length > 0
       ? calculateWeightedDistribution(analysisWeighted)
       : null;
-  const countDistributionForAnalysis = calculateDistribution(
+  // 시청 시간을 모르는 유효 영상도 포함(화면용 countDistribution과 다름)
+  const analysisDistribution = calculateDistribution(
     valid.map((e) => e.categoryId),
   );
 
@@ -82,7 +83,8 @@ function aggregateViewing(entries) {
       chart.map((e) => ({ categoryId: e.categoryId, weight: capped(e) })),
     ),
     // 분석·저장용
-    entropy: calculateEntropy(countDistributionForAnalysis),
+    analysisDistribution,
+    entropy: calculateEntropy(analysisDistribution),
     weightedDistribution,
     weightedEntropy:
       weightedDistribution != null

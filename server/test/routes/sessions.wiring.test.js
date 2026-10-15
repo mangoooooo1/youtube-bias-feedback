@@ -227,17 +227,31 @@ describe("POST /api/sessions — 클릭성 이탈 필터링 및 시간 가중 en
   beforeEach(() => {
     process.env.YOUTUBE_API_KEY = "wiring-test-key";
     // wt-game은 게임(20), wt-music은 음악(10) 카테고리로 응답한다.
+    // wt-cap-*은 영상 길이(contentDetails.duration)도 함께, wt-nocat은 카테고리 없이 응답한다.
     global.fetch = vi.fn((url) => {
       const parsed = new URL(url);
       if (parsed.pathname.endsWith("/videos")) {
         const ids = parsed.searchParams.get("id").split(",");
-        const categoryById = { "wt-game": "20", "wt-music": "10" };
+        const categoryById = {
+          "wt-game": "20",
+          "wt-music": "10",
+          "wt-cap-game": "20",
+          "wt-cap-music": "10",
+        };
+        const durationById = {
+          "wt-cap-game": "PT10M",
+          "wt-cap-music": "PT1M40S",
+        };
         return Promise.resolve({
           ok: true,
           json: async () => ({
             items: ids.map((id) => ({
               id,
-              snippet: { categoryId: categoryById[id] ?? "20", title: id },
+              snippet:
+                id === "wt-nocat"
+                  ? { title: id }
+                  : { categoryId: categoryById[id] ?? "20", title: id },
+              contentDetails: { duration: durationById[id] },
             })),
           }),
         });
@@ -377,6 +391,55 @@ describe("POST /api/sessions — 클릭성 이탈 필터링 및 시간 가중 en
       .prepare("SELECT * FROM sessions WHERE sessionId = ?")
       .get("all-misclicks");
     expect(row.validVideoCount).toBe(0);
+    expect(row.weightedEntropy).toBeNull();
+  });
+
+  // 잠자기·버퍼링 등으로 영상 길이보다 오래 본 것으로 기록된 값이 시간 가중 분포를 부풀리지 않게 한다
+  it("영상 길이보다 오래 본 것으로 기록된 영상은 영상 길이만큼만 시청 시간으로 센다", async () => {
+    // wt-cap-music(길이 100초)을 250초, wt-cap-game(길이 600초)을 100초 본 것으로 기록
+    // 상한 없이 세면 음악 250 : 게임 100, 상한을 두면 100 : 100
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "watch-time-capped",
+          videoIds: ["wt-cap-music", "wt-cap-game"],
+          watchedSecondsList: [250, 100],
+        }),
+      );
+
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare("SELECT * FROM sessions WHERE sessionId = ?")
+      .get("watch-time-capped");
+    expect(JSON.parse(row.weightedCategoryDistribution)).toEqual({
+      게임: 0.5,
+      음악: 0.5,
+    });
+    expect(row.weightedEntropy).toBe(1);
+  });
+
+  // 분포가 비어 있는데 다양성 0으로 저장하면 "한 분야만 봤다"와 구분되지 않는다
+  it("시청 시간은 있지만 카테고리가 없는 영상뿐이면 weighted 계열은 0이 아니라 null이다", async () => {
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "no-category-weighted",
+          videoIds: ["wt-nocat"],
+          watchedSecondsList: [120],
+        }),
+      );
+
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare("SELECT * FROM sessions WHERE sessionId = ?")
+      .get("no-category-weighted");
+    expect(row.validVideoCount).toBe(1);
+    expect(JSON.parse(row.categoryDistribution)).toEqual({});
+    expect(row.weightedCategoryDistribution).toBeNull();
     expect(row.weightedEntropy).toBeNull();
   });
 });
