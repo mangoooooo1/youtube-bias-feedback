@@ -70,7 +70,7 @@ function composition(events) {
 }
 
 /** 참여자별 비율을 동일 가중(참여자 1명 = 1표)으로 단순 평균한다 — 시청량이 많은 참여자가
- * 그룹 평균을 지배하지 않도록 하기 위함(mergeSessionDistributions의 videoCount 가중과는
+ * 그룹 평균을 지배하지 않도록 하기 위함(영상 수로 가중하는 분포 집계와는
  * 다른 목적: 여기서는 "그룹 내 개인들이 평균적으로 어떻게 달라졌는가"를 보려는 것이라
  * 참여자 단위 평균이 더 적합하다). */
 function groupAverage(participantRows, totalPeriods) {

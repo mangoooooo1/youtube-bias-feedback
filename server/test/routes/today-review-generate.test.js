@@ -7,19 +7,20 @@ import { generateAndStoreTodayReview } from "../../routes/today-review-generate.
 function createTestDb() {
   const db = new Database(":memory:");
   db.exec(`
-    CREATE TABLE sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      anonymousId TEXT NOT NULL,
-      sessionId TEXT NOT NULL UNIQUE,
-      endTime TEXT,
-      videoCount INTEGER,
-      categoryDistribution TEXT
-    );
     CREATE TABLE video_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      eventId TEXT,
       anonymousId TEXT NOT NULL,
+      videoId TEXT,
+      sessionId TEXT,
       title TEXT,
-      watchedAt TEXT
+      watchedAt TEXT,
+      watchedSeconds REAL
+    );
+    CREATE TABLE video_metadata (
+      videoId TEXT PRIMARY KEY,
+      categoryId TEXT,
+      durationSeconds INTEGER
     );
     CREATE TABLE today_reviews (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,26 +47,34 @@ function createTestDb() {
   return db;
 }
 
-function insertSession(
+// "오늘" 리뷰는 세션이 아니라 영상 기록(video_events + video_metadata)에서 집계한다.
+// category가 null이면 메타데이터 행 없이(카테고리를 못 가져온 상태로) 넣는다.
+const CATEGORY_ID = { 음악: "10", 게임: "20" };
+let videoSeq = 0;
+function insertWatchedVideos(
   db,
-  { anonymousId, sessionId, endTime, videoCount, categoryDistribution },
-) {
-  db.prepare(
-    `INSERT INTO sessions (anonymousId, sessionId, endTime, videoCount, categoryDistribution)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(
+  {
     anonymousId,
-    sessionId,
-    endTime,
-    videoCount,
-    JSON.stringify(categoryDistribution),
-  );
-}
-
-function insertVideoEvent(db, { anonymousId, title, watchedAt }) {
-  db.prepare(
-    `INSERT INTO video_events (anonymousId, title, watchedAt) VALUES (?, ?, ?)`,
-  ).run(anonymousId, title, watchedAt);
+    sessionId = "s1",
+    watchedAt,
+    category = "음악",
+    count = 1,
+    title = "영상",
+  },
+) {
+  for (let i = 0; i < count; i++) {
+    videoSeq += 1;
+    const videoId = `vid-${videoSeq}`;
+    if (category !== null) {
+      db.prepare(
+        "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, 600)",
+      ).run(videoId, CATEGORY_ID[category]);
+    }
+    db.prepare(
+      `INSERT INTO video_events (eventId, anonymousId, videoId, sessionId, title, watchedAt, watchedSeconds)
+       VALUES (?, ?, ?, ?, ?, ?, 300)`,
+    ).run(`e-${videoSeq}`, anonymousId, videoId, sessionId, title, watchedAt);
+  }
 }
 
 const originalFetch = global.fetch;
@@ -77,7 +86,7 @@ afterEach(() => {
 });
 
 describe("generateAndStoreTodayReview", () => {
-  it("오늘 분석된 세션이 하나도 없으면 null을 반환하고 아무것도 저장하지 않는다", async () => {
+  it("오늘 본 영상이 하나도 없으면 null을 반환하고 아무것도 저장하지 않는다", async () => {
     const db = createTestDb();
     const now = new Date("2026-03-10T20:00:00+09:00");
 
@@ -97,12 +106,10 @@ describe("generateAndStoreTodayReview", () => {
   it("apiKey가 없으면 Gemini를 부르지 않고 폴백만 사용한다", async () => {
     const db = createTestDb();
     const now = new Date("2026-03-10T20:00:00+09:00");
-    insertSession(db, {
+    insertWatchedVideos(db, {
       anonymousId: "u1",
-      sessionId: "s1",
-      endTime: "2026-03-10T10:00:00+09:00",
-      videoCount: 3,
-      categoryDistribution: { 음악: 1 },
+      watchedAt: "2026-03-10T10:00:00+09:00",
+      count: 3,
     });
     global.fetch = vi.fn();
 
@@ -128,17 +135,11 @@ describe("generateAndStoreTodayReview", () => {
   it("Gemini 호출이 성공하면 llm 결과를 저장한다", async () => {
     const db = createTestDb();
     const now = new Date("2026-03-10T20:00:00+09:00");
-    insertSession(db, {
-      anonymousId: "u2",
-      sessionId: "s1",
-      endTime: "2026-03-10T10:00:00+09:00",
-      videoCount: 3,
-      categoryDistribution: { 음악: 1 },
-    });
-    insertVideoEvent(db, {
+    insertWatchedVideos(db, {
       anonymousId: "u2",
       title: "오늘 영상",
       watchedAt: "2026-03-10T10:00:00+09:00",
+      count: 3,
     });
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -172,12 +173,10 @@ describe("generateAndStoreTodayReview", () => {
   it("Gemini 호출이 실패하면 폴백으로 대체하고 failureReason을 기록한다", async () => {
     const db = createTestDb();
     const now = new Date("2026-03-10T20:00:00+09:00");
-    insertSession(db, {
+    insertWatchedVideos(db, {
       anonymousId: "u3",
-      sessionId: "s1",
-      endTime: "2026-03-10T10:00:00+09:00",
-      videoCount: 3,
-      categoryDistribution: { 음악: 1 },
+      watchedAt: "2026-03-10T10:00:00+09:00",
+      count: 3,
     });
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
@@ -201,12 +200,11 @@ describe("generateAndStoreTodayReview", () => {
   it("같은 날짜에 재호출하면 genCount가 1씩 증가하고 최신본으로 덮어쓴다", async () => {
     const db = createTestDb();
     const now = new Date("2026-03-10T10:00:00+09:00");
-    insertSession(db, {
+    insertWatchedVideos(db, {
       anonymousId: "u4",
       sessionId: "s1",
-      endTime: "2026-03-10T09:00:00+09:00",
-      videoCount: 2,
-      categoryDistribution: { 음악: 1 },
+      watchedAt: "2026-03-10T09:00:00+09:00",
+      count: 2,
     });
 
     const first = await generateAndStoreTodayReview(db, {
@@ -216,12 +214,12 @@ describe("generateAndStoreTodayReview", () => {
     });
     expect(first.genCount).toBe(1);
 
-    insertSession(db, {
+    insertWatchedVideos(db, {
       anonymousId: "u4",
       sessionId: "s2",
-      endTime: "2026-03-10T09:30:00+09:00",
-      videoCount: 5,
-      categoryDistribution: { 게임: 1 },
+      watchedAt: "2026-03-10T09:30:00+09:00",
+      category: "게임",
+      count: 5,
     });
     const second = await generateAndStoreTodayReview(db, {
       anonymousId: "u4",
@@ -237,35 +235,83 @@ describe("generateAndStoreTodayReview", () => {
     expect(row.videoCount).toBe(7);
   });
 
-  it("categoryDistribution이 빈 세션(YouTube 카테고리 조회 전부 실패)은 집계에서 제외된다", async () => {
+  // 2026-10-16 변경: 카테고리를 못 가져온 영상도 영상 수·제목에는 포함하고 리뷰를 보류하지 않는다
+  // (결정기록 결정 1 보완). 다만 오늘 영상이 전부 카테고리 없음이면 프롬프트가 근거로 삼을 분포가
+  // 없어 Gemini를 부르지 않고 "분석하지 못했다"는 폴백을 저장한다.
+  it("오늘 영상이 모두 카테고리를 못 가져왔으면 Gemini 없이 폴백 리뷰를 저장한다(리뷰를 보류하지 않음)", async () => {
     const db = createTestDb();
     const now = new Date("2026-03-10T20:00:00+09:00");
-    insertSession(db, {
+    insertWatchedVideos(db, {
       anonymousId: "u5",
-      sessionId: "s1",
-      endTime: "2026-03-10T10:00:00+09:00",
-      videoCount: 3,
-      categoryDistribution: {},
+      watchedAt: "2026-03-10T10:00:00+09:00",
+      category: null,
+      count: 3,
     });
+    global.fetch = vi.fn();
 
     const result = await generateAndStoreTodayReview(db, {
       anonymousId: "u5",
-      apiKey: undefined,
+      apiKey: "fake-key",
       now,
     });
 
-    expect(result).toBeNull();
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(result.source).toBe("fallback");
+    expect(result.review).toContain("분석하지 못했습니다");
+    const row = db
+      .prepare("SELECT * FROM today_reviews WHERE anonymousId = ?")
+      .get("u5");
+    expect(row.videoCount).toBe(3);
+  });
+
+  it("카테고리를 못 가져온 영상이 일부만 섞여 있으면 그대로 Gemini를 부르고 그 제목도 넘긴다", async () => {
+    const db = createTestDb();
+    const now = new Date("2026-03-10T20:00:00+09:00");
+    insertWatchedVideos(db, {
+      anonymousId: "u6",
+      watchedAt: "2026-03-10T10:00:00+09:00",
+      count: 2,
+    });
+    insertWatchedVideos(db, {
+      anonymousId: "u6",
+      title: "분류 없는 영상",
+      watchedAt: "2026-03-10T11:00:00+09:00",
+      category: null,
+    });
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":"관찰 문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    const result = await generateAndStoreTodayReview(db, {
+      anonymousId: "u6",
+      apiKey: "fake-key",
+      now,
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(result.source).toBe("llm");
+    const prompt = JSON.parse(global.fetch.mock.calls[0][1].body).contents[0]
+      .parts[0].text;
+    expect(prompt).toContain("분류 없는 영상");
   });
 });
 
 describe("generateAndStoreTodayReview — LLM 호출 메트릭", () => {
   function seed(db, anonymousId) {
-    insertSession(db, {
+    insertWatchedVideos(db, {
       anonymousId,
       sessionId: `${anonymousId}-s1`,
-      endTime: "2026-03-10T10:00:00+09:00",
-      videoCount: 3,
-      categoryDistribution: { 음악: 1 },
+      watchedAt: "2026-03-10T10:00:00+09:00",
+      count: 3,
     });
   }
   const now = new Date("2026-03-10T20:00:00+09:00");
@@ -318,7 +364,7 @@ describe("generateAndStoreTodayReview — LLM 호출 메트릭", () => {
     });
   });
 
-  it("오늘 세션이 없어 생성하지 않으면 기록하지 않는다", async () => {
+  it("오늘 본 영상이 없어 생성하지 않으면 기록하지 않는다", async () => {
     const db = createTestDb();
     const recordMetric = vi.fn();
 

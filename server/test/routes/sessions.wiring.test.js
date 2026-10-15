@@ -63,6 +63,27 @@ beforeEach(() => {
   ).run();
 });
 
+// "오늘" 리뷰는 세션이 아니라 영상 기록(video_events)에서 집계한다. 운영에서는 확장이 영상을
+// 볼 때마다 /api/video-events로 먼저 보내므로, 오늘 리뷰를 검증하는 테스트는 세션 저장 전에
+// 그 세션에서 본 영상 기록을 넣는다.
+function insertTodayVideos(anonymousId, sessionId, videoIds = ["v1", "v2"]) {
+  const watchedAt = new Date().toISOString();
+  const insert = db.prepare(
+    `INSERT INTO video_events (eventId, anonymousId, videoId, title, watchedAt, sessionId, watchedSeconds)
+     VALUES (?, ?, ?, ?, ?, ?, 300)`,
+  );
+  videoIds.forEach((videoId, i) =>
+    insert.run(
+      `${sessionId}-e${i}`,
+      anonymousId,
+      videoId,
+      videoId,
+      watchedAt,
+      sessionId,
+    ),
+  );
+}
+
 function basePayload(overrides = {}) {
   return {
     anonymousId: "wiring-user",
@@ -479,6 +500,7 @@ describe("POST /api/sessions — 오늘 누적 리뷰 생성·자격 게이팅",
 
   afterEach(() => {
     db.exec("DELETE FROM participants");
+    db.exec("DELETE FROM video_events");
     global.fetch = originalFetch;
     process.env.YOUTUBE_API_KEY = originalApiKey;
   });
@@ -487,6 +509,7 @@ describe("POST /api/sessions — 오늘 누적 리뷰 생성·자격 게이팅",
     db.prepare(
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
     ).run("exp-eligible", "EXP", "2020-01-01T00:00:00+09:00");
+    insertTodayVideos("exp-eligible", "exp-eligible-s1");
 
     const res = await request(app)
       .post("/api/sessions")
@@ -508,6 +531,7 @@ describe("POST /api/sessions — 오늘 누적 리뷰 생성·자격 게이팅",
     db.prepare(
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
     ).run("exp-baseline", "EXP", new Date().toISOString());
+    insertTodayVideos("exp-baseline", "exp-baseline-s1");
 
     const res = await request(app)
       .post("/api/sessions")
@@ -534,6 +558,7 @@ describe("POST /api/sessions — 오늘 누적 리뷰 생성·자격 게이팅",
     db.prepare(
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
     ).run("con-unverified", "CON", "2020-01-01T00:00:00+09:00");
+    insertTodayVideos("con-unverified", "con-unverified-s1");
 
     const res = await request(app)
       .post("/api/sessions")
@@ -617,6 +642,7 @@ describe("POST /api/sessions — 오늘 리뷰 생성 결과를 세션 행에 �
 
   afterEach(() => {
     db.exec("DELETE FROM today_reviews");
+    db.exec("DELETE FROM video_events");
     global.fetch = originalFetch;
     process.env.YOUTUBE_API_KEY = originalYoutubeKey;
     process.env.TODAY_REVIEW_GEMINI_API_KEY = originalGeminiKey;
@@ -640,9 +666,11 @@ describe("POST /api/sessions — 오늘 리뷰 생성 결과를 세션 행에 �
     const endTime = new Date().toISOString();
     vi.spyOn(console, "error").mockImplementation(() => {});
     try {
+      insertTodayVideos("wiring-user", "rec-s1");
       await request(app)
         .post("/api/sessions")
         .send(basePayload({ sessionId: "rec-s1", endTime }));
+      insertTodayVideos("wiring-user", "rec-s2");
       await request(app)
         .post("/api/sessions")
         .send(basePayload({ sessionId: "rec-s2", endTime }));
@@ -675,7 +703,7 @@ describe("POST /api/sessions — 오늘 리뷰 생성 결과를 세션 행에 �
   });
 
   it("클라이언트가 보낸 LLM 값은 저장하지 않는다", async () => {
-    // 카테고리 조회 실패로 리뷰가 생성되지 않는 경우라 서버가 덮어쓰지도 않는다
+    // 오늘 본 영상 기록이 없어 리뷰가 생성되지 않는 경우라 서버가 덮어쓰지도 않는다
     process.env.YOUTUBE_API_KEY = "";
 
     await request(app)
