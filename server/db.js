@@ -146,6 +146,9 @@ function execSchema() {
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_video_events_eventId ON video_events(eventId);
+    -- 참여자별·기간별 집계(viewing-aggregate)가 영상 기록을 읽을 때 전체 표를 훑지 않게 한다
+    CREATE INDEX IF NOT EXISTS idx_video_events_participant_watched
+      ON video_events(anonymousId, watchedAt);
 
     -- YouTube 영상·채널 메타데이터 캐시
     --
