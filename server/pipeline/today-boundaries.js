@@ -11,6 +11,7 @@
 // 고정 기준을 쓴다. 참여자 대부분이 KST권이라 실제 영향은 거의 없을 것으로 보인다.
 const { kstDateStr } = require("./period-boundaries");
 const { aggregateViewing } = require("./viewing-aggregate");
+const { groupTitlesByCategory } = require("./review-titles");
 
 /** 본 시각을 KST 날짜로 바꾼다. 파싱할 수 없으면 null. */
 function viewedDate(event) {
@@ -64,6 +65,10 @@ function aggregateTodayCumulative({ events, now = new Date() }) {
     videoTitles: todayEvents.map((e) => e.title).filter(Boolean),
     sessionCount: sessionIds.length,
     sessionIds,
+    timeDistribution: aggregate.timeDistribution,
+    countDistribution: aggregate.countDistribution,
+    chartCount: aggregate.chartCount,
+    titleGroups: groupTitlesByCategory(todayEvents),
   };
 }
 

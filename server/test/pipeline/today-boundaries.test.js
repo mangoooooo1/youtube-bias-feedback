@@ -100,6 +100,19 @@ describe("aggregateTodayCumulative", () => {
     expect(result.entropy).toBe(1);
     expect(result.videoCount).toBe(12); // 잠깐 본 영상까지 포함한 영상 기록 수
     expect(result.validVideoCount).toBe(4); // 잠깐 본 스포츠 8개 제외
+    // 리뷰 LLM 입력용: 화면 도넛과 같은 시간·개수 비중, 잠깐 본 영상 제목은 빠진 묶음
+    expect(result.timeDistribution).toEqual({ 음악: 0.5, 게임: 0.5 });
+    expect(result.countDistribution).toEqual({ 음악: 0.5, 게임: 0.5 });
+    expect(result.chartCount).toBe(4);
+    const groupedTitles = result.titleGroups.flatMap((g) =>
+      g.titles.map((t) => t.title),
+    );
+    expect(groupedTitles.sort()).toEqual([
+      "게임 1",
+      "게임 2",
+      "음악 1",
+      "음악 2",
+    ]);
     expect(result.sessionCount).toBe(2);
     expect(result.sessionIds).toEqual(["s-a", "s-b"]);
     expect(result.videoTitles).toHaveLength(12);
@@ -114,6 +127,14 @@ describe("aggregateTodayCumulative", () => {
       now: NOW,
     });
     expect(result.videoTitles).toEqual(["오늘 영상"]);
+    expect(result.titleGroups).toEqual([
+      {
+        category: "음악",
+        videoCount: 1,
+        titles: [{ title: "오늘 영상", count: 1 }],
+        omittedCount: 0,
+      },
+    ]);
   });
 
   it("자정을 넘긴 세션의 영상은 세션이 끝난 날이 아니라 영상을 본 날로 나뉜다", () => {
