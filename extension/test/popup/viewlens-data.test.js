@@ -131,17 +131,6 @@ describe("VL.serverDist — 유튜브 분야 15종 + 기타", () => {
     expect(other.color).toBe(VL.CATS.기타.color);
   });
 
-  // 예전 9개 묶음으로 그리는 지금 화면(VL.dist)도 같은 VL_CATS 색을 쓴다
-  it("예전 9개 묶음 키도 VL_CATS의 같은 분야 색을 쓰고, 그때의 화면 이름은 유지한다", () => {
-    const [news] = VL.dist({ news: 1 });
-    expect(news).toMatchObject({
-      name: "뉴스·정치",
-      color: VL.CATS["뉴스 & 정치"].color,
-    });
-    expect(VL.dist({ music: 1 })[0].color).toBe(VL.CATS.음악.color);
-    expect(VL.dist({ unknown: 1 })[0].color).toBe(VL.CATS.기타.color);
-  });
-
   it("서버 이름을 그대로 키·이름으로 쓰고 비중 큰 순으로 정렬한다", () => {
     expect(
       VL.serverDist({ 게임: 0.3, "인물 & 블로그": 0.7 }).map((d) => [

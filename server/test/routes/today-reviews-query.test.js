@@ -220,6 +220,8 @@ describe("getTodayReviews — DB 통합", () => {
 
     const rows = getTodayReviews(db, "exp-active");
     expect(rows.map((r) => r.reviewDate)).toEqual(["2026-03-03", "2026-03-05"]);
+    // 다양성 점수는 응답에 없다
+    expect(rows[0]).not.toHaveProperty("entropy");
   });
 
   it("CON은 코드 검증 전이면 리뷰 행이 있어도 빈 배열", () => {

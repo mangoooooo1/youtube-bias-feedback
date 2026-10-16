@@ -407,36 +407,18 @@ class ViewLensPopup {
   }
 
   /**
-   * 도넛·스택 바·추이선 등, render()마다 새로 마운트돼 transition이 저절로 재생되지
-   * 않는 차트들을 한 번에 트리거한다(더블 rAF로 다음 프레임에 목표 상태로 바꿈).
+   * 도넛은 render()마다 새로 마운트돼 transition이 저절로 재생되지 않아
+   * 더블 rAF로 다음 프레임에 목표 상태로 바꾼다.
    * 도넛 가운데 퍼센트 카운트업도 같은 타이밍에 함께 진행한다.
    */
   _animateCharts() {
     const segs = this.container.querySelectorAll(".vl-donut-seg");
-    const catRows = this.container.querySelectorAll(".vl-cat-row");
-    const stackSegs = this.container.querySelectorAll(".vl-stack-seg");
-    const trendLineMask = this.container.querySelector(".vl-trend-line-mask");
-    if (
-      segs.length > 0 ||
-      catRows.length > 0 ||
-      stackSegs.length > 0 ||
-      trendLineMask
-    ) {
+    if (segs.length > 0) {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           segs.forEach((el) => {
             el.setAttribute("stroke-dasharray", el.dataset.finalDash);
           });
-          catRows.forEach((el) => {
-            el.style.opacity = "1";
-            el.style.transform = "translateX(0)";
-          });
-          stackSegs.forEach((el) => {
-            el.style.transform = "scaleX(1)";
-          });
-          if (trendLineMask) {
-            trendLineMask.style.strokeDashoffset = "0";
-          }
         });
       });
     }

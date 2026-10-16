@@ -4,28 +4,6 @@ window.findUnrevealedPastDate = findUnrevealedPastDate;
 window.addDaysKst = addDaysKst;
 const DEFAULT_TONE = "indigo";
 
-// ── Category name (Korean) → VL short key ─────────────────────────────────────
-const CAT_NAME_TO_KEY = {
-  음악: "music",
-  게임: "game",
-  "뉴스 & 정치": "news",
-  교육: "edu",
-  "과학 & 기술": "sci",
-  엔터테인먼트: "ent",
-  스포츠: "sports",
-  "인물 & 블로그": "vlog",
-  "동영상 블로그": "vlog",
-  코미디: "ent",
-  "영화 & 애니메이션": "ent",
-  영화: "ent",
-  "노하우 & 스타일": "vlog",
-  "비영리 & 사회운동": "news",
-};
-
-function toVlKey(catName) {
-  return CAT_NAME_TO_KEY[catName] || "etc";
-}
-
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
 function dateStr(d) {
@@ -65,68 +43,6 @@ function dayFromInstall(installDate, offset) {
   return dateStr(new Date(ms));
 }
 
-// ── Distribution helpers ───────────────────────────────────────────────────────
-
-/** Merge sessions into a single {vlKey: fraction} object */
-function mergeDist(sessions) {
-  const totalVids = sessions.reduce(
-    (s, sess) => s + (sess.videoCount ?? sess.videos?.length ?? 1),
-    0,
-  );
-  if (totalVids === 0) return {};
-  const merged = {};
-  for (const sess of sessions) {
-    const w = (sess.videoCount ?? sess.videos?.length ?? 1) / totalVids;
-    for (const [catName, ratio] of Object.entries(
-      sess.categoryDistribution || {},
-    )) {
-      const k = toVlKey(catName);
-      merged[k] = (merged[k] ?? 0) + ratio * w;
-    }
-  }
-  // Normalise to sum=1 to fix floating-point drift
-  const sum = Object.values(merged).reduce((a, b) => a + b, 0);
-  if (sum > 0)
-    Object.keys(merged).forEach((k) => {
-      merged[k] = merged[k] / sum;
-    });
-  return merged;
-}
-
-// period_reviews.categoryDistribution은 sessions와 동일 포맷으로 저장돼 있어 VL.dist가 기대하는 {vlKey: fraction} 형태가 아니다.
-function vlDistFromCategoryDistribution(categoryDistribution) {
-  const merged = {};
-  for (const [catName, ratio] of Object.entries(categoryDistribution || {})) {
-    const k = toVlKey(catName);
-    merged[k] = (merged[k] ?? 0) + ratio;
-  }
-  return Object.keys(merged).length > 0 ? VL.dist(merged) : VL.dist({ etc: 1 });
-}
-
-/** Top VL key from a session's categoryDistribution */
-function topKey(sess) {
-  const dist = sess.categoryDistribution || {};
-  const top = Object.entries(dist).sort(([, a], [, b]) => b - a)[0];
-  return top ? toVlKey(top[0]) : "etc";
-}
-
-/**
- * 세션들의 영상을 하나의 목록으로 펼친다. 영상별 실제 카테고리는 로컬에 없어서
- * (세션 단위 categoryDistribution만 있음) 그 세션의 대표 카테고리(topKey)로 근사한다.
- * @param {Array<object>} sessions - 대상 세션 목록
- * @returns {Array<{title: string, cat: string, videoId: (string|null)}>}
- */
-function listSessionVideos(sessions) {
-  return sessions.flatMap((sess) => {
-    const cat = topKey(sess);
-    return (sess.videos || []).map((v) => ({
-      title: v.title,
-      cat,
-      videoId: v.videoId || null,
-    }));
-  });
-}
-
 // ── Build VL.today ────────────────────────────────────────────────────────────
 
 /**
@@ -149,10 +65,6 @@ function buildDataForDate(allSessions, targetDate) {
     return {
       isEmpty: true,
       dateLabel: koreanDateLabel(targetDate),
-      videoCount: 0,
-      sessionCount: 0,
-      dist: [],
-      videos: [],
       review: "",
       sessionIds: [],
     };
@@ -162,12 +74,6 @@ function buildDataForDate(allSessions, targetDate) {
 
   const sourceDate = targetDate;
   const sourceDateStr = dateStr(sourceDate);
-  const distObj = mergeDist(sourceSessions);
-  const distArr = VL.dist(distObj);
-  const videoCount = sourceSessions.reduce(
-    (s, sess) => s + (sess.videoCount ?? sess.videos?.length ?? 1),
-    0,
-  );
   // 리뷰 텍스트는 서버가 준 이력(VL._todayReviewsByDate, boot()에서 조회)을 우선 쓴다.
   // 로컬 세션 기록이 스토리지 clear·재설치 등으로 사라져도 서버에 남아있는 리뷰를 계속
   // 보여줄 수 있다. 서버 조회가 안 됐거나 실패한 경우에만 로컬 세션 스냅샷으로 대체한다.
@@ -186,14 +92,8 @@ function buildDataForDate(allSessions, targetDate) {
   // 오늘 전체 세션 id 목록이 필요하다.
   const sessionIds = sourceSessions.map((s) => s.sessionId);
 
-  const videos = listSessionVideos(sourceSessions);
-
   return {
     dateLabel: koreanDateLabel(sourceDate),
-    videoCount,
-    sessionCount: sourceSessions.length,
-    dist: distArr,
-    videos,
     review,
     reviewTopic,
     reviewGeneratedAt,
@@ -240,125 +140,35 @@ function findUnrevealedPastDate(
 // ── Build VL.weeks ────────────────────────────────────────────────────────────
 
 /**
- * 설치일 기준 기간(구간/주차)별 요약 데이터를 만든다.
- * daily는 로컬 세션 데이터가 있을 때만 채워지고, 서버 스냅샷만 있으면(재설치 등) null로
- * 남겨 "일별 데이터 없음"을 그대로 알린다 — 기록이 없는 날은 0이 아니라 배열에서 제외해
- * "값이 0"과 "기록 없음"을 구분한다.
- * @param {Array<object>} allSessions - 전체 세션 목록
+ * 설치일 기준 기간(구간)별 이름·날짜 범위·리뷰. 그래프 값은 서버 집계를 쓴다.
  * @param {string} installDate - ISO 설치일
  * @param {Array<object>} [periodReviews] - 서버가 생성해 둔 기간 리뷰 목록
- * @returns {Array<object>} 기간별 데이터 배열(entropy·dist·daily 등 포함)
+ * @returns {Array<{week: number, label: string, range: string, review: string}>}
  */
-function buildWeeksData(allSessions, installDate, periodReviews = []) {
-  const analyzedSessions = allSessions.filter(
-    (s) =>
-      s.endTime &&
-      s.categoryDistribution &&
-      Object.keys(s.categoryDistribution).length > 0,
-  );
-
-  // 서버가 배치로 생성한 기간 리뷰
+function buildWeeksData(installDate, periodReviews = []) {
   const reviewsByIndex = new Map(
     (periodReviews || []).map((r) => [r.periodIndex, r]),
   );
+  const mdLabel = (ymd) =>
+    `${Number(ymd.slice(5, 7))}/${Number(ymd.slice(8, 10))}`;
 
   const weeks = [];
-
   for (let w = 1; w <= VL.TOTAL_WEEKS; w++) {
-    const startOffset = (w - 1) * VL.DAYS_PER_PERIOD; // day offset from install
-    const endOffset = w * VL.DAYS_PER_PERIOD - 1;
-    const isBaseline = startOffset < VL.BASELINE_DAYS; // 14일(2주) 미만이면 베이스라인 — 1·2주차
-
-    const weekStart = dayFromInstall(installDate, startOffset);
-    const weekEnd = dayFromInstall(installDate, endOffset);
-
-    const weekSessions = analyzedSessions.filter((s) => {
-      const d = dateStr(new Date(s.endTime));
-      return d >= weekStart && d <= weekEnd;
-    });
-
-    // 재설치 등으로 로컬 세션 캐시가 비어 있을 때, 서버가 사전 생성해 둔 기간 리뷰
-    // 스냅샷(categoryDistribution/entropy/videoCount/sessionCount)을 대신 쓴다(4-2절 폴백).
-    // EXP는 로컬 세션이 정상적으로 쌓여 있어 weekSessions가 비지 않으므로 이 분기를 타지 않는다.
-    const reviewRow = reviewsByIndex.get(w) || null;
-    const useServerSnapshot = weekSessions.length === 0 && !!reviewRow;
-
-    // Weekly aggregate
-    const weekDistArr = useServerSnapshot
-      ? vlDistFromCategoryDistribution(
-          JSON.parse(reviewRow.categoryDistribution || "{}"),
-        )
-      : (() => {
-          const weekDist = mergeDist(weekSessions);
-          return Object.keys(weekDist).length > 0
-            ? VL.dist(weekDist)
-            : VL.dist({ etc: 1 });
-        })();
-
-    // 위에서 이미 KST 기준으로 구한 weekStart/weekEnd 문자열을 그대로 쓴다.
-    const mdLabel = (ymd) =>
-      `${Number(ymd.slice(5, 7))}/${Number(ymd.slice(8, 10))}`;
-    const range = `${mdLabel(weekStart)} – ${mdLabel(weekEnd)}`;
-
-    const daily = useServerSnapshot
-      ? null
-      : Array.from({ length: VL.DAYS_PER_PERIOD }, (_, d) => {
-          const dayKey = dayFromInstall(installDate, startOffset + d);
-          const daySess = weekSessions.filter(
-            (s) => dateStr(new Date(s.endTime)) === dayKey,
-          );
-          if (daySess.length === 0) return null;
-          const dayDist = mergeDist(daySess);
-          const dayDistArr =
-            Object.keys(dayDist).length > 0 ? VL.dist(dayDist) : [];
-          if (dayDistArr.length === 0) return null;
-          const videoCount = daySess.reduce(
-            (s, sess) => s + (sess.videoCount ?? sess.videos?.length ?? 1),
-            0,
-          );
-          return {
-            dateStr: dayKey,
-            label: mdLabel(dayKey),
-            entropy: VL.entropy(dayDistArr),
-            videoCount,
-            categoryCount: dayDistArr.length,
-          };
-        }).filter(Boolean);
-
-    // Review: 서버가 생성한 기간 리뷰
+    const weekStart = dayFromInstall(installDate, (w - 1) * VL.DAYS_PER_PERIOD);
+    const weekEnd = dayFromInstall(installDate, w * VL.DAYS_PER_PERIOD - 1);
     const periodEnded = weekEnd < dateStr(new Date());
     const review =
-      reviewRow?.review ||
+      reviewsByIndex.get(w)?.review ||
       (periodEnded
         ? "이번 기간 데이터를 분석 중이에요. 곧 리포트를 볼 수 있어요."
         : "아직 진행 중인 기간이에요. 기간이 끝나면 리뷰가 생성돼요.");
-
-    const totalVids = useServerSnapshot
-      ? (reviewRow.videoCount ?? 0)
-      : weekSessions.reduce(
-          (s, sess) => s + (sess.videoCount ?? sess.videos?.length ?? 1),
-          0,
-        );
-    const sessionCount = useServerSnapshot
-      ? (reviewRow.sessionCount ?? 0)
-      : weekSessions.length;
-
     weeks.push({
       week: w,
       label: VL.periodLabel(w),
-      isBaseline,
-      range,
-      videoCount: totalVids,
-      sessionCount,
-      dist: weekDistArr,
-      daily,
+      range: `${mdLabel(weekStart)} – ${mdLabel(weekEnd)}`,
       review,
     });
   }
-
-  weeks.forEach((wk) => {
-    wk.entropy = VL.entropy(wk.dist);
-  });
   return weeks;
 }
 
@@ -1272,7 +1082,7 @@ async function boot() {
   VL._studyEndCodeVerified = !!stored.studyEndCodeVerified;
 
   if (installDate) {
-    VL.weeks = buildWeeksData(sessions, installDate, cachedPeriodReviews);
+    VL.weeks = buildWeeksData(installDate, cachedPeriodReviews);
   }
 
   // Apply theme tokens
@@ -1521,11 +1331,7 @@ async function boot() {
       if (installDate) {
         // 기간 리뷰는 세션이 갱신될 때마다 다시 조회하지 않는다 — 서버 cron이 하루/일주일에
         // 한 번만 새로 생성하므로, boot() 시점에 캐시로 가져온 값을 그대로 재사용한다.
-        VL.weeks = buildWeeksData(
-          updatedSessions,
-          installDate,
-          cachedPeriodReviews,
-        );
+        VL.weeks = buildWeeksData(installDate, cachedPeriodReviews);
       }
     }
 

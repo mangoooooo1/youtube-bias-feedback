@@ -29,28 +29,6 @@ const VL_CATS = {
   기타: { name: "기타", color: "oklch(0.62 0.02 250)" },
 };
 
-const LEGACY_GROUPS = {
-  game: { cat: "게임", name: "게임" },
-  music: { cat: "음악", name: "음악" },
-  ent: { cat: "엔터테인먼트", name: "엔터테인먼트" },
-  news: { cat: "뉴스 & 정치", name: "뉴스·정치" },
-  edu: { cat: "교육", name: "교육" },
-  sci: { cat: "과학 & 기술", name: "과학·기술" },
-  sports: { cat: "스포츠", name: "스포츠" },
-  vlog: { cat: "인물 & 블로그", name: "인물·블로그" },
-  etc: { cat: "기타", name: "기타" },
-};
-
-function dist(obj) {
-  if (!obj) return [];
-  return Object.entries(obj)
-    .map(([k, p]) => {
-      const group = LEGACY_GROUPS[k] || LEGACY_GROUPS.etc;
-      return { key: k, name: group.name, color: VL_CATS[group.cat].color, p };
-    })
-    .sort((a, b) => b.p - a.p);
-}
-
 // ── 서버 집계(/api/viewing-summary) → 화면 값 ──────────────────────────────────
 // 꺾은선의 "그 밖" 선(상위 3개 분야 밖의 합)
 const OTHERS_LINE = {
@@ -291,10 +269,6 @@ function periodLines(period, days, today) {
   return { lines, points };
 }
 
-function entropy(arr) {
-  return arr.reduce((h, d) => (d.p > 0 ? h - d.p * Math.log2(d.p) : h), 0);
-}
-
 // 베이스라인 기간(설치 후 BASELINE_DAYS 미만) 판정
 // 팝업/Studio는 classic script라 ESM import를 쓸 수 없어(background.js는 type=module) 로직을 중복 정의한다.
 const BASELINE_DAYS = 4;
@@ -321,26 +295,16 @@ function josa(word, withBatchim, withoutBatchim) {
 
 const today = {
   dateLabel: "6월 7일 토요일",
-  videoCount: 14,
-  sessionCount: 2,
-  dist: dist({
-    game: 0.4,
-    music: 0.22,
-    ent: 0.14,
-    news: 0.12,
-    edu: 0.08,
-    sci: 0.04,
-  }),
   videos: [
-    { title: "2024 LCK 서머 결승 풀 하이라이트", cat: "game" },
-    { title: "발로란트 신규 요원 200% 활용 공략", cat: "game" },
-    { title: "랭크 올리는 정글 동선 완전정복", cat: "game" },
-    { title: "아이유 신곡 'Love Wins All' MV", cat: "music" },
-    { title: "백예린 〈square〉 라이브 클립", cat: "music" },
-    { title: "연예대상 레전드 무대 모음.zip", cat: "ent" },
-    { title: "[속보] 오늘의 주요 뉴스 브리핑", cat: "news" },
-    { title: "10분 만에 끝내는 미적분 핵심 개념", cat: "edu" },
-    { title: "블랙홀은 정말 모든 걸 삼킬까? (다큐)", cat: "sci" },
+    { title: "2024 LCK 서머 결승 풀 하이라이트" },
+    { title: "발로란트 신규 요원 200% 활용 공략" },
+    { title: "랭크 올리는 정글 동선 완전정복" },
+    { title: "아이유 신곡 'Love Wins All' MV" },
+    { title: "백예린 〈square〉 라이브 클립" },
+    { title: "연예대상 레전드 무대 모음.zip" },
+    { title: "[속보] 오늘의 주요 뉴스 브리핑" },
+    { title: "10분 만에 끝내는 미적분 핵심 개념" },
+    { title: "블랙홀은 정말 모든 걸 삼킬까? (다큐)" },
   ],
   review:
     "오늘은 게임 영상에 가장 오래 머무셨어요 — 특히 LCK 결승 하이라이트나 발로란트 공략처럼 e스포츠·경쟁 게임 쪽이 절반 가까이를 차지했네요. 음악은 아이유 신곡 MV나 라이브 클립 같은 최신 발매곡 위주였고요. 중간에 블랙홀 다큐와 미적분 개념 같은 과학·교육 영상도 함께 보셨어요.",
@@ -374,214 +338,25 @@ const weeks = [
   {
     week: 1,
     label: "1주차",
-    isBaseline: true,
     range: "6/1 – 6/7",
-    videoCount: 78,
-    sessionCount: 11,
-    dist: dist({
-      game: 0.51,
-      music: 0.2,
-      ent: 0.12,
-      news: 0.09,
-      sci: 0.05,
-      edu: 0.03,
-    }),
-    daily: [
-      {
-        dateStr: "2024-06-01",
-        label: "6/1",
-        entropy: 1.55,
-        videoCount: 9,
-        categoryCount: 3,
-      },
-      {
-        dateStr: "2024-06-02",
-        label: "6/2",
-        entropy: 1.8,
-        videoCount: 12,
-        categoryCount: 3,
-      },
-      {
-        dateStr: "2024-06-03",
-        label: "6/3",
-        entropy: 1.68,
-        videoCount: 8,
-        categoryCount: 3,
-      },
-      {
-        dateStr: "2024-06-04",
-        label: "6/4",
-        entropy: 2.02,
-        videoCount: 14,
-        categoryCount: 4,
-      },
-      {
-        dateStr: "2024-06-05",
-        label: "6/5",
-        entropy: 1.74,
-        videoCount: 10,
-        categoryCount: 3,
-      },
-      {
-        dateStr: "2024-06-06",
-        label: "6/6",
-        entropy: 1.96,
-        videoCount: 13,
-        categoryCount: 4,
-      },
-      {
-        dateStr: "2024-06-07",
-        label: "6/7",
-        entropy: 1.88,
-        videoCount: 12,
-        categoryCount: 4,
-      },
-    ],
     review:
       "첫 주 동안의 시청 습관을 기준선으로 담아 두었어요. 게임이 절반 가까이를 차지했지만, 이건 평가가 아니라 출발점이에요. 다음 주부터 어떤 변화가 생기는지 저와 함께 천천히 지켜봐요.",
   },
   {
     week: 2,
     label: "2주차",
-    isBaseline: true,
     range: "6/8 – 6/14",
-    videoCount: 71,
-    sessionCount: 10,
-    dist: dist({
-      game: 0.37,
-      music: 0.19,
-      edu: 0.14,
-      sci: 0.11,
-      news: 0.1,
-      ent: 0.09,
-    }),
-    daily: [
-      {
-        dateStr: "2024-06-08",
-        label: "6/8",
-        entropy: 1.98,
-        videoCount: 10,
-        categoryCount: 4,
-      },
-      {
-        dateStr: "2024-06-09",
-        label: "6/9",
-        entropy: 2.21,
-        videoCount: 11,
-        categoryCount: 4,
-      },
-      {
-        dateStr: "2024-06-10",
-        label: "6/10",
-        entropy: 2.34,
-        videoCount: 9,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-11",
-        label: "6/11",
-        entropy: 2.18,
-        videoCount: 8,
-        categoryCount: 4,
-      },
-      {
-        dateStr: "2024-06-12",
-        label: "6/12",
-        entropy: 2.46,
-        videoCount: 12,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-13",
-        label: "6/13",
-        entropy: 2.4,
-        videoCount: 10,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-14",
-        label: "6/14",
-        entropy: 2.55,
-        videoCount: 11,
-        categoryCount: 5,
-      },
-    ],
     review:
       "베이스라인 기간의 두 번째 주예요. 교육과 과학·기술 영상이 조금 늘었지만, 이 시기는 평가가 아니라 계속 기준선을 담아 두는 과정이에요.",
   },
   {
     week: 3,
     label: "3주차",
-    isBaseline: false,
     range: "6/15 – 6/21",
-    videoCount: 69,
-    sessionCount: 9,
-    dist: dist({
-      game: 0.29,
-      edu: 0.18,
-      music: 0.16,
-      sci: 0.15,
-      news: 0.12,
-      ent: 0.1,
-    }),
-    daily: [
-      {
-        dateStr: "2024-06-15",
-        label: "6/15",
-        entropy: 2.41,
-        videoCount: 9,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-16",
-        label: "6/16",
-        entropy: 2.58,
-        videoCount: 11,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-17",
-        label: "6/17",
-        entropy: 2.52,
-        videoCount: 8,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-18",
-        label: "6/18",
-        entropy: 2.71,
-        videoCount: 12,
-        categoryCount: 6,
-      },
-      {
-        dateStr: "2024-06-19",
-        label: "6/19",
-        entropy: 2.63,
-        videoCount: 10,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-20",
-        label: "6/20",
-        entropy: 2.78,
-        videoCount: 10,
-        categoryCount: 6,
-      },
-      {
-        dateStr: "2024-06-21",
-        label: "6/21",
-        entropy: 2.69,
-        videoCount: 9,
-        categoryCount: 6,
-      },
-    ],
     review:
       "3주 동안 정말 꾸준히 해오셨어요. 시청 다양성이 기준선보다 눈에 띄게 높아졌고, 어느 한 카테고리에 치우치지 않는 균형이 보여요. 지금의 리듬을 가볍게 이어가시면 충분해요.",
   },
 ];
-weeks.forEach((w) => {
-  w.entropy = entropy(w.dist);
-});
 // 총 실험 기간 12일(베이스라인 4일 + 4일씩 2개 기간)
 const TOTAL_DAYS = 12;
 // 탭을 며칠 단위로 나눌지 — 4일 단위로 기간을 구분한다.
@@ -704,8 +479,6 @@ window.VL = {
   donutPair,
   playedVideos,
   reviewAsOfLabel,
-  dist,
-  entropy,
   today,
   weeks,
   TIMELINE,
