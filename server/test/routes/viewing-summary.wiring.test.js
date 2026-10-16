@@ -248,6 +248,42 @@ describe("getViewingSummary — 날짜·구간 나눔과 화면용 값", () => {
     expect(periods[1].validCount).toBe(3);
   });
 
+  // 화면 "영상 N개"는 리뷰와 같은 기준(시청 시간이 확인된 유효 영상), 시간을 모르는 영상은 따로 센다
+  it("시청 시간이 확인된 유효 영상 수와 확인 중인 영상 수를 날짜·구간별로 돌려준다", () => {
+    addParticipant("confirmed", "TEST-EXP", INSTALL);
+    addVideo("confirmed", { watchedAt: "2026-03-05T10:00:00+09:00" });
+    addVideo("confirmed", {
+      watchedAt: "2026-03-05T10:05:00+09:00",
+      categoryId: null,
+    });
+    addVideo("confirmed", {
+      watchedAt: "2026-03-05T10:10:00+09:00",
+      watchedSeconds: null,
+    });
+    // 분야도 모르고 시간도 모르는 영상 — 확인 중으로 센다
+    addVideo("confirmed", {
+      watchedAt: "2026-03-05T10:15:00+09:00",
+      categoryId: null,
+      watchedSeconds: null,
+    });
+    addVideo("confirmed", {
+      watchedAt: "2026-03-05T10:20:00+09:00",
+      watchedSeconds: 3,
+    });
+
+    const { days, periods } = getViewingSummary(db, "confirmed", NOW);
+
+    expect(days[0]).toMatchObject({
+      validCount: 4,
+      confirmedCount: 2,
+      unconfirmedCount: 2,
+    });
+    expect(periods[1]).toMatchObject({
+      confirmedCount: 2,
+      unconfirmedCount: 2,
+    });
+  });
+
   it("시청 시간 합이 유한하지 않으면 null로 돌려준다(영상 길이를 모르는 극단값)", () => {
     addParticipant("overflow", "TEST-EXP", INSTALL);
     for (let i = 0; i < 3; i++) {
