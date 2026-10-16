@@ -99,6 +99,7 @@ describe("aggregateTodayCumulative", () => {
     expect(result.categoryDistribution).toEqual({ 음악: 0.5, 게임: 0.5 });
     expect(result.entropy).toBe(1);
     expect(result.videoCount).toBe(12); // 잠깐 본 영상까지 포함한 영상 기록 수
+    expect(result.validVideoCount).toBe(4); // 잠깐 본 스포츠 8개 제외
     expect(result.sessionCount).toBe(2);
     expect(result.sessionIds).toEqual(["s-a", "s-b"]);
     expect(result.videoTitles).toHaveLength(12);

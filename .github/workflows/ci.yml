@@ -37,6 +37,7 @@ jobs:
           node --check server/monitoring/error-monitor.js
           node --check server/monitoring/research-pipeline-monitor.js
           bash -n server/scripts/period-reviews-checked.sh
+          bash -n server/scripts/today-reviews-checked.sh
           bash -n server/scripts/backup-checked.sh
 
       - name: Validate extension manifest

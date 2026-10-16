@@ -59,9 +59,8 @@ function aggregateTodayCumulative({ events, now = new Date() }) {
     categoryDistribution: aggregate.analysisDistribution,
     entropy: aggregate.entropy,
     prevEntropy,
-    // 잠깐 본 영상까지 포함한 오늘 영상 기록 수(세션 videoCount 합과 같은 의미).
-    // LLM 입력을 유효 시청 기준으로 바꾸는 것은 Task 3에서 다룬다.
     videoCount: todayEvents.length,
+    validVideoCount: aggregate.validCount,
     videoTitles: todayEvents.map((e) => e.title).filter(Boolean),
     sessionCount: sessionIds.length,
     sessionIds,

@@ -73,6 +73,7 @@ jobs:
             echo "DB_BACKUP_NIGHT_PING_URL=${{ secrets.DB_BACKUP_NIGHT_PING_URL }}" >> server/.env
             echo "DB_BACKUP_MORNING_PING_URL=${{ secrets.DB_BACKUP_MORNING_PING_URL }}" >> server/.env
             echo "PERIOD_REVIEWS_PING_URL=${{ secrets.PERIOD_REVIEWS_PING_URL }}" >> server/.env
+            echo "TODAY_REVIEWS_PING_URL=${{ secrets.TODAY_REVIEWS_PING_URL }}" >> server/.env
             echo "HEALTH_URL=https://viewlens.site/health" >> server/.env
             echo "ERROR_LOG_PATH=/home/ubuntu/.pm2/logs/youtube-bias-server-error.log" >> server/.env
             pm2 restart youtube-bias-server

@@ -106,8 +106,24 @@ function recordFeedbackTimestamp(db, column, sessionId, anonymousId) {
   return "recorded";
 }
 
+/**
+ * 응답에 오늘 리뷰를 싣지 않은 세션의 알림 시각을 비운다.
+ * 확장은 알림 자격만으로 feedbackNotifiedAt을 미리 채워 보내지만, 실제 알림은 응답에
+ * todayReview가 있을 때만 띄운다. 측정 퍼널이 실제 알림과 어긋나지 않게 맞춘다.
+ * @param {import("better-sqlite3").Database} db - DB 커넥션
+ * @param {string} sessionId - 이번 요청으로 저장한 세션 id
+ * @param {string} anonymousId - 세션 소유 참여자 익명 id
+ * @returns {void}
+ */
+function clearFeedbackNotifiedAt(db, sessionId, anonymousId) {
+  db.prepare(
+    "UPDATE sessions SET feedbackNotifiedAt = NULL WHERE sessionId = ? AND anonymousId = ?",
+  ).run(sessionId, anonymousId);
+}
+
 module.exports = {
   insertSession,
   recordSessionReview,
   recordFeedbackTimestamp,
+  clearFeedbackNotifiedAt,
 };

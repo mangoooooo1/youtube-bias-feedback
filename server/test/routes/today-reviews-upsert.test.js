@@ -11,6 +11,7 @@ function createTestDb() {
       reviewDate TEXT NOT NULL,
       sessionCount INTEGER,
       videoCount INTEGER,
+      validVideoCount INTEGER,
       categoryDistribution TEXT,
       entropy REAL,
       review TEXT,
@@ -180,6 +181,14 @@ describe("upsertTodayReview", () => {
     expect(row.sessionCount).toBeNull();
     expect(row.categoryDistribution).toBeNull();
     expect(row.review).toBeNull();
+  });
+
+  it("유효 시청 영상 수를 저장하고, 재생성 시 최신 값으로 갱신한다", () => {
+    upsertTodayReview(db, basePayload({ genCount: 1, validVideoCount: 2 }));
+    upsertTodayReview(db, basePayload({ genCount: 2, validVideoCount: 5 }));
+
+    const row = db.prepare("SELECT * FROM today_reviews").get();
+    expect(row.validVideoCount).toBe(5);
   });
 
   it("갱신 시 updatedAt이 채워진다", () => {
