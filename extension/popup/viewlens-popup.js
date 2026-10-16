@@ -501,6 +501,79 @@ async function getPeriodReviewsCached(
 // background.js가 세션이 끝날 때마다 이 캐시에 최신 항목 하나를 병합해 두므로(빠른 경로),
 // 로컬에 아무것도 없을 때만(새 시청 없이 캐시가 사라진 경우 등) 서버 조회가 개입한다.
 
+const VIEWING_SUMMARY_TIMEOUT_MS = 5000;
+
+/**
+ * 화면 그래프·숫자의 원천인 서버 집계(/api/viewing-summary)를 받는다. 실패하면 null.
+ * @returns {Promise<{days: Array, periods: Array}|null>}
+ */
+async function fetchViewingSummary(serverUrl, anonymousId, participantToken) {
+  if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    VIEWING_SUMMARY_TIMEOUT_MS,
+  );
+  try {
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/viewing-summary`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anonymousId, participantToken }),
+        signal: controller.signal,
+      },
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    const data = json.data;
+    return Array.isArray(data?.days) && Array.isArray(data?.periods)
+      ? data
+      : null;
+  } catch (error) {
+    console.warn("[popup] 시청 집계 조회 오류:", error.message);
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * 마지막으로 받은 서버 집계를 기기에서 읽는다.
+ * 팝업을 열자마자 그리고, 서버가 안 될 때도 쓴다.
+ * 다른 참여자(재설치·코드 복구)의 저장본은 쓰지 않는다.
+ * @returns {Promise<{fetchedAt: string, data: object}|null>}
+ */
+async function loadViewingSummaryCache(anonymousId) {
+  const { viewingSummaryCache } = await chrome.storage.local.get(
+    "viewingSummaryCache",
+  );
+  if (!viewingSummaryCache || viewingSummaryCache.anonymousId !== anonymousId)
+    return null;
+  return {
+    fetchedAt: viewingSummaryCache.fetchedAt,
+    data: viewingSummaryCache.data,
+  };
+}
+
+/**
+ * 서버 집계를 새로 받아 저장본을 덮어쓴다(쌓지 않음). 실패하면 저장본을 건드리지 않고 null.
+ * @returns {Promise<{fetchedAt: string, data: object}|null>}
+ */
+async function refreshViewingSummary(serverUrl, anonymousId, participantToken) {
+  const data = await fetchViewingSummary(
+    serverUrl,
+    anonymousId,
+    participantToken,
+  );
+  if (!data) return null;
+  const fetchedAt = new Date().toISOString();
+  await chrome.storage.local.set({
+    viewingSummaryCache: { anonymousId, fetchedAt, data },
+  });
+  return { fetchedAt, data };
+}
+
 const TODAY_REVIEWS_TIMEOUT_MS = 5000;
 
 async function fetchTodayReviews(serverUrl, anonymousId, participantToken) {
@@ -1052,6 +1125,21 @@ async function boot() {
   VL._allSessions = sessions;
   VL._installDate = installDate;
   VL._lastWatchedAt = stored.lastWatchedAt || null;
+
+  // 화면 그래프·숫자의 원천(서버 집계). 저장본을 먼저 쓰고, 새로 받아 오면 바꾼다.
+  VL._viewingSummary = await loadViewingSummaryCache(stored.anonymousId);
+  refreshViewingSummary(
+    stored.serverUrl,
+    stored.anonymousId,
+    stored.participantToken,
+  )
+    .then((fresh) => {
+      if (fresh) VL._viewingSummary = fresh;
+    })
+    // 저장 실패 등은 저장본·기존 화면을 그대로 두면 된다
+    .catch((error) =>
+      console.warn("[popup] 시청 집계 갱신 오류:", error.message),
+    );
 
   const realToday = buildDataForDate(sessions, new Date());
   realToday.collectingCount = collectingCount;

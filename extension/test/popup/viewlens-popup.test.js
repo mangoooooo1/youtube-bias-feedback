@@ -210,3 +210,123 @@ describe("boot 실패 — 빈 팝업을 오류 보고로 넘긴다", () => {
     expect(consoleMock.error).toHaveBeenCalledTimes(1);
   });
 });
+
+// 화면 그래프의 원천(서버 집계) — 저장본으로 바로 그리고, 열 때마다 새로 받아 덮어쓴다
+describe("viewing-summary 조회와 저장본", () => {
+  const TIMEOUT_DECL = /const VIEWING_SUMMARY_TIMEOUT_MS = \d+;/;
+  const FETCH_DECL =
+    /async function fetchViewingSummary\(serverUrl, anonymousId, participantToken\) \{[\s\S]*?\n\}/;
+  const LOAD_DECL =
+    /async function loadViewingSummaryCache\(anonymousId\) \{[\s\S]*?\n\}/;
+  const REFRESH_DECL =
+    /async function refreshViewingSummary\(serverUrl, anonymousId, participantToken\) \{[\s\S]*?\n\}/;
+  const ID = "697236fb-5dd0-420f-aaae-c42128e1950a";
+  const SUMMARY = { days: [{ date: "2026-03-05" }], periods: [] };
+
+  function load(initialStorage, fetchImpl) {
+    const raw = readFileSync(VIEWLENS_POPUP_PATH, "utf8");
+    const src = [TIMEOUT_DECL, FETCH_DECL, LOAD_DECL, REFRESH_DECL]
+      .map((re) => raw.match(re)[0])
+      .join("\n");
+    let store = { ...initialStorage };
+    const chrome = {
+      storage: {
+        local: {
+          get: async (keys) =>
+            Object.fromEntries([].concat(keys).map((k) => [k, store[k]])),
+          set: async (obj) => {
+            store = { ...store, ...structuredClone(obj) };
+          },
+        },
+      },
+    };
+    const fetch = vi.fn(fetchImpl);
+    const console = { warn: vi.fn(), log: vi.fn() };
+    const fns = new Function(
+      "chrome",
+      "fetch",
+      "console",
+      `${src}\nreturn { loadViewingSummaryCache, refreshViewingSummary };`,
+    )(chrome, fetch, console);
+    return { ...fns, fetch, dump: () => store };
+  }
+
+  const ok = (data) => async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ data }),
+  });
+
+  it("새로 받으면 저장본을 덮어쓰고, 다음에 같은 참여자로 읽을 수 있다", async () => {
+    const { refreshViewingSummary, loadViewingSummaryCache, fetch } = load(
+      {},
+      ok(SUMMARY),
+    );
+
+    const fresh = await refreshViewingSummary("https://srv", ID, "tok");
+    const cached = await loadViewingSummaryCache(ID);
+
+    expect(fresh.data).toEqual(SUMMARY);
+    expect(cached).toEqual({ fetchedAt: fresh.fetchedAt, data: SUMMARY });
+    const [url, options] = fetch.mock.calls[0];
+    expect(url).toBe("https://srv/api/viewing-summary");
+    expect(JSON.parse(options.body)).toEqual({
+      anonymousId: ID,
+      participantToken: "tok",
+    });
+  });
+
+  it("서버가 실패하면 null을 돌려주고 기존 저장본을 지우지 않는다", async () => {
+    const saved = {
+      anonymousId: ID,
+      fetchedAt: "2026-03-05T00:00:00Z",
+      data: SUMMARY,
+    };
+    const { refreshViewingSummary, dump } = load(
+      { viewingSummaryCache: saved },
+      async () => ({ ok: false, status: 500 }),
+    );
+
+    expect(await refreshViewingSummary("https://srv", ID, "tok")).toBeNull();
+    expect(dump().viewingSummaryCache).toEqual(saved);
+  });
+
+  it("네트워크 오류·형식이 다른 응답도 null", async () => {
+    const offline = load({}, async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    const malformed = load({}, ok({ days: "x" }));
+
+    expect(
+      await offline.refreshViewingSummary("https://srv", ID, "tok"),
+    ).toBeNull();
+    expect(
+      await malformed.refreshViewingSummary("https://srv", ID, "tok"),
+    ).toBeNull();
+  });
+
+  it("다른 참여자의 저장본은 쓰지 않는다(재설치·코드 복구)", async () => {
+    const { loadViewingSummaryCache } = load(
+      {
+        viewingSummaryCache: {
+          anonymousId: "someone-else",
+          fetchedAt: "2026-03-05T00:00:00Z",
+          data: SUMMARY,
+        },
+      },
+      ok(SUMMARY),
+    );
+
+    expect(await loadViewingSummaryCache(ID)).toBeNull();
+  });
+
+  it("서버 주소나 참여자 id가 없으면 요청하지 않는다", async () => {
+    const { refreshViewingSummary, fetch } = load({}, ok(SUMMARY));
+
+    expect(
+      await refreshViewingSummary("YOUR_SERVER_URL", ID, "tok"),
+    ).toBeNull();
+    expect(await refreshViewingSummary("https://srv", null, "tok")).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});

@@ -1,23 +1,184 @@
 const VL_CATS = {
-  game: { name: "게임", color: "oklch(0.67 0.15 32)" },
-  music: { name: "음악", color: "oklch(0.66 0.14 300)" },
-  ent: { name: "엔터테인먼트", color: "oklch(0.68 0.13 350)" },
-  news: { name: "뉴스·정치", color: "oklch(0.64 0.13 248)" },
-  edu: { name: "교육", color: "oklch(0.66 0.13 152)" },
-  sci: { name: "과학·기술", color: "oklch(0.68 0.12 205)" },
-  sports: { name: "스포츠", color: "oklch(0.70 0.13 78)" },
-  vlog: { name: "인물·블로그", color: "oklch(0.66 0.10 120)" },
-  etc: { name: "기타", color: "oklch(0.62 0.02 250)" },
+  게임: { name: "게임", color: "oklch(0.77 0.085 32)" },
+  음악: { name: "음악", color: "oklch(0.86 0.085 300)" },
+  엔터테인먼트: { name: "엔터테인먼트", color: "oklch(0.86 0.085 342)" },
+  "뉴스 & 정치": { name: "뉴스 & 정치", color: "oklch(0.86 0.085 248)" },
+  교육: { name: "교육", color: "oklch(0.86 0.085 152)" },
+  "과학 & 기술": { name: "과학 & 기술", color: "oklch(0.86 0.085 205)" },
+  스포츠: { name: "스포츠", color: "oklch(0.77 0.085 78)" },
+  "인물 & 블로그": { name: "인물 & 블로그", color: "oklch(0.77 0.085 120)" },
+  "영화 & 애니메이션": {
+    name: "영화 & 애니메이션",
+    color: "oklch(0.77 0.085 325)",
+  },
+  "자동차 & 차량": { name: "자동차 & 차량", color: "oklch(0.77 0.085 226)" },
+  "애완동물 & 동물": {
+    name: "애완동물 & 동물",
+    color: "oklch(0.86 0.085 100)",
+  },
+  "여행 & 이벤트": { name: "여행 & 이벤트", color: "oklch(0.77 0.085 178)" },
+  코미디: { name: "코미디", color: "oklch(0.86 0.085 55)" },
+  "노하우 & 스타일": {
+    name: "노하우 & 스타일",
+    color: "oklch(0.77 0.085 274)",
+  },
+  "비영리 & 사회운동": {
+    name: "비영리 & 사회운동",
+    color: "oklch(0.84 0.10 18)",
+  },
+  기타: { name: "기타", color: "oklch(0.62 0.02 250)" },
+};
+
+const LEGACY_GROUPS = {
+  game: { cat: "게임", name: "게임" },
+  music: { cat: "음악", name: "음악" },
+  ent: { cat: "엔터테인먼트", name: "엔터테인먼트" },
+  news: { cat: "뉴스 & 정치", name: "뉴스·정치" },
+  edu: { cat: "교육", name: "교육" },
+  sci: { cat: "과학 & 기술", name: "과학·기술" },
+  sports: { cat: "스포츠", name: "스포츠" },
+  vlog: { cat: "인물 & 블로그", name: "인물·블로그" },
+  etc: { cat: "기타", name: "기타" },
 };
 
 function dist(obj) {
   if (!obj) return [];
   return Object.entries(obj)
     .map(([k, p]) => {
-      const cat = VL_CATS[k] || VL_CATS.etc;
-      return { key: k, name: cat.name, color: cat.color, p };
+      const group = LEGACY_GROUPS[k] || LEGACY_GROUPS.etc;
+      return { key: k, name: group.name, color: VL_CATS[group.cat].color, p };
     })
     .sort((a, b) => b.p - a.p);
+}
+
+// ── 서버 집계(/api/viewing-summary) → 화면 값 ──────────────────────────────────
+// 꺾은선의 "그 밖" 선(상위 3개 분야 밖의 합)
+const OTHERS_LINE = {
+  key: "__others",
+  name: "그 밖",
+  color: VL_CATS.기타.color,
+};
+
+// 시청이 적은 날
+const MIN_VALID_VIDEOS_PER_DAY = 2;
+
+// 서버와 같은 반올림
+const percentOf = (p) => Math.round(p * 100);
+
+/** 서버 비중 {분야 이름: 비율} → [{ key, name, color, p }] (비중 큰 순) */
+function serverDist(distribution) {
+  return Object.entries(distribution || {})
+    .map(([name, p]) => ({
+      key: name,
+      name,
+      color: (VL_CATS[name] || VL_CATS.기타).color,
+      p,
+    }))
+    .sort((a, b) => b.p - a.p);
+}
+
+/** 반올림한 퍼센트로 1위인 분야 이름들(동점이면 여럿, 이름 순) */
+function topCategoryNames(distArr) {
+  if (distArr.length === 0) return [];
+  const max = percentOf(distArr[0].p);
+  return distArr
+    .filter((d) => percentOf(d.p) === max)
+    .map((d) => d.name)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * 탭 맨 위 제목 문장
+ * @returns {string|null} 분포가 비어 있으면 null
+ */
+function titleSentence(timeDist, countDist) {
+  const time = topCategoryNames(timeDist).join("·");
+  const count = topCategoryNames(countDist).join("·");
+  if (!time || !count) return null;
+  if (time === count)
+    return `시청 시간과 영상 개수 모두 ${time} 분야가 가장 많았어요.`;
+  return `시청 시간이 가장 긴 분야는 ${josa(time, "이었지만", "였지만")}, 영상을 가장 많이 본 분야는 ${josa(count, "이었어요", "였어요")}.`;
+}
+
+/**
+ * 하루치 서버 값을 화면 값으로. 기록이 없는 날(day가 없음)은 0으로 채운다.
+ * @param {object|undefined} day - viewing-summary days[] 항목
+ */
+function dayView(day) {
+  const timeDist = serverDist(day?.timeDistribution);
+  const countDist = serverDist(day?.countDistribution);
+  return {
+    // 화면 "영상 N개" — 시청 시간이 확인된 유효 영상(리뷰와 같은 기준)
+    confirmedCount: day?.confirmedCount ?? 0,
+    unconfirmedCount: day?.unconfirmedCount ?? 0,
+    shortCount: day?.shortCount ?? 0,
+    // 도넛 두 개는 같은 영상 묶음(시청 시간을 알고 분야가 있는 유효 영상)
+    chartCount: day?.chartCount ?? 0,
+    timeDist,
+    countDist,
+    title: titleSentence(timeDist, countDist),
+    // 영상 목록에 짧게 봄·확인 중·분야 미확인을 붙이는 데 쓴다
+    excludedReasons: Object.fromEntries(
+      (day?.excluded || []).map((e) => [e.eventId, e.reason]),
+    ),
+  };
+}
+
+/** "YYYY-MM-DD" 범위의 모든 날짜 */
+function datesInRange(start, end) {
+  const dates = [];
+  const [y, m, d] = start.split("-").map(Number);
+  for (let i = 0; ; i++) {
+    const date = new Date(Date.UTC(y, m - 1, d + i)).toISOString().slice(0, 10);
+    if (date > end) break;
+    dates.push(date);
+  }
+  return dates;
+}
+
+/**
+ * 기간 탭 꺾은선 데이터 — 선은 구간 시청 시간 상위 3개 분야(+ 분야가 더 있으면 "그 밖").
+ * 기록 없는 날은 모든 선 0%. 오늘 이후 날짜는 그리지 않는다.
+ * @param {object} period - viewing-summary periods[] 항목 { start, end, timeDistribution, ... }
+ * @param {Array<object>} days - viewing-summary days[]
+ * @param {string} today - 오늘 KST 날짜(YYYY-MM-DD)
+ */
+function periodLines(period, days, today) {
+  const ranked = serverDist(period.timeDistribution);
+  const top = ranked.slice(0, 3);
+  const lines = [
+    ...top.map(({ key, name, color }) => ({ key, name, color })),
+    ...(ranked.length > 3 ? [OTHERS_LINE] : []),
+  ];
+  const byDate = new Map((days || []).map((d) => [d.date, d]));
+  const points = datesInRange(period.start, period.end)
+    .filter((date) => date <= today)
+    .map((date) => {
+      const day = byDate.get(date);
+      const shares = day?.timeDistribution || {};
+      const hasChart = Object.keys(shares).length > 0;
+      const values = Object.fromEntries(
+        top.map(({ key }) => [key, percentOf(shares[key] ?? 0)]),
+      );
+      if (ranked.length > 3) {
+        const othersShare = Object.entries(shares)
+          .filter(([name]) => !top.some((t) => t.key === name))
+          .reduce((sum, [, p]) => sum + p, 0);
+        values[OTHERS_LINE.key] = percentOf(othersShare);
+      }
+      const confirmed = day?.confirmedCount ?? 0;
+      return {
+        date,
+        values,
+        // 그래프에 그릴 비중이 없는 날
+        noRecord: !hasChart,
+        // 시청이 적은 날 — 빈 원
+        few: confirmed > 0 && confirmed < MIN_VALID_VIDEOS_PER_DAY,
+        // 오늘 — 점선 + "집계 중"
+        isToday: date === today,
+      };
+    });
+  return { lines, points };
 }
 
 function entropy(arr) {
@@ -461,6 +622,11 @@ const TONES = {
 
 window.VL = {
   CATS: VL_CATS,
+  MIN_VALID_VIDEOS_PER_DAY,
+  serverDist,
+  titleSentence,
+  dayView,
+  periodLines,
   dist,
   entropy,
   H_MAX,
