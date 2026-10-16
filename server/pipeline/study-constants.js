@@ -11,8 +11,12 @@ function minValidVideosForPeriod(days) {
   return days * MIN_VALID_VIDEOS_PER_DAY;
 }
 
-// 리뷰 한 번에 LLM으로 넘기는 영상 제목 상한
-const MAX_TITLES_PER_REVIEW = 100;
+// 하루치 리뷰에서 LLM으로 넘기는 영상 제목 상한(오늘 리뷰). 기간 리뷰는 구간 일수만큼 늘린다
+const MAX_TITLES_PER_DAY = 100;
+/** 기간 리뷰의 제목 상한 — 하루 상한 × 구간 일수 */
+function maxTitlesForPeriod(days) {
+  return days * MAX_TITLES_PER_DAY;
+}
 
 module.exports = {
   TOTAL_DAYS,
@@ -20,5 +24,6 @@ module.exports = {
   BASELINE_DAYS,
   MIN_VALID_VIDEOS_PER_DAY,
   minValidVideosForPeriod,
-  MAX_TITLES_PER_REVIEW,
+  MAX_TITLES_PER_DAY,
+  maxTitlesForPeriod,
 };

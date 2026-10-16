@@ -2,6 +2,12 @@
 const { SENSITIVE_PATTERN } = require("./sensitive-pattern");
 const { oneLine } = require("../log-line");
 const { MIN_VALID_VIDEOS_PER_DAY } = require("./study-constants");
+const {
+  shareBasis,
+  formatShares,
+  formatTitleGroups,
+  topSharesPhrase,
+} = require("./review-prompt-format");
 
 const GEMINI_API_URL =
   "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
@@ -14,34 +20,6 @@ const ERROR_BODY_MAX_LENGTH = 1000;
 // v2.0: 유효 시청·시청 시간 비중·카테고리별 제목 묶음 입력, 다양성 지수·직전 시청일 비교·70% 쏠림 지시 제거
 const TODAY_PROMPT_VERSION = "viewlens-today-mirror-v2.0";
 
-const percent = (ratio) => Math.round(ratio * 100);
-
-/**
- * 시청 시간 비중을 쓰고, 유효 영상이 모두 시청 시간을 모르는 드문 경우에만 영상 개수 비중으로 대신한다.
- * @returns {{label: string, unit: string, entries: Array<[string, number]>}} 비중 큰 순
- */
-function shareBasis({ timeDistribution, categoryDistribution }) {
-  const hasTime = timeDistribution && Object.keys(timeDistribution).length > 0;
-  const distribution = hasTime ? timeDistribution : categoryDistribution;
-  return {
-    label: hasTime ? "분야별 시청 시간 비중" : "분야별 영상 개수 비중",
-    unit: hasTime ? "시청 시간은" : "영상 개수는",
-    entries: Object.entries(distribution ?? {}).sort(([, a], [, b]) => b - a),
-  };
-}
-
-function formatTitleGroups(titleGroups = []) {
-  if (titleGroups.length === 0) return "";
-  const blocks = titleGroups.map((g) => {
-    const lines = g.titles.map(({ title, count }) =>
-      count > 1 ? `  · ${title} (${count}번)` : `  · ${title}`,
-    );
-    if (g.omittedCount > 0) lines.push(`  · 이 외 ${g.omittedCount}개`);
-    return [`  [${g.category}] 영상 ${g.videoCount}개`, ...lines].join("\n");
-  });
-  return `\n- 분야별 영상 제목 (시청 시간이 많은 분야부터, 최근 본 순서, 괄호는 본 횟수):\n${blocks.join("\n")}`;
-}
-
 // "오늘" 탭 누적 리뷰 프롬프트: 오늘 본 영상 기록에서 직접 집계한 값(aggregateTodayCumulative)을 받는다.
 function buildTodayCumulativePrompt({
   validVideoCount,
@@ -49,13 +27,7 @@ function buildTodayCumulativePrompt({
   categoryDistribution,
   titleGroups = [],
 }) {
-  const { label, entries } = shareBasis({
-    timeDistribution,
-    categoryDistribution,
-  });
-  const shareLines = entries
-    .map(([name, ratio]) => `  · ${name}: ${percent(ratio)}%`)
-    .join("\n");
+  const basis = shareBasis({ timeDistribution, categoryDistribution });
 
   // 시청이 적은 날: 하루치로는 패턴을 말하기 어렵다는 점을 밝힌다
   const fewVideosSection =
@@ -67,8 +39,7 @@ function buildTodayCumulativePrompt({
 
 [오늘 정보]
 - 오늘 시청한 영상 수: ${validVideoCount}개 (30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셈)
-- ${label}:
-${shareLines}${formatTitleGroups(titleGroups)}${fewVideosSection}
+${formatShares(basis)}${formatTitleGroups(titleGroups)}${fewVideosSection}
 
 [피드백 원칙]
 - 위에 제시된 분야별 비중과 영상 제목에만 근거하세요. 정치 성향·이념·성격 등 데이터로 알 수 없는 내용은 추론하거나 단정하지 마세요.
@@ -203,12 +174,9 @@ function generateTodayFallbackReview({
   timeDistribution,
   categoryDistribution,
 }) {
-  const { unit, entries } = shareBasis({
-    timeDistribution,
-    categoryDistribution,
-  });
+  const basis = shareBasis({ timeDistribution, categoryDistribution });
 
-  if (entries.length === 0) {
+  if (basis.entries.length === 0) {
     return {
       topic: "분석 불가",
       feedback:
@@ -218,14 +186,11 @@ function generateTodayFallbackReview({
     };
   }
 
-  const [topName] = entries[0];
+  const [topName] = basis.entries[0];
   const summary =
-    entries.length === 1
+    basis.entries.length === 1
       ? `오늘은 ${topName} 영상을 ${validVideoCount}개 보셨어요.`
-      : `오늘은 영상 ${validVideoCount}개를 보셨고, ${unit} ${entries
-          .slice(0, 3)
-          .map(([name, ratio]) => `${name} ${percent(ratio)}%`)
-          .join(", ")} 순이었어요.`;
+      : `오늘은 영상 ${validVideoCount}개를 보셨고, ${topSharesPhrase(basis)} 순이었어요.`;
   const fewNote =
     validVideoCount < MIN_VALID_VIDEOS_PER_DAY
       ? "영상이 적어 오늘 패턴을 정확히 말하기는 어려워요."

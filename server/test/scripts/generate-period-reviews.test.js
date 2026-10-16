@@ -412,6 +412,141 @@ describe("generate-period-reviews.js — run()", () => {
     expect(row.sessionCount).toBe(2);
   });
 
+  // 오늘 리뷰와 같은 기준 — 유효 영상 수, 시청 시간 비중, 분야별 제목 전부(잠깐 본 영상 제외)
+  it("프롬프트에 유효 영상 수·시청 시간 비중·분야별 제목 전부를 넣고, 잠깐 본 영상 제목은 넣지 않는다", async () => {
+    const userId = "prompt-input-user";
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run(userId, INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+    ).run(userId, JSON.stringify({ 음악: 1 }), 13, "2026-06-02T11:00:00+09:00");
+    const insertMeta = db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, 600)",
+    );
+    insertMeta.run("p-music", "10");
+    insertMeta.run("p-game", "20");
+    const insertEvent = db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, ?, ?, ?, ?)",
+    );
+    // 이전 프롬프트는 앞 10개만 넘겼다 — 12개를 넣어 전부 넘어가는지 본다
+    for (let i = 0; i < 12; i++)
+      insertEvent.run(
+        userId,
+        "p-music",
+        `음악 ${i}`,
+        `2026-06-01T10:${String(i).padStart(2, "0")}:00+09:00`,
+        300,
+      );
+    insertEvent.run(
+      userId,
+      "p-game",
+      "잘못 누른 게임",
+      "2026-06-02T10:00:00+09:00",
+      3,
+    );
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":"문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await run(db, "fake-key");
+
+    const prompt = JSON.parse(global.fetch.mock.calls[0][1].body).contents[0]
+      .parts[0].text;
+    expect(prompt).toContain("이 기간(4일)에 시청한 영상 수: 12개");
+    expect(prompt).toContain("분야별 시청 시간 비중:\n  · 음악: 100%");
+    expect(prompt).toContain("  [음악] 영상 12개");
+    for (let i = 0; i < 12; i++) expect(prompt).toContain(`  · 음악 ${i}\n`);
+    expect(prompt).not.toContain("잘못 누른 게임");
+    // 4일 구간 기준(8개) 이상이라 "영상이 적다" 지침이 없다
+    expect(prompt).not.toContain("시청한 영상이 적어");
+
+    const row = db
+      .prepare(
+        "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+      )
+      .get(userId);
+    // 저장값은 그대로 — 영상 기록 수는 잠깐 본 영상 포함
+    expect(row.videoCount).toBe(13);
+    expect(row.validVideoCount).toBe(12);
+  });
+
+  it("기간 제목 상한은 하루 상한 × 구간 일수라, 하루 상한(100)을 넘는 150개도 전부 넘긴다", async () => {
+    const userId = "many-titles-user";
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run(userId, INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, 600)",
+    ).run("many-music", "10");
+    const insertEvent = db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, 'many-music', ?, '2026-06-01T10:00:00+09:00', 300)",
+    );
+    for (let i = 0; i < 150; i++) insertEvent.run(userId, `쇼츠 ${i}`);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":"문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await run(db, "fake-key");
+
+    const prompt = JSON.parse(global.fetch.mock.calls[0][1].body).contents[0]
+      .parts[0].text;
+    expect(prompt.match(/ {2}· 쇼츠 \d+/g)).toHaveLength(150);
+    expect(prompt).not.toContain("이 외");
+  });
+
+  it("Gemini가 실패하면 대체 문구도 유효 영상 수와 시청 시간 비중으로 적는다", async () => {
+    const userId = "fallback-input-user";
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run(userId, INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, 600)",
+    ).run("f-music", "10");
+    const insertEvent = db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, 'f-music', '음악', ?, ?)",
+    );
+    insertEvent.run(userId, "2026-06-01T10:00:00+09:00", 300);
+    insertEvent.run(userId, "2026-06-01T11:00:00+09:00", 2); // 잠깐 본 영상
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => "server error",
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await run(db, "fake-key");
+
+    const row = db
+      .prepare(
+        "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+      )
+      .get(userId);
+    expect(row.llmStatus).toBe("fallback");
+    expect(row.review).toBe(
+      "이 기간에는 음악 영상을 1개 보셨어요. 영상이 적어 이 기간의 패턴을 정확히 말하기는 어려워요.",
+    );
+  });
+
   // 오늘 리뷰와 같은 기준. 근거 분포 없이 LLM을 부르지 않는다
   it("기간 유효 영상이 모두 카테고리를 못 가져왔으면 Gemini 없이 '분석하지 못했다' 폴백을 저장한다", async () => {
     const userId = "no-category-user";
