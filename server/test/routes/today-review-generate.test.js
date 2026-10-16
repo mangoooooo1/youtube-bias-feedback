@@ -28,6 +28,7 @@ function createTestDb() {
       reviewDate TEXT NOT NULL,
       sessionCount INTEGER,
       videoCount INTEGER,
+      validVideoCount INTEGER,
       categoryDistribution TEXT,
       entropy REAL,
       review TEXT,
@@ -233,6 +234,39 @@ describe("generateAndStoreTodayReview", () => {
       .get("u4");
     expect(row.genCount).toBe(2);
     expect(row.videoCount).toBe(7);
+  });
+
+  it("생성 시점의 유효 시청 영상 수를 저장한다(잠깐 본 영상 제외)", async () => {
+    const db = createTestDb();
+    const now = new Date("2026-03-10T20:00:00+09:00");
+    insertWatchedVideos(db, {
+      anonymousId: "u-valid",
+      watchedAt: "2026-03-10T10:00:00+09:00",
+      count: 2,
+    });
+    // 3초만 본 영상 — 유효 시청이 아님
+    db.prepare(
+      "INSERT INTO video_events (eventId, anonymousId, videoId, sessionId, title, watchedAt, watchedSeconds) VALUES (?, ?, ?, ?, ?, ?, 3)",
+    ).run(
+      "e-short",
+      "u-valid",
+      "vid-short",
+      "s1",
+      "잠깐",
+      "2026-03-10T10:30:00+09:00",
+    );
+
+    await generateAndStoreTodayReview(db, {
+      anonymousId: "u-valid",
+      apiKey: undefined,
+      now,
+    });
+
+    const row = db
+      .prepare("SELECT * FROM today_reviews WHERE anonymousId = ?")
+      .get("u-valid");
+    expect(row.videoCount).toBe(3);
+    expect(row.validVideoCount).toBe(2);
   });
 
   // 2026-10-16 변경: 카테고리를 못 가져온 영상도 영상 수·제목에는 포함하고 리뷰를 보류하지 않는다

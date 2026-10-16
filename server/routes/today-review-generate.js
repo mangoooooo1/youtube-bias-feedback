@@ -88,6 +88,7 @@ async function generateAndStoreTodayReview(
     reviewDate: aggregate.reviewDate,
     sessionCount: aggregate.sessionCount,
     videoCount: aggregate.videoCount,
+    validVideoCount: aggregate.validVideoCount,
     categoryDistribution: aggregate.categoryDistribution,
     entropy: aggregate.entropy,
     review: result.feedback,

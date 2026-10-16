@@ -278,13 +278,14 @@ function execSchema() {
     CREATE INDEX IF NOT EXISTS idx_period_review_versions_participant_period
       ON period_review_versions(anonymousId, periodIndex, generatedAt);
 
-    -- "오늘" 탭 누적 리뷰 — 클라이언트 백그라운드 워커가 오늘 세션 전체를 병합 집계해 생성한 리뷰
+    -- "오늘" 탭 누적 리뷰 — 서버가 오늘 본 영상 기록에서 직접 집계해 생성한 리뷰(날짜별 최신본)
     CREATE TABLE IF NOT EXISTS today_reviews (
       id                   INTEGER PRIMARY KEY AUTOINCREMENT,
       anonymousId          TEXT    NOT NULL,
-      reviewDate           TEXT    NOT NULL,  -- 참여자 로컬 기준 날짜 (YYYY-MM-DD)
+      reviewDate           TEXT    NOT NULL,  -- 영상을 본 시각(watchedAt)의 KST 날짜 (YYYY-MM-DD)
       sessionCount         INTEGER,
       videoCount           INTEGER,
+      validVideoCount      INTEGER,           -- 이 최신본 생성 시점의 유효 시청 영상 수(재생성 판단용)
       categoryDistribution TEXT,              -- JSON 문자열 (sessions와 동일 포맷)
       entropy              REAL,
       review               TEXT,              -- 참여자에게 노출된 누적 리뷰 문장(최신본)

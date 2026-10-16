@@ -9,6 +9,7 @@ function upsertTodayReview(db, payload) {
     reviewDate,
     sessionCount,
     videoCount,
+    validVideoCount,
     categoryDistribution,
     entropy,
     review,
@@ -24,16 +25,17 @@ function upsertTodayReview(db, payload) {
 
   db.prepare(
     `INSERT INTO today_reviews
-      (anonymousId, reviewDate, sessionCount, videoCount, categoryDistribution, entropy,
-       review, reviewTopic, source, promptVersion, llmStatus, failureReason, geminiMs,
+      (anonymousId, reviewDate, sessionCount, videoCount, validVideoCount, categoryDistribution,
+       entropy, review, reviewTopic, source, promptVersion, llmStatus, failureReason, geminiMs,
        genCount, generatedAt, updatedAt)
      VALUES
-      (@anonymousId, @reviewDate, @sessionCount, @videoCount, @categoryDistribution, @entropy,
-       @review, @reviewTopic, @source, @promptVersion, @llmStatus, @failureReason, @geminiMs,
+      (@anonymousId, @reviewDate, @sessionCount, @videoCount, @validVideoCount, @categoryDistribution,
+       @entropy, @review, @reviewTopic, @source, @promptVersion, @llmStatus, @failureReason, @geminiMs,
        @genCount, @generatedAt, @updatedAt)
      ON CONFLICT(anonymousId, reviewDate) DO UPDATE SET
        sessionCount         = excluded.sessionCount,
        videoCount           = excluded.videoCount,
+       validVideoCount      = excluded.validVideoCount,
        categoryDistribution = excluded.categoryDistribution,
        entropy              = excluded.entropy,
        review               = excluded.review,
@@ -54,6 +56,7 @@ function upsertTodayReview(db, payload) {
     reviewDate,
     sessionCount: sessionCount ?? null,
     videoCount: videoCount ?? null,
+    validVideoCount: validVideoCount ?? null,
     categoryDistribution:
       categoryDistribution != null
         ? JSON.stringify(categoryDistribution)
