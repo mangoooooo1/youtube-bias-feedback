@@ -104,8 +104,10 @@ function aggregateViewing(entries) {
 function aggregateViewingByDay(entries) {
   const byDate = new Map();
   for (const e of entries) {
-    if (!e.watchedAt) continue;
-    const date = kstDateStr(new Date(e.watchedAt));
+    // 빈 값·파싱할 수 없는 값은 날짜를 정할 수 없어 뺀다.
+    const ms = Date.parse(e.watchedAt);
+    if (!Number.isFinite(ms)) continue;
+    const date = kstDateStr(new Date(ms));
     if (!byDate.has(date)) byDate.set(date, []);
     byDate.get(date).push(e);
   }

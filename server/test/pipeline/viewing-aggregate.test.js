@@ -194,11 +194,14 @@ describe("aggregateViewingByDay — 영상을 본 시각(KST) 기준 날짜별 �
     expect(result[0].date).toBe("2026-10-16");
   });
 
-  it("본 시각이 없는 기록은 날짜를 정할 수 없어 뺀다", () => {
+  it("본 시각이 없거나 파싱할 수 없는 기록은 날짜를 정할 수 없어 뺀다", () => {
     const result = aggregateViewingByDay([
       video({ categoryId: MUSIC, watchedAt: "2026-10-16T03:00:00Z" }),
       video({ categoryId: GAME, watchedAt: undefined }),
+      video({ categoryId: GAME, watchedAt: "not-a-date" }),
     ]);
+
+    expect(result.map((d) => d.date)).toEqual(["2026-10-16"]);
 
     expect(result).toHaveLength(1);
     expect(result[0].validCount).toBe(1);
