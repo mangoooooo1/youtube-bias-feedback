@@ -10,7 +10,7 @@ const {
 } = require("./review-prompt-format");
 
 const GEMINI_API_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
+  "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent";
 const TIMEOUT_MS = 10000;
 // Gemini 오류 응답은 여러 줄 JSON이고 길이를 알 수 없어 한 줄로 만들고 자른다
 const ERROR_BODY_MAX_LENGTH = 1000;
