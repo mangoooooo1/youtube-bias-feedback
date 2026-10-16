@@ -34,13 +34,32 @@ function nextGenCount(db, anonymousId, reviewDate) {
   return (existing?.genCount ?? 0) + 1;
 }
 
+// 참여자별로 진행 중인 생성(마지막 차례의 Promise). 같은 참여자의 세션이 거의 동시에 끝나도
+// 생성을 한 줄로 세워, 뒤 요청은 앞 요청이 저장한 결과를 보고 재생성 여부를 판단한다.
+// 한 프로세스 안에서만 유효하다(PM2 단일 프로세스 전제).
+const queues = new Map();
+
 /**
  * anonymousId의 "오늘" 누적 리뷰를 다시 계산해 today_reviews에 저장하고 그 결과를 반환한다.
  * 오늘 유효 시청 영상이 하나도 없거나, 다시 만들 필요가 없으면(needsRegeneration) 아무것도
  * 저장하지 않고 null을 반환한다. apiKey가 없으면(.env 미설정) Gemini 호출 없이
- * 결정론적 폴백 문구만 사용한다.
+ * 결정론적 폴백 문구만 사용한다. 같은 참여자의 호출은 순서대로 실행된다.
  */
-async function generateAndStoreTodayReview(
+async function generateAndStoreTodayReview(db, options) {
+  const { anonymousId } = options;
+  const previous = queues.get(anonymousId) ?? Promise.resolve();
+  const run = previous.then(() => generateOnce(db, options));
+  // 앞 차례가 실패해도 뒤 차례는 실행되도록 실패를 삼킨 Promise를 줄 끝으로 둔다
+  const tail = run.catch(() => {});
+  queues.set(anonymousId, tail);
+  try {
+    return await run;
+  } finally {
+    if (queues.get(anonymousId) === tail) queues.delete(anonymousId);
+  }
+}
+
+async function generateOnce(
   db,
   { anonymousId, apiKey, now = new Date(), recordMetric = recordLlmCall },
 ) {

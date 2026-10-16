@@ -456,6 +456,107 @@ describe("generateAndStoreTodayReview — 재생성 조건", () => {
       review: "다시 만든 리뷰",
     });
   });
+
+  // 같은 참여자의 세션 두 개가 거의 동시에 끝난 경우 — 생성을 한 줄로 세운다
+  it("같은 참여자의 동시 호출은 순서대로 실행돼, 새 영상이 없으면 Gemini를 한 번만 부른다", async () => {
+    const db = createTestDb();
+    insertWatchedVideos(db, {
+      anonymousId: "together",
+      watchedAt: "2026-03-10T10:00:00+09:00",
+    });
+    global.fetch = geminiOk();
+
+    const results = await Promise.all([
+      generate(db, "together"),
+      generate(db, "together"),
+    ]);
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(results[0].genCount).toBe(1);
+    expect(results[1]).toBeNull();
+    expect(storedRow(db, "together").genCount).toBe(1);
+  });
+
+  it("앞 생성 중에 유효 영상이 늘었으면 뒤 호출이 그 영상까지 넣어 다시 만든다", async () => {
+    const db = createTestDb();
+    insertWatchedVideos(db, {
+      anonymousId: "added",
+      watchedAt: "2026-03-10T10:00:00+09:00",
+    });
+    const respond = geminiOk();
+    let calls = 0;
+    // 첫 Gemini 호출 중에 다른 세션의 영상 기록이 도착한 상황
+    global.fetch = vi.fn((...args) => {
+      calls += 1;
+      if (calls === 1) {
+        insertWatchedVideos(db, {
+          anonymousId: "added",
+          watchedAt: "2026-03-10T11:00:00+09:00",
+        });
+      }
+      return respond(...args);
+    });
+
+    const results = await Promise.all([
+      generate(db, "added"),
+      generate(db, "added"),
+    ]);
+
+    expect(results.map((r) => r.genCount)).toEqual([1, 2]);
+    expect(storedRow(db, "added")).toMatchObject({
+      genCount: 2,
+      validVideoCount: 2,
+    });
+  });
+
+  it("다른 참여자의 생성은 서로 기다리지 않는다", async () => {
+    const db = createTestDb();
+    for (const id of ["slow", "fast"]) {
+      insertWatchedVideos(db, {
+        anonymousId: id,
+        watchedAt: "2026-03-10T10:00:00+09:00",
+      });
+    }
+    let releaseSlow;
+    const respond = geminiOk();
+    global.fetch = vi.fn((url, init) => {
+      // slow 참여자의 Gemini 응답만 붙잡아 둔다(제목으로 구분할 수 없어 첫 호출을 slow로 본다)
+      if (global.fetch.mock.calls.length === 1) {
+        return new Promise((resolve) => {
+          releaseSlow = () => resolve(respond(url, init));
+        });
+      }
+      return respond(url, init);
+    });
+
+    const slow = generate(db, "slow");
+    const fast = await generate(db, "fast");
+
+    expect(fast.genCount).toBe(1);
+    releaseSlow();
+    expect((await slow).genCount).toBe(1);
+  });
+
+  it("앞 생성이 오류로 끝나도 뒤 호출은 실행된다", async () => {
+    const db = createTestDb();
+    insertWatchedVideos(db, {
+      anonymousId: "after-error",
+      watchedAt: "2026-03-10T10:00:00+09:00",
+    });
+    global.fetch = geminiOk();
+    const failing = vi.fn(() => {
+      throw new Error("메트릭 기록 실패");
+    });
+
+    const [first, second] = await Promise.allSettled([
+      generate(db, "after-error", { recordMetric: failing }),
+      generate(db, "after-error"),
+    ]);
+
+    expect(first.status).toBe("rejected");
+    expect(second.status).toBe("fulfilled");
+    expect(second.value.genCount).toBe(1);
+  });
 });
 
 describe("generateAndStoreTodayReview — LLM 호출 메트릭", () => {
