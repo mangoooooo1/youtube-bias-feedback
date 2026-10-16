@@ -268,9 +268,6 @@ describe("generateAndStoreTodayReview", () => {
     expect(row.validVideoCount).toBe(2);
   });
 
-  // 2026-10-16 변경: 카테고리를 못 가져온 영상도 영상 수·제목에는 포함하고 리뷰를 보류하지 않는다
-  // (결정기록 결정 1 보완). 다만 오늘 영상이 전부 카테고리 없음이면 프롬프트가 근거로 삼을 분포가
-  // 없어 Gemini를 부르지 않고 "분석하지 못했다"는 폴백을 저장한다.
   it("오늘 영상이 모두 카테고리를 못 가져왔으면 Gemini 없이 폴백 리뷰를 저장한다(리뷰를 보류하지 않음)", async () => {
     const db = createTestDb();
     const now = new Date("2026-03-10T20:00:00+09:00");

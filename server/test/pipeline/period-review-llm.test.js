@@ -58,7 +58,6 @@ describe("buildPeriodPrompt — 지침", () => {
     expect(prompt).toContain("시청한 영상이 적어");
   });
 
-  // 결정 4 — 70% 분기 제거
   it("한 분야 비중이 커도 쏠림 지시를 넣지 않는다", () => {
     const prompt = buildPeriodPrompt(
       baseArgs({ timeDistribution: { 음악: 0.95, 게임: 0.05 } }),
@@ -147,7 +146,7 @@ describe("generatePeriodFallbackReview", () => {
     );
   });
 
-  it("한 분야 비중이 커도 판정 문장을 넣지 않는다(결정 4)", () => {
+  it("한 분야 비중이 커도 판정 문장을 넣지 않는다", () => {
     const result = generatePeriodFallbackReview(
       baseArgs({ timeDistribution: { 음악: 0.9, 게임: 0.1 } }),
     );
@@ -364,7 +363,7 @@ describe("generatePeriodReview — 실패 사유 분류 (failureReason 태깅)",
   });
 });
 
-// 결정 8 — 직전 구간 비교. 숫자는 코드가 계산(period-comparison.js), Gemini는 문장만
+// 직전 구간 비교. 숫자는 코드가 계산(period-comparison.js), Gemini는 문장만
 function comparisonArgs(overrides = {}) {
   return {
     previousPeriods: [
@@ -436,7 +435,7 @@ function comparisonArgs(overrides = {}) {
   };
 }
 
-describe("buildPeriodPrompt — 직전 구간 비교(결정 8)", () => {
+describe("buildPeriodPrompt — 직전 구간 비교", () => {
   it("직전·이전 구간 비중, 크기 순 변화, 새로/안 본 분야, 직전 구간 제목을 넣고 comparison을 요청한다", () => {
     const prompt = buildPeriodPrompt(
       baseArgs({ comparison: comparisonArgs() }),
@@ -504,7 +503,7 @@ describe("buildPeriodPrompt — 직전 구간 비교(결정 8)", () => {
   });
 });
 
-describe("buildCodeComparison — Gemini를 쓰지 못할 때의 비교 문장(결정 8 규칙)", () => {
+describe("buildCodeComparison — Gemini를 쓰지 못할 때의 비교 문장", () => {
   const args = (comparison, extra = {}) => ({
     comparison,
     validVideoCount: 20,

@@ -98,7 +98,7 @@ describe("buildTodayCumulativePrompt — 지침", () => {
     expect(prompt).not.toContain("시청한 영상이 적어");
   });
 
-  // 결정 4 — 70% 분기 제거, B — 다양성 지수·직전 시청일 비교 제거
+  // 70% 분기 제거, B — 다양성 지수·직전 시청일 비교 제거
   it("한 분야 비중이 커도 쏠림 지시를 넣지 않고, 다양성 지수·직전 시청일 비교도 없다", () => {
     const prompt = buildTodayCumulativePrompt(
       baseArgs({ timeDistribution: { 음악: 0.95, 게임: 0.05 } }),
@@ -117,7 +117,7 @@ describe("buildTodayCumulativePrompt — 지침", () => {
     expect(prompt).toContain("비중이 가장 큰 분야는 그 퍼센트와 함께 언급");
   });
 
-  it("분야 안의 세부 소재를 짚되 인물·정당·이슈 논조는 요약하지 않게 한다(결정 9)", () => {
+  it("분야 안의 세부 소재를 짚되 인물·정당·이슈 논조는 요약하지 않게 한다", () => {
     const prompt = buildTodayCumulativePrompt(baseArgs());
     expect(prompt).toContain("어떤 소재를 주로 봤는지 제목을 근거로 짚어");
     expect(prompt).toContain("주장이나 논조는 절대 요약·평가하지 마세요");
@@ -182,7 +182,7 @@ describe("generateTodayFallbackReview", () => {
     );
   });
 
-  it("한 분야 비중이 커도 판정 문장을 넣지 않는다(결정 4)", () => {
+  it("한 분야 비중이 커도 판정 문장을 넣지 않는다", () => {
     const result = generateTodayFallbackReview(
       baseArgs({ timeDistribution: { 음악: 0.9, 게임: 0.1 } }),
     );

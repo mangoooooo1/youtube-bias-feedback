@@ -412,7 +412,7 @@ describe("generate-period-reviews.js — run()", () => {
     expect(row.sessionCount).toBe(2);
   });
 
-  // 결정 8 — 2구간부터 직전 구간 비교를 프롬프트에 넣고, 리뷰 첫 문장을 비교로 쓰게 한다
+  // 2구간부터 직전 구간 비교를 프롬프트에 넣고, 리뷰 첫 문장을 비교로 쓰게 한다
   describe("직전 구간 비교", () => {
     const userId = "compare-user";
 
