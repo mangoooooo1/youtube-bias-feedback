@@ -72,8 +72,9 @@ function summarizePeriod(period) {
     periodIndex: period.periodIndex,
     periodStart: period.periodStart,
     periodEnd: period.periodEnd,
-    validVideoCount: aggregate.validCount,
-    isFew: aggregate.validCount < minValidVideosForPeriod(periodDays(period)),
+    validVideoCount: aggregate.confirmedCount, // 리뷰 기준: 시청 시간이 확인된 유효 영상
+    isFew:
+      aggregate.confirmedCount < minValidVideosForPeriod(periodDays(period)),
     shares: percentShares(aggregate.timeDistribution),
   };
 }
@@ -133,7 +134,7 @@ function buildPeriodComparison(periods) {
   const dailyShares = datesBetween(current.periodStart, current.periodEnd).map(
     (date) => {
       const day = byDate.get(date);
-      const validVideoCount = day?.validCount ?? 0;
+      const validVideoCount = day?.confirmedCount ?? 0;
       return {
         date,
         validVideoCount,

@@ -52,6 +52,39 @@ describe("aggregateTodayCumulative", () => {
   });
 
   // 세션 분포를 영상 수로 병합하던 방식은 이 예시를 음악 83% / 게임 17%로 만들었다
+  it("오늘 유효 영상이 모두 시청 시간을 아직 모르면 리뷰를 만들지 않는다(null)", () => {
+    const result = aggregateTodayCumulative({
+      events: [
+        video({ watchedAt: "2026-03-10T09:00:00+09:00", watchedSeconds: null }),
+      ],
+      now: NOW,
+    });
+    expect(result).toBeNull();
+  });
+
+  // 음악 2개를 다 보고 게임 1개를 보는 중 — 리뷰는 확인된 2개만 "봤다"고 말한다
+  it("리뷰용 영상 수·비중·제목은 시청 시간이 확인된 유효 영상만 쓴다", () => {
+    const result = aggregateTodayCumulative({
+      events: [
+        video({ title: "음악 1", watchedAt: "2026-03-10T09:00:00+09:00" }),
+        video({ title: "음악 2", watchedAt: "2026-03-10T09:10:00+09:00" }),
+        video({
+          title: "게임",
+          watchedAt: "2026-03-10T09:20:00+09:00",
+          categoryId: GAME,
+          watchedSeconds: null,
+        }),
+      ],
+      now: NOW,
+    });
+
+    expect(result.validVideoCount).toBe(2);
+    expect(result.timeDistribution).toEqual({ 음악: 1 });
+    expect(result.titleGroups.map((g) => g.category)).toEqual(["음악"]);
+    // 저장·분석용 분포는 사전등록 정의대로 보는 중인 영상도 넣는다
+    expect(result.categoryDistribution).toEqual({ 음악: 0.667, 게임: 0.333 });
+  });
+
   it("오늘 여러 세션의 영상을 세션 병합 없이 영상 단위로 집계한다", () => {
     const sessionA = [
       video({

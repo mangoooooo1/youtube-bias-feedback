@@ -6,7 +6,7 @@ const {
   shareBasis,
   formatShares,
   formatTitleGroups,
-  topSharesPhrase,
+  sharesSentence,
 } = require("./review-prompt-format");
 
 const GEMINI_API_URL =
@@ -24,10 +24,9 @@ const TODAY_PROMPT_VERSION = "viewlens-today-mirror-v2.0";
 function buildTodayCumulativePrompt({
   validVideoCount,
   timeDistribution,
-  categoryDistribution,
   titleGroups = [],
 }) {
-  const basis = shareBasis({ timeDistribution, categoryDistribution });
+  const basis = shareBasis({ timeDistribution });
 
   // 시청이 적은 날: 하루치로는 패턴을 말하기 어렵다는 점을 밝힌다
   const fewVideosSection =
@@ -169,12 +168,8 @@ async function generateTodayReview(prompt, apiKey) {
 }
 
 // "오늘" 누적 리뷰의 폴백: 프롬프트와 같은 기준(유효 영상 수, 시청 시간 비중)의 사실만 적는다
-function generateTodayFallbackReview({
-  validVideoCount,
-  timeDistribution,
-  categoryDistribution,
-}) {
-  const basis = shareBasis({ timeDistribution, categoryDistribution });
+function generateTodayFallbackReview({ validVideoCount, timeDistribution }) {
+  const basis = shareBasis({ timeDistribution });
 
   if (basis.entries.length === 0) {
     return {
@@ -187,10 +182,8 @@ function generateTodayFallbackReview({
   }
 
   const [topName] = basis.entries[0];
-  const summary =
-    basis.entries.length === 1
-      ? `오늘은 ${topName} 영상을 ${validVideoCount}개 보셨어요.`
-      : `오늘은 영상 ${validVideoCount}개를 보셨고, ${topSharesPhrase(basis)} 순이었어요.`;
+  // 영상 수(시청 시간이 확인된 유효 영상, 분야 미확인 포함)와 분야 비중은 대상이 달라 따로 적는다
+  const summary = `오늘은 영상 ${validVideoCount}개를 보셨고, ${sharesSentence(basis)}`;
   const fewNote =
     validVideoCount < MIN_VALID_VIDEOS_PER_DAY
       ? "영상이 적어 오늘 패턴을 정확히 말하기는 어려워요."

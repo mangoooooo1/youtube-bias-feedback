@@ -6,17 +6,16 @@
 const percent = (ratio) => Math.round(ratio * 100);
 
 /**
- * 시청 시간 비중을 쓰고, 유효 영상이 모두 시청 시간을 모르는 드문 경우에만 영상 개수 비중으로 대신한다.
- * @returns {{label: string, unit: string, entries: Array<[string, number]>}} 비중 큰 순
+ * 시청 시간 비중(시청 시간이 확인되고 분야가 있는 유효 영상 기준, 화면 도넛과 같은 대상).
+ * 비어 있으면(확인된 영상이 모두 분야를 못 가져옴) 리뷰는 "분석하지 못했다"로 간다.
+ * @returns {{label: string, entries: Array<[string, number]>}} 비중 큰 순
  */
-function shareBasis({ timeDistribution, categoryDistribution }) {
-  const hasTime =
-    timeDistribution != null && Object.keys(timeDistribution).length > 0;
-  const distribution = hasTime ? timeDistribution : categoryDistribution;
+function shareBasis({ timeDistribution }) {
   return {
-    label: hasTime ? "분야별 시청 시간 비중" : "분야별 영상 개수 비중",
-    unit: hasTime ? "시청 시간은" : "영상 개수는",
-    entries: Object.entries(distribution ?? {}).sort(([, a], [, b]) => b - a),
+    label: "분야별 시청 시간 비중",
+    entries: Object.entries(timeDistribution ?? {}).sort(
+      ([, a], [, b]) => b - a,
+    ),
   };
 }
 
@@ -41,17 +40,41 @@ function formatTitleGroups(titleGroups = []) {
   return `\n- 분야별 영상 제목 (시청 시간이 많은 분야부터, 최근 본 순서, 괄호는 본 횟수):\n${blocks.join("\n")}`;
 }
 
-/** 대체 문구의 사실 문장 꼬리 "시청 시간은 음악 50%, 게임 30%, 교육 15%" (상위 3개) */
-function topSharesPhrase(basis) {
-  return `${basis.unit} ${basis.entries
+/** 마지막 글자에 받침이 있는지(한글이 아니면 받침 없음으로 본다) */
+function hasFinalConsonant(word) {
+  const code = word.charCodeAt(word.length - 1) - 0xac00;
+  return code >= 0 && code <= 11171 && code % 28 !== 0;
+}
+
+const josa = (word, withFinal, withoutFinal) =>
+  `${word}${hasFinalConsonant(word) ? withFinal : withoutFinal}`;
+
+/**
+ * 대체 문구의 비중 문장(상위 3개). basis.entries가 비어 있지 않을 때만 부른다.
+ * - 분야 하나: "시청 시간은 모두 음악이었어요."
+ * - 여럿: "전체 시청 시간 중 음악이 62%로 가장 많았어요. 그다음은 게임 38%, 교육 15%였어요."
+ * - 1·2위가 같으면: "전체 시청 시간 중 음악과 게임이 각각 50%로 가장 많았어요."
+ */
+function sharesSentence(basis) {
+  const top = basis.entries
     .slice(0, 3)
-    .map(([name, ratio]) => `${name} ${percent(ratio)}%`)
-    .join(", ")}`;
+    .map(([name, ratio]) => ({ name, percent: percent(ratio) }));
+  if (top.length === 1) {
+    return `시청 시간은 모두 ${josa(top[0].name, "이었어요", "였어요")}.`;
+  }
+  const tied = top[0].percent === top[1].percent;
+  const first = tied
+    ? `전체 시청 시간 중 ${josa(top[0].name, "과", "와")} ${josa(top[1].name, "이", "가")} 각각 ${top[0].percent}%로 가장 많았어요.`
+    : `전체 시청 시간 중 ${josa(top[0].name, "이", "가")} ${top[0].percent}%로 가장 많았어요.`;
+  const rest = top.slice(tied ? 2 : 1);
+  return rest.length > 0
+    ? `${first} 그다음은 ${rest.map((s) => `${s.name} ${s.percent}%`).join(", ")}였어요.`
+    : first;
 }
 
 module.exports = {
   shareBasis,
   formatShares,
   formatTitleGroups,
-  topSharesPhrase,
+  sharesSentence,
 };

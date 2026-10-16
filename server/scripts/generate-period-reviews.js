@@ -161,26 +161,24 @@ async function processPeriod({
     // 이 기간엔 분석할 시청 기록(유효 시청 영상)이 없음 — Gemini 호출 자체를 생략(불필요한 비용 방지).
     result = generatePeriodFallbackReview({
       validVideoCount: 0,
-      categoryDistribution: {},
       periodDays,
     });
     llmStatus = "fallback";
-  } else if (Object.keys(categoryDistribution).length === 0) {
-    // 유효 영상이 모두 카테고리를 못 가져오는 경우
+  } else if (Object.keys(aggregate.timeDistribution).length === 0) {
+    // 시청 시간이 확인된 유효 영상이 모두 카테고리를 못 가져왔거나, 시청 시간이 아직 하나도 확인되지 않은 경우
     // 프롬프트가 근거로 삼을 분포가 없어 Gemini를 부르지 않는다.
     // 실패가 아닌 fallback이라 재시도 기간(periodEnd+3일) 안에 카테고리를 다시 가져오면 다음 실행에서 정상 리뷰로 바뀐다.
     result = generatePeriodFallbackReview({
       validVideoCount,
-      categoryDistribution: {},
       periodDays,
     });
     llmStatus = "fallback";
   } else {
-    // LLM 입력은 오늘 리뷰와 같은 기준(유효 영상 수, 시청 시간 비중, 분야별 제목 전부)
+    // LLM 입력은 오늘 리뷰와 같은 기준(시청 시간이 확인된 유효 영상 수, 시청 시간 비중, 분야별 제목 전부).
+    // 저장하는 validVideoCount는 분석 기준(시간을 모르는 영상 포함) 그대로 둔다
     const reviewInput = {
-      validVideoCount,
+      validVideoCount: aggregate.confirmedCount,
       timeDistribution: aggregate.timeDistribution,
-      categoryDistribution,
       titleGroups,
       periodDays,
       // 이전 구간 비교·구간 안의 흐름. 원본 영상 기록에서 매번 다시 계산한다

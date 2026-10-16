@@ -243,3 +243,20 @@ describe("buildPeriodComparison — 직전 구간 제목", () => {
     ]);
   });
 });
+
+describe("buildPeriodComparison — 시청 시간이 확인된 유효 영상 기준", () => {
+  it("이전 구간·날짜별 영상 수와 적은 구간 판정에 시청 시간을 모르는 영상을 넣지 않는다", () => {
+    const result = buildPeriodComparison([
+      period(1, [
+        ...shares({ [MUSIC]: 100 }, 7),
+        { ...watch(GAME, null), watchedSeconds: null },
+      ]),
+      period(2, shares({ [MUSIC]: 100 })),
+    ]);
+
+    expect(result.previousPeriods[0]).toMatchObject({
+      validVideoCount: 7,
+      isFew: true,
+    });
+  });
+});

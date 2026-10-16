@@ -7,7 +7,7 @@ const {
   shareBasis,
   formatShares,
   formatTitleGroups,
-  topSharesPhrase,
+  sharesSentence,
 } = require("./review-prompt-format");
 
 const GEMINI_API_URL =
@@ -108,12 +108,11 @@ function formatDailyShares(dailyShares = []) {
 function buildPeriodPrompt({
   validVideoCount,
   timeDistribution,
-  categoryDistribution,
   titleGroups = [],
   periodDays,
   comparison = null,
 }) {
-  const basis = shareBasis({ timeDistribution, categoryDistribution });
+  const basis = shareBasis({ timeDistribution });
   const withComparison = hasPreviousPeriod(comparison);
   const currentFew = isFewVideosPeriod(validVideoCount, periodDays);
   const previousFew = withComparison && comparison.previousPeriods.at(-1).isFew;
@@ -327,11 +326,10 @@ function buildCodeComparison({ comparison, validVideoCount, periodDays }) {
 function generatePeriodFallbackReview({
   validVideoCount,
   timeDistribution,
-  categoryDistribution,
   periodDays,
   comparison = null,
 }) {
-  const basis = shareBasis({ timeDistribution, categoryDistribution });
+  const basis = shareBasis({ timeDistribution });
 
   if (basis.entries.length === 0) {
     // 유효 영상은 있는데 카테고리를 하나도 못 가져온 경우는 "분석하지 못했다"고 알린다.
@@ -347,10 +345,8 @@ function generatePeriodFallbackReview({
   }
 
   const [topName] = basis.entries[0];
-  const summary =
-    basis.entries.length === 1
-      ? `이 기간에는 ${topName} 영상을 ${validVideoCount}개 보셨어요.`
-      : `이 기간에는 영상 ${validVideoCount}개를 보셨고, ${topSharesPhrase(basis)} 순이었어요.`;
+  // 영상 수(시청 시간이 확인된 유효 영상, 분야 미확인 포함)와 분야 비중은 대상이 달라 따로 적는다
+  const summary = `이 기간에는 영상 ${validVideoCount}개를 보셨고, ${sharesSentence(basis)}`;
   const fewNote = isFewVideosPeriod(validVideoCount, periodDays)
     ? "영상이 적어 이 기간의 패턴을 정확히 말하기는 어려워요."
     : "";

@@ -46,12 +46,13 @@ describe("buildTodayCumulativePrompt — 입력", () => {
     );
   });
 
-  it("시청 시간 비중이 비어 있으면 영상 개수 비중으로 대신한다", () => {
+  // 영상 개수 비중(categoryDistribution)은 시청 시간을 모르는 영상까지 세어 대신 쓰지 않는다
+  it("시청 시간 비중이 비어 있어도 영상 개수 비중으로 대신하지 않는다", () => {
     const prompt = buildTodayCumulativePrompt(
       baseArgs({ timeDistribution: {} }),
     );
-    expect(prompt).toContain("분야별 영상 개수 비중:\n  · 음악: 50%");
-    expect(prompt).not.toContain("시청 시간 비중");
+    expect(prompt).not.toContain("영상 개수 비중");
+    expect(prompt).not.toContain("음악: 50%");
   });
 
   it("제목을 분야별로 묶어 전부 넣고, 다시 본 횟수를 붙인다", () => {
@@ -149,12 +150,15 @@ describe("generateTodayFallbackReview", () => {
     expect(result.promptVersion).toBe(TODAY_PROMPT_VERSION);
   });
 
-  it("분야가 하나면 유효 영상 수만 사실로 적는다", () => {
+  // 영상 수(분야 미확인 포함)를 그 분야의 영상 수로 적지 않는다
+  it("분야가 하나면 영상 수와 그 분야의 시청 시간 비중을 따로 적는다", () => {
     const result = generateTodayFallbackReview(
       baseArgs({ timeDistribution: { 음악: 1 }, validVideoCount: 3 }),
     );
     expect(result.topic).toBe("음악");
-    expect(result.feedback).toBe("오늘은 음악 영상을 3개 보셨어요.");
+    expect(result.feedback).toBe(
+      "오늘은 영상 3개를 보셨고, 시청 시간은 모두 음악이었어요.",
+    );
   });
 
   it("분야가 여럿이면 시청 시간 비중 상위 3개를 숫자로 적는다", () => {
@@ -165,15 +169,17 @@ describe("generateTodayFallbackReview", () => {
       }),
     );
     expect(result.feedback).toBe(
-      "오늘은 영상 10개를 보셨고, 시청 시간은 음악 50%, 게임 30%, 교육 15% 순이었어요.",
+      "오늘은 영상 10개를 보셨고, 전체 시청 시간 중 음악이 50%로 가장 많았어요. 그다음은 게임 30%, 교육 15%였어요.",
     );
   });
 
-  it("시청 시간 비중이 없으면 영상 개수 기준이라고 밝힌다", () => {
+  it("시청 시간 비중이 없으면 영상 개수 비중으로 대신하지 않고 '분석하지 못했다'고 알린다", () => {
     const result = generateTodayFallbackReview(
       baseArgs({ timeDistribution: {}, validVideoCount: 2 }),
     );
-    expect(result.feedback).toContain("영상 개수는 음악 50%, 게임 50% 순");
+    expect(result.feedback).toContain(
+      "오늘의 시청 데이터를 분석하지 못했습니다",
+    );
   });
 
   it("한 분야 비중이 커도 판정 문장을 넣지 않는다(결정 4)", () => {
@@ -190,7 +196,7 @@ describe("generateTodayFallbackReview", () => {
       baseArgs({ timeDistribution: { 음악: 1 }, validVideoCount: 1 }),
     );
     expect(result.feedback).toBe(
-      "오늘은 음악 영상을 1개 보셨어요. 영상이 적어 오늘 패턴을 정확히 말하기는 어려워요.",
+      "오늘은 영상 1개를 보셨고, 시청 시간은 모두 음악이었어요. 영상이 적어 오늘 패턴을 정확히 말하기는 어려워요.",
     );
   });
 });

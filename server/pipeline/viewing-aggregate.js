@@ -70,8 +70,10 @@ function aggregateViewing(entries) {
   );
 
   return {
-    // 화면 "영상 N개", LLM 영상 수: 카테고리 없는 영상 포함
+    // 유효 시청 영상 수(카테고리 없는 영상, 시청 시간을 아직 모르는 영상 포함)
     validCount: valid.length,
+    // 시청 시간이 확인된 유효 영상 수(카테고리 없는 영상 포함)
+    confirmedCount: valid.filter((e) => e.watchedSeconds != null).length,
     shortCount: countOf(EXCLUDED_REASONS.SHORT),
     uncategorizedCount: countOf(EXCLUDED_REASONS.UNCATEGORIZED),
     pendingTimeCount: countOf(EXCLUDED_REASONS.PENDING_TIME),

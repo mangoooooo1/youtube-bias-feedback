@@ -207,3 +207,17 @@ describe("aggregateViewingByDay — 영상을 본 시각(KST) 기준 날짜별 �
     expect(result[0].validCount).toBe(1);
   });
 });
+
+describe("aggregateViewing — 시청 시간이 확인된 유효 영상 수", () => {
+  it("시청 시간을 아직 모르는 영상은 빼고, 분야를 못 가져온 영상은 센다", () => {
+    const result = aggregateViewing([
+      video({}),
+      video({ categoryId: null }),
+      video({ categoryId: GAME, watchedSeconds: null }),
+      short({}),
+    ]);
+
+    expect(result.validCount).toBe(3);
+    expect(result.confirmedCount).toBe(2);
+  });
+});

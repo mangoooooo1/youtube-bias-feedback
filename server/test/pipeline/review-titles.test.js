@@ -48,15 +48,32 @@ describe("groupTitlesByCategory", () => {
       }),
       video({ title: "게임", categoryId: GAME, watchedSeconds: 100 }),
       video({ title: "스포츠", categoryId: SPORTS, watchedSeconds: 500 }),
-      // 시청 시간을 아직 모르는 영상만 있는 카테고리는 시간 0으로 뒤쪽
-      video({ title: "보는 중", categoryId: MUSIC, watchedSeconds: null }),
     ]);
 
     expect(groups.map((g) => g.category)).toEqual([
       "스포츠",
       "게임",
-      "음악",
       UNCATEGORIZED_GROUP,
+    ]);
+  });
+
+  it("시청 시간을 아직 모르는 영상의 제목은 넣지 않는다(잠깐 보고 끈 영상일 수도 있음)", () => {
+    const groups = groupTitlesByCategory([
+      video({ title: "다 본 음악" }),
+      video({
+        title: "보는 중인 게임",
+        categoryId: GAME,
+        watchedSeconds: null,
+      }),
+    ]);
+
+    expect(groups).toEqual([
+      {
+        category: "음악",
+        videoCount: 1,
+        titles: [{ title: "다 본 음악", count: 1 }],
+        omittedCount: 0,
+      },
     ]);
   });
 

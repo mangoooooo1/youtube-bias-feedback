@@ -547,7 +547,7 @@ describe("generate-period-reviews.js — run()", () => {
         llmStatus: "fallback",
         failureReason: "number_mismatch",
         review:
-          "직전 구간보다 게임 비중이 50%p 늘었어요. 이 기간에는 영상 8개를 보셨고, 시청 시간은 음악 50%, 게임 50% 순이었어요.",
+          "직전 구간보다 게임 비중이 50%p 늘었어요. 이 기간에는 영상 8개를 보셨고, 전체 시청 시간 중 음악과 게임이 각각 50%로 가장 많았어요.",
       });
       // Gemini를 불렀다가 실패한 것으로 센다(1구간 성공이 있어 전량 실패는 아님)
       expect(summary.llmFailures).toBe(1);
@@ -657,6 +657,46 @@ describe("generate-period-reviews.js — run()", () => {
     expect(prompt).not.toContain("이 외");
   });
 
+  it("프롬프트 영상 수는 시청 시간이 확인된 영상만 세고, 저장하는 validVideoCount는 분석 기준(시간 모름 포함) 그대로다", async () => {
+    const userId = "pending-period-user";
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run(userId, INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, 600)",
+    ).run("pp-music", "10");
+    const insertEvent = db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, 'pp-music', ?, '2026-06-01T10:00:00+09:00', ?)",
+    );
+    for (let i = 0; i < 8; i++) insertEvent.run(userId, `음악 ${i}`, 300);
+    insertEvent.run(userId, "시간 모르는 영상", null);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":"문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await run(db, "fake-key");
+
+    const prompt = JSON.parse(global.fetch.mock.calls[0][1].body).contents[0]
+      .parts[0].text;
+    expect(prompt).toContain("이 기간(4일)에 시청한 영상 수: 8개");
+    expect(prompt).not.toContain("시간 모르는 영상");
+    const row = db
+      .prepare(
+        "SELECT validVideoCount FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+      )
+      .get(userId);
+    expect(row.validVideoCount).toBe(9);
+  });
+
   it("Gemini가 실패하면 대체 문구도 유효 영상 수와 시청 시간 비중으로 적는다", async () => {
     const userId = "fallback-input-user";
     db.prepare(
@@ -686,7 +726,7 @@ describe("generate-period-reviews.js — run()", () => {
       .get(userId);
     expect(row.llmStatus).toBe("fallback");
     expect(row.review).toBe(
-      "이 기간에는 음악 영상을 1개 보셨어요. 영상이 적어 이 기간의 패턴을 정확히 말하기는 어려워요.",
+      "이 기간에는 영상 1개를 보셨고, 시청 시간은 모두 음악이었어요. 영상이 적어 이 기간의 패턴을 정확히 말하기는 어려워요.",
     );
   });
 

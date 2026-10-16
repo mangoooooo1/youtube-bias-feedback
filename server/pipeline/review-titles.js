@@ -68,7 +68,10 @@ function groupTitlesByCategory(
   { maxTitles = MAX_TITLES_PER_DAY } = {},
 ) {
   const groups = new Map();
-  for (const e of entries.filter(isValidWatch)) {
+  const confirmed = entries.filter(
+    (e) => e.watchedSeconds != null && isValidWatch(e),
+  );
+  for (const e of confirmed) {
     const category =
       e.categoryId == null
         ? UNCATEGORIZED_GROUP

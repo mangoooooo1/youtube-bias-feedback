@@ -124,12 +124,14 @@ describe("generatePeriodFallbackReview", () => {
     expect(result.feedback).not.toContain("시청 기록이 없어요");
   });
 
-  it("분야가 하나면 유효 영상 수만 사실로 적는다", () => {
+  it("분야가 하나면 영상 수와 그 분야의 시청 시간 비중을 따로 적는다", () => {
     const result = generatePeriodFallbackReview(
       baseArgs({ timeDistribution: { 음악: 1 }, validVideoCount: 10 }),
     );
     expect(result.topic).toBe("음악");
-    expect(result.feedback).toBe("이 기간에는 음악 영상을 10개 보셨어요.");
+    expect(result.feedback).toBe(
+      "이 기간에는 영상 10개를 보셨고, 시청 시간은 모두 음악이었어요.",
+    );
   });
 
   it("분야가 여럿이면 시청 시간 비중 상위 3개를 숫자로 적는다", () => {
@@ -141,7 +143,7 @@ describe("generatePeriodFallbackReview", () => {
     );
     expect(result.topic).toBe("음악");
     expect(result.feedback).toBe(
-      "이 기간에는 영상 23개를 보셨고, 시청 시간은 음악 48%, 게임 30%, 스포츠 12% 순이었어요.",
+      "이 기간에는 영상 23개를 보셨고, 전체 시청 시간 중 음악이 48%로 가장 많았어요. 그다음은 게임 30%, 스포츠 12%였어요.",
     );
   });
 
@@ -159,7 +161,7 @@ describe("generatePeriodFallbackReview", () => {
       baseArgs({ timeDistribution: { 음악: 1 }, validVideoCount: 3 }),
     );
     expect(result.feedback).toBe(
-      "이 기간에는 음악 영상을 3개 보셨어요. 영상이 적어 이 기간의 패턴을 정확히 말하기는 어려워요.",
+      "이 기간에는 영상 3개를 보셨고, 시청 시간은 모두 음악이었어요. 영상이 적어 이 기간의 패턴을 정확히 말하기는 어려워요.",
     );
   });
 
@@ -602,7 +604,7 @@ describe("generatePeriodFallbackReview — 비교 문장", () => {
       baseArgs({ comparison: comparisonArgs() }),
     );
     expect(result.feedback).toBe(
-      "직전 구간보다 게임 비중이 15%p 늘었어요. 이 기간에는 영상 20개를 보셨고, 시청 시간은 음악 60%, 게임 40% 순이었어요.",
+      "직전 구간보다 게임 비중이 15%p 늘었어요. 이 기간에는 영상 20개를 보셨고, 전체 시청 시간 중 음악이 60%로 가장 많았어요. 그다음은 게임 40%였어요.",
     );
   });
 

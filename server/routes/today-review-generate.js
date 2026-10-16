@@ -99,7 +99,7 @@ async function generateOnce(
   // 오늘 유효 영상이 모두 카테고리를 못 가져온 경우(유튜브 API 장애 등) — 프롬프트가 근거로 삼을
   // 분포가 없으므로 Gemini를 부르지 않고 "분석하지 못했다"는 폴백을 저장한다. 카테고리를 다시
   // 가져오면 다음 생성에서 정상 리뷰로 바뀐다. 일부만 없는 날은 그대로 Gemini를 부른다.
-  const hasCategories = Object.keys(aggregate.categoryDistribution).length > 0;
+  const hasCategories = Object.keys(aggregate.timeDistribution).length > 0;
   const callGemini = Boolean(apiKey) && hasCategories;
   const startedAt = Date.now();
   if (!callGemini) {

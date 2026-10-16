@@ -433,6 +433,52 @@ describe("generateAndStoreTodayReview — 재생성 조건", () => {
     expect(storedRow(db, "plus-one").validVideoCount).toBe(2);
   });
 
+  it("보는 중이던 영상의 시청 시간이 도착하면 다시 생성한다", async () => {
+    const db = createTestDb();
+    insertWatchedVideos(db, {
+      anonymousId: "pending",
+      watchedAt: "2026-03-10T10:00:00+09:00",
+      count: 2,
+    });
+    db.prepare(
+      `INSERT INTO video_events (eventId, anonymousId, videoId, sessionId, title, watchedAt, watchedSeconds)
+       VALUES ('e-pending', 'pending', 'vid-pending', 's1', '보는 중', '2026-03-10T11:00:00+09:00', NULL)`,
+    ).run();
+    global.fetch = geminiOk();
+    await generate(db, "pending");
+    expect(storedRow(db, "pending").validVideoCount).toBe(2);
+
+    // 다음 영상으로 넘어가며 시청 시간이 도착
+    db.prepare(
+      "UPDATE video_events SET watchedSeconds = 300 WHERE eventId = 'e-pending'",
+    ).run();
+    const result = await generate(db, "pending");
+
+    expect(result.genCount).toBe(2);
+    expect(storedRow(db, "pending").validVideoCount).toBe(3);
+  });
+
+  it("보는 중인 영상이 섞여도 대체 문구는 확인된 영상 수와 비중만 말한다", async () => {
+    const db = createTestDb();
+    insertWatchedVideos(db, {
+      anonymousId: "fallback-pending",
+      watchedAt: "2026-03-10T10:00:00+09:00",
+      count: 2,
+    });
+    db.prepare(
+      `INSERT INTO video_events (eventId, anonymousId, videoId, sessionId, title, watchedAt, watchedSeconds)
+       VALUES ('e-fp', 'fallback-pending', 'vid-fp', 's1', '보는 중', '2026-03-10T11:00:00+09:00', NULL)`,
+    ).run();
+
+    const result = await generate(db, "fallback-pending", {
+      apiKey: undefined,
+    });
+
+    expect(result.review).toBe(
+      "오늘은 영상 2개를 보셨고, 시청 시간은 모두 음악이었어요.",
+    );
+  });
+
   it("지난 결과가 폴백이면 유효 영상이 늘지 않아도 다시 생성한다", async () => {
     const db = createTestDb();
     insertWatchedVideos(db, {

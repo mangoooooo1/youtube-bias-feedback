@@ -24,7 +24,8 @@ function viewedDate(event) {
  * @param {Array}  params.events - 영상 기록(video_events + video_metadata), watchedAt 오름차순
  *   [{ eventId, sessionId, title, watchedAt, watchedSeconds, categoryId, durationSeconds }]
  * @param {Date}   [params.now] - 기준 시각(테스트용 주입, 기본값 현재 시각)
- * @returns {object|null} 오늘 유효 시청 영상이 하나도 없으면 null
+ * @returns {object|null} 오늘 시청 시간이 확인된 유효 영상이 하나도 없으면 null — 시간을 아직 모르는
+ *   영상만으로는 리뷰를 만들지 않고, 시간이 도착한 뒤 다음 세션 종료나 자정 크론에서 만든다
  */
 function aggregateTodayCumulative({ events, now = new Date() }) {
   const today = kstDateStr(now);
@@ -34,7 +35,7 @@ function aggregateTodayCumulative({ events, now = new Date() }) {
 
   const todayEvents = dated.filter((e) => e.date === today);
   const aggregate = aggregateViewing(todayEvents);
-  if (aggregate.validCount === 0) return null;
+  if (aggregate.confirmedCount === 0) return null;
 
   const sessionIds = [
     ...new Set(todayEvents.map((e) => e.sessionId).filter(Boolean)),
@@ -45,7 +46,9 @@ function aggregateTodayCumulative({ events, now = new Date() }) {
     categoryDistribution: aggregate.analysisDistribution,
     entropy: aggregate.entropy,
     videoCount: todayEvents.length,
-    validVideoCount: aggregate.validCount,
+    // 리뷰가 "봤다"고 말하는 영상 수(시청 시간이 확인된 유효 영상). 재생성 판단에도 쓴다 —
+    // 보는 중이던 영상의 시청 시간이 도착하면 늘어나 리뷰를 다시 만든다
+    validVideoCount: aggregate.confirmedCount,
     videoTitles: todayEvents.map((e) => e.title).filter(Boolean),
     sessionCount: sessionIds.length,
     sessionIds,
