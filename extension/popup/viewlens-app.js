@@ -1,3 +1,18 @@
+/**
+ * 선택한 날짜의 서버 집계 화면 값(VL.dayView)과 불러오기 상태.
+ * status: loading(아직 없음) / failed(저장본도 없이 실패) / ok(저장본이든 새 값이든 보여 줄 값이 있음)
+ */
+function _dayViewForDate(dateKey) {
+  const summary = VL._viewingSummary?.data;
+  const view = VL.dayView(summary?.days.find((day) => day.date === dateKey));
+  view.status = summary
+    ? "ok"
+    : VL._viewingSummaryStatus === "failed"
+      ? "failed"
+      : "loading";
+  return view;
+}
+
 function _collectingTimerText() {
   const lastWatchedAt = VL._lastWatchedAt;
   if (!lastWatchedAt) return "";
@@ -286,6 +301,7 @@ class ViewLensPopup {
       const isToday = dateStr(this._selectedDate) === dateStr(new Date());
       d.collectingCount = isToday ? (VL.today?.collectingCount ?? 0) : 0;
       d.collectingTimer = isToday ? _collectingTimerText() : "";
+      d.view = _dayViewForDate(dateStr(this._selectedDate));
       VL.today = d;
     }
 

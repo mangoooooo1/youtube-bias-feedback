@@ -309,7 +309,7 @@ describe("VL.serverDist — 유튜브 분야 15종 + 기타", () => {
   });
 });
 
-describe("VL.titleSentence — 탭 맨 위 제목 문장(결정 1)", () => {
+describe("VL.titleSentence — 탭 맨 위 제목 문장", () => {
   let VL;
   beforeAll(() => {
     VL = loadVL();
@@ -395,7 +395,7 @@ describe("VL.dayView — 하루치 화면 값", () => {
   });
 });
 
-describe("VL.periodLines — 기간 탭 꺾은선(결정 1)", () => {
+describe("VL.periodLines — 기간 탭 꺾은선", () => {
   let VL;
   beforeAll(() => {
     VL = loadVL();
@@ -491,5 +491,46 @@ describe("VL.MIN_VALID_VIDEOS_PER_DAY — 서버 기준과 동치성", () => {
       MIN_VALID_VIDEOS_PER_DAY,
     } = require("../../../server/pipeline/study-constants.js");
     expect(VL.MIN_VALID_VIDEOS_PER_DAY).toBe(MIN_VALID_VIDEOS_PER_DAY);
+  });
+});
+
+describe("VL.formatDuration·VL.donutPair — 오늘 탭 도넛 툴팁", () => {
+  let VL;
+  beforeAll(() => {
+    VL = loadVL();
+  });
+
+  it("초를 시간·분으로 바꾼다", () => {
+    expect(VL.formatDuration(20)).toBe("1분 미만");
+    expect(VL.formatDuration(45 * 60)).toBe("45분");
+    expect(VL.formatDuration(2 * 3600)).toBe("2시간");
+    expect(VL.formatDuration(5400)).toBe("1시간 30분");
+  });
+
+  it("조각마다 퍼센트와 시간(합계 × 비중)·개수를 툴팁으로 단다", () => {
+    const { time, count } = VL.donutPair(
+      VL.dayView({
+        chartCount: 12,
+        chartSeconds: 5400,
+        timeDistribution: { 음악: 0.6, 스포츠: 0.4 },
+        countDistribution: { 스포츠: 0.75, 음악: 0.25 },
+      }),
+    );
+    expect(time.map((d) => d.tip)).toEqual([
+      "음악 60% · 54분",
+      "스포츠 40% · 36분",
+    ]);
+    expect(count.map((d) => d.tip)).toEqual([
+      "스포츠 75% · 9개",
+      "음악 25% · 3개",
+    ]);
+  });
+
+  it("영상 수(확인됨)와 도넛 개수의 차이를 분야 미확인 수로 준다", () => {
+    expect(
+      VL.dayView({ confirmedCount: 13, chartCount: 12 })
+        .uncategorizedConfirmedCount,
+    ).toBe(1);
+    expect(VL.dayView(undefined).uncategorizedConfirmedCount).toBe(0);
   });
 });

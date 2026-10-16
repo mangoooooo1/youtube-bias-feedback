@@ -103,6 +103,7 @@ const VL_DONUT_DRAW_MS = 900;
  * @param {number} [opts.size]
  * @param {number} [opts.thickness]
  * @param {number} [opts.drawMs]
+ * @param {string} [opts.label] - 주면 가운데에 1위 퍼센트 대신 이 이름만 보인다(예: "시청 시간")
  * @returns {string} HTML
  */
 function vlDonut({
@@ -110,6 +111,7 @@ function vlDonut({
   size = 128,
   thickness = 18,
   drawMs = VL_DONUT_DRAW_MS,
+  label = null,
 } = {}) {
   const r = (size - thickness) / 2;
   const cx = size / 2,
@@ -131,7 +133,7 @@ function vlDonut({
       stroke-dasharray="0 ${C}"
       data-final-dash="${finalDash}"
       stroke-dashoffset="${-acc * C}"
-      style="transition:stroke-dasharray ${segDurMs}ms linear ${delayMs}ms"/>`;
+      style="transition:stroke-dasharray ${segDurMs}ms linear ${delayMs}ms">${d.tip ? `<title>${vlEscapeHtml(d.tip)}</title>` : ""}</circle>`;
       acc += d.p;
       return html;
     })
@@ -140,9 +142,13 @@ function vlDonut({
     <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
       <g transform="rotate(-90 ${cx} ${cy})">${segments}</g>
     </svg>
-    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
-      <span class="vl-donut-count" data-target="${Math.round(top.p * 100)}" style=";font-weight:700;font-size:var(--vl-fs-6);color:var(--vl-ink);line-height:1">0%</span>
-      <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:3px;font-weight:600">${top.name}</span>
+    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none">
+      ${
+        label
+          ? `<span style="font-size:var(--vl-fs-2);color:var(--vl-ink-2);font-weight:700">${vlEscapeHtml(label)}</span>`
+          : `<span class="vl-donut-count" data-target="${Math.round(top.p * 100)}" style=";font-weight:700;font-size:var(--vl-fs-6);color:var(--vl-ink);line-height:1">0%</span>
+      <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:3px;font-weight:600">${top.name}</span>`
+      }
     </div>
   </div>`;
 }

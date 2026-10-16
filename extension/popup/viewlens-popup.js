@@ -1128,18 +1128,26 @@ async function boot() {
 
   // 화면 그래프·숫자의 원천(서버 집계). 저장본을 먼저 쓰고, 새로 받아 오면 바꾼다.
   VL._viewingSummary = await loadViewingSummaryCache(stored.anonymousId);
-  refreshViewingSummary(
-    stored.serverUrl,
-    stored.anonymousId,
-    stored.participantToken,
-  )
-    .then((fresh) => {
-      if (fresh) VL._viewingSummary = fresh;
-    })
-    // 저장 실패 등은 저장본·기존 화면을 그대로 두면 된다
-    .catch((error) =>
-      console.warn("[popup] 시청 집계 갱신 오류:", error.message),
-    );
+  VL._viewingSummaryStatus = "loading";
+  // 새로 받아 오면 VL._viewingSummary를 바꾸고 true. 실패하면 저장본을 그대로 두고 false
+  const reloadViewingSummary = () =>
+    refreshViewingSummary(
+      stored.serverUrl,
+      stored.anonymousId,
+      stored.participantToken,
+    )
+      .then((fresh) => {
+        VL._viewingSummaryStatus = fresh ? "ok" : "failed";
+        if (fresh) VL._viewingSummary = fresh;
+        return true;
+      })
+      // 저장 실패 등은 저장본·기존 화면을 그대로 두면 된다
+      .catch((error) => {
+        console.warn("[popup] 시청 집계 갱신 오류:", error.message);
+        VL._viewingSummaryStatus = "failed";
+        return true;
+      });
+  const initialSummaryLoad = reloadViewingSummary();
 
   const realToday = buildDataForDate(sessions, new Date());
   realToday.collectingCount = collectingCount;
@@ -1243,6 +1251,10 @@ async function boot() {
 
   // Mount popup
   const popup = new ViewLensPopup(popEl);
+  // 서버 집계가 도착하면(또는 실패가 확정되면) 그래프·상태 문구를 다시 그린다
+  initialSummaryLoad.then((changed) => {
+    if (changed) popup.render();
+  });
   popup.mount({
     onboarded: !!stored.group,
     group: stored.group || null,
@@ -1439,6 +1451,10 @@ async function boot() {
       localLastWatchedAt = changes.lastWatchedAt.newValue || null;
 
     if (changes.sessions) {
+      // 세션이 끝나 기록이 바뀌었으니 서버 집계도 다시 받는다(받은 뒤 다시 그림)
+      reloadViewingSummary().then((changed) => {
+        if (changed) popup.render();
+      });
       const updatedSessions = changes.sessions.newValue || [];
       VL._allSessions = updatedSessions;
       const freshToday = buildDataForDate(updatedSessions, new Date());

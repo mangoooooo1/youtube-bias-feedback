@@ -114,6 +114,12 @@ function dayView(day) {
     shortCount: day?.shortCount ?? 0,
     // 도넛 두 개는 같은 영상 묶음(시청 시간을 알고 분야가 있는 유효 영상)
     chartCount: day?.chartCount ?? 0,
+    chartSeconds: day?.chartSeconds ?? 0,
+    // "영상 N개"와 도넛 개수의 차이 — 시청 시간은 확인됐지만 분야를 못 가져온 영상
+    uncategorizedConfirmedCount: Math.max(
+      0,
+      (day?.confirmedCount ?? 0) - (day?.chartCount ?? 0),
+    ),
     timeDist,
     countDist,
     title: titleSentence(timeDist, countDist),
@@ -121,6 +127,34 @@ function dayView(day) {
     excludedReasons: Object.fromEntries(
       (day?.excluded || []).map((e) => [e.eventId, e.reason]),
     ),
+  };
+}
+
+/** 초 → "1시간 30분" / "45분" / "1분 미만" */
+function formatDuration(seconds) {
+  const minutes = Math.round((seconds || 0) / 60);
+  if (minutes < 1) return "1분 미만";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}분`;
+  return m === 0 ? `${h}시간` : `${h}시간 ${m}분`;
+}
+
+/**
+ * 오늘 탭 도넛 두 개(시청 시간 / 영상 개수)의 조각. 조각마다 툴팁 문구를 붙인다.
+ * 분야별 시간·개수는 합계 × 비중으로 되살린다(서버는 비중과 합계만 준다).
+ * @param {ReturnType<typeof dayView>} view
+ */
+function donutPair(view) {
+  return {
+    time: view.timeDist.map((d) => ({
+      ...d,
+      tip: `${d.name} ${percentOf(d.p)}% · ${formatDuration(d.p * (view.chartSeconds || 0))}`,
+    })),
+    count: view.countDist.map((d) => ({
+      ...d,
+      tip: `${d.name} ${percentOf(d.p)}% · ${Math.round(d.p * view.chartCount)}개`,
+    })),
   };
 }
 
@@ -296,6 +330,30 @@ const today = {
   ],
   review:
     "오늘은 게임 영상에 가장 오래 머무셨어요 — 특히 LCK 결승 하이라이트나 발로란트 공략처럼 e스포츠·경쟁 게임 쪽이 절반 가까이를 차지했네요. 음악은 아이유 신곡 MV나 라이브 클립 같은 최신 발매곡 위주였고요. 중간에 블랙홀 다큐와 미적분 개념 같은 과학·교육 영상도 함께 보셨어요.",
+  // Studio 미리보기용 서버 집계 예시(실제 팝업은 /api/viewing-summary 값으로 덮어쓴다)
+  view: dayView({
+    confirmedCount: 13,
+    unconfirmedCount: 1,
+    shortCount: 2,
+    chartCount: 12,
+    chartSeconds: 9000,
+    timeDistribution: {
+      게임: 0.45,
+      음악: 0.2,
+      엔터테인먼트: 0.15,
+      "뉴스 & 정치": 0.1,
+      교육: 0.06,
+      "과학 & 기술": 0.04,
+    },
+    countDistribution: {
+      게임: 0.34,
+      음악: 0.25,
+      엔터테인먼트: 0.17,
+      "뉴스 & 정치": 0.08,
+      교육: 0.08,
+      "과학 & 기술": 0.08,
+    },
+  }),
 };
 
 const weeks = [
@@ -606,8 +664,9 @@ const TONES = {
       "--vl-card": "#171a26",
       "--vl-card-2": "#1f2230",
       "--vl-ink": "#eef0f7",
-      "--vl-ink-2": "#a3a9bd",
-      "--vl-ink-3": "#6b7188",
+      // 다크 모드 보조 글자 — 작은 글씨도 카드 위에서 잘 읽히도록 대비를 높였다(약 10:1, 6.7:1)
+      "--vl-ink-2": "#c3c8d8",
+      "--vl-ink-3": "#9aa0b6",
       "--vl-line": "#252a3a",
       "--vl-line-2": "#2f354a",
       "--vl-accent": "#818cf8",
@@ -627,6 +686,8 @@ window.VL = {
   titleSentence,
   dayView,
   periodLines,
+  formatDuration,
+  donutPair,
   dist,
   entropy,
   H_MAX,

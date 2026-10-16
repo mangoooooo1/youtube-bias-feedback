@@ -233,29 +233,63 @@ function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
   </div>`;
 }
 
+const SHORT_WATCH_TIP =
+  "30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셌어요. 그보다 짧게 본 영상은 잘못 눌렀거나 바로 넘긴 영상으로 보고 빼요.";
+const UNCATEGORIZED_TIP =
+  "유튜브에서 분야 정보를 가져오지 못한 영상이에요. 정보를 다시 가져오면 그래프에 들어가요.";
+
+function _infoTip(tip) {
+  return `<span class="vl-tip vl-tip-up vl-tip-line" data-tip="${vlEscapeHtml(tip)}" style="display:inline-flex;width:12px;height:12px;border-radius:50%;border:1px solid var(--vl-ink-3);align-items:center;justify-content:center;font-size:8px;font-weight:700;line-height:1;color:var(--vl-ink-3);cursor:default;flex-shrink:0">i</span>`;
+}
+
+function _footNote(text, tip) {
+  return `<div style="position:relative;display:flex;align-items:center;gap:4px;margin-top:8px;font-size:var(--vl-fs-2);color:var(--vl-ink-3)">${vlEscapeHtml(text)}${_infoTip(tip)}</div>`;
+}
+
+// 오늘 탭 그래프 영역
+function _todayChartCard(view, isToday) {
+  if (view.timeDist.length === 0) {
+    const text =
+      view.status === "failed"
+        ? "시청 기록을 불러오지 못했어요. 잠시 후 다시 열어 주세요."
+        : view.status === "loading"
+          ? "시청 기록을 불러오고 있어요."
+          : "분야를 확인한 영상이 아직 없어요.";
+    return vlCard({
+      pad: 16,
+      children: `<div style="font-size:var(--vl-fs-3);color:var(--vl-ink-2);text-align:center">${text}</div>`,
+    });
+  }
+  const { time, count } = VL.donutPair(view);
+  return vlCard({
+    pad: 16,
+    children: `
+      <div style="font-size:var(--vl-fs-2);font-weight:700;color:var(--vl-ink-2);margin-bottom:10px">${isToday ? "오늘" : "이 날"} 유튜브 시청 분야별 비중</div>
+      <div style="display:flex;justify-content:space-around;gap:8px">
+        ${vlDonut({ data: time, size: 116, label: "시청 시간" })}
+        ${vlDonut({ data: count, size: 116, label: "영상 개수" })}
+      </div>
+      ${view.shortCount > 0 ? _footNote(`잠깐 본 영상 ${view.shortCount}개는 세지 않았어요`, SHORT_WATCH_TIP) : ""}
+      ${
+        view.uncategorizedConfirmedCount > 0
+          ? _footNote(
+              `분야를 확인하지 못한 영상 ${view.uncategorizedConfirmedCount}개는 그래프에서 뺐어요`,
+              UNCATEGORIZED_TIP,
+            )
+          : ""
+      }
+    `,
+  });
+}
+
 function screenToday() {
   const d = VL.today;
-  if (d.isEmpty) {
+  const view = d.view || VL.dayView(null);
+  const hasRecord = view.confirmedCount + view.unconfirmedCount > 0;
+  if (d.isEmpty && !hasRecord) {
     const isToday = d.dateLabel === koreanDateLabel(new Date());
     return screenTodayEmpty(d.dateLabel, d.collectingCount, isToday);
   }
-  // 도넛 조각이 채워지는 타이밍에 맞춰 자기 카테고리가 다 찰 때 해당 줄이 나타난다
-  // (트리거는 _animateCharts, viewlens-app.js). d.dist가 이미 비율 내림차순이라 누적
-  // 비율만 계산하면 된다.
-  let catAcc = 0;
-  const catRows = d.dist
-    .map((c) => {
-      catAcc += c.p;
-      const revealMs = Math.round(catAcc * VL_DONUT_DRAW_MS);
-      return `
-    <div class="vl-cat-row" style="display:flex;align-items:center;gap:8px;opacity:0;transform:translateX(6px);transition:opacity .3s ease ${revealMs}ms,transform .3s ease ${revealMs}ms">
-      <span style="width:8px;height:8px;border-radius:3px;background:${c.color};flex-shrink:0"></span>
-      <span style="font-size:var(--vl-fs-3);color:var(--vl-ink);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name}</span>
-      <span style="font-size:var(--vl-fs-3);color:var(--vl-ink-2)">${Math.round(c.p * 100)}%</span>
-    </div>
-  `;
-    })
-    .join("");
 
   const isToday = d.dateLabel === koreanDateLabel(new Date());
   // 잠금 상태는 VL._todayCumulative에서 읽는다.
@@ -280,6 +314,21 @@ function screenToday() {
       <span style="font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-accent)">아래로 스크롤해서 피드백 확인하세요!</span>
     </div>`
     : "";
+  // "영상 N개"는 시청 시간이 확인된 유효 영상(리뷰와 같은 기준), 확인 중인 영상은 따로 센다
+  const countBlock = `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;color:var(--vl-ink-2);font-size:var(--vl-fs-2);font-weight:600;line-height:1.3;white-space:nowrap">
+      <span>영상 ${view.confirmedCount}개</span>
+      ${view.unconfirmedCount > 0 ? `<span style="color:var(--vl-ink-3);font-weight:500">시청 시간 확인 중 ${view.unconfirmedCount}개</span>` : ""}
+    </div>`;
+  const legend =
+    view.timeDist.length > 0
+      ? `<div style="display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:var(--vl-fs-2);color:var(--vl-ink-2)">${view.timeDist
+          .map(
+            (c) =>
+              `<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:3px;background:${c.color};flex-shrink:0"></span>${vlEscapeHtml(c.name)}</span>`,
+          )
+          .join("")}</div>`
+      : "";
+
   return `<div style="display:flex;flex-direction:column">
     <div style="padding:12px 16px 22px;display:flex;flex-direction:column;gap:14px">
     <div style="display:flex;align-items:center;justify-content:space-between">
@@ -289,20 +338,20 @@ function screenToday() {
       </div>
       ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
     </div>
-    <div style="display:flex;align-items:flex-start;justify-content:space-between">
+    ${
+      view.title
+        ? `<div>
+      <div style="font-size:var(--vl-fs-5);font-weight:800;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(view.title)}</div>
+      ${legend}
+    </div>`
+        : ""
+    }
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
       <div>${isCollecting ? collectingRow : scrollNudgeRow}</div>
-      <span style="display:inline-flex;align-items:center;color:var(--vl-ink-2);font-size:var(--vl-fs-2);font-weight:600;line-height:1.2;white-space:nowrap">${d.videoCount}개 영상 · ${d.dist.length}개 분야</span>
+      ${countBlock}
     </div>
 
-    ${vlCard({
-      pad: 16,
-      children: `
-      <div style="display:flex;align-items:center;gap:16px">
-        ${vlDonut({ data: d.dist, size: 124 })}
-        <div style="flex:1;display:flex;flex-direction:column;gap:8px">${catRows}</div>
-      </div>
-    `,
-    })}
+    ${_todayChartCard(view, isToday)}
 
     ${_todayCumulativeCard(isToday, d, reviewLocked)}
   </div>

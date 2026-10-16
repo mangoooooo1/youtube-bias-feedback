@@ -348,6 +348,20 @@ body {
   left: auto;
   right: 0;
 }
+.vl-tip-up::after {
+  top: auto;
+  bottom: calc(100% + 8px);
+  transform: translateY(4px);
+}
+/* 안내 문장 끝의 ⓘ — 마우스는 ⓘ에 올리지만 툴팁은 그 줄의 왼쪽 시작점에서 펼친다.
+   ⓘ 기준으로 펼치면 짧은 문장에서는 상자가 팝업 왼쪽 끝 밖으로 잘린다(줄 요소가 position:relative) */
+.vl-tip-line {
+  position: static;
+}
+.vl-tip-line::after {
+  left: 0;
+  right: auto;
+}
 /* 차트 위 투명 히트 영역: 그 자체가 안 보이면 어디를 가리키고 있는지 드러나지 않으므로,
    호버 시 점 위에 은은한 원(halo)을 띄워 정확히 뭘 가리키는지 보이게 한다. */
 .vl-chart-hit {
