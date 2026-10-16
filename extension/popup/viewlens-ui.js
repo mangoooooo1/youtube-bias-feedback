@@ -154,6 +154,80 @@ function vlDonut({
 }
 
 /**
+ * 기간 탭 꺾은선
+ * 날마다 분야별 시청 시간 비중(%). 선마다 한 분야(상위 3개 + 그 밖).
+ * 기록 없는 날은 모든 선 0%와 "기록 없음", 시청이 적은 날은 빈 원, 오늘은 점선과 "집계 중".
+ * 점에 마우스를 올리면 그날 그 분야 비중(SVG title)이 보인다.
+ * @param {object} opts
+ * @param {Array<{key: string, name: string, color: string}>} opts.lines
+ * @param {Array<{date: string, values: Record<string, number>, noRecord: boolean, few: boolean, isToday: boolean}>} opts.points
+ * @param {string|null} [opts.focus] - 강조할 분야 key(공통 범례를 눌렀을 때). 나머지 선은 흐리게
+ * @returns {string} SVG HTML
+ */
+function vlShareLines({ lines = [], points = [], focus = null } = {}) {
+  const W = 300;
+  const H = 150;
+  const PAD = { l: 30, r: 10, t: 14, b: 20 };
+  const cw = W - PAD.l - PAD.r;
+  const ch = H - PAD.t - PAD.b;
+  const x = (i) =>
+    PAD.l + (points.length <= 1 ? cw / 2 : (cw * i) / (points.length - 1));
+  const y = (v) => PAD.t + ch - (v / 100) * ch;
+  const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+  const dayLabel = (date) => {
+    const [, m, d] = date.split("-").map(Number);
+    return `${m}/${d}`;
+  };
+  const weekday = (date) => WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
+
+  let out = [0, 50, 100]
+    .map(
+      (v) =>
+        `<line x1="${PAD.l}" x2="${PAD.l + cw}" y1="${y(v)}" y2="${y(v)}" stroke="var(--vl-line)" stroke-width="1"/>` +
+        `<text x="${PAD.l - 5}" y="${y(v) + 3}" text-anchor="end" font-size="9" fill="var(--vl-ink-3)">${v}%</text>`,
+    )
+    .join("");
+  out += points
+    .map(
+      (p, i) =>
+        `<text x="${x(i)}" y="${H - 5}" text-anchor="middle" font-size="9" fill="var(--vl-ink-3)">${dayLabel(p.date)}</text>`,
+    )
+    .join("");
+
+  for (const line of lines) {
+    const dim = focus && line.key !== focus;
+    const opacity = dim ? 0.18 : 1;
+    const width = focus && !dim ? 3 : 2;
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i].values[line.key] ?? 0;
+      const b = points[i + 1].values[line.key] ?? 0;
+      const dash = points[i + 1].isToday ? ' stroke-dasharray="4 3"' : "";
+      out += `<line x1="${x(i)}" y1="${y(a)}" x2="${x(i + 1)}" y2="${y(b)}" stroke="${line.color}" stroke-width="${width}" stroke-linecap="round" opacity="${opacity}"${dash}/>`;
+    }
+    points.forEach((p, i) => {
+      const v = p.values[line.key] ?? 0;
+      const tip = p.noRecord
+        ? `${dayLabel(p.date)}(${weekday(p.date)}) · 기록 없음`
+        : `${dayLabel(p.date)}(${weekday(p.date)})${p.isToday ? " 집계 중" : ""} · ${line.name} ${v}%${p.few ? " · 영상이 적은 날" : ""}`;
+      out += p.few
+        ? `<circle cx="${x(i)}" cy="${y(v)}" r="3.5" fill="var(--vl-card)" stroke="${line.color}" stroke-width="1.6" opacity="${opacity}"><title>${vlEscapeHtml(tip)}</title></circle>`
+        : `<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="${line.color}" opacity="${opacity}"><title>${vlEscapeHtml(tip)}</title></circle>`;
+    });
+  }
+
+  points.forEach((p, i) => {
+    if (p.noRecord) {
+      out += `<text x="${x(i)}" y="${y(0) - 8}" text-anchor="middle" font-size="8.5" fill="var(--vl-ink-3)">기록 없음</text>`;
+    }
+    if (p.isToday) {
+      out += `<text x="${x(i)}" y="${PAD.t - 4}" text-anchor="${i === points.length - 1 ? "end" : "middle"}" font-size="9" fill="var(--vl-accent)">집계 중</text>`;
+    }
+  });
+
+  return `<svg class="vl-share-lines" viewBox="0 0 ${W} ${H}" width="100%" style="display:block">${out}</svg>`;
+}
+
+/**
  * 추이 꺾은선 차트. y축 기준선(bands)과 점별 호버 툴팁을 지원한다.
  * @param {object} opts
  * @param {number[]} opts.data
@@ -330,7 +404,7 @@ function vlReview({
       </p>`
     : "";
 
-  // 기간별 리뷰 첫 줄 사실 문장({ main, note }, VL.periodFactSentence)
+  // 리뷰 위 사실 문장({ main, note })
   const factBlock = fact
     ? `<p style="margin:0 0 10px;font-size:var(--vl-fs-4);font-weight:700;color:var(--vl-ink);line-height:1.5;text-wrap:pretty">${vlEscapeHtml(fact.main)}</p>${
         fact.note
@@ -445,5 +519,6 @@ window.vlStackedBar = vlStackedBar;
 window.vlDonut = vlDonut;
 window.VL_DONUT_DRAW_MS = VL_DONUT_DRAW_MS;
 window.vlMiniLine = vlMiniLine;
+window.vlShareLines = vlShareLines;
 window.vlReview = vlReview;
 window.vlConfirmModal = vlConfirmModal;

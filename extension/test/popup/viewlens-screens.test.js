@@ -19,7 +19,7 @@ function loadScreens() {
     "document",
     "markSVG",
     `${src}\n;const koreanDateLabel = window.koreanDateLabel;
-const VL = window.VL;\nreturn { screenToday, VL, koreanDateLabel };`,
+const VL = window.VL;\nreturn { screenToday, screenFeedback, vlShareLines, VL, koreanDateLabel };`,
   )(sandbox, {}, () => "");
 }
 
@@ -231,5 +231,155 @@ describe("screenToday — 리뷰 카드와 재생한 영상 목록", () => {
     expect(html).toContain("3월 5일엔 어떤 영상을 봤을까요?");
     expect(html).toContain("이 날 재생한 영상");
     expect(html).toContain("3/6 00:31 기준");
+  });
+});
+
+const PERIOD = {
+  periodIndex: 2,
+  start: "2026-06-05",
+  end: "2026-06-08",
+  confirmedCount: 9,
+  shortCount: 2,
+  chartCount: 8,
+  chartSeconds: 7200,
+  timeDistribution: {
+    게임: 0.5,
+    음악: 0.2,
+    스포츠: 0.15,
+    교육: 0.1,
+    코미디: 0.05,
+  },
+  countDistribution: {
+    음악: 0.4,
+    게임: 0.3,
+    스포츠: 0.1,
+    교육: 0.1,
+    코미디: 0.1,
+  },
+};
+const PERIOD_DAYS = [
+  {
+    date: "2026-06-05",
+    confirmedCount: 5,
+    timeDistribution: { 게임: 0.6, 음악: 0.2, 교육: 0.2 },
+  },
+  { date: "2026-06-06", confirmedCount: 1, timeDistribution: { 게임: 1 } },
+  // 6/7은 기록 없음
+  {
+    date: "2026-06-08",
+    confirmedCount: 3,
+    timeDistribution: { 음악: 0.5, 코미디: 0.5 },
+  },
+];
+
+describe("vlShareLines — 날마다 분야별 비중 꺾은선", () => {
+  let vlShareLines;
+  let VL;
+
+  beforeEach(() => {
+    ({ vlShareLines, VL } = loadScreens());
+  });
+
+  function draw(focus = null, today = "2026-06-08") {
+    return vlShareLines({
+      ...VL.periodLines(PERIOD, PERIOD_DAYS, today),
+      focus,
+    });
+  }
+
+  it("기록 없는 날은 '기록 없음', 오늘은 점선과 '집계 중'", () => {
+    const svg = draw();
+    expect(svg.match(/>기록 없음</g)).toHaveLength(1);
+    expect(svg).toContain(">집계 중<");
+    expect(svg).toContain('stroke-dasharray="4 3"');
+  });
+
+  it("오늘이 구간 밖이면 점선·'집계 중'이 없다", () => {
+    const svg = draw(null, "2026-06-20");
+    expect(svg).not.toContain("집계 중");
+    expect(svg).not.toContain("stroke-dasharray");
+  });
+
+  it("시청이 적은 날(유효 영상 2개 미만)은 빈 원, 점마다 날짜·분야·비중 툴팁", () => {
+    const svg = draw();
+    expect(svg).toContain('fill="var(--vl-card)"');
+    expect(svg).toContain(
+      "<title>6/6(토) · 게임 100% · 영상이 적은 날</title>",
+    );
+    expect(svg).toContain("<title>6/5(금) · 게임 60%</title>");
+  });
+
+  it("범례로 고른 분야만 진하게, 나머지 선은 흐리게", () => {
+    const svg = draw("게임");
+    expect(svg).toMatch(/stroke="[^"]+" stroke-width="3"[^>]*opacity="1"/);
+    expect(svg).toContain('opacity="0.18"');
+    expect(draw()).not.toContain('opacity="0.18"');
+  });
+});
+
+describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
+  let screenFeedback;
+  let VL;
+
+  beforeEach(() => {
+    ({ screenFeedback, VL } = loadScreens());
+    VL.weeks[1] = {
+      ...VL.weeks[1],
+      label: "2구간",
+      review: "직전 구간보다 게임 비중이 늘었어요.",
+    };
+  });
+
+  function render(period = PERIOD, status = "ok", focus = null) {
+    return screenFeedback(
+      2,
+      2,
+      { period, days: PERIOD_DAYS, today: "2026-06-08", status },
+      focus,
+    );
+  }
+
+  it("구간 줄 오른쪽에 날짜 범위, 제목 문장, 상위 3개 + 그 밖 범례", () => {
+    const html = render();
+    expect(html).toContain("6/5 ~ 6/8");
+    expect(html).toContain(
+      "시청 시간이 가장 긴 분야는 게임이었지만, 영상을 가장 많이 본 분야는 음악이었어요.",
+    );
+    const keys = [...html.matchAll(/data-legend-key="([^"]+)"/g)].map(
+      (m) => m[1],
+    );
+    expect(keys.slice(0, 3)).toEqual(["게임", "음악", "스포츠"]);
+    expect(keys).toHaveLength(4);
+  });
+
+  it("꺾은선·구간 전체 도넛 2개·안내 문구를 그리고, 리뷰 카드 제목은 직전 구간 비교 질문", () => {
+    const html = render();
+    expect(html).toContain("날마다 유튜브 시청 시간 중 분야별 비중");
+    expect(html).toContain("vl-share-lines");
+    expect(html).toContain("2구간 전체 분야별 비중");
+    expect(html).toContain("잠깐 본 영상 2개는 세지 않았어요");
+    expect(html).toContain("분야를 확인하지 못한 영상 1개는 그래프에서 뺐어요");
+    expect(html).toContain("이번 구간, 시청은 어떻게 달라졌나요?");
+    expect(html).toContain("직전 구간보다 게임 비중이 늘었어요.");
+    // 리뷰 위 코드 비교 문장·생성 시각은 없다
+    expect(html).not.toContain("돌아보기");
+    expect(html).not.toContain("기준</");
+  });
+
+  it("범례로 고른 분야 외 항목은 흐리게", () => {
+    const html = render(PERIOD, "ok", "음악");
+    expect(html).toMatch(/data-legend-key="게임"[^>]*opacity:0.35/);
+    expect(html).toMatch(/data-legend-key="음악"[^>]*opacity:1/);
+  });
+
+  it("집계가 없으면 상태에 맞는 안내만 보여 준다", () => {
+    expect(render(null, "loading")).toContain("시청 기록을 불러오고 있어요.");
+    expect(render(null, "failed")).toContain("시청 기록을 불러오지 못했어요.");
+    const empty = render(
+      { ...PERIOD, timeDistribution: {}, countDistribution: {} },
+      "ok",
+    );
+    expect(empty).toContain("이 구간에는 그래프에 넣을 시청 기록이 없어요.");
+    expect(empty).not.toContain("vl-share-lines");
   });
 });

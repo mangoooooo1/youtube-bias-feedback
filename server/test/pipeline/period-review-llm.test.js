@@ -160,7 +160,7 @@ describe("generatePeriodFallbackReview", () => {
       baseArgs({ timeDistribution: { 음악: 1 }, validVideoCount: 3 }),
     );
     expect(result.feedback).toBe(
-      "이 기간에는 영상 3개를 보셨고, 시청 시간은 모두 음악이었어요. 영상이 적어 이 기간의 패턴을 정확히 말하기는 어려워요.",
+      "이 기간에는 영상 3개를 보셨고, 시청 시간은 모두 음악이었어요. 영상이 적어 이번 구간의 패턴을 정확히 말하기는 어려워요.",
     );
   });
 
@@ -503,6 +503,28 @@ describe("buildPeriodPrompt — 직전 구간 비교", () => {
   });
 });
 
+describe("buildPeriodPrompt — 영상이 적다는 지침은 한 번만", () => {
+  it("이번 구간이 적으면 패턴과 변화 폭을 한 문장으로, 비교 문장용 지침은 따로 넣지 않는다", () => {
+    const prompt = buildPeriodPrompt(
+      baseArgs({ comparison: comparisonArgs(), validVideoCount: 6 }),
+    );
+    expect(prompt).toContain(
+      "영상이 적어 이번 구간의 패턴이나 직전 구간과의 변화 폭을 정확히 말하기는 어렵다는 점을 한 문장으로만",
+    );
+    expect(prompt).not.toContain("직전 구간의 영상이 적습니다");
+  });
+
+  it("직전 구간만 적으면 비교 첫 문장에 직전 구간이 적다는 점을 밝히게 한다", () => {
+    const fewPrevious = comparisonArgs();
+    fewPrevious.previousPeriods[1].isFew = true;
+    const prompt = buildPeriodPrompt(baseArgs({ comparison: fewPrevious }));
+    expect(prompt).toContain(
+      "직전 구간은 영상이 적어서 변화 폭이 평소와 다를 수 있다",
+    );
+    expect(prompt).not.toContain("이 기간은 시청한 영상이 적어");
+  });
+});
+
 describe("buildCodeComparison — Gemini를 쓰지 못할 때의 비교 문장", () => {
   const args = (comparison, extra = {}) => ({
     comparison,
@@ -582,22 +604,37 @@ describe("buildCodeComparison — Gemini를 쓰지 못할 때의 비교 문장",
     );
   });
 
-  it("이번 또는 직전 구간이 적은 구간이면 변화 폭이 다를 수 있다는 문장을 붙인다", () => {
+  // 영상이 적다는 안내는 한 번만 — 이번 구간이 적으면 대체 문구 마지막 문장이 맡는다
+  it("직전 구간만 적으면 비교 문장에 '직전 구간은 영상이 적어서…'를 붙이고, 이번 구간이 적으면 붙이지 않는다", () => {
     const fewPrevious = comparisonArgs();
     fewPrevious.previousPeriods[1].isFew = true;
 
+    expect(buildCodeComparison(args(fewPrevious))).toBe(
+      "직전 구간보다 게임 비중이 15%p 늘었어요. 직전 구간은 영상이 적어서, 변화 폭이 평소와 다를 수 있어요.",
+    );
     expect(
       buildCodeComparison(args(comparisonArgs(), { validVideoCount: 7 })),
-    ).toBe(
-      "직전 구간보다 게임 비중이 15%p 늘었어요. 영상이 적어서, 변화 폭이 평소와 다를 수 있어요.",
-    );
-    expect(buildCodeComparison(args(fewPrevious))).toContain(
-      "영상이 적어서, 변화 폭이 평소와 다를 수 있어요.",
+    ).toBe("직전 구간보다 게임 비중이 15%p 늘었어요.");
+    expect(buildCodeComparison(args(fewPrevious, { validVideoCount: 7 }))).toBe(
+      "직전 구간보다 게임 비중이 15%p 늘었어요.",
     );
   });
 });
 
 describe("generatePeriodFallbackReview — 비교 문장", () => {
+  it("이번·직전 구간이 둘 다 적어도 '영상이 적어' 안내는 마지막 문장 한 번(패턴이나 변화 폭)", () => {
+    const fewPrevious = comparisonArgs();
+    fewPrevious.previousPeriods[1].isFew = true;
+    const { feedback } = generatePeriodFallbackReview(
+      baseArgs({ comparison: fewPrevious, validVideoCount: 6 }),
+    );
+
+    expect(feedback.match(/영상이 적어/g)).toHaveLength(1);
+    expect(feedback).toMatch(
+      /영상이 적어 이번 구간의 패턴이나 변화 폭을 정확히 말하기는 어려워요\.$/,
+    );
+  });
+
   it("2구간부터는 대체 문구의 첫 문장을 코드 비교 문장으로 둔다", () => {
     const result = generatePeriodFallbackReview(
       baseArgs({ comparison: comparisonArgs() }),

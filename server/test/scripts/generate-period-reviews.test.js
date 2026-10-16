@@ -726,7 +726,7 @@ describe("generate-period-reviews.js — run()", () => {
       .get(userId);
     expect(row.llmStatus).toBe("fallback");
     expect(row.review).toBe(
-      "이 기간에는 영상 1개를 보셨고, 시청 시간은 모두 음악이었어요. 영상이 적어 이 기간의 패턴을 정확히 말하기는 어려워요.",
+      "이 기간에는 영상 1개를 보셨고, 시청 시간은 모두 음악이었어요. 영상이 적어 이번 구간의 패턴을 정확히 말하기는 어려워요.",
     );
   });
 

@@ -13,6 +13,23 @@ function _dayViewForDate(dateKey) {
   return view;
 }
 
+/**
+ * 선택한 구간의 서버 집계(구간 값 + 날짜별 값)와 불러오기 상태. 상태 기준은 _dayViewForDate와 같다.
+ */
+function _periodViewFor(periodIndex) {
+  const summary = VL._viewingSummary?.data;
+  return {
+    period: summary?.periods.find((p) => p.periodIndex === periodIndex) ?? null,
+    days: summary?.days ?? [],
+    today: dateStr(new Date()),
+    status: summary
+      ? "ok"
+      : VL._viewingSummaryStatus === "failed"
+        ? "failed"
+        : "loading",
+  };
+}
+
 function _collectingTimerText() {
   const lastWatchedAt = VL._lastWatchedAt;
   if (!lastWatchedAt) return "";
@@ -176,6 +193,8 @@ class ViewLensPopup {
     this.container = container;
     this._tab = "today";
     this._selWeek = 1;
+    // 기간 탭 공통 범례에서 강조한 분야(다시 누르면 해제)
+    this._periodFocus = null;
     this._selectedDate = new Date();
     // 대조군 종료 후 리뷰 화면 보기 상태
     this._studyEndReviewOpen = false;
@@ -332,7 +351,12 @@ class ViewLensPopup {
       bodyHTML =
         this._tab === "today"
           ? screenToday()
-          : screenFeedback(currentWeek, selWeek);
+          : screenFeedback(
+              currentWeek,
+              selWeek,
+              _periodViewFor(selWeek),
+              this._periodFocus,
+            );
     } else if (studyEndReady && this._studyEndReviewOpen) {
       // currentWeek는 day(경과일)로 계산되는데, studyEndReady가 참이면 이미 day >= TOTAL_DAYS라
       bodyHTML =
@@ -340,7 +364,12 @@ class ViewLensPopup {
         (VL._studyEndCodeVerified
           ? this._tab === "today"
             ? screenToday()
-            : screenFeedback(currentWeek, selWeek)
+            : screenFeedback(
+                currentWeek,
+                selWeek,
+                _periodViewFor(selWeek),
+                this._periodFocus,
+              )
           : screenStudyEndCodeInput());
     } else {
       // 10-8: groupCfg.feedback이 true인데 feedbackActive가 false라는 건 "EXP인데 베이스라인
@@ -490,8 +519,19 @@ class ViewLensPopup {
           const w = parseInt(btn.dataset.week, 10);
           if (w <= currentWeek) {
             this._selWeek = w;
+            this._periodFocus = null;
             this.render();
           }
+        });
+      });
+    // 기간 탭 범례 — 누른 분야 선만 강조
+    this.container
+      .querySelectorAll("#vl-period-legend [data-legend-key]")
+      .forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const key = btn.dataset.legendKey;
+          this._periodFocus = this._periodFocus === key ? null : key;
+          this.render();
         });
       });
     // Date navigation
