@@ -151,3 +151,25 @@ describe("video_events 인덱스", () => {
     expect(plan).toContain("idx_video_events_participant_watched");
   });
 });
+
+describe("initializeDB — 예전 스키마 DB 감지", () => {
+  // 인덱스가 없는 새 열은 CREATE TABLE IF NOT EXISTS로 추가되지 않고 오류도 나지 않는다.
+  // 재생성을 잊고 배포하면 서버는 뜨고 오늘 리뷰만 조용히 실패하므로, 시작 단계에서 막는다.
+  it("today_reviews에 validVideoCount가 없으면 DB 재생성 안내와 함께 실패한다", () => {
+    db.exec("DROP TABLE today_reviews");
+    db.exec(`CREATE TABLE today_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      anonymousId TEXT NOT NULL,
+      reviewDate TEXT NOT NULL,
+      generatedAt TEXT NOT NULL
+    )`);
+    try {
+      expect(() => initializeDB()).toThrow(
+        /validVideoCount[\s\S]*백업한 뒤 삭제/,
+      );
+    } finally {
+      db.exec("DROP TABLE today_reviews");
+      initializeDB();
+    }
+  });
+});

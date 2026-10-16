@@ -32,6 +32,7 @@ db.pragma("foreign_keys = ON");
 function initializeDB() {
   try {
     execSchema();
+    assertLatestColumns();
     backfillPeriodReviewVersions();
   } catch (err) {
     // 이 저장소는 addColumn()으로 기존 DB를 소급 마이그레이션하는 대신, 스키마 변경마다
@@ -48,6 +49,15 @@ function initializeDB() {
     }
     throw err;
   }
+}
+
+/**
+ * 예전 스키마 DB를 시작 단계에서 걸러낸다. CREATE TABLE IF NOT EXISTS는 기존 테이블에 새 열을
+ * 추가하지 않고, 인덱스가 없는 새 열은 execSchema에서 오류가 나지 않아 서버가 정상으로 뜬 뒤
+ * 요청마다 실패한다. 새 열을 추가하면 여기에도 적는다.
+ */
+function assertLatestColumns() {
+  db.prepare("SELECT validVideoCount FROM today_reviews LIMIT 0");
 }
 
 function execSchema() {
