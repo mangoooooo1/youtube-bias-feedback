@@ -36,21 +36,6 @@ function aggregateTodayCumulative({ events, now = new Date() }) {
   const aggregate = aggregateViewing(todayEvents);
   if (aggregate.validCount === 0) return null;
 
-  // 직전 시청일 = 오늘보다 앞선 날짜 중 유효 시청이 있는 가장 최근 날.
-  // "<"로 비교해 단말 시계 오류로 미래 날짜가 찍힌 기록은 제외한다.
-  const priorDates = [...new Set(dated.map((e) => e.date))]
-    .filter((d) => d < today)
-    .sort()
-    .reverse();
-  let prevEntropy = null;
-  for (const date of priorDates) {
-    const prev = aggregateViewing(dated.filter((e) => e.date === date));
-    if (prev.validCount > 0) {
-      prevEntropy = prev.entropy;
-      break;
-    }
-  }
-
   const sessionIds = [
     ...new Set(todayEvents.map((e) => e.sessionId).filter(Boolean)),
   ];
@@ -59,7 +44,6 @@ function aggregateTodayCumulative({ events, now = new Date() }) {
     reviewDate: today,
     categoryDistribution: aggregate.analysisDistribution,
     entropy: aggregate.entropy,
-    prevEntropy,
     videoCount: todayEvents.length,
     validVideoCount: aggregate.validCount,
     videoTitles: todayEvents.map((e) => e.title).filter(Boolean),
