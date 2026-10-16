@@ -413,7 +413,13 @@ class ViewLensPopup {
    */
   _animateCharts() {
     const segs = this.container.querySelectorAll(".vl-donut-seg");
-    if (segs.length > 0) {
+    if (this._skipDonutAnim) {
+      this._skipDonutAnim = false;
+      segs.forEach((el) => {
+        el.style.transition = "none";
+        el.setAttribute("stroke-dasharray", el.dataset.finalDash);
+      });
+    } else if (segs.length > 0) {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           segs.forEach((el) => {
@@ -513,6 +519,8 @@ class ViewLensPopup {
         btn.addEventListener("click", () => {
           const key = btn.dataset.legendKey;
           this._periodFocus = this._periodFocus === key ? null : key;
+          // 칩은 꺾은선만 바꾸므로 도넛은 다시 차오르지 않게 한다
+          this._skipDonutAnim = true;
           this.render();
         });
       });

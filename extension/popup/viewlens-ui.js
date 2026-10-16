@@ -97,20 +97,51 @@ function vlDonut({
 }
 
 /**
+ * 그래프 범례. focus를 주면(undefined가 아니면) 누를 수 있는 칩이 되고, 고른 칩만 분야 색이 옅게 깔린다.
+ * @param {object} opts
+ * @param {Array<{key: string, name: string, color: string}>} opts.items
+ * @param {string|null} [opts.focus] - 칩 모드에서 고른 key(없으면 null)
+ * @param {string} [opts.id]
+ * @returns {string} HTML
+ */
+function vlLegend({ items = [], focus, id = "" } = {}) {
+  const dot = (c) =>
+    `<span style="width:7px;height:7px;border-radius:50%;background:${c};flex-shrink:0"></span>`;
+  const idAttr = id ? ` id="${id}"` : "";
+  if (focus === undefined) {
+    return `<div${idAttr} style="display:flex;flex-wrap:wrap;justify-content:center;gap:4px 12px;font-size:var(--vl-fs-2);color:var(--vl-ink-2)">${items
+      .map(
+        (i) =>
+          `<span style="display:inline-flex;align-items:center;gap:5px">${dot(i.color)}${vlEscapeHtml(i.name)}</span>`,
+      )
+      .join("")}</div>`;
+  }
+  return `<div${idAttr} style="display:flex;flex-wrap:wrap;gap:6px">${items
+    .map((i) => {
+      const on = focus === i.key;
+      const dim = focus && !on;
+      return `<button type="button" data-legend-key="${vlEscapeHtml(i.key)}" aria-pressed="${on}" class="vl-press" style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font:inherit;font-size:var(--vl-fs-2);font-weight:${on ? 700 : 500};cursor:pointer;color:${on ? "var(--vl-ink)" : "var(--vl-ink-2)"};border:1px solid ${on ? `color-mix(in oklab,${i.color} 60%,transparent)` : "var(--vl-line)"};background:${on ? `color-mix(in oklab,${i.color} 22%,transparent)` : "transparent"};opacity:${dim ? 0.5 : 1};transition:background .15s,opacity .15s">${dot(i.color)}${vlEscapeHtml(i.name)}</button>`;
+    })
+    .join("")}</div>`;
+}
+
+/**
  * 기간 탭 꺾은선
  * 날마다 분야별 시청 시간 비중(%). 선마다 한 분야(상위 3개 + 그 밖).
- * 기록 없는 날은 모든 선 0%와 "기록 없음", 시청이 적은 날은 빈 원, 오늘은 점선과 "집계 중".
+ * 기록 없는 날은 모든 선 0%와 날짜 아래 "기록 없음", 오늘은 점선과 "집계 중".
  * 점에 마우스를 올리면 그날 그 분야 비중(SVG title)이 보인다.
  * @param {object} opts
  * @param {Array<{key: string, name: string, color: string}>} opts.lines
- * @param {Array<{date: string, values: Record<string, number>, noRecord: boolean, few: boolean, isToday: boolean}>} opts.points
- * @param {string|null} [opts.focus] - 강조할 분야 key(공통 범례를 눌렀을 때). 나머지 선은 흐리게
+ * @param {Array<{date: string, values: Record<string, number>, noRecord: boolean, isToday: boolean}>} opts.points
+ * @param {string|null} [opts.focus] - 강조할 분야 key(공통 범례를 눌렀을 때). 나머지 선은 흐리게, 고른 선의 점엔 핑
  * @returns {string} SVG HTML
  */
+// 한 페이지에 꺾은선이 여러 개여도 clipPath id가 겹치지 않게
+let vlShareLinesSeq = 0;
 function vlShareLines({ lines = [], points = [], focus = null } = {}) {
   const W = 300;
-  const H = 150;
-  const PAD = { l: 30, r: 10, t: 14, b: 20 };
+  const H = 162;
+  const PAD = { l: 30, r: 10, t: 14, b: 32 };
   const cw = W - PAD.l - PAD.r;
   const ch = H - PAD.t - PAD.b;
   const x = (i) =>
@@ -123,7 +154,22 @@ function vlShareLines({ lines = [], points = [], focus = null } = {}) {
   };
   const weekday = (date) => WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
 
-  let out = [0, 50, 100]
+  // 양 끝 날짜는 그래프 밖으로 잘리지 않게 안쪽으로 붙인다
+  const edgeAnchor = (i) =>
+    points.length > 1 && i === 0
+      ? "start"
+      : points.length > 1 && i === points.length - 1
+        ? "end"
+        : "middle";
+  // 기록 없는 날 — 날짜 아래에 "기록 없음"
+  let out = points
+    .map((p, i) =>
+      p.noRecord
+        ? `<text x="${x(i)}" y="${H - 4}" text-anchor="${edgeAnchor(i)}" font-size="9" font-weight="700" fill="var(--vl-ink-2)">기록 없음</text>`
+        : "",
+    )
+    .join("");
+  out += [0, 50, 100]
     .map(
       (v) =>
         `<line x1="${PAD.l}" x2="${PAD.l + cw}" y1="${y(v)}" y2="${y(v)}" stroke="var(--vl-line)" stroke-width="1"/>` +
@@ -133,10 +179,12 @@ function vlShareLines({ lines = [], points = [], focus = null } = {}) {
   out += points
     .map(
       (p, i) =>
-        `<text x="${x(i)}" y="${H - 5}" text-anchor="middle" font-size="9" fill="var(--vl-ink-3)">${dayLabel(p.date)}</text>`,
+        `<text x="${x(i)}" y="${PAD.t + ch + 13}" text-anchor="${edgeAnchor(i)}" font-size="9" fill="var(--vl-ink-3)">${dayLabel(p.date)}</text>`,
     )
     .join("");
 
+  // 선·점·표시는 clip 안에 그려, clip이 왼쪽에서 오른쪽으로 넓어지며 선이 그어지게 한다
+  let plot = "";
   for (const line of lines) {
     const dim = focus && line.key !== focus;
     const opacity = dim ? 0.18 : 1;
@@ -145,27 +193,31 @@ function vlShareLines({ lines = [], points = [], focus = null } = {}) {
       const a = points[i].values[line.key] ?? 0;
       const b = points[i + 1].values[line.key] ?? 0;
       const dash = points[i + 1].isToday ? ' stroke-dasharray="4 3"' : "";
-      out += `<line x1="${x(i)}" y1="${y(a)}" x2="${x(i + 1)}" y2="${y(b)}" stroke="${line.color}" stroke-width="${width}" stroke-linecap="round" opacity="${opacity}"${dash}/>`;
+      plot += `<line x1="${x(i)}" y1="${y(a)}" x2="${x(i + 1)}" y2="${y(b)}" stroke="${line.color}" stroke-width="${width}" stroke-linecap="round" opacity="${opacity}"${dash}/>`;
     }
     points.forEach((p, i) => {
       const v = p.values[line.key] ?? 0;
       const tip = p.noRecord
         ? `${dayLabel(p.date)}(${weekday(p.date)}) · 기록 없음`
-        : `${dayLabel(p.date)}(${weekday(p.date)})${p.isToday ? " 집계 중" : ""} · ${line.name} ${v}%${p.few ? " · 영상이 적은 날" : ""}`;
-      out += p.few
-        ? `<circle cx="${x(i)}" cy="${y(v)}" r="3.5" fill="var(--vl-card)" stroke="${line.color}" stroke-width="1.6" opacity="${opacity}"><title>${vlEscapeHtml(tip)}</title></circle>`
-        : `<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="${line.color}" opacity="${opacity}"><title>${vlEscapeHtml(tip)}</title></circle>`;
+        : `${dayLabel(p.date)}(${weekday(p.date)})${p.isToday ? " 집계 중" : ""} · ${line.name} ${v}%`;
+      // 고른 분야의 점에만 핑
+      if (focus === line.key && !p.noRecord) {
+        plot += `<circle class="vl-dot-ping" cx="${x(i)}" cy="${y(v)}" r="3" fill="${line.color}"/>`;
+      }
+      plot += `<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="${line.color}" opacity="${opacity}"><title>${vlEscapeHtml(tip)}</title></circle>`;
     });
   }
 
   points.forEach((p, i) => {
-    if (p.noRecord) {
-      out += `<text x="${x(i)}" y="${y(0) - 8}" text-anchor="middle" font-size="8.5" fill="var(--vl-ink-3)">기록 없음</text>`;
-    }
     if (p.isToday) {
-      out += `<text x="${x(i)}" y="${PAD.t - 4}" text-anchor="${i === points.length - 1 ? "end" : "middle"}" font-size="9" fill="var(--vl-accent)">집계 중</text>`;
+      plot += `<text x="${x(i)}" y="${PAD.t - 4}" text-anchor="${i === points.length - 1 ? "end" : "middle"}" font-size="9" fill="var(--vl-accent)">집계 중</text>`;
     }
   });
+
+  // SMIL은 svg가 화면에 붙는 순간 재생돼 render()마다(칩을 눌러도) 다시 그어진다
+  const clipId = `vl-share-clip-${++vlShareLinesSeq}`;
+  out += `<clipPath id="${clipId}"><rect x="0" y="0" width="0" height="${H}"><animate attributeName="width" from="0" to="${W}" dur="${VL_DONUT_DRAW_MS}ms" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines="0.3 0 0.2 1"/></rect></clipPath>`;
+  out += `<g clip-path="url(#${clipId})">${plot}</g>`;
 
   return `<svg class="vl-share-lines" viewBox="0 0 ${W} ${H}" width="100%" style="display:block">${out}</svg>`;
 }
@@ -324,6 +376,7 @@ window.vlSectionLabel = vlSectionLabel;
 window.vlBadge = vlBadge;
 window.vlDonut = vlDonut;
 window.VL_DONUT_DRAW_MS = VL_DONUT_DRAW_MS;
+window.vlLegend = vlLegend;
 window.vlShareLines = vlShareLines;
 window.vlReview = vlReview;
 window.vlConfirmModal = vlConfirmModal;

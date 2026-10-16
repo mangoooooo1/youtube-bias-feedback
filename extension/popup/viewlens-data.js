@@ -34,11 +34,9 @@ const VL_CATS = {
 const OTHERS_LINE = {
   key: "__others",
   name: "그 밖",
-  color: VL_CATS.기타.color,
+  // "기타" 분야(회색)와 구분되는 중립색
+  color: "var(--vl-ink-2)",
 };
-
-// 시청이 적은 날
-const MIN_VALID_VIDEOS_PER_DAY = 2;
 
 // 서버와 같은 반올림
 const percentOf = (p) => Math.round(p * 100);
@@ -254,14 +252,11 @@ function periodLines(period, days, today) {
           .reduce((sum, [, p]) => sum + p, 0);
         values[OTHERS_LINE.key] = percentOf(othersShare);
       }
-      const confirmed = day?.confirmedCount ?? 0;
       return {
         date,
         values,
         // 그래프에 그릴 비중이 없는 날
         noRecord: !hasChart,
-        // 시청이 적은 날 — 빈 원
-        few: confirmed > 0 && confirmed < MIN_VALID_VIDEOS_PER_DAY,
         // 오늘 — 점선 + "집계 중"
         isToday: date === today,
       };
@@ -470,7 +465,6 @@ const TONES = {
 
 window.VL = {
   CATS: VL_CATS,
-  MIN_VALID_VIDEOS_PER_DAY,
   serverDist,
   titleSentence,
   dayView,

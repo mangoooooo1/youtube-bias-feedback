@@ -73,6 +73,17 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
     expect(html).not.toContain("개 분야");
   });
 
+  it("영상 수 줄이 제목 문장보다 위, 범례는 도넛 카드 안 도넛 아래", () => {
+    const html = render();
+    const title = html.indexOf("시청 시간이 가장 긴 분야는");
+    const card = html.indexOf("유튜브 시청 분야별 비중");
+    expect(html.indexOf("영상 13개")).toBeLessThan(title);
+    expect(html.indexOf(">음악</span>")).toBeGreaterThan(card);
+    expect(html.indexOf(">음악</span>")).toBeGreaterThan(
+      html.lastIndexOf("영상 개수"),
+    );
+  });
+
   it("확인 중인 영상이 없으면 그 줄을 숨긴다", () => {
     expect(render({ unconfirmedCount: 0 })).not.toContain("시청 시간 확인 중");
   });
@@ -290,6 +301,11 @@ describe("vlShareLines — 날마다 분야별 비중 꺾은선", () => {
   it("기록 없는 날은 '기록 없음', 오늘은 점선과 '집계 중'", () => {
     const svg = draw();
     expect(svg.match(/>기록 없음</g)).toHaveLength(1);
+    // "기록 없음"은 날짜(6/7)보다 아래, 세로 띠는 없다
+    expect(svg).not.toContain('fill="var(--vl-line)"');
+    const yOf = (label) =>
+      Number(svg.match(new RegExp(`y="([\\d.]+)"[^>]*>${label}<`))[1]);
+    expect(yOf("기록 없음")).toBeGreaterThan(yOf("6/7"));
     expect(svg).toContain(">집계 중<");
     expect(svg).toContain('stroke-dasharray="4 3"');
   });
@@ -300,13 +316,30 @@ describe("vlShareLines — 날마다 분야별 비중 꺾은선", () => {
     expect(svg).not.toContain("stroke-dasharray");
   });
 
-  it("시청이 적은 날(유효 영상 2개 미만)은 빈 원, 점마다 날짜·분야·비중 툴팁", () => {
+  it("점은 영상 수와 상관없이 모두 채운 원, 점마다 날짜·분야·비중 툴팁", () => {
     const svg = draw();
-    expect(svg).toContain('fill="var(--vl-card)"');
-    expect(svg).toContain(
-      "<title>6/6(토) · 게임 100% · 영상이 적은 날</title>",
-    );
+    expect(svg).not.toContain('fill="var(--vl-card)"');
+    expect(svg).not.toContain("영상이 적은 날");
+    expect(svg).toContain("<title>6/6(토) · 게임 100%</title>");
     expect(svg).toContain("<title>6/5(금) · 게임 60%</title>");
+  });
+
+  it("선은 clip이 왼쪽에서 오른쪽으로 넓어지며 그어지고, 그릴 때마다 clip id가 다르다", () => {
+    const svg = draw();
+    expect(svg).toMatch(/<animate attributeName="width" from="0" to="300"/);
+    const ids = [draw(), draw()].map(
+      (html) => html.match(/clip-path="url\(#([^)]+)\)"/)[1],
+    );
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+
+  it("핑은 고른 분야의 점에만(기록 없는 날 제외), 고르지 않으면 없다", () => {
+    expect(draw()).not.toContain("vl-dot-ping");
+    const svg = draw("게임");
+    const pings = svg.match(/class="vl-dot-ping"/g) || [];
+    // 6/5·6/6·6/8 — 6/7은 기록 없음
+    expect(pings).toHaveLength(3);
+    expect(svg).not.toMatch(/vl-dot-ping[^>]*stroke/);
   });
 
   it("범례로 고른 분야만 진하게, 나머지 선은 흐리게", () => {
@@ -366,10 +399,27 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
     expect(html).not.toContain("기준</");
   });
 
-  it("범례로 고른 분야 외 항목은 흐리게", () => {
+  it("꺾은선 범례는 누를 수 있는 칩 — 고른 칩만 눌림, 나머지는 흐리게", () => {
     const html = render(PERIOD, "ok", "음악");
-    expect(html).toMatch(/data-legend-key="게임"[^>]*opacity:0.35/);
-    expect(html).toMatch(/data-legend-key="음악"[^>]*opacity:1/);
+    expect(html).toMatch(/data-legend-key="음악" aria-pressed="true"/);
+    expect(html).toMatch(
+      /data-legend-key="게임" aria-pressed="false"[^>]*opacity:0.5/,
+    );
+    expect(render()).not.toContain('aria-pressed="true"');
+  });
+
+  it("도넛 카드에는 모든 분야 범례, 꺾은선 칩은 상위 3개 + 그 밖", () => {
+    const html = render();
+    const donutCard = html.slice(html.indexOf("2구간 전체 분야별 비중"));
+    expect(donutCard).toContain(">교육</span>");
+    expect(donutCard).toContain(">코미디</span>");
+    expect(donutCard).not.toContain("data-legend-key");
+  });
+
+  it("'그 밖' 선은 '기타' 분야와 다른 색", () => {
+    const { lines } = VL.periodLines(PERIOD, PERIOD_DAYS, "2026-06-08");
+    expect(lines.at(-1).name).toBe("그 밖");
+    expect(lines.at(-1).color).not.toBe(VL.CATS.기타.color);
   });
 
   it("집계가 없으면 상태에 맞는 안내만 보여 준다", () => {

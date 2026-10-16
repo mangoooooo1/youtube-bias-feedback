@@ -269,6 +269,7 @@ function _todayChartCard(view, isToday) {
         ${vlDonut({ data: time, size: 116, label: "시청 시간" })}
         ${vlDonut({ data: count, size: 116, label: "영상 개수" })}
       </div>
+      <div style="margin-top:12px">${vlLegend({ items: view.timeDist })}</div>
       ${view.shortCount > 0 ? _footNote(`잠깐 본 영상 ${view.shortCount}개는 세지 않았어요`, SHORT_WATCH_TIP) : ""}
       ${
         view.uncategorizedConfirmedCount > 0
@@ -319,15 +320,6 @@ function screenToday() {
       <span>영상 ${view.confirmedCount}개</span>
       ${view.unconfirmedCount > 0 ? `<span style="color:var(--vl-ink-3);font-weight:500">시청 시간 확인 중 ${view.unconfirmedCount}개</span>` : ""}
     </div>`;
-  const legend =
-    view.timeDist.length > 0
-      ? `<div style="display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:var(--vl-fs-2);color:var(--vl-ink-2)">${view.timeDist
-          .map(
-            (c) =>
-              `<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:8px;height:8px;border-radius:3px;background:${c.color};flex-shrink:0"></span>${vlEscapeHtml(c.name)}</span>`,
-          )
-          .join("")}</div>`
-      : "";
 
   return `<div style="display:flex;flex-direction:column">
     <div style="padding:12px 16px 22px;display:flex;flex-direction:column;gap:14px">
@@ -338,18 +330,15 @@ function screenToday() {
       </div>
       ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
     </div>
-    ${
-      view.title
-        ? `<div>
-      <div style="font-size:var(--vl-fs-5);font-weight:800;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(view.title)}</div>
-      ${legend}
-    </div>`
-        : ""
-    }
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
       <div>${isCollecting ? collectingRow : scrollNudgeRow}</div>
       ${countBlock}
     </div>
+    ${
+      view.title
+        ? `<div style="font-size:var(--vl-fs-5);font-weight:800;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(view.title)}</div>`
+        : ""
+    }
 
     ${_todayChartCard(view, isToday)}
 
@@ -455,17 +444,6 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
   const title = VL.titleSentence(timeDist, countDist);
   const chart = period ? VL.periodLines(period, days, today) : null;
 
-  // 공통 범례 — 꺾은선의 선(상위 3개 + 그 밖)과 같은 항목. 누르면 그 분야 선만 강조한다
-  const legend =
-    chart && chart.lines.length > 0
-      ? `<div id="vl-period-legend" style="display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:var(--vl-fs-2);color:var(--vl-ink-2)">${chart.lines
-          .map(
-            (l) =>
-              `<button type="button" data-legend-key="${vlEscapeHtml(l.key)}" style="display:inline-flex;align-items:center;gap:4px;padding:0;border:none;background:none;font:inherit;color:inherit;cursor:pointer;opacity:${focus && focus !== l.key ? 0.35 : 1}"><span style="width:8px;height:8px;border-radius:3px;background:${l.color};flex-shrink:0"></span>${vlEscapeHtml(l.name)}</button>`,
-          )
-          .join("")}</div>`
-      : "";
-
   const emptyText =
     status === "failed"
       ? "시청 기록을 불러오지 못했어요. 잠시 후 다시 열어 주세요."
@@ -486,7 +464,9 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
       : `${vlCard({
           pad: 16,
           children: `
-        <div style="font-size:var(--vl-fs-2);font-weight:700;color:var(--vl-ink-2);margin-bottom:8px">날마다 유튜브 시청 시간 중 분야별 비중</div>
+        <div style="font-size:var(--vl-fs-2);font-weight:700;color:var(--vl-ink-2);margin-bottom:10px">날마다 유튜브 시청 시간 중 분야별 비중</div>
+        <!-- 꺾은선 범례(상위 3개 + 그 밖) — 누르면 그 분야 선만 강조 -->
+        <div style="margin-bottom:8px">${vlLegend({ items: chart.lines, focus: focus ?? null, id: "vl-period-legend" })}</div>
         ${vlShareLines({ ...chart, focus })}
         ${period.shortCount > 0 ? _footNote(`잠깐 본 영상 ${period.shortCount}개는 세지 않았어요`, SHORT_WATCH_TIP) : ""}
         ${uncategorizedConfirmed > 0 ? _footNote(`분야를 확인하지 못한 영상 ${uncategorizedConfirmed}개는 그래프에서 뺐어요`, UNCATEGORIZED_TIP) : ""}
@@ -506,7 +486,8 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
         <div style="display:flex;justify-content:space-around;gap:8px">
           ${vlDonut({ data: time, size: 116, label: "시청 시간" })}
           ${vlDonut({ data: count, size: 116, label: "영상 개수" })}
-        </div>`,
+        </div>
+        <div style="margin-top:12px">${vlLegend({ items: timeDist })}</div>`,
         });
       })()}`;
 
@@ -520,10 +501,7 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
 
     ${
       title
-        ? `<div>
-      <div style="font-size:var(--vl-fs-5);font-weight:800;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(title)}</div>
-      ${legend}
-    </div>`
+        ? `<div style="font-size:var(--vl-fs-5);font-weight:800;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(title)}</div>`
         : ""
     }
 

@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { createRequire } from "node:module";
 import { isConGroup as isConGroupShared } from "../../pipeline/study-period.js";
 import { isBaselinePeriod as isBaselinePeriodShared } from "../../pipeline/baseline.js";
 
@@ -295,7 +294,7 @@ describe("VL.periodLines — 기간 탭 꺾은선", () => {
     });
   });
 
-  it("확인된 유효 영상이 1개인 날은 적은 날, 오늘은 표시하고 오늘 이후는 그리지 않는다", () => {
+  it("오늘은 표시하고 오늘 이후는 그리지 않는다", () => {
     const { points } = VL.periodLines(
       period,
       [
@@ -313,21 +312,10 @@ describe("VL.periodLines — 기간 탭 꺾은선", () => {
       "2026-03-06",
     );
 
-    expect(points.map((p) => [p.date, p.few, p.isToday])).toEqual([
-      ["2026-03-05", true, false],
-      ["2026-03-06", false, true],
+    expect(points.map((p) => [p.date, p.isToday])).toEqual([
+      ["2026-03-05", false],
+      ["2026-03-06", true],
     ]);
-  });
-});
-
-describe("VL.MIN_VALID_VIDEOS_PER_DAY — 서버 기준과 동치성", () => {
-  it("서버 study-constants의 하루 기준과 같다", () => {
-    const VL = loadVL();
-    const require = createRequire(import.meta.url);
-    const {
-      MIN_VALID_VIDEOS_PER_DAY,
-    } = require("../../../server/pipeline/study-constants.js");
-    expect(VL.MIN_VALID_VIDEOS_PER_DAY).toBe(MIN_VALID_VIDEOS_PER_DAY);
   });
 });
 
