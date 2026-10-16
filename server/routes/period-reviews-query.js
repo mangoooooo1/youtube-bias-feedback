@@ -10,9 +10,10 @@ const FEEDBACK_GROUPS = new Set(["EXP", "TEST-EXP"]);
 const CONTROL_GROUPS = new Set(["CON", "TEST-CON"]);
 const TOTAL_PERIODS = Math.ceil(TOTAL_DAYS / DAYS_PER_PERIOD);
 
+// entropy(다양성 점수)는 분석 결과 변수라 참여자 응답에 넣지 않는다
 const SELECT_COLUMNS = `
   periodIndex, periodStart, periodEnd, isBaseline, sessionCount, videoCount,
-  categoryDistribution, entropy, review, reviewTopic, source, promptVersion, generatedAt
+  categoryDistribution, review, reviewTopic, source, promptVersion, generatedAt
 `;
 
 /**

@@ -107,6 +107,8 @@ describe("getPeriodReviews", () => {
 
     const result = getPeriodReviews(db, "exp-user");
     expect(result.map((r) => r.periodIndex)).toEqual([1, 2]);
+    // 다양성 점수는 응답에 없다
+    expect(result[0]).not.toHaveProperty("entropy");
   });
 
   it("TEST-EXP 참여자도 정상적으로 조회된다", () => {

@@ -32,63 +32,6 @@ function vlBadge({ text = "", tone = "accent", size = "md" } = {}) {
   return `<span style="display:inline-flex;align-items:center;gap:5px;${s};border-radius:999px;padding:${sm ? "2px 8px" : "4px 10px"};font-size:${sm ? 11 : 12}px;font-weight:700;line-height:1.2;white-space:nowrap">${text}</span>`;
 }
 
-function vlBarChart({ data = [], maxVal, animate = true } = {}) {
-  const top = maxVal || Math.max(...data.map((d) => d.p));
-  return `<div style="display:flex;flex-direction:column;gap:11px">
-    ${data
-      .map(
-        (d) => `
-      <div style="display:flex;align-items:center;gap:10px">
-        <span style="width:8px;height:8px;border-radius:3px;background:${d.color};flex-shrink:0"></span>
-        <span style="width:86px;font-size:var(--vl-fs-3);color:var(--vl-ink);font-weight:500;flex-shrink:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.name}</span>
-        <div style="flex:1;height:8px;background:var(--vl-line);border-radius:999px;overflow:hidden">
-          <div style="width:${(d.p / top) * 100}%;height:100%;background:${d.color};border-radius:999px;${animate ? "transition:width .7s cubic-bezier(.2,.8,.2,1)" : ""}"></div>
-        </div>
-        <span style="width:34px;text-align:right;;font-size:var(--vl-fs-3);color:var(--vl-ink-2);flex-shrink:0">${Math.round(d.p * 100)}%</span>
-      </div>
-    `,
-      )
-      .join("")}
-  </div>`;
-}
-
-/**
- * 카테고리 비율을 하나의 막대에 이어붙인 100% 스택 바(도넛과 다른 시각 언어로 비율을
- * 보여준다). 도넛과 같은 방식으로 자기 비율만큼 delay를 줘 왼쪽부터 차례로 자라난다
- * (flex가 최종 폭을 이미 정하므로 width 대신 scaleX(0)→scaleX(1)을 애니메이션한다).
- * @param {object} opts
- * @param {{name: string, p: number, color: string}[]} opts.data
- * @param {number} [opts.drawMs] - 전체 draw-in 재생 시간(ms)
- * @returns {string} HTML
- */
-function vlStackedBar({ data = [], drawMs = 900 } = {}) {
-  let acc = 0;
-  const segments = data
-    .map((d) => {
-      const delayMs = Math.round(acc * drawMs);
-      const durMs = Math.max(60, Math.round(d.p * drawMs));
-      acc += d.p;
-      return `<div class="vl-stack-seg" style="flex:${Math.max(d.p, 0.001)} 0 0%;background:${d.color};min-width:2px;transform:scaleX(0);transform-origin:left;transition:transform ${durMs}ms linear ${delayMs}ms" title="${d.name} ${Math.round(d.p * 100)}%"></div>`;
-    })
-    .join("");
-  // 항상 다 보여야 해서(호버 뒤에 숨기지 않음) 줄바꿈으로 세로 공간을 줄인다. 배지 대신
-  // 점+텍스트로 가볍게 — 이름은 진하게, %는 옅게 둬서 카테고리명이 먼저 읽히게 한다.
-  const legend = data
-    .map(
-      (d) => `
-    <span style="display:inline-flex;align-items:center;gap:6px">
-      <span style="width:6px;height:6px;border-radius:50%;background:${d.color};flex-shrink:0"></span>
-      <span style="font-size:var(--vl-fs-2);color:var(--vl-ink);font-weight:600;white-space:nowrap">${d.name}</span>
-      <span style="font-size:var(--vl-fs-1);color:var(--vl-ink-3);white-space:nowrap">${Math.round(d.p * 100)}%</span>
-    </span>`,
-    )
-    .join("");
-  return `<div style="display:flex;flex-direction:column;gap:12px">
-    <div style="display:flex;width:100%;height:16px;border-radius:8px;overflow:hidden">${segments}</div>
-    <div style="display:flex;flex-wrap:wrap;gap:8px 14px">${legend}</div>
-  </div>`;
-}
-
 // render()가 매번 innerHTML을 통째로 교체해 이 원도 매번 새로 마운트된다.
 // 그 점을 이용해 0으로 그렸다가 다음 프레임에 실제 값(data-final-dash)으로 바꿔 transition이
 // 재생되게 한다(더블 rAF는 render()에서 처리). screenToday()의 카테고리 범례가 같은 타이밍으로
@@ -103,6 +46,7 @@ const VL_DONUT_DRAW_MS = 900;
  * @param {number} [opts.size]
  * @param {number} [opts.thickness]
  * @param {number} [opts.drawMs]
+ * @param {string} [opts.label] - 주면 가운데에 1위 퍼센트 대신 이 이름만 보인다(예: "시청 시간")
  * @returns {string} HTML
  */
 function vlDonut({
@@ -110,6 +54,7 @@ function vlDonut({
   size = 128,
   thickness = 18,
   drawMs = VL_DONUT_DRAW_MS,
+  label = null,
 } = {}) {
   const r = (size - thickness) / 2;
   const cx = size / 2,
@@ -131,7 +76,7 @@ function vlDonut({
       stroke-dasharray="0 ${C}"
       data-final-dash="${finalDash}"
       stroke-dashoffset="${-acc * C}"
-      style="transition:stroke-dasharray ${segDurMs}ms linear ${delayMs}ms"/>`;
+      style="transition:stroke-dasharray ${segDurMs}ms linear ${delayMs}ms">${d.tip ? `<title>${vlEscapeHtml(d.tip)}</title>` : ""}</circle>`;
       acc += d.p;
       return html;
     })
@@ -140,135 +85,141 @@ function vlDonut({
     <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
       <g transform="rotate(-90 ${cx} ${cy})">${segments}</g>
     </svg>
-    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
-      <span class="vl-donut-count" data-target="${Math.round(top.p * 100)}" style=";font-weight:700;font-size:var(--vl-fs-6);color:var(--vl-ink);line-height:1">0%</span>
-      <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:3px;font-weight:600">${top.name}</span>
+    <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none">
+      ${
+        label
+          ? `<span style="font-size:var(--vl-fs-2);color:var(--vl-ink-2);font-weight:700">${vlEscapeHtml(label)}</span>`
+          : `<span class="vl-donut-count" data-target="${Math.round(top.p * 100)}" style=";font-weight:700;font-size:var(--vl-fs-6);color:var(--vl-ink);line-height:1">0%</span>
+      <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:3px;font-weight:600">${top.name}</span>`
+      }
     </div>
   </div>`;
 }
 
 /**
- * 추이 꺾은선 차트. y축 기준선(bands)과 점별 호버 툴팁을 지원한다.
+ * 그래프 범례. focus를 주면(undefined가 아니면) 누를 수 있는 칩이 되고, 고른 칩만 분야 색이 옅게 깔린다.
  * @param {object} opts
- * @param {number[]} opts.data
- * @param {string[]} [opts.labels] - 점 아래 x축 라벨(기간 이름)
- * @param {{boundaries: number[], labels: string[]}} [opts.bands] - y축 등급 경계선.
- *   boundaries는 오름차순[b1,b2], labels는 위 등급부터("다양","보통","편중")
- * @param {string[]} [opts.tooltips] - 점마다 호버 시 보여줄 문구(data와 같은 순서).
- *   SVG엔 ::after가 안정적으로 안 붙어 좌표만 맞춘 투명 span을 얹는 방식으로 구현한다
- * @param {number} [opts.height]
+ * @param {Array<{key: string, name: string, color: string}>} opts.items
+ * @param {string|null} [opts.focus] - 칩 모드에서 고른 key(없으면 null)
+ * @param {string} [opts.id]
  * @returns {string} HTML
  */
-function vlMiniLine({
-  data = [],
-  labels = [],
-  bands = null,
-  tooltips = [],
-  height = 64,
-} = {}) {
-  const W = 300,
-    H = height,
-    padLeft = bands ? 24 : 10,
-    padRight = 10,
-    padTop = 6,
-    padBottom = labels.length > 0 ? 20 : 6;
-  const plotH = H - padTop - padBottom;
-  const boundaries = bands?.boundaries || [];
-  const allVals = [...data, ...boundaries];
-  const lo = Math.min(...allVals) - 0.25;
-  const hi = Math.max(...allVals) + 0.25;
-  const x = (i) =>
-    padLeft + (i * (W - padLeft - padRight)) / (data.length - 1 || 1);
-  const y = (v) => padTop + plotH - ((v - lo) / (hi - lo)) * plotH;
-  const pts = data.map((v, i) => `${x(i)},${y(v)}`).join(" ");
-  const area = `${padLeft},${padTop + plotH} ${pts} ${W - padRight},${padTop + plotH}`;
-  // 점마다 은은하게 퍼지는 핑 원을 하나씩 더 깔아 "살아있는 추이"처럼 보이게 한다
-  // (vlDotPing, viewlens-tokens.css).
-  const dots = data
-    .map(
-      (v, i) => `
-      <circle cx="${x(i)}" cy="${y(v)}" r="2.6" fill="var(--vl-accent)" class="vl-dot-ping"/>
-      <circle cx="${x(i)}" cy="${y(v)}" r="2.6" fill="var(--vl-accent)"/>`,
-    )
-    .join("");
-  // 추이 선 draw-in: dasharray를 직접 애니메이션하면 다 그려질 때까지 실선처럼 보인다.
-  // 대신 고정된 점선은 그대로 두고 그 위에 마스크를 씌워, 마스크 폴리라인의
-  // dashoffset만 트랜지션시켜 점선이 왼쪽부터 드러나게 한다.
-  const maskId = `vlLineMask${Math.round(Math.random() * 1e9)}`;
-  const ptCoords = data.map((v, i) => [x(i), y(v)]);
-  const polyLen = ptCoords
-    .slice(1)
-    .reduce(
-      (sum, [px, py], i) =>
-        sum + Math.hypot(px - ptCoords[i][0], py - ptCoords[i][1]),
-      0,
-    );
-  const finalLineDash = "3 2.5";
-  const lineStrokeWidth = 1.75;
-  // 추이 선(실제 데이터)은 점선, 기준선들(등급 경계)은 실선 —
-  // "지금 변하고 있는 값"과 "고정된 기준"을 선 스타일로도 구분한다.
-  const zoneLines = bands
-    ? boundaries
-        .map(
-          (v) =>
-            `<line x1="${padLeft}" y1="${y(v)}" x2="${W - padRight}" y2="${y(v)}" stroke="var(--vl-line)" stroke-width="1"/>`,
-        )
-        .join("")
-    : "";
-  const zoneLabels =
-    bands && bands.labels
-      ? (() => {
-          // edges: 위(hi)→아래(lo) 순으로, bands.labels도 같은 순서(위 등급부터)여야 한다.
-          // boundaries는 오름차순[b1,b2]으로 들어오므로 뒤집어서 내림차순으로 맞춘다.
-          const edges = [hi, ...[...boundaries].reverse(), lo];
-          return bands.labels
-            .map((label, i) => {
-              const midY = (y(edges[i]) + y(edges[i + 1])) / 2;
-              return `<text x="2" y="${midY + 3}" font-size="8.5" fill="var(--vl-ink-3)">${vlEscapeHtml(label)}</text>`;
-            })
-            .join("");
-        })()
-      : "";
-  const xLabels = labels
-    .map(
-      (l, i) =>
-        `<text x="${x(i)}" y="${H - 6}" text-anchor="middle" font-size="9" fill="var(--vl-ink-3)">${vlEscapeHtml(l)}</text>`,
-    )
-    .join("");
-  // 오른쪽 절반의 점은 툴팁을 왼쪽으로 펼친다(.vl-tip-right, 카드 밖 잘림 방지).
-  // 호버 시 halo로 커서 위치를 보여준다(.vl-chart-hit, viewlens-tokens.css).
-  const hitAreas = data
-    .map((v, i) => {
-      if (!tooltips[i]) return "";
-      const leftPct = (x(i) / W) * 100;
-      const rightSide = x(i) > W / 2 ? " vl-tip-right" : "";
-      return `<span class="vl-tip vl-chart-hit${rightSide}" data-tip="${tooltips[i]}"
-        style="position:absolute;left:${leftPct}%;top:${y(v)}px;width:20px;height:20px;transform:translate(-50%,-50%);cursor:default"></span>`;
+function vlLegend({ items = [], focus, id = "" } = {}) {
+  const dot = (c) =>
+    `<span style="width:7px;height:7px;border-radius:50%;background:${c};flex-shrink:0"></span>`;
+  const idAttr = id ? ` id="${id}"` : "";
+  if (focus === undefined) {
+    return `<div${idAttr} style="display:flex;flex-wrap:wrap;justify-content:center;gap:4px 12px;font-size:var(--vl-fs-2);color:var(--vl-ink-2)">${items
+      .map(
+        (i) =>
+          `<span style="display:inline-flex;align-items:center;gap:5px">${dot(i.color)}${vlEscapeHtml(i.name)}</span>`,
+      )
+      .join("")}</div>`;
+  }
+  return `<div${idAttr} style="display:flex;flex-wrap:wrap;gap:6px">${items
+    .map((i) => {
+      const on = focus === i.key;
+      const dim = focus && !on;
+      return `<button type="button" data-legend-key="${vlEscapeHtml(i.key)}" aria-pressed="${on}" class="vl-press" style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:999px;font:inherit;font-size:var(--vl-fs-2);font-weight:${on ? 700 : 500};cursor:pointer;color:${on ? "var(--vl-ink)" : "var(--vl-ink-2)"};border:1px solid ${on ? `color-mix(in oklab,${i.color} 60%,transparent)` : "var(--vl-line)"};background:${on ? `color-mix(in oklab,${i.color} 22%,transparent)` : "transparent"};opacity:${dim ? 0.5 : 1};transition:background .15s,opacity .15s">${dot(i.color)}${vlEscapeHtml(i.name)}</button>`;
     })
+    .join("")}</div>`;
+}
+
+/**
+ * 기간 탭 꺾은선
+ * 날마다 분야별 시청 시간 비중(%). 선마다 한 분야(상위 3개 + 그 밖).
+ * 기록 없는 날은 모든 선 0%와 날짜 아래 "기록 없음", 오늘은 점선과 "집계 중".
+ * 점에 마우스를 올리면 그날 그 분야 비중(SVG title)이 보인다.
+ * @param {object} opts
+ * @param {Array<{key: string, name: string, color: string}>} opts.lines
+ * @param {Array<{date: string, values: Record<string, number>, noRecord: boolean, isToday: boolean}>} opts.points
+ * @param {string|null} [opts.focus] - 강조할 분야 key(공통 범례를 눌렀을 때). 나머지 선은 흐리게, 고른 선의 점엔 핑
+ * @returns {string} SVG HTML
+ */
+// 한 페이지에 꺾은선이 여러 개여도 clipPath id가 겹치지 않게
+let vlShareLinesSeq = 0;
+function vlShareLines({ lines = [], points = [], focus = null } = {}) {
+  const W = 300;
+  const H = 162;
+  const PAD = { l: 30, r: 10, t: 14, b: 32 };
+  const cw = W - PAD.l - PAD.r;
+  const ch = H - PAD.t - PAD.b;
+  const x = (i) =>
+    PAD.l + (points.length <= 1 ? cw / 2 : (cw * i) / (points.length - 1));
+  const y = (v) => PAD.t + ch - (v / 100) * ch;
+  const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
+  const dayLabel = (date) => {
+    const [, m, d] = date.split("-").map(Number);
+    return `${m}/${d}`;
+  };
+  const weekday = (date) => WEEKDAYS[new Date(`${date}T00:00:00Z`).getUTCDay()];
+
+  // 양 끝 날짜는 그래프 밖으로 잘리지 않게 안쪽으로 붙인다
+  const edgeAnchor = (i) =>
+    points.length > 1 && i === 0
+      ? "start"
+      : points.length > 1 && i === points.length - 1
+        ? "end"
+        : "middle";
+  // 기록 없는 날 — 날짜 아래에 "기록 없음"
+  let out = points
+    .map((p, i) =>
+      p.noRecord
+        ? `<text x="${x(i)}" y="${H - 4}" text-anchor="${edgeAnchor(i)}" font-size="9" font-weight="700" fill="var(--vl-ink-2)">기록 없음</text>`
+        : "",
+    )
     .join("");
-  return `<div style="position:relative">
-    <svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="display:block;height:${height}px" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="vlFill" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="var(--vl-accent)" stop-opacity="0.20"/>
-          <stop offset="100%" stop-color="var(--vl-accent)" stop-opacity="0"/>
-        </linearGradient>
-        <mask id="${maskId}" maskUnits="userSpaceOnUse" x="0" y="0" width="${W}" height="${H}">
-          <polyline class="vl-trend-line-mask" points="${pts}" fill="none" stroke="#fff" stroke-width="${lineStrokeWidth + 3}" stroke-linejoin="round" stroke-linecap="round"
-            stroke-dasharray="${polyLen} ${polyLen}" stroke-dashoffset="${polyLen}"
-            style="transition:stroke-dashoffset .9s ease-out"/>
-        </mask>
-      </defs>
-      ${zoneLines}
-      <polygon points="${area}" fill="url(#vlFill)"/>
-      <polyline class="vl-trend-line" points="${pts}" fill="none" stroke="var(--vl-accent)" stroke-width="${lineStrokeWidth}" stroke-linejoin="round" stroke-linecap="round"
-        stroke-dasharray="${finalLineDash}" mask="url(#${maskId})"/>
-      ${dots}
-      ${zoneLabels}
-      ${xLabels}
-    </svg>
-    ${hitAreas}
-  </div>`;
+  out += [0, 50, 100]
+    .map(
+      (v) =>
+        `<line x1="${PAD.l}" x2="${PAD.l + cw}" y1="${y(v)}" y2="${y(v)}" stroke="var(--vl-line)" stroke-width="1"/>` +
+        `<text x="${PAD.l - 5}" y="${y(v) + 3}" text-anchor="end" font-size="9" fill="var(--vl-ink-3)">${v}%</text>`,
+    )
+    .join("");
+  out += points
+    .map(
+      (p, i) =>
+        `<text x="${x(i)}" y="${PAD.t + ch + 13}" text-anchor="${edgeAnchor(i)}" font-size="9" fill="var(--vl-ink-3)">${dayLabel(p.date)}</text>`,
+    )
+    .join("");
+
+  // 선·점·표시는 clip 안에 그려, clip이 왼쪽에서 오른쪽으로 넓어지며 선이 그어지게 한다
+  let plot = "";
+  for (const line of lines) {
+    const dim = focus && line.key !== focus;
+    const opacity = dim ? 0.18 : 1;
+    const width = focus && !dim ? 3 : 2;
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i].values[line.key] ?? 0;
+      const b = points[i + 1].values[line.key] ?? 0;
+      const dash = points[i + 1].isToday ? ' stroke-dasharray="4 3"' : "";
+      plot += `<line x1="${x(i)}" y1="${y(a)}" x2="${x(i + 1)}" y2="${y(b)}" stroke="${line.color}" stroke-width="${width}" stroke-linecap="round" opacity="${opacity}"${dash}/>`;
+    }
+    points.forEach((p, i) => {
+      const v = p.values[line.key] ?? 0;
+      const tip = p.noRecord
+        ? `${dayLabel(p.date)}(${weekday(p.date)}) · 기록 없음`
+        : `${dayLabel(p.date)}(${weekday(p.date)})${p.isToday ? " 집계 중" : ""} · ${line.name} ${v}%`;
+      // 고른 분야의 점에만 핑
+      if (focus === line.key && !p.noRecord) {
+        plot += `<circle class="vl-dot-ping" cx="${x(i)}" cy="${y(v)}" r="3" fill="${line.color}"/>`;
+      }
+      plot += `<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="${line.color}" opacity="${opacity}"><title>${vlEscapeHtml(tip)}</title></circle>`;
+    });
+  }
+
+  points.forEach((p, i) => {
+    if (p.isToday) {
+      plot += `<text x="${x(i)}" y="${PAD.t - 4}" text-anchor="${i === points.length - 1 ? "end" : "middle"}" font-size="9" fill="var(--vl-accent)">집계 중</text>`;
+    }
+  });
+
+  // SMIL은 svg가 화면에 붙는 순간 재생돼 render()마다(칩을 눌러도) 다시 그어진다
+  const clipId = `vl-share-clip-${++vlShareLinesSeq}`;
+  out += `<clipPath id="${clipId}"><rect x="0" y="0" width="0" height="${H}"><animate attributeName="width" from="0" to="${W}" dur="${VL_DONUT_DRAW_MS}ms" fill="freeze" calcMode="spline" keyTimes="0;1" keySplines="0.3 0 0.2 1"/></rect></clipPath>`;
+  out += `<g clip-path="url(#${clipId})">${plot}</g>`;
+
+  return `<svg class="vl-share-lines" viewBox="0 0 ${W} ${H}" width="100%" style="display:block">${out}</svg>`;
 }
 
 /**
@@ -289,7 +240,6 @@ function vlMiniLine({
 function vlReview({
   text = "",
   topic = "",
-  fact = null,
   title = "오늘 돌아보기",
   videos = [],
   videoListLabel = "분석한 영상",
@@ -297,6 +247,7 @@ function vlReview({
   locked = false,
   sessionId = null,
   id = "vl-review-card",
+  asOf = "",
 } = {}) {
   // 영상별 실제 카테고리를 몰라서(세션 단위로만 근사) 색 점을 찍으면 같은 세션 안의
   // 무관한 영상까지 엉뚱한 색으로 보여 오해를 준다. 그래서 색 표시는 아예 뺀다.
@@ -304,7 +255,11 @@ function vlReview({
     const ytUrl = v.videoId
       ? `https://www.youtube.com/watch?v=${encodeURIComponent(v.videoId)}`
       : null;
-    const label = `<span style="font-size:var(--vl-fs-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${vlEscapeHtml(v.title)}</span>`;
+    // 거의 안 봄·확인 중·분야 미확인
+    const mark = v.mark
+      ? `<span style="flex-shrink:0;margin-left:6px;font-size:var(--vl-fs-1);color:var(--vl-ink-3);white-space:nowrap">${vlEscapeHtml(v.mark)}</span>`
+      : "";
+    const label = `<span style="font-size:var(--vl-fs-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${vlEscapeHtml(v.title)}</span>${mark}`;
     const base = `display:flex;align-items:center;min-width:0`;
     return ytUrl
       ? `<a href="${ytUrl}" target="_blank" rel="noopener" class="vl-vid-link"
@@ -317,15 +272,6 @@ function vlReview({
     ? `<p style="margin:0 0 10px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink);line-height:1.4;letter-spacing:-0.02em;text-wrap:pretty">
         당신은 '<span style="color:var(--vl-accent)">${vlEscapeHtml(topic)}</span>'에 관심이 많습니다!
       </p>`
-    : "";
-
-  // 기간별 리뷰 첫 줄 사실 문장({ main, note }, VL.periodFactSentence)
-  const factBlock = fact
-    ? `<p style="margin:0 0 10px;font-size:var(--vl-fs-4);font-weight:700;color:var(--vl-ink);line-height:1.5;text-wrap:pretty">${vlEscapeHtml(fact.main)}</p>${
-        fact.note
-          ? `<p style="margin:-4px 0 10px;font-size:var(--vl-fs-2);color:var(--vl-ink-3);line-height:1.5;text-wrap:pretty">${vlEscapeHtml(fact.note)}</p>`
-          : ""
-      }`
     : "";
 
   // 10개 넘으면 <details> 안에서 계속 스크롤하는 대신 10개씩 페이지로 나눠 가로로
@@ -382,9 +328,9 @@ function vlReview({
       <div style="display:flex;align-items:center;gap:7px;margin-bottom:9px">
         ${markSVG({ size: 18, filled: false, accent: "var(--vl-accent)" })}
         <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">${title}</span>
+        ${asOf ? `<span style="margin-left:auto;font-size:var(--vl-fs-1);color:var(--vl-ink-3);white-space:nowrap">${vlEscapeHtml(asOf)}</span>` : ""}
       </div>
       ${topicBlock}
-      ${factBlock}
       <p style="margin:0;font-size:var(--vl-fs-3);line-height:1.65;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(text)}</p>
       ${videoList}
     </div>
@@ -428,10 +374,9 @@ function vlConfirmModal({
 window.vlCard = vlCard;
 window.vlSectionLabel = vlSectionLabel;
 window.vlBadge = vlBadge;
-window.vlBarChart = vlBarChart;
-window.vlStackedBar = vlStackedBar;
 window.vlDonut = vlDonut;
 window.VL_DONUT_DRAW_MS = VL_DONUT_DRAW_MS;
-window.vlMiniLine = vlMiniLine;
+window.vlLegend = vlLegend;
+window.vlShareLines = vlShareLines;
 window.vlReview = vlReview;
 window.vlConfirmModal = vlConfirmModal;

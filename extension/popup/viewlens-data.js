@@ -1,27 +1,267 @@
 const VL_CATS = {
-  game: { name: "게임", color: "oklch(0.67 0.15 32)" },
-  music: { name: "음악", color: "oklch(0.66 0.14 300)" },
-  ent: { name: "엔터테인먼트", color: "oklch(0.68 0.13 350)" },
-  news: { name: "뉴스·정치", color: "oklch(0.64 0.13 248)" },
-  edu: { name: "교육", color: "oklch(0.66 0.13 152)" },
-  sci: { name: "과학·기술", color: "oklch(0.68 0.12 205)" },
-  sports: { name: "스포츠", color: "oklch(0.70 0.13 78)" },
-  vlog: { name: "인물·블로그", color: "oklch(0.66 0.10 120)" },
-  etc: { name: "기타", color: "oklch(0.62 0.02 250)" },
+  게임: { name: "게임", color: "oklch(0.77 0.085 32)" },
+  음악: { name: "음악", color: "oklch(0.86 0.085 300)" },
+  엔터테인먼트: { name: "엔터테인먼트", color: "oklch(0.86 0.085 342)" },
+  "뉴스 & 정치": { name: "뉴스 & 정치", color: "oklch(0.86 0.085 248)" },
+  교육: { name: "교육", color: "oklch(0.86 0.085 152)" },
+  "과학 & 기술": { name: "과학 & 기술", color: "oklch(0.86 0.085 205)" },
+  스포츠: { name: "스포츠", color: "oklch(0.77 0.085 78)" },
+  "인물 & 블로그": { name: "인물 & 블로그", color: "oklch(0.77 0.085 120)" },
+  "영화 & 애니메이션": {
+    name: "영화 & 애니메이션",
+    color: "oklch(0.77 0.085 325)",
+  },
+  "자동차 & 차량": { name: "자동차 & 차량", color: "oklch(0.77 0.085 226)" },
+  "애완동물 & 동물": {
+    name: "애완동물 & 동물",
+    color: "oklch(0.86 0.085 100)",
+  },
+  "여행 & 이벤트": { name: "여행 & 이벤트", color: "oklch(0.77 0.085 178)" },
+  코미디: { name: "코미디", color: "oklch(0.86 0.085 55)" },
+  "노하우 & 스타일": {
+    name: "노하우 & 스타일",
+    color: "oklch(0.77 0.085 274)",
+  },
+  "비영리 & 사회운동": {
+    name: "비영리 & 사회운동",
+    color: "oklch(0.84 0.10 18)",
+  },
+  기타: { name: "기타", color: "oklch(0.62 0.02 250)" },
 };
 
-function dist(obj) {
-  if (!obj) return [];
-  return Object.entries(obj)
-    .map(([k, p]) => {
-      const cat = VL_CATS[k] || VL_CATS.etc;
-      return { key: k, name: cat.name, color: cat.color, p };
-    })
+// ── 서버 집계(/api/viewing-summary) → 화면 값 ──────────────────────────────────
+// 꺾은선의 "그 밖" 선(상위 3개 분야 밖의 합)
+const OTHERS_LINE = {
+  key: "__others",
+  name: "그 밖",
+  // "기타" 분야(회색)와 구분되는 중립색
+  color: "var(--vl-ink-2)",
+};
+
+// 서버와 같은 반올림
+const percentOf = (p) => Math.round(p * 100);
+
+/** 서버 비중 {분야 이름: 비율} → [{ key, name, color, p }] (비중 큰 순) */
+function serverDist(distribution) {
+  return Object.entries(distribution || {})
+    .map(([name, p]) => ({
+      key: name,
+      name,
+      color: (VL_CATS[name] || VL_CATS.기타).color,
+      p,
+    }))
     .sort((a, b) => b.p - a.p);
 }
 
-function entropy(arr) {
-  return arr.reduce((h, d) => (d.p > 0 ? h - d.p * Math.log2(d.p) : h), 0);
+/** 반올림한 퍼센트로 1위인 분야 이름들(동점이면 여럿, 이름 순) */
+function topCategoryNames(distArr) {
+  if (distArr.length === 0) return [];
+  const max = percentOf(distArr[0].p);
+  return distArr
+    .filter((d) => percentOf(d.p) === max)
+    .map((d) => d.name)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * 탭 맨 위 제목 문장
+ * @returns {string|null} 분포가 비어 있으면 null
+ */
+function titleSentence(timeDist, countDist) {
+  const time = topCategoryNames(timeDist).join("·");
+  const count = topCategoryNames(countDist).join("·");
+  if (!time || !count) return null;
+  if (time === count)
+    return `시청 시간과 영상 개수 모두 ${time} 분야가 가장 많았어요.`;
+  return `시청 시간이 가장 긴 분야는 ${josa(time, "이었지만", "였지만")}, 영상을 가장 많이 본 분야는 ${josa(count, "이었어요", "였어요")}.`;
+}
+
+/**
+ * 하루치 서버 값을 화면 값으로. 기록이 없는 날(day가 없음)은 0으로 채운다.
+ * @param {object|undefined} day - viewing-summary days[] 항목
+ */
+function dayView(day) {
+  const timeDist = serverDist(day?.timeDistribution);
+  const countDist = serverDist(day?.countDistribution);
+  return {
+    // 화면 "영상 N개" — 시청 시간이 확인된 유효 영상(리뷰와 같은 기준)
+    confirmedCount: day?.confirmedCount ?? 0,
+    unconfirmedCount: day?.unconfirmedCount ?? 0,
+    shortCount: day?.shortCount ?? 0,
+    // 도넛 두 개는 같은 영상 묶음(시청 시간을 알고 분야가 있는 유효 영상)
+    chartCount: day?.chartCount ?? 0,
+    chartSeconds: day?.chartSeconds ?? 0,
+    // "영상 N개"와 도넛 개수의 차이 — 시청 시간은 확인됐지만 분야를 못 가져온 영상
+    uncategorizedConfirmedCount: Math.max(
+      0,
+      (day?.confirmedCount ?? 0) - (day?.chartCount ?? 0),
+    ),
+    timeDist,
+    countDist,
+    title: titleSentence(timeDist, countDist),
+    // 영상 목록에 거의 안 봄·확인 중·분야 미확인을 붙이는 데 쓴다
+    excludedReasons: Object.fromEntries(
+      (day?.excluded || []).map((e) => [e.eventId, e.reason]),
+    ),
+  };
+}
+
+/** 초 → "1시간 30분" / "45분" / "1분 미만" */
+function formatDuration(seconds) {
+  const minutes = Math.round((seconds || 0) / 60);
+  if (minutes < 1) return "1분 미만";
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}분`;
+  return m === 0 ? `${h}시간` : `${h}시간 ${m}분`;
+}
+
+/**
+ * 오늘 탭 도넛 두 개(시청 시간 / 영상 개수)의 조각. 조각마다 툴팁 문구를 붙인다.
+ * 분야별 시간·개수는 합계 × 비중으로 되살린다(서버는 비중과 합계만 준다).
+ * @param {ReturnType<typeof dayView>} view
+ */
+function donutPair(view) {
+  return {
+    time: view.timeDist.map((d) => ({
+      ...d,
+      tip: `${d.name} ${percentOf(d.p)}% · ${formatDuration(d.p * (view.chartSeconds || 0))}`,
+    })),
+    count: view.countDist.map((d) => ({
+      ...d,
+      tip: `${d.name} ${percentOf(d.p)}% · ${Math.round(d.p * view.chartCount)}개`,
+    })),
+  };
+}
+
+/** KST(Asia/Seoul) 기준 YYYY-MM-DD */
+function kstDate(date) {
+  return date.toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+}
+
+// 서버가 영상별로 알려 준 "그래프에서 뺀 사유" → 목록 표시
+const PLAYED_VIDEO_MARKS = {
+  short: "거의 안 봄",
+  uncategorized: "분야 미확인",
+  pending_time: "확인 중",
+};
+
+/**
+ * 그날 재생한 영상 목록
+ * 끝난 세션과 진행 중인 세션의 영상 기록을 모두 모아 본 시각 순으로.
+ * @param {Array<{videos?: Array}>} sessions - 끝난 세션들
+ * @param {Array<object>} liveVideos - 진행 중인 세션의 영상 기록(video__ 키)
+ * @param {string} dateKey - YYYY-MM-DD(KST)
+ * @param {Record<string, string>} reasons - eventId → 서버 사유(VL.dayView().excludedReasons)
+ * @returns {Array<{title: string, videoId: string|null, eventId: string|null, mark: string|null}>}
+ */
+function playedVideos(sessions, liveVideos, dateKey, reasons = {}) {
+  const all = [
+    ...(sessions || []).flatMap((s) => s.videos || []),
+    ...(liveVideos || []),
+  ];
+  const seen = new Set();
+  return all
+    .filter((v) => {
+      const ms = Date.parse(v.watchedAt);
+      if (!Number.isFinite(ms) || kstDate(new Date(ms)) !== dateKey)
+        return false;
+      // 세션 종료 직전·직후에 같은 영상 기록이 두 곳에 잠깐 함께 있을 수 있다
+      if (v.eventId) {
+        if (seen.has(v.eventId)) return false;
+        seen.add(v.eventId);
+      }
+      return true;
+    })
+    .sort((a, b) => Date.parse(a.watchedAt) - Date.parse(b.watchedAt))
+    .map((v) => {
+      const reason = v.eventId ? reasons[v.eventId] : undefined;
+      const mark =
+        reason === "short" || reason === "uncategorized"
+          ? PLAYED_VIDEO_MARKS[reason]
+          : v.watchedSeconds == null || reason === "pending_time"
+            ? PLAYED_VIDEO_MARKS.pending_time
+            : null;
+      return {
+        title: v.title,
+        videoId: v.videoId || null,
+        eventId: v.eventId || null,
+        mark,
+      };
+    });
+}
+
+/**
+ * 리뷰 카드의 "기준" 시각
+ * @returns {string} "14:32 기준" / "10/16 00:31 기준" / 값이 없으면 ""
+ */
+function reviewAsOfLabel(generatedAt, reviewDate) {
+  const ms = Date.parse(generatedAt);
+  if (!Number.isFinite(ms)) return "";
+  const at = new Date(ms);
+  const time = at.toLocaleTimeString("en-GB", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const day = kstDate(at);
+  if (day === reviewDate) return `${time} 기준`;
+  const [, m, d] = day.split("-").map(Number);
+  return `${m}/${d} ${time} 기준`;
+}
+
+/** "YYYY-MM-DD" 범위의 모든 날짜 */
+function datesInRange(start, end) {
+  const dates = [];
+  const [y, m, d] = start.split("-").map(Number);
+  for (let i = 0; ; i++) {
+    const date = new Date(Date.UTC(y, m - 1, d + i)).toISOString().slice(0, 10);
+    if (date > end) break;
+    dates.push(date);
+  }
+  return dates;
+}
+
+/**
+ * 기간 탭 꺾은선 데이터 — 선은 구간 시청 시간 상위 3개 분야(+ 분야가 더 있으면 "그 밖").
+ * 기록 없는 날은 모든 선 0%. 오늘 이후 날짜는 그리지 않는다.
+ * @param {object} period - viewing-summary periods[] 항목 { start, end, timeDistribution, ... }
+ * @param {Array<object>} days - viewing-summary days[]
+ * @param {string} today - 오늘 KST 날짜(YYYY-MM-DD)
+ */
+function periodLines(period, days, today) {
+  const ranked = serverDist(period.timeDistribution);
+  const top = ranked.slice(0, 3);
+  const lines = [
+    ...top.map(({ key, name, color }) => ({ key, name, color })),
+    ...(ranked.length > 3 ? [OTHERS_LINE] : []),
+  ];
+  const byDate = new Map((days || []).map((d) => [d.date, d]));
+  const points = datesInRange(period.start, period.end)
+    .filter((date) => date <= today)
+    .map((date) => {
+      const day = byDate.get(date);
+      const shares = day?.timeDistribution || {};
+      const hasChart = Object.keys(shares).length > 0;
+      const values = Object.fromEntries(
+        top.map(({ key }) => [key, percentOf(shares[key] ?? 0)]),
+      );
+      if (ranked.length > 3) {
+        const othersShare = Object.entries(shares)
+          .filter(([name]) => !top.some((t) => t.key === name))
+          .reduce((sum, [, p]) => sum + p, 0);
+        values[OTHERS_LINE.key] = percentOf(othersShare);
+      }
+      return {
+        date,
+        values,
+        // 그래프에 그릴 비중이 없는 날
+        noRecord: !hasChart,
+        // 오늘 — 점선 + "집계 중"
+        isToday: date === today,
+      };
+    });
+  return { lines, points };
 }
 
 // 베이스라인 기간(설치 후 BASELINE_DAYS 미만) 판정
@@ -41,13 +281,6 @@ function isTestGroup(group) {
   return typeof group === "string" && group.startsWith("TEST");
 }
 
-const H_MAX = 3.17;
-
-/**
- * 기간별 일별 추이 그래프의 경계선 — H_MAX 대비 1/3, 2/3 지점(그래프 교체 이슈에서 제거 예정).
- */
-const DIVERSITY_BAND_RATIOS = [1 / 3, 2 / 3];
-
 // 받침 유무로 조사를 고른다(한글이 아니면 받침 없음으로 본다)
 function josa(word, withBatchim, withoutBatchim) {
   const code = word.charCodeAt(word.length - 1) - 0xac00;
@@ -55,300 +288,70 @@ function josa(word, withBatchim, withoutBatchim) {
   return `${word}${hasBatchim ? withBatchim : withoutBatchim}`;
 }
 
-// 기간 비중이 이 영상 수 미만이면 영상 1개가 10%p 이상을 움직인다
-const FEW_VIDEOS = 10;
-
-/**
- * 기간별 리뷰 첫 줄 사실 문장. 막대그래프와 같은 w.dist·w.videoCount로 계산한다.
- * @param {{label: string, videoCount: number, dist: Array<{key: string, name: string, p: number}>}} w
- * @param {object|null} prevW - 직전 기간(첫 기간이면 null)
- * @returns {{main: string, note: string|null}}
- */
-function periodFactSentence(w, prevW) {
-  const n = w.videoCount;
-  if (n === 0)
-    return { main: `${w.label}에는 시청 기록이 없어요.`, note: null };
-
-  // "기타"는 다른 분야가 없을 때만 쓴다
-  const shown = w.dist.filter((d) => d.p > 0);
-  const specific = shown.filter((d) => d.key !== "etc");
-  const cats = specific.length > 0 ? specific : shown;
-  if (cats.length === 0)
-    return { main: `${w.label}에 본 영상은 ${n}개예요.`, note: null };
-
-  const pct = (d) => Math.round(d.p * 100);
-  if (n === 1) {
-    return {
-      main: `${w.label}에 본 영상 1개는 ${cats[0].name} 관련 영상이었어요.`,
-      note: null,
-    };
-  }
-
-  const parts = cats
-    .slice(0, 2)
-    .map((d) => `${josa(d.name, "이", "가")} ${pct(d)}%`);
-  let main = `${w.label}에 본 영상 ${n}개 중 ${parts.join(", ")}였어요.`;
-
-  const compared = prevW && prevW.videoCount > 0;
-  if (compared) {
-    const top = cats[0];
-    const prev = prevW.dist.find((d) => d.key === top.key);
-    const diff = pct(top) - (prev ? pct(prev) : 0);
-    main +=
-      diff === 0
-        ? ` ${top.name} 비중은 ${josa(prevW.label, "과", "와")} 같았어요.`
-        : ` ${prevW.label}보다 ${top.name} 비중이 ${Math.abs(diff)}%p ${diff > 0 ? "늘었어요" : "줄었어요"}.`;
-  }
-
-  let note = null;
-  if (n < FEW_VIDEOS) {
-    note =
-      "이 기간은 본 영상이 적어서, 비중이 평소 시청 경향과 다를 수 있어요.";
-  } else if (compared && prevW.videoCount < FEW_VIDEOS) {
-    note = `${josa(prevW.label, "은", "는")} 본 영상이 적어서, 변화 폭이 평소와 다를 수 있어요.`;
-  }
-  return { main, note };
-}
-
 const today = {
   dateLabel: "6월 7일 토요일",
-  videoCount: 14,
-  sessionCount: 2,
-  dist: dist({
-    game: 0.4,
-    music: 0.22,
-    ent: 0.14,
-    news: 0.12,
-    edu: 0.08,
-    sci: 0.04,
-  }),
   videos: [
-    { title: "2024 LCK 서머 결승 풀 하이라이트", cat: "game" },
-    { title: "발로란트 신규 요원 200% 활용 공략", cat: "game" },
-    { title: "랭크 올리는 정글 동선 완전정복", cat: "game" },
-    { title: "아이유 신곡 'Love Wins All' MV", cat: "music" },
-    { title: "백예린 〈square〉 라이브 클립", cat: "music" },
-    { title: "연예대상 레전드 무대 모음.zip", cat: "ent" },
-    { title: "[속보] 오늘의 주요 뉴스 브리핑", cat: "news" },
-    { title: "10분 만에 끝내는 미적분 핵심 개념", cat: "edu" },
-    { title: "블랙홀은 정말 모든 걸 삼킬까? (다큐)", cat: "sci" },
+    { title: "2024 LCK 서머 결승 풀 하이라이트" },
+    { title: "발로란트 신규 요원 200% 활용 공략" },
+    { title: "랭크 올리는 정글 동선 완전정복" },
+    { title: "아이유 신곡 'Love Wins All' MV" },
+    { title: "백예린 〈square〉 라이브 클립" },
+    { title: "연예대상 레전드 무대 모음.zip" },
+    { title: "[속보] 오늘의 주요 뉴스 브리핑" },
+    { title: "10분 만에 끝내는 미적분 핵심 개념" },
+    { title: "블랙홀은 정말 모든 걸 삼킬까? (다큐)" },
   ],
   review:
     "오늘은 게임 영상에 가장 오래 머무셨어요 — 특히 LCK 결승 하이라이트나 발로란트 공략처럼 e스포츠·경쟁 게임 쪽이 절반 가까이를 차지했네요. 음악은 아이유 신곡 MV나 라이브 클립 같은 최신 발매곡 위주였고요. 중간에 블랙홀 다큐와 미적분 개념 같은 과학·교육 영상도 함께 보셨어요.",
+  // Studio 미리보기용 서버 집계 예시(실제 팝업은 /api/viewing-summary 값으로 덮어쓴다)
+  view: dayView({
+    confirmedCount: 13,
+    unconfirmedCount: 1,
+    shortCount: 2,
+    chartCount: 12,
+    chartSeconds: 9000,
+    timeDistribution: {
+      게임: 0.45,
+      음악: 0.2,
+      엔터테인먼트: 0.15,
+      "뉴스 & 정치": 0.1,
+      교육: 0.06,
+      "과학 & 기술": 0.04,
+    },
+    countDistribution: {
+      게임: 0.34,
+      음악: 0.25,
+      엔터테인먼트: 0.17,
+      "뉴스 & 정치": 0.08,
+      교육: 0.08,
+      "과학 & 기술": 0.08,
+    },
+  }),
 };
 
 const weeks = [
   {
     week: 1,
     label: "1주차",
-    isBaseline: true,
     range: "6/1 – 6/7",
-    videoCount: 78,
-    sessionCount: 11,
-    dist: dist({
-      game: 0.51,
-      music: 0.2,
-      ent: 0.12,
-      news: 0.09,
-      sci: 0.05,
-      edu: 0.03,
-    }),
-    daily: [
-      {
-        dateStr: "2024-06-01",
-        label: "6/1",
-        entropy: 1.55,
-        videoCount: 9,
-        categoryCount: 3,
-      },
-      {
-        dateStr: "2024-06-02",
-        label: "6/2",
-        entropy: 1.8,
-        videoCount: 12,
-        categoryCount: 3,
-      },
-      {
-        dateStr: "2024-06-03",
-        label: "6/3",
-        entropy: 1.68,
-        videoCount: 8,
-        categoryCount: 3,
-      },
-      {
-        dateStr: "2024-06-04",
-        label: "6/4",
-        entropy: 2.02,
-        videoCount: 14,
-        categoryCount: 4,
-      },
-      {
-        dateStr: "2024-06-05",
-        label: "6/5",
-        entropy: 1.74,
-        videoCount: 10,
-        categoryCount: 3,
-      },
-      {
-        dateStr: "2024-06-06",
-        label: "6/6",
-        entropy: 1.96,
-        videoCount: 13,
-        categoryCount: 4,
-      },
-      {
-        dateStr: "2024-06-07",
-        label: "6/7",
-        entropy: 1.88,
-        videoCount: 12,
-        categoryCount: 4,
-      },
-    ],
     review:
       "첫 주 동안의 시청 습관을 기준선으로 담아 두었어요. 게임이 절반 가까이를 차지했지만, 이건 평가가 아니라 출발점이에요. 다음 주부터 어떤 변화가 생기는지 저와 함께 천천히 지켜봐요.",
   },
   {
     week: 2,
     label: "2주차",
-    isBaseline: true,
     range: "6/8 – 6/14",
-    videoCount: 71,
-    sessionCount: 10,
-    dist: dist({
-      game: 0.37,
-      music: 0.19,
-      edu: 0.14,
-      sci: 0.11,
-      news: 0.1,
-      ent: 0.09,
-    }),
-    daily: [
-      {
-        dateStr: "2024-06-08",
-        label: "6/8",
-        entropy: 1.98,
-        videoCount: 10,
-        categoryCount: 4,
-      },
-      {
-        dateStr: "2024-06-09",
-        label: "6/9",
-        entropy: 2.21,
-        videoCount: 11,
-        categoryCount: 4,
-      },
-      {
-        dateStr: "2024-06-10",
-        label: "6/10",
-        entropy: 2.34,
-        videoCount: 9,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-11",
-        label: "6/11",
-        entropy: 2.18,
-        videoCount: 8,
-        categoryCount: 4,
-      },
-      {
-        dateStr: "2024-06-12",
-        label: "6/12",
-        entropy: 2.46,
-        videoCount: 12,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-13",
-        label: "6/13",
-        entropy: 2.4,
-        videoCount: 10,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-14",
-        label: "6/14",
-        entropy: 2.55,
-        videoCount: 11,
-        categoryCount: 5,
-      },
-    ],
     review:
       "베이스라인 기간의 두 번째 주예요. 교육과 과학·기술 영상이 조금 늘었지만, 이 시기는 평가가 아니라 계속 기준선을 담아 두는 과정이에요.",
   },
   {
     week: 3,
     label: "3주차",
-    isBaseline: false,
     range: "6/15 – 6/21",
-    videoCount: 69,
-    sessionCount: 9,
-    dist: dist({
-      game: 0.29,
-      edu: 0.18,
-      music: 0.16,
-      sci: 0.15,
-      news: 0.12,
-      ent: 0.1,
-    }),
-    daily: [
-      {
-        dateStr: "2024-06-15",
-        label: "6/15",
-        entropy: 2.41,
-        videoCount: 9,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-16",
-        label: "6/16",
-        entropy: 2.58,
-        videoCount: 11,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-17",
-        label: "6/17",
-        entropy: 2.52,
-        videoCount: 8,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-18",
-        label: "6/18",
-        entropy: 2.71,
-        videoCount: 12,
-        categoryCount: 6,
-      },
-      {
-        dateStr: "2024-06-19",
-        label: "6/19",
-        entropy: 2.63,
-        videoCount: 10,
-        categoryCount: 5,
-      },
-      {
-        dateStr: "2024-06-20",
-        label: "6/20",
-        entropy: 2.78,
-        videoCount: 10,
-        categoryCount: 6,
-      },
-      {
-        dateStr: "2024-06-21",
-        label: "6/21",
-        entropy: 2.69,
-        videoCount: 9,
-        categoryCount: 6,
-      },
-    ],
     review:
       "3주 동안 정말 꾸준히 해오셨어요. 시청 다양성이 기준선보다 눈에 띄게 높아졌고, 어느 한 카테고리에 치우치지 않는 균형이 보여요. 지금의 리듬을 가볍게 이어가시면 충분해요.",
   },
 ];
-weeks.forEach((w) => {
-  w.entropy = entropy(w.dist);
-});
 // 총 실험 기간 12일(베이스라인 4일 + 4일씩 2개 기간)
 const TOTAL_DAYS = 12;
 // 탭을 며칠 단위로 나눌지 — 4일 단위로 기간을 구분한다.
@@ -445,8 +448,9 @@ const TONES = {
       "--vl-card": "#171a26",
       "--vl-card-2": "#1f2230",
       "--vl-ink": "#eef0f7",
-      "--vl-ink-2": "#a3a9bd",
-      "--vl-ink-3": "#6b7188",
+      // 다크 모드 보조 글자 — 작은 글씨도 카드 위에서 잘 읽히도록 대비를 높였다(약 10:1, 6.7:1)
+      "--vl-ink-2": "#c3c8d8",
+      "--vl-ink-3": "#9aa0b6",
       "--vl-line": "#252a3a",
       "--vl-line-2": "#2f354a",
       "--vl-accent": "#818cf8",
@@ -461,11 +465,14 @@ const TONES = {
 
 window.VL = {
   CATS: VL_CATS,
-  dist,
-  entropy,
-  H_MAX,
-  DIVERSITY_BAND_RATIOS,
-  periodFactSentence,
+  serverDist,
+  titleSentence,
+  dayView,
+  periodLines,
+  formatDuration,
+  donutPair,
+  playedVideos,
+  reviewAsOfLabel,
   today,
   weeks,
   TIMELINE,

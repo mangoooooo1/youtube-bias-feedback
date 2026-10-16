@@ -330,3 +330,37 @@ describe("연구 종료 시점 — 팝업(_isStudyEndTimeReached)과 서버(isSt
     }
   });
 });
+
+// 오늘 탭 그래프의 데이터와 불러오기 상태
+describe("_dayViewForDate — 서버 집계 불러오기 상태", () => {
+  const DECL = /function _dayViewForDate\(dateKey\) \{[\s\S]*?\n\}/;
+  function load(VL) {
+    const raw = readFileSync(VIEWLENS_APP_PATH, "utf8");
+    return new Function("VL", `${raw.match(DECL)[0]}\nreturn _dayViewForDate;`)(
+      VL,
+    );
+  }
+  const fakeVL = (summary, status) => ({
+    _viewingSummary: summary,
+    _viewingSummaryStatus: status,
+    dayView: (day) => ({ day }),
+  });
+  const summary = {
+    data: { days: [{ date: "2026-03-05", confirmedCount: 2 }], periods: [] },
+  };
+
+  it("선택한 날짜의 서버 값을 찾아 넘긴다", () => {
+    const view = load(fakeVL(summary, "ok"))("2026-03-05");
+    expect(view).toMatchObject({ day: { confirmedCount: 2 }, status: "ok" });
+    expect(load(fakeVL(summary, "ok"))("2026-03-06").day).toBeUndefined();
+  });
+
+  it.each([
+    [summary, "loading", "ok"],
+    [summary, "failed", "ok"],
+    [null, "loading", "loading"],
+    [null, "failed", "failed"],
+  ])("저장본 %#: 불러오기 %s → 화면 상태 %s", (s, loadStatus, expected) => {
+    expect(load(fakeVL(s, loadStatus))("2026-03-05").status).toBe(expected);
+  });
+});

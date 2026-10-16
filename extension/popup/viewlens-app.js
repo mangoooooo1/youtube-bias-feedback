@@ -1,3 +1,35 @@
+/**
+ * 선택한 날짜의 서버 집계 화면 값(VL.dayView)과 불러오기 상태.
+ * status: loading(아직 없음) / failed(저장본도 없이 실패) / ok(저장본이든 새 값이든 보여 줄 값이 있음)
+ */
+function _dayViewForDate(dateKey) {
+  const summary = VL._viewingSummary?.data;
+  const view = VL.dayView(summary?.days.find((day) => day.date === dateKey));
+  view.status = summary
+    ? "ok"
+    : VL._viewingSummaryStatus === "failed"
+      ? "failed"
+      : "loading";
+  return view;
+}
+
+/**
+ * 선택한 구간의 서버 집계(구간 값 + 날짜별 값)와 불러오기 상태. 상태 기준은 _dayViewForDate와 같다.
+ */
+function _periodViewFor(periodIndex) {
+  const summary = VL._viewingSummary?.data;
+  return {
+    period: summary?.periods.find((p) => p.periodIndex === periodIndex) ?? null,
+    days: summary?.days ?? [],
+    today: dateStr(new Date()),
+    status: summary
+      ? "ok"
+      : VL._viewingSummaryStatus === "failed"
+        ? "failed"
+        : "loading",
+  };
+}
+
 function _collectingTimerText() {
   const lastWatchedAt = VL._lastWatchedAt;
   if (!lastWatchedAt) return "";
@@ -161,6 +193,8 @@ class ViewLensPopup {
     this.container = container;
     this._tab = "today";
     this._selWeek = 1;
+    // 기간 탭 공통 범례에서 강조한 분야(다시 누르면 해제)
+    this._periodFocus = null;
     this._selectedDate = new Date();
     // 대조군 종료 후 리뷰 화면 보기 상태
     this._studyEndReviewOpen = false;
@@ -286,6 +320,16 @@ class ViewLensPopup {
       const isToday = dateStr(this._selectedDate) === dateStr(new Date());
       d.collectingCount = isToday ? (VL.today?.collectingCount ?? 0) : 0;
       d.collectingTimer = isToday ? _collectingTimerText() : "";
+      const dateKey = dateStr(this._selectedDate);
+      d.dateKey = dateKey;
+      d.view = _dayViewForDate(dateKey);
+      // 그날 재생한 영상 전부(진행 중인 세션 포함) + 서버 사유 표시
+      d.videos = VL.playedVideos(
+        VL._allSessions,
+        VL._liveVideos,
+        dateKey,
+        d.view.excludedReasons,
+      );
       VL.today = d;
     }
 
@@ -307,7 +351,12 @@ class ViewLensPopup {
       bodyHTML =
         this._tab === "today"
           ? screenToday()
-          : screenFeedback(currentWeek, selWeek);
+          : screenFeedback(
+              currentWeek,
+              selWeek,
+              _periodViewFor(selWeek),
+              this._periodFocus,
+            );
     } else if (studyEndReady && this._studyEndReviewOpen) {
       // currentWeek는 day(경과일)로 계산되는데, studyEndReady가 참이면 이미 day >= TOTAL_DAYS라
       bodyHTML =
@@ -315,7 +364,12 @@ class ViewLensPopup {
         (VL._studyEndCodeVerified
           ? this._tab === "today"
             ? screenToday()
-            : screenFeedback(currentWeek, selWeek)
+            : screenFeedback(
+                currentWeek,
+                selWeek,
+                _periodViewFor(selWeek),
+                this._periodFocus,
+              )
           : screenStudyEndCodeInput());
     } else {
       // 10-8: groupCfg.feedback이 true인데 feedbackActive가 false라는 건 "EXP인데 베이스라인
@@ -353,36 +407,24 @@ class ViewLensPopup {
   }
 
   /**
-   * 도넛·스택 바·추이선 등, render()마다 새로 마운트돼 transition이 저절로 재생되지
-   * 않는 차트들을 한 번에 트리거한다(더블 rAF로 다음 프레임에 목표 상태로 바꿈).
+   * 도넛은 render()마다 새로 마운트돼 transition이 저절로 재생되지 않아
+   * 더블 rAF로 다음 프레임에 목표 상태로 바꾼다.
    * 도넛 가운데 퍼센트 카운트업도 같은 타이밍에 함께 진행한다.
    */
   _animateCharts() {
     const segs = this.container.querySelectorAll(".vl-donut-seg");
-    const catRows = this.container.querySelectorAll(".vl-cat-row");
-    const stackSegs = this.container.querySelectorAll(".vl-stack-seg");
-    const trendLineMask = this.container.querySelector(".vl-trend-line-mask");
-    if (
-      segs.length > 0 ||
-      catRows.length > 0 ||
-      stackSegs.length > 0 ||
-      trendLineMask
-    ) {
+    if (this._skipDonutAnim) {
+      this._skipDonutAnim = false;
+      segs.forEach((el) => {
+        el.style.transition = "none";
+        el.setAttribute("stroke-dasharray", el.dataset.finalDash);
+      });
+    } else if (segs.length > 0) {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           segs.forEach((el) => {
             el.setAttribute("stroke-dasharray", el.dataset.finalDash);
           });
-          catRows.forEach((el) => {
-            el.style.opacity = "1";
-            el.style.transform = "translateX(0)";
-          });
-          stackSegs.forEach((el) => {
-            el.style.transform = "scaleX(1)";
-          });
-          if (trendLineMask) {
-            trendLineMask.style.strokeDashoffset = "0";
-          }
         });
       });
     }
@@ -465,8 +507,21 @@ class ViewLensPopup {
           const w = parseInt(btn.dataset.week, 10);
           if (w <= currentWeek) {
             this._selWeek = w;
+            this._periodFocus = null;
             this.render();
           }
+        });
+      });
+    // 기간 탭 범례 — 누른 분야 선만 강조
+    this.container
+      .querySelectorAll("#vl-period-legend [data-legend-key]")
+      .forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const key = btn.dataset.legendKey;
+          this._periodFocus = this._periodFocus === key ? null : key;
+          // 칩은 꺾은선만 바꾸므로 도넛은 다시 차오르지 않게 한다
+          this._skipDonutAnim = true;
+          this.render();
         });
       });
     // Date navigation

@@ -412,7 +412,7 @@ describe("generate-period-reviews.js — run()", () => {
     expect(row.sessionCount).toBe(2);
   });
 
-  // 결정 8 — 2구간부터 직전 구간 비교를 프롬프트에 넣고, 리뷰 첫 문장을 비교로 쓰게 한다
+  // 2구간부터 직전 구간 비교를 프롬프트에 넣고, 리뷰 첫 문장을 비교로 쓰게 한다
   describe("직전 구간 비교", () => {
     const userId = "compare-user";
 
@@ -726,7 +726,7 @@ describe("generate-period-reviews.js — run()", () => {
       .get(userId);
     expect(row.llmStatus).toBe("fallback");
     expect(row.review).toBe(
-      "이 기간에는 영상 1개를 보셨고, 시청 시간은 모두 음악이었어요. 영상이 적어 이 기간의 패턴을 정확히 말하기는 어려워요.",
+      "이 기간에는 영상 1개를 보셨고, 시청 시간은 모두 음악이었어요. 영상이 적어 이번 구간의 패턴을 정확히 말하기는 어려워요.",
     );
   });
 

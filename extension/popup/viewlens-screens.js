@@ -233,29 +233,64 @@ function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
   </div>`;
 }
 
+const SHORT_WATCH_TIP =
+  "30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셌어요. 그보다 짧게 본 영상은 잘못 눌렀거나 바로 넘긴 영상으로 보고 빼요.";
+const UNCATEGORIZED_TIP =
+  "유튜브에서 분야 정보를 가져오지 못한 영상이에요. 정보를 다시 가져오면 그래프에 들어가요.";
+
+function _infoTip(tip) {
+  return `<span class="vl-tip vl-tip-up vl-tip-line" data-tip="${vlEscapeHtml(tip)}" style="display:inline-flex;width:12px;height:12px;border-radius:50%;border:1px solid var(--vl-ink-3);align-items:center;justify-content:center;font-size:8px;font-weight:700;line-height:1;color:var(--vl-ink-3);cursor:default;flex-shrink:0">i</span>`;
+}
+
+function _footNote(text, tip) {
+  return `<div style="position:relative;display:flex;align-items:center;gap:4px;margin-top:8px;font-size:var(--vl-fs-2);color:var(--vl-ink-3)">${vlEscapeHtml(text)}${_infoTip(tip)}</div>`;
+}
+
+// 오늘 탭 그래프 영역
+function _todayChartCard(view, isToday) {
+  if (view.timeDist.length === 0) {
+    const text =
+      view.status === "failed"
+        ? "시청 기록을 불러오지 못했어요. 잠시 후 다시 열어 주세요."
+        : view.status === "loading"
+          ? "시청 기록을 불러오고 있어요."
+          : "분야를 확인한 영상이 아직 없어요.";
+    return vlCard({
+      pad: 16,
+      children: `<div style="font-size:var(--vl-fs-3);color:var(--vl-ink-2);text-align:center">${text}</div>`,
+    });
+  }
+  const { time, count } = VL.donutPair(view);
+  return vlCard({
+    pad: 16,
+    children: `
+      <div style="font-size:var(--vl-fs-2);font-weight:700;color:var(--vl-ink-2);margin-bottom:10px">${isToday ? "오늘" : "이 날"} 유튜브 시청 분야별 비중</div>
+      <div style="display:flex;justify-content:space-around;gap:8px">
+        ${vlDonut({ data: time, size: 116, label: "시청 시간" })}
+        ${vlDonut({ data: count, size: 116, label: "영상 개수" })}
+      </div>
+      <div style="margin-top:12px">${vlLegend({ items: view.timeDist })}</div>
+      ${view.shortCount > 0 ? _footNote(`잠깐 본 영상 ${view.shortCount}개는 세지 않았어요`, SHORT_WATCH_TIP) : ""}
+      ${
+        view.uncategorizedConfirmedCount > 0
+          ? _footNote(
+              `분야를 확인하지 못한 영상 ${view.uncategorizedConfirmedCount}개는 그래프에서 뺐어요`,
+              UNCATEGORIZED_TIP,
+            )
+          : ""
+      }
+    `,
+  });
+}
+
 function screenToday() {
   const d = VL.today;
-  if (d.isEmpty) {
+  const view = d.view || VL.dayView(null);
+  const hasRecord = view.confirmedCount + view.unconfirmedCount > 0;
+  if (d.isEmpty && !hasRecord) {
     const isToday = d.dateLabel === koreanDateLabel(new Date());
     return screenTodayEmpty(d.dateLabel, d.collectingCount, isToday);
   }
-  // 도넛 조각이 채워지는 타이밍에 맞춰 자기 카테고리가 다 찰 때 해당 줄이 나타난다
-  // (트리거는 _animateCharts, viewlens-app.js). d.dist가 이미 비율 내림차순이라 누적
-  // 비율만 계산하면 된다.
-  let catAcc = 0;
-  const catRows = d.dist
-    .map((c) => {
-      catAcc += c.p;
-      const revealMs = Math.round(catAcc * VL_DONUT_DRAW_MS);
-      return `
-    <div class="vl-cat-row" style="display:flex;align-items:center;gap:8px;opacity:0;transform:translateX(6px);transition:opacity .3s ease ${revealMs}ms,transform .3s ease ${revealMs}ms">
-      <span style="width:8px;height:8px;border-radius:3px;background:${c.color};flex-shrink:0"></span>
-      <span style="font-size:var(--vl-fs-3);color:var(--vl-ink);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name}</span>
-      <span style="font-size:var(--vl-fs-3);color:var(--vl-ink-2)">${Math.round(c.p * 100)}%</span>
-    </div>
-  `;
-    })
-    .join("");
 
   const isToday = d.dateLabel === koreanDateLabel(new Date());
   // 잠금 상태는 VL._todayCumulative에서 읽는다.
@@ -280,6 +315,12 @@ function screenToday() {
       <span style="font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-accent)">아래로 스크롤해서 피드백 확인하세요!</span>
     </div>`
     : "";
+  // "영상 N개"는 시청 시간이 확인된 유효 영상(리뷰와 같은 기준), 확인 중인 영상은 따로 센다
+  const countBlock = `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;color:var(--vl-ink-2);font-size:var(--vl-fs-2);font-weight:600;line-height:1.3;white-space:nowrap">
+      <span>영상 ${view.confirmedCount}개</span>
+      ${view.unconfirmedCount > 0 ? `<span style="color:var(--vl-ink-3);font-weight:500">시청 시간 확인 중 ${view.unconfirmedCount}개</span>` : ""}
+    </div>`;
+
   return `<div style="display:flex;flex-direction:column">
     <div style="padding:12px 16px 22px;display:flex;flex-direction:column;gap:14px">
     <div style="display:flex;align-items:center;justify-content:space-between">
@@ -289,20 +330,17 @@ function screenToday() {
       </div>
       ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
     </div>
-    <div style="display:flex;align-items:flex-start;justify-content:space-between">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
       <div>${isCollecting ? collectingRow : scrollNudgeRow}</div>
-      <span style="display:inline-flex;align-items:center;color:var(--vl-ink-2);font-size:var(--vl-fs-2);font-weight:600;line-height:1.2;white-space:nowrap">${d.videoCount}개 영상 · ${d.dist.length}개 분야</span>
+      ${countBlock}
     </div>
+    ${
+      view.title
+        ? `<div style="font-size:var(--vl-fs-5);font-weight:800;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(view.title)}</div>`
+        : ""
+    }
 
-    ${vlCard({
-      pad: 16,
-      children: `
-      <div style="display:flex;align-items:center;gap:16px">
-        ${vlDonut({ data: d.dist, size: 124 })}
-        <div style="flex:1;display:flex;flex-direction:column;gap:8px">${catRows}</div>
-      </div>
-    `,
-    })}
+    ${_todayChartCard(view, isToday)}
 
     ${_todayCumulativeCard(isToday, d, reviewLocked)}
   </div>
@@ -311,57 +349,78 @@ function screenToday() {
 
 // "오늘" 하루 전체를 반영하는 누적 리뷰 카드
 // 오늘은 서버의 today_reviews 캐시(VL._todayCumulative)를 쓰고, 과거 날짜는
-// buildDataForDate가 그 날의 마지막 세션에서 이미 캡처해 둔 review 스냅샷(d.review)을
-// 그대로 보여준다.
+// buildDataForDate가 서버 이력에서 찾은 리뷰(d.review)를 그대로 보여준다.
+// 영상 목록은 그날 재생한 영상 전부(진행 중인 세션 포함, VL.playedVideos)라 위 "영상 N개"와 수가 다를 수 있다.
+// "10월 15일 수요일" → "10월 15일엔 어떤 영상을 봤을까요?"
+function _pastDayReviewTitle(dateLabel) {
+  return `${dateLabel.replace(/\s*\S+요일$/, "")}엔 어떤 영상을 봤을까요?`;
+}
+
 function _todayCumulativeCard(isToday, d, locked) {
+  const videos = d.videos || [];
   if (!isToday) {
     if (!isRealReview(d.review)) return "";
     return vlReview({
-      title: `${d.dateLabel} 돌아보기`,
+      title: _pastDayReviewTitle(d.dateLabel),
       text: d.review,
       topic: d.reviewTopic || "",
-      videos: d.videos,
-      videoListLabel: "이 날 시청한 영상",
-      totalCount: d.videoCount,
+      videos,
+      videoListLabel: "이 날 재생한 영상",
       locked: false,
       sessionId: d.sessionId ?? null,
+      asOf: VL.reviewAsOfLabel(d.reviewGeneratedAt, d.dateKey),
     });
   }
 
   const cumulative = VL._todayCumulative;
   if (!cumulative?.eligible) return "";
 
+  // 모든 세션이 서버 응답을 받았는데 리뷰가 없다.
+  const noReviewText =
+    (d.view?.unconfirmedCount ?? 0) > 0
+      ? "지금 보고 있는 영상의 시청 시간이 확인되면 리뷰를 만들어요."
+      : "잠깐 본 영상만 있어 아직 리뷰를 만들지 않았어요.";
+  const text = cumulative.generating
+    ? "오늘 하루 전체 시청을 분석하고 있어요. 잠시 후 업데이트돼요."
+    : cumulative.noReview
+      ? noReviewText
+      : cumulative.review || "";
+  const showReview = !cumulative.generating && !cumulative.noReview;
+
   return vlReview({
-    title: "오늘 하루 돌아보기",
-    text: cumulative.generating
-      ? "오늘 하루 전체 시청을 분석하고 있어요. 잠시 후 업데이트돼요."
-      : cumulative.review || "",
-    topic: cumulative.generating ? "" : cumulative.reviewTopic || "",
-    videos: d.videos,
-    videoListLabel: "오늘 시청한 영상",
-    totalCount: d.videoCount,
-    locked: !!locked && !cumulative.generating,
+    title: "오늘은 어떤 영상을 봤을까요?",
+    text,
+    topic: showReview ? cumulative.reviewTopic || "" : "",
+    videos,
+    videoListLabel: "오늘 재생한 영상",
+    locked: !!locked && showReview,
     sessionId: cumulative.sessionId ?? null,
+    asOf: showReview
+      ? VL.reviewAsOfLabel(cumulative.generatedAt, d.dateKey)
+      : "",
   });
 }
 
 // ── Feedback ──────────────────────────────────────────────────────────────────
 
-function screenFeedback(currentWeek, selWeek) {
+/** "2026-06-05" → "6/5" */
+function _md(date) {
+  const [, m, d] = date.split("-").map(Number);
+  return `${m}/${d}`;
+}
+
+/**
+ * 기간 탭 — 서버 집계(구간 값 + 날짜별 값) 기준. 리뷰는 서버가 만든 기간 리뷰(첫 문장이 직전 구간 비교).
+ * @param {number} currentWeek - 지금 진행 중인 구간
+ * @param {number} selWeek - 선택한 구간
+ * @param {{period: object|null, days: Array, today: string, status: string}} periodView - _periodViewFor 결과
+ * @param {string|null} [focus] - 공통 범례에서 강조한 분야 key
+ */
+function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
   const w = VL.weeks[selWeek - 1];
-  const prevW = selWeek >= 2 ? VL.weeks[selWeek - 2] : null;
-  // 이 기간(선택된 주차) 안의 날짜별 값
-  // w.daily는 로컬 데이터로 실제 계산 가능할 때만 채워진다(null이면 일별 데이터를 알 수 없다는 뜻, 가짜로 채우지 않는다).
-  const dailyPoints = w.daily || [];
-  const trendData = dailyPoints.map((d) => d.entropy);
-  const trendLabels = dailyPoints.map((d) => d.label);
-  const trendTooltips = dailyPoints.map(
-    (d) => `영상 ${d.videoCount}개 · 카테고리 ${d.categoryCount}개`,
-  );
-  const bandBoundaries = VL.DIVERSITY_BAND_RATIOS.map((r) => VL.H_MAX * r);
+  const { period, days = [], today, status } = periodView || {};
 
   // 위 탭 바와 같은 언어(테두리 없이 색+밑줄로 선택 상태 표현)로 맞춘다
-  // 이 버튼만 예전 방식(테두리+채움 배경)이 남아 있었다.
   const weekBtns = VL.weeks
     .map((wk) => {
       const locked = wk.week > currentWeek;
@@ -378,70 +437,79 @@ function screenFeedback(currentWeek, selWeek) {
     </button>`;
     })
     .join("");
+  const range = period ? `${_md(period.start)} ~ ${_md(period.end)}` : w.range;
+
+  const timeDist = VL.serverDist(period?.timeDistribution);
+  const countDist = VL.serverDist(period?.countDistribution);
+  const title = VL.titleSentence(timeDist, countDist);
+  const chart = period ? VL.periodLines(period, days, today) : null;
+
+  const emptyText =
+    status === "failed"
+      ? "시청 기록을 불러오지 못했어요. 잠시 후 다시 열어 주세요."
+      : status === "loading"
+        ? "시청 기록을 불러오고 있어요."
+        : "이 구간에는 그래프에 넣을 시청 기록이 없어요.";
+  const uncategorizedConfirmed = Math.max(
+    0,
+    (period?.confirmedCount ?? 0) - (period?.chartCount ?? 0),
+  );
+
+  const chartCards =
+    timeDist.length === 0
+      ? vlCard({
+          pad: 16,
+          children: `<div style="font-size:var(--vl-fs-3);color:var(--vl-ink-2);text-align:center">${emptyText}</div>`,
+        })
+      : `${vlCard({
+          pad: 16,
+          children: `
+        <div style="font-size:var(--vl-fs-2);font-weight:700;color:var(--vl-ink-2);margin-bottom:10px">날마다 유튜브 시청 시간 중 분야별 비중</div>
+        <!-- 꺾은선 범례(상위 3개 + 그 밖) — 누르면 그 분야 선만 강조 -->
+        <div style="margin-bottom:8px">${vlLegend({ items: chart.lines, focus: focus ?? null, id: "vl-period-legend" })}</div>
+        ${vlShareLines({ ...chart, focus })}
+        ${period.shortCount > 0 ? _footNote(`잠깐 본 영상 ${period.shortCount}개는 세지 않았어요`, SHORT_WATCH_TIP) : ""}
+        ${uncategorizedConfirmed > 0 ? _footNote(`분야를 확인하지 못한 영상 ${uncategorizedConfirmed}개는 그래프에서 뺐어요`, UNCATEGORIZED_TIP) : ""}
+      `,
+        })}
+      ${(() => {
+        const { time, count } = VL.donutPair({
+          timeDist,
+          countDist,
+          chartSeconds: period.chartSeconds ?? 0,
+          chartCount: period.chartCount ?? 0,
+        });
+        return vlCard({
+          pad: 16,
+          children: `
+        <div style="font-size:var(--vl-fs-2);font-weight:700;color:var(--vl-ink-2);margin-bottom:10px">${w.label} 전체 분야별 비중</div>
+        <div style="display:flex;justify-content:space-around;gap:8px">
+          ${vlDonut({ data: time, size: 116, label: "시청 시간" })}
+          ${vlDonut({ data: count, size: 116, label: "영상 개수" })}
+        </div>
+        <div style="margin-top:12px">${vlLegend({ items: timeDist })}</div>`,
+        });
+      })()}`;
 
   return `<div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
     <!-- 버튼 라벨이 가운데 정렬이라 박스 왼쪽 끝보다 더 오른쪽에서 시작한다(실측
     약 13.6px) — 아래 제목과 맞추려고 줄 전체를 그만큼 왼쪽으로 당긴다. -->
-    <div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:2px;margin-left:-14px" id="vl-week-btns">${weekBtns}</div>
-
-    <div style="display:flex;align-items:center;justify-content:space-between">
-      <div>
-        <div style="font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink)">
-          ${w.label} 리포트
-        </div>
-        <div style=";font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:2px">${w.range}</div>
-      </div>
+    <div style="display:flex;align-items:flex-start;gap:4px;margin-left:-14px">
+      <div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:2px;min-width:0" id="vl-week-btns">${weekBtns}</div>
+      <span style="margin-left:auto;padding-top:6px;font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-ink-2);white-space:nowrap">${range}</span>
     </div>
 
-    ${vlCard({
-      pad: 16,
-      children: `
-        ${vlSectionLabel({ text: "일별 다양성 추이" })}
-        ${
-          dailyPoints.length > 0
-            ? vlMiniLine({
-                // 그 기간 안에 시청 기록이 있는 날이 하루뿐이면 점 하나라 선을 못 그림
-                // 같은 값을 2번 넣어 점으로라도 표시.
-                data:
-                  trendData.length > 1
-                    ? trendData
-                    : [trendData[0] ?? 0, trendData[0] ?? 0],
-                labels:
-                  trendData.length > 1
-                    ? trendLabels
-                    : [trendLabels[0] ?? "", trendLabels[0] ?? ""],
-                tooltips:
-                  trendData.length > 1
-                    ? trendTooltips
-                    : [trendTooltips[0] ?? "", trendTooltips[0] ?? ""],
-                bands: {
-                  boundaries: bandBoundaries,
-                  labels: ["다양", "보통", "편중"],
-                },
-                height: 96,
-              })
-            : `<p style="margin:0;font-size:var(--vl-fs-3);line-height:1.55;color:var(--vl-ink-2)">이 기간은 일별 데이터를 볼 수 없어요.</p>`
-        }
-    `,
-    })}
+    ${
+      title
+        ? `<div style="font-size:var(--vl-fs-5);font-weight:800;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(title)}</div>`
+        : ""
+    }
 
-    ${vlCard({
-      pad: 16,
-      children: `
-      ${vlSectionLabel({ text: `${w.label} 카테고리 분포` })}
-      ${
-        // 영상이 없으면 빈 분포 대신 넣어 둔 "기타 100%"를 그리지 않는다
-        w.videoCount > 0
-          ? vlStackedBar({ data: w.dist })
-          : `<p style="margin:0;font-size:var(--vl-fs-3);line-height:1.55;color:var(--vl-ink-2)">이 기간에는 시청 기록이 없어요.</p>`
-      }
-    `,
-    })}
+    ${chartCards}
 
     ${vlReview({
       text: w.review,
-      fact: VL.periodFactSentence(w, prevW),
-      title: `${w.label} 돌아보기`,
+      title: "이번 구간, 시청은 어떻게 달라졌나요?",
     })}
   </div>`;
 }
@@ -577,14 +645,14 @@ function screenPastDayRevealModal(pastDay) {
   return `<div style="position:absolute;inset:0;z-index:20;display:flex;align-items:flex-end;justify-content:center;padding:16px;background:color-mix(in oklab,var(--vl-ink) 45%,transparent)">
     <div style="width:100%;max-height:88%;overflow-y:auto;background:var(--vl-card);border-radius:18px;padding:18px 16px 16px;box-shadow:0 -12px 40px -8px rgba(0,0,0,.35);animation:vlSheet .35s ease-out">
       ${vlReview({
-        title: `${pastDay.dateLabel} 돌아보기`,
+        title: _pastDayReviewTitle(pastDay.dateLabel),
         text: pastDay.review,
         topic: pastDay.reviewTopic,
         videos: pastDay.videos,
-        videoListLabel: "이 날 시청한 영상",
-        totalCount: pastDay.videoCount,
+        videoListLabel: "이 날 재생한 영상",
         locked: false,
         id: "vl-reveal-review-card",
+        asOf: VL.reviewAsOfLabel(pastDay.reviewGeneratedAt, pastDay.dateKey),
       })}
       <button id="vl-reveal-dismiss" class="vl-press" style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);font-weight:700;cursor:pointer;font-family:inherit">확인했어요</button>
     </div>

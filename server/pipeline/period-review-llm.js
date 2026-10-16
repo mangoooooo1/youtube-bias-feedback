@@ -117,15 +117,17 @@ function buildPeriodPrompt({
   const currentFew = isFewVideosPeriod(validVideoCount, periodDays);
   const previousFew = withComparison && comparison.previousPeriods.at(-1).isFew;
 
+  // 영상이 적다는 안내는 한 번만
   const guidance = [];
   if (currentFew) {
     guidance.push(
-      "- 이 기간은 시청한 영상이 적어 패턴을 단정하기 어렵습니다. 무엇을 봤는지 가볍게 비추고, 영상이 적어 정확한 피드백은 아니라는 점을 한 문장으로 밝혀 주세요.",
+      withComparison
+        ? "- 이 기간은 시청한 영상이 적어 패턴을 단정하기 어렵습니다. 무엇을 봤는지 가볍게 비추고, 영상이 적어 이번 구간의 패턴이나 직전 구간과의 변화 폭을 정확히 말하기는 어렵다는 점을 한 문장으로만 밝혀 주세요."
+        : "- 이 기간은 시청한 영상이 적어 패턴을 단정하기 어렵습니다. 무엇을 봤는지 가볍게 비추고, 영상이 적어 정확한 피드백은 아니라는 점을 한 문장으로 밝혀 주세요.",
     );
-  }
-  if (withComparison && (currentFew || previousFew)) {
+  } else if (withComparison && previousFew) {
     guidance.push(
-      '- 이번 구간이나 직전 구간의 영상이 적습니다. 직전 구간과 비교하는 첫 문장에 "영상이 적어서 변화 폭이 평소와 다를 수 있다"는 점을 함께 밝혀 주세요.',
+      '- 직전 구간의 영상이 적습니다. 직전 구간과 비교하는 첫 문장에 "직전 구간은 영상이 적어서 변화 폭이 평소와 다를 수 있다"는 점을 함께 밝혀 주세요.',
     );
   }
   const guidanceSection =
@@ -313,11 +315,12 @@ function buildCodeComparison({ comparison, validVideoCount, periodDays }) {
   } else {
     sentence = "직전 구간과 비슷하게 봤어요.";
   }
-  const few =
-    isFewVideosPeriod(validVideoCount, periodDays) ||
-    comparison.previousPeriods.at(-1).isFew;
-  return few
-    ? `${sentence} 영상이 적어서, 변화 폭이 평소와 다를 수 있어요.`
+  // 이번 구간이 적은 경우는 대체 문구 마지막 문장이 변화 폭까지 함께 말한다(중복 방지)
+  const onlyPreviousFew =
+    comparison.previousPeriods.at(-1).isFew &&
+    !isFewVideosPeriod(validVideoCount, periodDays);
+  return onlyPreviousFew
+    ? `${sentence} 직전 구간은 영상이 적어서, 변화 폭이 평소와 다를 수 있어요.`
     : sentence;
 }
 
@@ -347,9 +350,11 @@ function generatePeriodFallbackReview({
   const [topName] = basis.entries[0];
   // 영상 수(시청 시간이 확인된 유효 영상, 분야 미확인 포함)와 분야 비중은 대상이 달라 따로 적는다
   const summary = `이 기간에는 영상 ${validVideoCount}개를 보셨고, ${sharesSentence(basis)}`;
-  const fewNote = isFewVideosPeriod(validVideoCount, periodDays)
-    ? "영상이 적어 이 기간의 패턴을 정확히 말하기는 어려워요."
-    : "";
+  const fewNote = !isFewVideosPeriod(validVideoCount, periodDays)
+    ? ""
+    : hasPreviousPeriod(comparison)
+      ? "영상이 적어 이번 구간의 패턴이나 변화 폭을 정확히 말하기는 어려워요."
+      : "영상이 적어 이번 구간의 패턴을 정확히 말하기는 어려워요.";
 
   return {
     topic: topName,

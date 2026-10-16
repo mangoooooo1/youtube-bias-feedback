@@ -15,6 +15,10 @@ const { isTodayReviewEligible } = require("./today-reviews-query");
 function toScreenView(aggregate, { withExcluded }) {
   const view = {
     validCount: aggregate.validCount,
+    // 시청 시간이 확인된 유효 영상, 분야 미확인 포함
+    confirmedCount: aggregate.confirmedCount,
+    // 유효 영상 중 시청 시간이 아직 오지 않은 영상(분야 유무 무관)
+    unconfirmedCount: aggregate.validCount - aggregate.confirmedCount,
     shortCount: aggregate.shortCount,
     uncategorizedCount: aggregate.uncategorizedCount,
     pendingTimeCount: aggregate.pendingTimeCount,

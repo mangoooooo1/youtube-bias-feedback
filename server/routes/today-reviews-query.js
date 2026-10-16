@@ -35,8 +35,9 @@ function isTodayReviewEligible(participant, now = new Date()) {
   return false;
 }
 
+// entropy(다양성 점수)는 분석 결과 변수라 참여자 응답에 넣지 않는다
 const SELECT_COLUMNS = `
-  reviewDate, sessionCount, videoCount, categoryDistribution, entropy,
+  reviewDate, sessionCount, videoCount, categoryDistribution,
   review, reviewTopic, source, promptVersion, generatedAt
 `;
 
