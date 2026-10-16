@@ -303,6 +303,7 @@ function vlReview({
   locked = false,
   sessionId = null,
   id = "vl-review-card",
+  asOf = "",
 } = {}) {
   // 영상별 실제 카테고리를 몰라서(세션 단위로만 근사) 색 점을 찍으면 같은 세션 안의
   // 무관한 영상까지 엉뚱한 색으로 보여 오해를 준다. 그래서 색 표시는 아예 뺀다.
@@ -310,7 +311,11 @@ function vlReview({
     const ytUrl = v.videoId
       ? `https://www.youtube.com/watch?v=${encodeURIComponent(v.videoId)}`
       : null;
-    const label = `<span style="font-size:var(--vl-fs-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${vlEscapeHtml(v.title)}</span>`;
+    // 거의 안 봄·확인 중·분야 미확인
+    const mark = v.mark
+      ? `<span style="flex-shrink:0;margin-left:6px;font-size:var(--vl-fs-1);color:var(--vl-ink-3);white-space:nowrap">${vlEscapeHtml(v.mark)}</span>`
+      : "";
+    const label = `<span style="font-size:var(--vl-fs-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0">${vlEscapeHtml(v.title)}</span>${mark}`;
     const base = `display:flex;align-items:center;min-width:0`;
     return ytUrl
       ? `<a href="${ytUrl}" target="_blank" rel="noopener" class="vl-vid-link"
@@ -388,6 +393,7 @@ function vlReview({
       <div style="display:flex;align-items:center;gap:7px;margin-bottom:9px">
         ${markSVG({ size: 18, filled: false, accent: "var(--vl-accent)" })}
         <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">${title}</span>
+        ${asOf ? `<span style="margin-left:auto;font-size:var(--vl-fs-1);color:var(--vl-ink-3);white-space:nowrap">${vlEscapeHtml(asOf)}</span>` : ""}
       </div>
       ${topicBlock}
       ${factBlock}

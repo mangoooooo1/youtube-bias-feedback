@@ -360,37 +360,52 @@ function screenToday() {
 
 // "오늘" 하루 전체를 반영하는 누적 리뷰 카드
 // 오늘은 서버의 today_reviews 캐시(VL._todayCumulative)를 쓰고, 과거 날짜는
-// buildDataForDate가 그 날의 마지막 세션에서 이미 캡처해 둔 review 스냅샷(d.review)을
-// 그대로 보여준다.
+// buildDataForDate가 서버 이력에서 찾은 리뷰(d.review)를 그대로 보여준다.
+// 영상 목록은 그날 재생한 영상 전부(진행 중인 세션 포함, VL.playedVideos)라 위 "영상 N개"와 수가 다를 수 있다.
 function _todayCumulativeCard(isToday, d, locked) {
+  const videos = d.videos || [];
   if (!isToday) {
     if (!isRealReview(d.review)) return "";
+    // "10월 15일 수요일" → "10월 15일엔 어떤 영상을 봤을까요?"
+    const day = d.dateLabel.replace(/\s*\S+요일$/, "");
     return vlReview({
-      title: `${d.dateLabel} 돌아보기`,
+      title: `${day}엔 어떤 영상을 봤을까요?`,
       text: d.review,
       topic: d.reviewTopic || "",
-      videos: d.videos,
-      videoListLabel: "이 날 시청한 영상",
-      totalCount: d.videoCount,
+      videos,
+      videoListLabel: "이 날 재생한 영상",
       locked: false,
       sessionId: d.sessionId ?? null,
+      asOf: VL.reviewAsOfLabel(d.reviewGeneratedAt, d.dateKey),
     });
   }
 
   const cumulative = VL._todayCumulative;
   if (!cumulative?.eligible) return "";
 
+  // 모든 세션이 서버 응답을 받았는데 리뷰가 없다.
+  const noReviewText =
+    (d.view?.unconfirmedCount ?? 0) > 0
+      ? "지금 보고 있는 영상의 시청 시간이 확인되면 리뷰를 만들어요."
+      : "잠깐 본 영상만 있어 아직 리뷰를 만들지 않았어요.";
+  const text = cumulative.generating
+    ? "오늘 하루 전체 시청을 분석하고 있어요. 잠시 후 업데이트돼요."
+    : cumulative.noReview
+      ? noReviewText
+      : cumulative.review || "";
+  const showReview = !cumulative.generating && !cumulative.noReview;
+
   return vlReview({
-    title: "오늘 하루 돌아보기",
-    text: cumulative.generating
-      ? "오늘 하루 전체 시청을 분석하고 있어요. 잠시 후 업데이트돼요."
-      : cumulative.review || "",
-    topic: cumulative.generating ? "" : cumulative.reviewTopic || "",
-    videos: d.videos,
-    videoListLabel: "오늘 시청한 영상",
-    totalCount: d.videoCount,
-    locked: !!locked && !cumulative.generating,
+    title: "오늘은 어떤 영상을 봤을까요?",
+    text,
+    topic: showReview ? cumulative.reviewTopic || "" : "",
+    videos,
+    videoListLabel: "오늘 재생한 영상",
+    locked: !!locked && showReview,
     sessionId: cumulative.sessionId ?? null,
+    asOf: showReview
+      ? VL.reviewAsOfLabel(cumulative.generatedAt, d.dateKey)
+      : "",
   });
 }
 
@@ -626,14 +641,14 @@ function screenPastDayRevealModal(pastDay) {
   return `<div style="position:absolute;inset:0;z-index:20;display:flex;align-items:flex-end;justify-content:center;padding:16px;background:color-mix(in oklab,var(--vl-ink) 45%,transparent)">
     <div style="width:100%;max-height:88%;overflow-y:auto;background:var(--vl-card);border-radius:18px;padding:18px 16px 16px;box-shadow:0 -12px 40px -8px rgba(0,0,0,.35);animation:vlSheet .35s ease-out">
       ${vlReview({
-        title: `${pastDay.dateLabel} 돌아보기`,
+        title: `${pastDay.dateLabel.replace(/s*S+요일$/, "")}엔 어떤 영상을 봤을까요?`,
         text: pastDay.review,
         topic: pastDay.reviewTopic,
         videos: pastDay.videos,
-        videoListLabel: "이 날 시청한 영상",
-        totalCount: pastDay.videoCount,
+        videoListLabel: "이 날 재생한 영상",
         locked: false,
         id: "vl-reveal-review-card",
+        asOf: VL.reviewAsOfLabel(pastDay.reviewGeneratedAt, pastDay.dateKey),
       })}
       <button id="vl-reveal-dismiss" class="vl-press" style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);font-weight:700;cursor:pointer;font-family:inherit">확인했어요</button>
     </div>

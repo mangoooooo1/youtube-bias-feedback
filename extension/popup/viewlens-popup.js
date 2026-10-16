@@ -178,6 +178,8 @@ function buildDataForDate(allSessions, targetDate) {
     "시청 패턴을 분석하고 있어요. 잠시 후 시청 분석이 업데이트돼요.";
   const reviewTopic =
     serverRow?.reviewTopic || sourceSessions.at(-1)?.reviewTopic || "";
+  // 리뷰 카드의 "기준" 시각(서버가 이 리뷰를 만든 시각)
+  const reviewGeneratedAt = serverRow?.generatedAt ?? null;
   // "피드백 확인하기" 블러 해제 버튼이 어느 세션을 확인 처리할지 알아야 해서 함께 넘긴다.
   const sessionId = sourceSessions.at(-1)?.sessionId ?? null;
   // 오늘 누적 리뷰(Story 11-2)의 신선도(staleness) 판정용 — 마지막 세션 하나가 아니라
@@ -194,9 +196,21 @@ function buildDataForDate(allSessions, targetDate) {
     videos,
     review,
     reviewTopic,
+    reviewGeneratedAt,
     sessionId,
     sessionIds,
   };
+}
+
+/**
+ * 진행 중인 세션의 영상 기록(video__ 키). 세션이 끝나기 전에도 "오늘 재생한 영상" 목록에 보여 준다.
+ * @returns {Promise<Array<object>>}
+ */
+async function loadLiveVideos() {
+  const all = await chrome.storage.local.get(null);
+  return Object.entries(all)
+    .filter(([key]) => key.startsWith("video__"))
+    .map(([, video]) => video);
 }
 
 // "어제 돌아보기" 리빌 대상 날짜를 찾는다
@@ -656,46 +670,53 @@ async function getTodayReviewsCached(
     : [];
 }
 
+/** 오늘(KST) 끝난 로컬 세션들 */
+function todaySessionsOf(allSessions) {
+  const todayStr = dateStr(new Date());
+  return (allSessions || []).filter(
+    (s) => s.endTime && dateStr(new Date(s.endTime)) === todayStr,
+  );
+}
+
 // 오늘 누적 리뷰의 현재 표시 상태를 판정한다. 대상이 아니면 즉시 빈 상태를 반환하고,
 // 대상이면 이미 조회해 둔 이력(reviews)에서 오늘 행을 찾는다.
-async function resolveTodayCumulative(eligible, reviews, todaySessionIds) {
-  if (!eligible) {
-    return {
-      eligible: false,
-      generating: false,
-      review: null,
-      reviewTopic: null,
-      sessionId: null,
-      locked: false,
-    };
+// 서버는 유효 시청 영상이 늘지 않은 세션에서는 리뷰를 다시 만들지 않으므로, "세션마다 리뷰가 새로 생긴다"고 보지 않는다.
+async function resolveTodayCumulative(eligible, reviews, todaySessions) {
+  const empty = {
+    eligible,
+    generating: false,
+    noReview: false,
+    review: null,
+    reviewTopic: null,
+    generatedAt: null,
+    sessionId: null,
+    locked: false,
+  };
+  if (!eligible) return empty;
+
+  if ((todaySessions || []).some((s) => s.syncedToServer !== true)) {
+    return { ...empty, generating: true };
   }
 
   const todayStr = dateStr(new Date());
   const todayRow = (reviews || []).find((r) => r.reviewDate === todayStr);
+  // 모든 세션이 응답을 받았는데 리뷰가 없다.
+  if (!todayRow) return { ...empty, noReview: true };
 
-  // 오늘 행이 아직 없거나, 로컬에서 아는 오늘 세션 수보다 적게 반영돼 있으면 생성 중으로 본다
-  if (!todayRow || (todayRow.sessionCount ?? 0) < todaySessionIds.length) {
-    return {
-      eligible: true,
-      generating: true,
-      review: null,
-      reviewTopic: null,
-      sessionId: null,
-      locked: false,
-    };
-  }
-
-  // 오늘 세션들의 등록 순서 그대로라 마지막 원소가 곧 가장 최근 세션이다
-  const sessionId = todaySessionIds.at(-1) ?? null;
+  // 잠금·열람·확인은 지금 리뷰를 실제로 받은 세션 기준
+  const reviewSession =
+    [...todaySessions].reverse().find((s) => isRealReview(s.review)) ??
+    todaySessions.at(-1);
+  const sessionId = reviewSession?.sessionId ?? null;
   const locked = isRealReview(todayRow.review)
     ? !(await isFeedbackConfirmed(sessionId))
     : false;
 
   return {
-    eligible: true,
-    generating: false,
+    ...empty,
     review: todayRow.review,
     reviewTopic: todayRow.reviewTopic,
+    generatedAt: todayRow.generatedAt ?? null,
     sessionId,
     locked,
   };
@@ -1127,6 +1148,7 @@ async function boot() {
   VL._lastWatchedAt = stored.lastWatchedAt || null;
 
   // 화면 그래프·숫자의 원천(서버 집계). 저장본을 먼저 쓰고, 새로 받아 오면 바꾼다.
+  VL._liveVideos = await loadLiveVideos();
   VL._viewingSummary = await loadViewingSummaryCache(stored.anonymousId);
   VL._viewingSummaryStatus = "loading";
   // 새로 받아 오면 VL._viewingSummary를 바꾸고 true. 실패하면 저장본을 그대로 두고 false
@@ -1190,7 +1212,7 @@ async function boot() {
   VL._todayCumulative = await resolveTodayCumulative(
     todayCumulativeEligible,
     todayReviewsList,
-    realToday.sessionIds,
+    todaySessionsOf(sessions),
   );
 
   // "어제 돌아보기" 리빌 (feedbackActive(EXP + 베이스라인 이후)일 때만 계산)
@@ -1209,6 +1231,14 @@ async function boot() {
       // revealedDate를 갱신하지 않으므로, 다음에 실제 리뷰가 쌓인 날이 오면 그 날짜가
       // 자연히 최신 후보로 대체된다(소급 리빌 금지 정책과 일관).
       if (isRealReview(revealData.review)) {
+        // 오늘 탭 카드와 같은 영상 목록(그날 재생한 영상 전부 + 서버 사유)
+        revealData.dateKey = revealPastDateStr;
+        revealData.videos = VL.playedVideos(
+          sessions,
+          VL._liveVideos,
+          revealPastDateStr,
+          _dayViewForDate(revealPastDateStr).excludedReasons,
+        );
         VL._revealPastDay = { dateStr: revealPastDateStr, data: revealData };
       }
     }
@@ -1474,9 +1504,18 @@ async function boot() {
           VL._todayCumulative = await resolveTodayCumulative(
             true,
             Object.values(VL._todayReviewsByDate || {}),
-            freshToday.sessionIds,
+            todaySessionsOf(updatedSessions),
           );
         }
+      } else {
+        // 리뷰를 건너뛴 세션은 리뷰 캐시가 바뀌지 않고 세션의 응답 여부만 바뀐다 — 여기서 다시 판정해
+        // "생성 중"에서 벗어나게 한다
+        VL._todayCumulative = await resolveTodayCumulative(
+          true,
+          Object.values(VL._todayReviewsByDate || {}),
+          todaySessionsOf(updatedSessions),
+        );
+        VL._todayConfirmed = !VL._todayCumulative.locked;
       }
 
       if (installDate) {
@@ -1500,7 +1539,7 @@ async function boot() {
         VL._todayCumulative = await resolveTodayCumulative(
           true,
           reviews,
-          VL.today?.sessionIds || [],
+          todaySessionsOf(VL._allSessions),
         );
         VL._todayConfirmed = !VL._todayCumulative.locked;
         if (
@@ -1513,7 +1552,13 @@ async function boot() {
       }
     }
 
-    if (changes.sessions || changes.todayReviewsCache) {
+    // 진행 중인 세션에 영상이 추가되거나 시청 시간이 기록되면 영상 목록을 다시 읽는다
+    const liveVideosChanged = Object.keys(changes).some((key) =>
+      key.startsWith("video__"),
+    );
+    if (liveVideosChanged) VL._liveVideos = await loadLiveVideos();
+
+    if (changes.sessions || changes.todayReviewsCache || liveVideosChanged) {
       popup.render();
     }
   });

@@ -534,3 +534,87 @@ describe("VL.formatDuration·VL.donutPair — 오늘 탭 도넛 툴팁", () => {
     expect(VL.dayView(undefined).uncategorizedConfirmedCount).toBe(0);
   });
 });
+
+describe("VL.playedVideos — 그날 재생한 영상 목록", () => {
+  let VL;
+  beforeAll(() => {
+    VL = loadVL();
+  });
+  const v = (eventId, watchedAt, extra = {}) => ({
+    eventId,
+    videoId: `vid-${eventId}`,
+    title: `영상 ${eventId}`,
+    watchedAt,
+    watchedSeconds: 300,
+    ...extra,
+  });
+
+  it("끝난 세션과 진행 중인 세션의 영상을 모아 본 시각 순으로, 그날(KST) 것만", () => {
+    const sessions = [
+      {
+        videos: [
+          v("e2", "2026-03-05T11:00:00+09:00"),
+          v("old", "2026-03-04T23:00:00+09:00"),
+        ],
+      },
+    ];
+    const live = [
+      v("e3", "2026-03-05T12:00:00+09:00"),
+      v("e1", "2026-03-05T00:10:00+09:00"),
+    ];
+
+    expect(
+      VL.playedVideos(sessions, live, "2026-03-05").map((x) => x.eventId),
+    ).toEqual(["e1", "e2", "e3"]);
+  });
+
+  it("세션 종료 직전·직후 두 곳에 같이 있는 영상은 한 번만", () => {
+    const same = v("e1", "2026-03-05T10:00:00+09:00");
+    expect(
+      VL.playedVideos([{ videos: [same] }], [same], "2026-03-05"),
+    ).toHaveLength(1);
+  });
+
+  it("서버 사유로 거의 안 봄·분야 미확인·확인 중, 기기에 시청 시간이 없으면 확인 중을 붙인다", () => {
+    const list = VL.playedVideos(
+      [],
+      [
+        v("short", "2026-03-05T10:00:00+09:00"),
+        v("uncat", "2026-03-05T10:01:00+09:00"),
+        v("pending", "2026-03-05T10:02:00+09:00"),
+        v("local-null", "2026-03-05T10:03:00+09:00", { watchedSeconds: null }),
+        v("ok", "2026-03-05T10:04:00+09:00"),
+      ],
+      "2026-03-05",
+      { short: "short", uncat: "uncategorized", pending: "pending_time" },
+    );
+
+    expect(list.map((x) => [x.eventId, x.mark])).toEqual([
+      ["short", "거의 안 봄"],
+      ["uncat", "분야 미확인"],
+      ["pending", "확인 중"],
+      ["local-null", "확인 중"],
+      ["ok", null],
+    ]);
+  });
+});
+
+describe("VL.reviewAsOfLabel — 리뷰 카드의 기준 시각", () => {
+  let VL;
+  beforeAll(() => {
+    VL = loadVL();
+  });
+
+  it("리뷰를 만든 시각을 KST 시:분으로, 만든 날이 리뷰 날짜와 다르면 날짜도 붙인다", () => {
+    expect(VL.reviewAsOfLabel("2026-10-16T05:32:00Z", "2026-10-16")).toBe(
+      "14:32 기준",
+    );
+    expect(VL.reviewAsOfLabel("2026-10-15T15:31:00Z", "2026-10-15")).toBe(
+      "10/16 00:31 기준",
+    );
+  });
+
+  it("값이 없으면 빈 문자열", () => {
+    expect(VL.reviewAsOfLabel(null, "2026-10-16")).toBe("");
+  });
+});

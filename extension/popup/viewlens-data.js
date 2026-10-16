@@ -123,7 +123,7 @@ function dayView(day) {
     timeDist,
     countDist,
     title: titleSentence(timeDist, countDist),
-    // 영상 목록에 짧게 봄·확인 중·분야 미확인을 붙이는 데 쓴다
+    // 영상 목록에 거의 안 봄·확인 중·분야 미확인을 붙이는 데 쓴다
     excludedReasons: Object.fromEntries(
       (day?.excluded || []).map((e) => [e.eventId, e.reason]),
     ),
@@ -156,6 +156,82 @@ function donutPair(view) {
       tip: `${d.name} ${percentOf(d.p)}% · ${Math.round(d.p * view.chartCount)}개`,
     })),
   };
+}
+
+/** KST(Asia/Seoul) 기준 YYYY-MM-DD */
+function kstDate(date) {
+  return date.toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+}
+
+// 서버가 영상별로 알려 준 "그래프에서 뺀 사유" → 목록 표시
+const PLAYED_VIDEO_MARKS = {
+  short: "거의 안 봄",
+  uncategorized: "분야 미확인",
+  pending_time: "확인 중",
+};
+
+/**
+ * 그날 재생한 영상 목록
+ * 끝난 세션과 진행 중인 세션의 영상 기록을 모두 모아 본 시각 순으로.
+ * @param {Array<{videos?: Array}>} sessions - 끝난 세션들
+ * @param {Array<object>} liveVideos - 진행 중인 세션의 영상 기록(video__ 키)
+ * @param {string} dateKey - YYYY-MM-DD(KST)
+ * @param {Record<string, string>} reasons - eventId → 서버 사유(VL.dayView().excludedReasons)
+ * @returns {Array<{title: string, videoId: string|null, eventId: string|null, mark: string|null}>}
+ */
+function playedVideos(sessions, liveVideos, dateKey, reasons = {}) {
+  const all = [
+    ...(sessions || []).flatMap((s) => s.videos || []),
+    ...(liveVideos || []),
+  ];
+  const seen = new Set();
+  return all
+    .filter((v) => {
+      const ms = Date.parse(v.watchedAt);
+      if (!Number.isFinite(ms) || kstDate(new Date(ms)) !== dateKey)
+        return false;
+      // 세션 종료 직전·직후에 같은 영상 기록이 두 곳에 잠깐 함께 있을 수 있다
+      if (v.eventId) {
+        if (seen.has(v.eventId)) return false;
+        seen.add(v.eventId);
+      }
+      return true;
+    })
+    .sort((a, b) => Date.parse(a.watchedAt) - Date.parse(b.watchedAt))
+    .map((v) => {
+      const reason = v.eventId ? reasons[v.eventId] : undefined;
+      const mark =
+        reason === "short" || reason === "uncategorized"
+          ? PLAYED_VIDEO_MARKS[reason]
+          : v.watchedSeconds == null || reason === "pending_time"
+            ? PLAYED_VIDEO_MARKS.pending_time
+            : null;
+      return {
+        title: v.title,
+        videoId: v.videoId || null,
+        eventId: v.eventId || null,
+        mark,
+      };
+    });
+}
+
+/**
+ * 리뷰 카드의 "기준" 시각
+ * @returns {string} "14:32 기준" / "10/16 00:31 기준" / 값이 없으면 ""
+ */
+function reviewAsOfLabel(generatedAt, reviewDate) {
+  const ms = Date.parse(generatedAt);
+  if (!Number.isFinite(ms)) return "";
+  const at = new Date(ms);
+  const time = at.toLocaleTimeString("en-GB", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const day = kstDate(at);
+  if (day === reviewDate) return `${time} 기준`;
+  const [, m, d] = day.split("-").map(Number);
+  return `${m}/${d} ${time} 기준`;
 }
 
 /** "YYYY-MM-DD" 범위의 모든 날짜 */
@@ -688,6 +764,8 @@ window.VL = {
   periodLines,
   formatDuration,
   donutPair,
+  playedVideos,
+  reviewAsOfLabel,
   dist,
   entropy,
   H_MAX,

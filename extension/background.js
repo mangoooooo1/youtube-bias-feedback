@@ -360,21 +360,18 @@ async function syncSessionToServer(session, metrics = {}) {
   if (!result.ok || result.data === null) return result;
   const postResult = result.data;
 
-  // 서버가 이번 응답으로 돌려준 categoryDistribution/entropy를 이제야 로컬에 채운다.
+  const todayReview = postResult?.todayReview ?? null;
+  // 팝업은 "서버 응답을 받았는지(syncedToServer)"로 리뷰 생성 중을 판단하고, 리뷰를 받은 세션에 잠금을 묶는다.
+  // 리뷰 캐시를 먼저 갱신한 뒤 응답 여부와 리뷰를 한 번에 저장해, 그 사이에 옛 리뷰가 잠깐 보이는 일이 없게 한다.
+  await mergeTodayReviewIntoCache(onboarding?.anonymousId, todayReview);
   await saveAnalysis(session.sessionId, {
     categoryDistribution: postResult.categoryDistribution,
     entropy: postResult.entropy,
     syncedToServer: postResult.categoryDistribution !== null,
+    ...(todayReview
+      ? { review: todayReview.review, reviewTopic: todayReview.reviewTopic }
+      : {}),
   });
-
-  const todayReview = postResult?.todayReview ?? null;
-  if (todayReview) {
-    await saveAnalysis(session.sessionId, {
-      review: todayReview.review,
-      reviewTopic: todayReview.reviewTopic,
-    });
-  }
-  await mergeTodayReviewIntoCache(onboarding?.anonymousId, todayReview);
   console.log("[background] 오늘 리뷰 반영 완료:", todayReview);
 
   // 알림 자격은 그룹·베이스라인만으로 미리 정해지지만, 실제 알림은 todayReview가

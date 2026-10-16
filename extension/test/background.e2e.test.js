@@ -189,6 +189,58 @@ describe("analyzeSession — 시청 감지 이후 전체 파이프라인 E2E", (
     expect(calls.sessions[0]).not.toHaveProperty("llmStatus");
   });
 
+  // 팝업은 세션의 응답 여부(syncedToServer)로 "생성 중"을 판단하고 리뷰를 받은 세션(review)에 잠금을 묶는다.
+  // 응답 여부만 먼저 저장되면 그 사이에 옛 리뷰가 잠깐 풀린 채 보일 수 있다
+  it("리뷰 캐시를 먼저 갱신하고, 세션에는 응답 여부와 리뷰를 한 번에 저장한다", async () => {
+    global.chrome = createChromeMock();
+    const { fetchMock } = createFetchMock({
+      todayReview: {
+        reviewDate: "2026-01-10",
+        review: "새 리뷰",
+        reviewTopic: "음악",
+      },
+    });
+    global.fetch = fetchMock;
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
+          endTime: FIXED_NOW.toISOString(),
+          videos: [{ videoId: "v1", title: "노래 모음" }],
+        },
+      ],
+    });
+    const writes = [];
+    const originalSet = global.chrome.storage.local.set;
+    global.chrome.storage.local.set = vi.fn(async (obj) => {
+      writes.push(structuredClone(obj));
+      return originalSet(obj);
+    });
+
+    const analyzeSession = await loadAnalyzeSession();
+    await analyzeSession({
+      sessionId: "s1",
+      videos: [{ videoId: "v1", title: "노래 모음" }],
+    });
+
+    const syncedWrite = writes.findIndex((w) =>
+      w.sessions?.some(
+        (x) => x.sessionId === "s1" && x.syncedToServer === true,
+      ),
+    );
+    const cacheWrite = writes.findIndex((w) => w.todayReviewsCache);
+    expect(syncedWrite).toBeGreaterThan(-1);
+    expect(cacheWrite).toBeGreaterThan(-1);
+    expect(cacheWrite).toBeLessThan(syncedWrite);
+    expect(
+      writes[syncedWrite].sessions.find((x) => x.sessionId === "s1").review,
+    ).toBe("새 리뷰");
+  });
+
   it("서버 응답에 오늘 리뷰가 없으면(자격 없음 등) 로컬에도 리뷰 텍스트를 저장하지 않는다", async () => {
     global.chrome = createChromeMock();
     const { fetchMock, calls } = createFetchMock({ todayReview: null });

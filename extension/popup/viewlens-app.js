@@ -301,7 +301,16 @@ class ViewLensPopup {
       const isToday = dateStr(this._selectedDate) === dateStr(new Date());
       d.collectingCount = isToday ? (VL.today?.collectingCount ?? 0) : 0;
       d.collectingTimer = isToday ? _collectingTimerText() : "";
-      d.view = _dayViewForDate(dateStr(this._selectedDate));
+      const dateKey = dateStr(this._selectedDate);
+      d.dateKey = dateKey;
+      d.view = _dayViewForDate(dateKey);
+      // 그날 재생한 영상 전부(진행 중인 세션 포함) + 서버 사유 표시
+      d.videos = VL.playedVideos(
+        VL._allSessions,
+        VL._liveVideos,
+        dateKey,
+        d.view.excludedReasons,
+      );
       VL.today = d;
     }
 

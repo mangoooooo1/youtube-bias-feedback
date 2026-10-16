@@ -330,3 +330,112 @@ describe("viewing-summary 조회와 저장본", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+// 서버는 유효 시청 영상이 늘지 않은 세션에서 리뷰를 다시 만들지 않는다
+describe("resolveTodayCumulative — 오늘 리뷰 카드 상태", () => {
+  const DECL =
+    /async function resolveTodayCumulative\(eligible, reviews, todaySessions\) \{[\s\S]*?\n\}/;
+  const TODAY = "2026-03-05";
+
+  function load(confirmed = []) {
+    const raw = readFileSync(VIEWLENS_POPUP_PATH, "utf8");
+    const isFeedbackConfirmed = vi.fn(async (id) => confirmed.includes(id));
+    const resolve = new Function(
+      "dateStr",
+      "isRealReview",
+      "isFeedbackConfirmed",
+      `${raw.match(DECL)[0]}\nreturn resolveTodayCumulative;`,
+    )(
+      () => TODAY,
+      (t) => typeof t === "string" && t.length > 0,
+      isFeedbackConfirmed,
+    );
+    return { resolve, isFeedbackConfirmed };
+  }
+  const row = {
+    reviewDate: TODAY,
+    review: "오늘 리뷰",
+    reviewTopic: "음악",
+    generatedAt: "2026-03-05T05:32:00Z",
+    sessionCount: 1,
+  };
+
+  it("대상이 아니면 빈 상태", async () => {
+    const { resolve } = load();
+    expect(await resolve(false, [row], [])).toMatchObject({
+      eligible: false,
+      generating: false,
+    });
+  });
+
+  it("서버 응답을 아직 못 받은 오늘 세션이 있으면 생성 중", async () => {
+    const { resolve } = load();
+    const result = await resolve(
+      true,
+      [row],
+      [
+        { sessionId: "s1", syncedToServer: true, review: "오늘 리뷰" },
+        { sessionId: "s2", syncedToServer: false },
+      ],
+    );
+    expect(result.generating).toBe(true);
+  });
+
+  it("리뷰를 건너뛴 세션(응답은 받았지만 리뷰 없음) 뒤에도 생성 중이 아니고 기존 리뷰를 보여 준다", async () => {
+    const { resolve } = load(["s1"]);
+    const result = await resolve(
+      true,
+      [row],
+      [
+        { sessionId: "s1", syncedToServer: true, review: "오늘 리뷰" },
+        { sessionId: "s2", syncedToServer: true },
+      ],
+    );
+    expect(result).toMatchObject({
+      generating: false,
+      noReview: false,
+      review: "오늘 리뷰",
+      generatedAt: "2026-03-05T05:32:00Z",
+      // 잠금·확인은 리뷰를 받은 세션 기준 — 이미 확인했으니 다시 잠기지 않는다
+      sessionId: "s1",
+      locked: false,
+    });
+  });
+
+  it("리뷰를 받은 세션을 아직 확인하지 않았으면 잠근다", async () => {
+    const { resolve } = load([]);
+    const result = await resolve(
+      true,
+      [row],
+      [{ sessionId: "s1", syncedToServer: true, review: "오늘 리뷰" }],
+    );
+    expect(result).toMatchObject({ sessionId: "s1", locked: true });
+  });
+
+  it("기기에 리뷰를 받은 세션 기록이 없으면(재설치 등) 마지막 세션으로 대신한다", async () => {
+    const { resolve } = load([]);
+    const result = await resolve(
+      true,
+      [row],
+      [
+        { sessionId: "s1", syncedToServer: true },
+        { sessionId: "s2", syncedToServer: true },
+      ],
+    );
+    expect(result.sessionId).toBe("s2");
+  });
+
+  it("모든 세션이 응답을 받았는데 오늘 리뷰가 없으면 noReview(생성 중 아님)", async () => {
+    const { resolve } = load();
+    const result = await resolve(
+      true,
+      [],
+      [{ sessionId: "s1", syncedToServer: true }],
+    );
+    expect(result).toMatchObject({
+      generating: false,
+      noReview: true,
+      review: null,
+    });
+  });
+});

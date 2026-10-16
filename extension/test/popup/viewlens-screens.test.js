@@ -19,7 +19,7 @@ function loadScreens() {
     "document",
     "markSVG",
     `${src}\n;const koreanDateLabel = window.koreanDateLabel;
-const VL = window.VL;\nreturn { screenToday, VL };`,
+const VL = window.VL;\nreturn { screenToday, VL, koreanDateLabel };`,
   )(sandbox, {}, () => "");
 }
 
@@ -134,5 +134,102 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
       { isEmpty: true },
     );
     expect(html).not.toContain("유튜브 시청 분야별 비중");
+  });
+});
+
+describe("screenToday — 리뷰 카드와 재생한 영상 목록", () => {
+  let screenToday;
+  let VL;
+  let koreanDateLabel;
+
+  beforeEach(() => {
+    ({ screenToday, VL, koreanDateLabel } = loadScreens());
+  });
+
+  function renderToday(cumulative, { videos = [], unconfirmedCount = 0 } = {}) {
+    const view = VL.dayView({ ...DAY, unconfirmedCount });
+    view.status = "ok";
+    VL.today = {
+      ...VL.today,
+      dateLabel: koreanDateLabel(new Date()),
+      dateKey: "2026-03-05",
+      isEmpty: false,
+      collectingCount: 0,
+      collectingTimer: "",
+      view,
+      videos,
+    };
+    VL._todayCumulative = {
+      eligible: true,
+      generating: false,
+      noReview: false,
+      locked: false,
+      ...cumulative,
+    };
+    return screenToday();
+  }
+
+  it("오늘 카드 제목과 리뷰를 만든 시각(기준)을 보여 준다", () => {
+    const html = renderToday({
+      review: "오늘 리뷰",
+      generatedAt: "2026-03-05T05:32:00Z",
+    });
+    expect(html).toContain("오늘은 어떤 영상을 봤을까요?");
+    expect(html).toContain("14:32 기준");
+    expect(html).not.toContain("오늘 하루 돌아보기");
+  });
+
+  it("생성 중이면 기준 시각을 숨긴다", () => {
+    const html = renderToday({
+      generating: true,
+      generatedAt: "2026-03-05T05:32:00Z",
+    });
+    expect(html).toContain("분석하고 있어요");
+    expect(html).not.toContain("기준</span>");
+  });
+
+  it("리뷰가 없을 때 확인 중인 영상이 있으면 시청 시간이 확인되면 만든다고 안내한다", () => {
+    expect(renderToday({ noReview: true }, { unconfirmedCount: 1 })).toContain(
+      "지금 보고 있는 영상의 시청 시간이 확인되면 리뷰를 만들어요.",
+    );
+    expect(renderToday({ noReview: true })).toContain(
+      "잠깐 본 영상만 있어 아직 리뷰를 만들지 않았어요.",
+    );
+  });
+
+  it("목록 이름은 '오늘 재생한 영상'이고 줄마다 표시를 붙인다", () => {
+    const html = renderToday(
+      { review: "오늘 리뷰" },
+      {
+        videos: [
+          { title: "다 본 영상", videoId: "a", mark: null },
+          { title: "넘긴 쇼츠", videoId: "b", mark: "거의 안 봄" },
+        ],
+      },
+    );
+    expect(html).toContain("오늘 재생한 영상");
+    expect(html).toContain(">거의 안 봄</span>");
+    expect(html).toContain(">2개</span>");
+  });
+
+  it("지난 날짜 카드는 '○월 ○일엔 어떤 영상을 봤을까요?'와 '이 날 재생한 영상'", () => {
+    const view = VL.dayView(DAY);
+    view.status = "ok";
+    VL.today = {
+      ...VL.today,
+      dateLabel: "3월 5일 목요일",
+      dateKey: "2026-03-05",
+      isEmpty: false,
+      collectingCount: 0,
+      collectingTimer: "",
+      view,
+      review: "그날 리뷰",
+      reviewGeneratedAt: "2026-03-05T15:31:00Z",
+      videos: [{ title: "영상", videoId: "a", mark: null }],
+    };
+    const html = screenToday();
+    expect(html).toContain("3월 5일엔 어떤 영상을 봤을까요?");
+    expect(html).toContain("이 날 재생한 영상");
+    expect(html).toContain("3/6 00:31 기준");
   });
 });
