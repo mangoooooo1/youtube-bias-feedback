@@ -504,7 +504,12 @@ async function resolveTodayCumulative(eligible, reviews, todaySessions) {
   };
   if (!eligible) return empty;
 
-  if ((todaySessions || []).some((s) => s.syncedToServer !== true)) {
+  // 전송 대기(false)·저장 직전(값 없음)만 생성 중. 서버가 거절한 세션("invalid")은 끝난 것으로 본다
+  if (
+    (todaySessions || []).some(
+      (s) => s.syncedToServer === false || s.syncedToServer === undefined,
+    )
+  ) {
     return { ...empty, generating: true };
   }
 

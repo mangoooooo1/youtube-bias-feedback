@@ -381,6 +381,33 @@ describe("resolveTodayCumulative — 오늘 리뷰 카드 상태", () => {
     expect(result.generating).toBe(true);
   });
 
+  it("세션 종료 직후 전송 상태가 아직 없으면 생성 중", async () => {
+    const { resolve } = load();
+    const result = await resolve(true, [row], [{ sessionId: "s1" }]);
+    expect(result.generating).toBe(true);
+  });
+
+  it("서버가 거절한 세션(invalid)은 생성 중으로 남기지 않는다", async () => {
+    const { resolve } = load(["s1"]);
+    expect(
+      await resolve(
+        true,
+        [row],
+        [
+          { sessionId: "s1", syncedToServer: true, review: "오늘 리뷰" },
+          { sessionId: "s2", syncedToServer: "invalid" },
+        ],
+      ),
+    ).toMatchObject({
+      generating: false,
+      review: "오늘 리뷰",
+      sessionId: "s1",
+    });
+    expect(
+      await resolve(true, [], [{ sessionId: "s1", syncedToServer: "invalid" }]),
+    ).toMatchObject({ generating: false, noReview: true });
+  });
+
   it("리뷰를 건너뛴 세션(응답은 받았지만 리뷰 없음) 뒤에도 생성 중이 아니고 기존 리뷰를 보여 준다", async () => {
     const { resolve } = load(["s1"]);
     const result = await resolve(
