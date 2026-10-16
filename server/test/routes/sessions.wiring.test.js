@@ -755,6 +755,36 @@ describe("POST /api/sessions — 오늘 리뷰 생성 결과를 세션 행에 �
     ).toBe(1);
   });
 
+  // 대조군은 자정 크론이 전날 리뷰를 한 번 만든다
+  it("대조군 세션 저장 시에는 오늘 리뷰를 만들지 않는다(Gemini 호출·저장 없음)", async () => {
+    db.prepare(
+      "INSERT OR IGNORE INTO participants (anonymousId, group_code, installDate) VALUES (?, 'CON', '2020-01-01T00:00:00+09:00')",
+    ).run("con-no-gen");
+    insertTodayVideos("con-no-gen", "con-no-gen-s1");
+
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          anonymousId: "con-no-gen",
+          sessionId: "con-no-gen-s1",
+          endTime: new Date().toISOString(),
+        }),
+      );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.todayReview).toBeNull();
+    expect(geminiCallCount()).toBe(0);
+    expect(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS c FROM today_reviews WHERE anonymousId = ?",
+        )
+        .get("con-no-gen").c,
+    ).toBe(0);
+    expect(sessionRow("con-no-gen-s1").llmStatus).toBeNull();
+  });
+
   it("클라이언트가 보낸 LLM 값은 저장하지 않는다", async () => {
     // 오늘 본 영상 기록이 없어 리뷰가 생성되지 않는 경우라 서버가 덮어쓰지도 않는다
     process.env.YOUTUBE_API_KEY = "";

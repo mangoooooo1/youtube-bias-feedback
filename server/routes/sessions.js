@@ -11,7 +11,10 @@ const {
 const { requireParticipant } = require("../middleware/requireParticipant");
 const { oneLine } = require("../log-line");
 const { generateAndStoreTodayReview } = require("./today-review-generate");
-const { isTodayReviewEligible } = require("./today-reviews-query");
+const {
+  isTodayReviewEligible,
+  CONTROL_GROUPS,
+} = require("./today-reviews-query");
 const {
   ensureVideoMetadata,
   getCategoryIdsForVideos,
@@ -159,14 +162,22 @@ router.post("/", requireParticipant, async (req, res, next) => {
     return next(err);
   }
 
-  // "오늘" 누적 리뷰는 그룹·자격과 무관하게 유효 시청 영상이 늘었으면 다시 계산해 저장하고, 지금 이 요청자가 볼 자격이 있을 때만 응답에 싣는다.
+  // "오늘" 누적 리뷰는 유효 시청 영상이 늘었으면 다시 계산해 저장하고, 지금 이 요청자가 볼 자격이 있을 때만 응답에 싣는다.
+  // 대조군은 세션마다 만들지 않고 자정 크론이 전날 리뷰를 한 번 만든다(generate-daily-today-reviews.js).
   let todayReview = null;
   try {
     const anonymousId = req.body.anonymousId;
-    const generated = await generateAndStoreTodayReview(db, {
-      anonymousId,
-      apiKey: process.env.TODAY_REVIEW_GEMINI_API_KEY,
-    });
+    const participant = db
+      .prepare(
+        "SELECT group_code, installDate, studyEndCodeVerifiedAt FROM participants WHERE anonymousId = ?",
+      )
+      .get(anonymousId);
+    const generated = CONTROL_GROUPS.has(participant?.group_code)
+      ? null
+      : await generateAndStoreTodayReview(db, {
+          anonymousId,
+          apiKey: process.env.TODAY_REVIEW_GEMINI_API_KEY,
+        });
     if (generated) {
       try {
         recordSessionReview(db, req.body.sessionId, generated);
@@ -176,11 +187,6 @@ router.post("/", requireParticipant, async (req, res, next) => {
           oneLine(err.message),
         );
       }
-      const participant = db
-        .prepare(
-          "SELECT group_code, installDate, studyEndCodeVerifiedAt FROM participants WHERE anonymousId = ?",
-        )
-        .get(anonymousId);
       if (isTodayReviewEligible(participant)) {
         todayReview = generated;
       }
