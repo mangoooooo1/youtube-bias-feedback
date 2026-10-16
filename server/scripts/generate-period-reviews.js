@@ -23,8 +23,10 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const {
   kstDateStr,
+  dayFromInstall,
   pendingCompletedPeriods,
 } = require("../pipeline/period-boundaries");
+const { buildPeriodComparison } = require("../pipeline/period-comparison");
 const {
   buildPeriodPrompt,
   generatePeriodReview,
@@ -34,9 +36,11 @@ const {
   TOTAL_DAYS,
   DAYS_PER_PERIOD,
   BASELINE_DAYS,
+  maxTitlesForPeriod,
 } = require("../pipeline/study-constants");
 const { recordLlmCall, closeLlmMetrics } = require("../monitoring/llm-metrics");
 const { aggregateViewing } = require("../pipeline/viewing-aggregate");
+const { groupTitlesByCategory } = require("../pipeline/review-titles");
 const {
   getCategoryIdsForVideos,
   getDurationsForVideos,
@@ -62,19 +66,57 @@ function isRetryEligible(periodEnd) {
  * 기간 내 video_events(재시청 포함)를 영상 단위로 직접 집계한다.
  * 세션별로 이미 계산된 분포를 병합하면 유효 영상 비율이 다른 세션끼리 가중치가 틀어져
  * (예: 50/50이어야 할 분포가 83/17), 원본 영상 기록에서 한 번에 계산한다(viewing-aggregate.js).
- * @param {import("better-sqlite3").Database} db - DB 커넥션
- * @param {{videoId: string, watchedSeconds: number|null}[]} eventsInRange - 기간 내 시청 이벤트
+ * @param {Array} entries - 기간 내 영상 기록(toEntries 결과)
+ * @param {number} periodDays - 구간 일수(제목 상한 계산용)
+ * @returns {{aggregate: object, titleGroups: Array}} 집계와 리뷰 LLM용 분야별 제목 묶음
  */
-function aggregatePeriodEvents(db, eventsInRange) {
-  const videoIds = eventsInRange.map((e) => e.videoId);
+function aggregatePeriodEvents(entries, periodDays) {
+  return {
+    aggregate: aggregateViewing(entries),
+    titleGroups: groupTitlesByCategory(entries, {
+      maxTitles: maxTitlesForPeriod(periodDays),
+    }),
+  };
+}
+
+/**
+ * video_events에 카테고리·영상 길이를 붙여 집계용 영상 기록으로 바꾼다.
+ * @param {import("better-sqlite3").Database} db - DB 커넥션
+ * @param {{videoId: string, title: string|null, watchedAt: string, watchedSeconds: number|null}[]} events
+ */
+function toEntries(db, events) {
+  const videoIds = events.map((e) => e.videoId);
   const categoryIds = getCategoryIdsForVideos(db, videoIds);
   const durations = getDurationsForVideos(db, videoIds);
-  return aggregateViewing(
-    eventsInRange.map((e, i) => ({
-      categoryId: categoryIds[i],
-      durationSeconds: durations[i],
-      watchedSeconds: e.watchedSeconds ?? null,
-    })),
+  return events.map((e, i) => ({
+    title: e.title,
+    watchedAt: e.watchedAt,
+    categoryId: categoryIds[i],
+    durationSeconds: durations[i],
+    watchedSeconds: e.watchedSeconds ?? null,
+  }));
+}
+
+/** 본 날짜(KST)가 기간 안인 영상 기록 */
+function eventsInPeriod(events, { periodStart, periodEnd }) {
+  return events.filter((v) =>
+    inRange(kstDateStr(new Date(v.watchedAt)), periodStart, periodEnd),
+  );
+}
+
+/** 1구간부터 periodIndex 구간까지의 날짜 범위(설치일 기준, pendingCompletedPeriods와 같은 계산) */
+function periodsUpTo(installDate, periodIndex) {
+  return Array.from({ length: periodIndex }, (_, i) => ({
+    periodIndex: i + 1,
+    periodStart: dayFromInstall(installDate, i * DAYS_PER_PERIOD),
+    periodEnd: dayFromInstall(installDate, (i + 1) * DAYS_PER_PERIOD - 1),
+  }));
+}
+
+/** 구간 일수(시작·끝 날짜 포함) */
+function periodLengthDays({ periodStart, periodEnd }) {
+  return (
+    Math.round((Date.parse(periodEnd) - Date.parse(periodStart)) / 86400000) + 1
   );
 }
 
@@ -83,6 +125,7 @@ async function processPeriod({
   apiKey,
   recordMetric = recordLlmCall,
   anonymousId,
+  installDate,
   period,
   allSessions,
   allEvents,
@@ -95,20 +138,13 @@ async function processPeriod({
       period.periodEnd,
     ),
   );
-  const eventsInRange = allEvents.filter((v) =>
-    inRange(
-      kstDateStr(new Date(v.watchedAt)),
-      period.periodStart,
-      period.periodEnd,
-    ),
+  const eventsInRange = eventsInPeriod(allEvents, period);
+  // 집계는 eventsInRange 전체(title 유무와 무관)로 계산하고, 제목 묶음에서만 제목 없는 영상이 빠진다.
+  const periodDays = periodLengthDays(period);
+  const { aggregate, titleGroups } = aggregatePeriodEvents(
+    toEntries(db, eventsInRange),
+    periodDays,
   );
-  // Gemini 프롬프트에는 title이 있는 이벤트만 넘긴다.
-  // 집계(aggregatePeriodEvents)는 eventsInRange 전체(title 유무와 무관)로 계산한다.
-  const titlesInRange = eventsInRange
-    .map((v) => v.title)
-    .filter((t) => t != null);
-
-  const aggregate = aggregatePeriodEvents(db, eventsInRange);
   const categoryDistribution = aggregate.analysisDistribution;
   const { entropy, weightedEntropy } = aggregate;
   const weightedCategoryDistribution = aggregate.weightedDistribution;
@@ -124,36 +160,43 @@ async function processPeriod({
   if (validVideoCount === 0) {
     // 이 기간엔 분석할 시청 기록(유효 시청 영상)이 없음 — Gemini 호출 자체를 생략(불필요한 비용 방지).
     result = generatePeriodFallbackReview({
-      categoryDistribution: {},
-      videoCount: 0,
+      validVideoCount: 0,
+      periodDays,
     });
     llmStatus = "fallback";
-  } else if (Object.keys(categoryDistribution).length === 0) {
-    // 유효 영상이 모두 카테고리를 못 가져오는 경우
+  } else if (Object.keys(aggregate.timeDistribution).length === 0) {
+    // 시청 시간이 확인된 유효 영상이 모두 카테고리를 못 가져왔거나, 시청 시간이 아직 하나도 확인되지 않은 경우
     // 프롬프트가 근거로 삼을 분포가 없어 Gemini를 부르지 않는다.
     // 실패가 아닌 fallback이라 재시도 기간(periodEnd+3일) 안에 카테고리를 다시 가져오면 다음 실행에서 정상 리뷰로 바뀐다.
     result = generatePeriodFallbackReview({
-      categoryDistribution: {},
-      videoCount: validVideoCount,
+      validVideoCount,
+      periodDays,
     });
     llmStatus = "fallback";
   } else {
-    const prompt = buildPeriodPrompt({
-      categoryDistribution,
-      entropy,
-      videoCount,
-      videoTitles: titlesInRange,
-    });
+    // LLM 입력은 오늘 리뷰와 같은 기준(시청 시간이 확인된 유효 영상 수, 시청 시간 비중, 분야별 제목 전부).
+    // 저장하는 validVideoCount는 분석 기준(시간을 모르는 영상 포함) 그대로 둔다
+    const reviewInput = {
+      validVideoCount: aggregate.confirmedCount,
+      timeDistribution: aggregate.timeDistribution,
+      titleGroups,
+      periodDays,
+      // 이전 구간 비교·구간 안의 흐름. 원본 영상 기록에서 매번 다시 계산한다
+      comparison: buildPeriodComparison(
+        periodsUpTo(installDate, period.periodIndex).map((p) => ({
+          ...p,
+          entries: toEntries(db, eventsInPeriod(allEvents, p)),
+        })),
+      ),
+    };
+    const prompt = buildPeriodPrompt(reviewInput);
 
     const startedAt = Date.now();
     try {
       result = await generatePeriodReview(prompt, apiKey);
       llmStatus = "success";
     } catch (err) {
-      result = generatePeriodFallbackReview({
-        categoryDistribution,
-        videoCount,
-      });
+      result = generatePeriodFallbackReview(reviewInput);
       llmStatus = "fallback";
       failureReason = err.failureReason ?? "network_error";
     } finally {
@@ -309,6 +352,7 @@ async function run(db, apiKey, { recordMetric } = {}) {
           apiKey,
           recordMetric,
           anonymousId,
+          installDate,
           period,
           allSessions,
           allEvents,

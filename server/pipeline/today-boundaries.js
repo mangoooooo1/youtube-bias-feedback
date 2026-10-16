@@ -11,6 +11,7 @@
 // 고정 기준을 쓴다. 참여자 대부분이 KST권이라 실제 영향은 거의 없을 것으로 보인다.
 const { kstDateStr } = require("./period-boundaries");
 const { aggregateViewing } = require("./viewing-aggregate");
+const { groupTitlesByCategory } = require("./review-titles");
 
 /** 본 시각을 KST 날짜로 바꾼다. 파싱할 수 없으면 null. */
 function viewedDate(event) {
@@ -23,7 +24,8 @@ function viewedDate(event) {
  * @param {Array}  params.events - 영상 기록(video_events + video_metadata), watchedAt 오름차순
  *   [{ eventId, sessionId, title, watchedAt, watchedSeconds, categoryId, durationSeconds }]
  * @param {Date}   [params.now] - 기준 시각(테스트용 주입, 기본값 현재 시각)
- * @returns {object|null} 오늘 유효 시청 영상이 하나도 없으면 null
+ * @returns {object|null} 오늘 시청 시간이 확인된 유효 영상이 하나도 없으면 null — 시간을 아직 모르는
+ *   영상만으로는 리뷰를 만들지 않고, 시간이 도착한 뒤 다음 세션 종료나 자정 크론에서 만든다
  */
 function aggregateTodayCumulative({ events, now = new Date() }) {
   const today = kstDateStr(now);
@@ -33,22 +35,7 @@ function aggregateTodayCumulative({ events, now = new Date() }) {
 
   const todayEvents = dated.filter((e) => e.date === today);
   const aggregate = aggregateViewing(todayEvents);
-  if (aggregate.validCount === 0) return null;
-
-  // 직전 시청일 = 오늘보다 앞선 날짜 중 유효 시청이 있는 가장 최근 날.
-  // "<"로 비교해 단말 시계 오류로 미래 날짜가 찍힌 기록은 제외한다.
-  const priorDates = [...new Set(dated.map((e) => e.date))]
-    .filter((d) => d < today)
-    .sort()
-    .reverse();
-  let prevEntropy = null;
-  for (const date of priorDates) {
-    const prev = aggregateViewing(dated.filter((e) => e.date === date));
-    if (prev.validCount > 0) {
-      prevEntropy = prev.entropy;
-      break;
-    }
-  }
+  if (aggregate.confirmedCount === 0) return null;
 
   const sessionIds = [
     ...new Set(todayEvents.map((e) => e.sessionId).filter(Boolean)),
@@ -58,12 +45,17 @@ function aggregateTodayCumulative({ events, now = new Date() }) {
     reviewDate: today,
     categoryDistribution: aggregate.analysisDistribution,
     entropy: aggregate.entropy,
-    prevEntropy,
     videoCount: todayEvents.length,
-    validVideoCount: aggregate.validCount,
+    // 리뷰가 "봤다"고 말하는 영상 수(시청 시간이 확인된 유효 영상). 재생성 판단에도 쓴다 —
+    // 보는 중이던 영상의 시청 시간이 도착하면 늘어나 리뷰를 다시 만든다
+    validVideoCount: aggregate.confirmedCount,
     videoTitles: todayEvents.map((e) => e.title).filter(Boolean),
     sessionCount: sessionIds.length,
     sessionIds,
+    timeDistribution: aggregate.timeDistribution,
+    countDistribution: aggregate.countDistribution,
+    chartCount: aggregate.chartCount,
+    titleGroups: groupTitlesByCategory(todayEvents),
   };
 }
 

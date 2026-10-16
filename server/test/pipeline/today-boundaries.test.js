@@ -11,7 +11,6 @@ import { aggregateTodayCumulative } from "../../pipeline/today-boundaries.js";
 const MUSIC = "10";
 const SPORTS = "17";
 const GAME = "20";
-const EDU = "27";
 
 function video({
   sessionId = "s1",
@@ -53,6 +52,39 @@ describe("aggregateTodayCumulative", () => {
   });
 
   // 세션 분포를 영상 수로 병합하던 방식은 이 예시를 음악 83% / 게임 17%로 만들었다
+  it("오늘 유효 영상이 모두 시청 시간을 아직 모르면 리뷰를 만들지 않는다(null)", () => {
+    const result = aggregateTodayCumulative({
+      events: [
+        video({ watchedAt: "2026-03-10T09:00:00+09:00", watchedSeconds: null }),
+      ],
+      now: NOW,
+    });
+    expect(result).toBeNull();
+  });
+
+  // 음악 2개를 다 보고 게임 1개를 보는 중 — 리뷰는 확인된 2개만 "봤다"고 말한다
+  it("리뷰용 영상 수·비중·제목은 시청 시간이 확인된 유효 영상만 쓴다", () => {
+    const result = aggregateTodayCumulative({
+      events: [
+        video({ title: "음악 1", watchedAt: "2026-03-10T09:00:00+09:00" }),
+        video({ title: "음악 2", watchedAt: "2026-03-10T09:10:00+09:00" }),
+        video({
+          title: "게임",
+          watchedAt: "2026-03-10T09:20:00+09:00",
+          categoryId: GAME,
+          watchedSeconds: null,
+        }),
+      ],
+      now: NOW,
+    });
+
+    expect(result.validVideoCount).toBe(2);
+    expect(result.timeDistribution).toEqual({ 음악: 1 });
+    expect(result.titleGroups.map((g) => g.category)).toEqual(["음악"]);
+    // 저장·분석용 분포는 사전등록 정의대로 보는 중인 영상도 넣는다
+    expect(result.categoryDistribution).toEqual({ 음악: 0.667, 게임: 0.333 });
+  });
+
   it("오늘 여러 세션의 영상을 세션 병합 없이 영상 단위로 집계한다", () => {
     const sessionA = [
       video({
@@ -100,6 +132,19 @@ describe("aggregateTodayCumulative", () => {
     expect(result.entropy).toBe(1);
     expect(result.videoCount).toBe(12); // 잠깐 본 영상까지 포함한 영상 기록 수
     expect(result.validVideoCount).toBe(4); // 잠깐 본 스포츠 8개 제외
+    // 리뷰 LLM 입력용: 화면 도넛과 같은 시간·개수 비중, 잠깐 본 영상 제목은 빠진 묶음
+    expect(result.timeDistribution).toEqual({ 음악: 0.5, 게임: 0.5 });
+    expect(result.countDistribution).toEqual({ 음악: 0.5, 게임: 0.5 });
+    expect(result.chartCount).toBe(4);
+    const groupedTitles = result.titleGroups.flatMap((g) =>
+      g.titles.map((t) => t.title),
+    );
+    expect(groupedTitles.sort()).toEqual([
+      "게임 1",
+      "게임 2",
+      "음악 1",
+      "음악 2",
+    ]);
     expect(result.sessionCount).toBe(2);
     expect(result.sessionIds).toEqual(["s-a", "s-b"]);
     expect(result.videoTitles).toHaveLength(12);
@@ -114,6 +159,14 @@ describe("aggregateTodayCumulative", () => {
       now: NOW,
     });
     expect(result.videoTitles).toEqual(["오늘 영상"]);
+    expect(result.titleGroups).toEqual([
+      {
+        category: "음악",
+        videoCount: 1,
+        titles: [{ title: "오늘 영상", count: 1 }],
+        omittedCount: 0,
+      },
+    ]);
   });
 
   it("자정을 넘긴 세션의 영상은 세션이 끝난 날이 아니라 영상을 본 날로 나뉜다", () => {
@@ -137,7 +190,6 @@ describe("aggregateTodayCumulative", () => {
 
     expect(result.categoryDistribution).toEqual({ 게임: 1 });
     expect(result.videoTitles).toEqual(["오늘 새벽 게임"]);
-    expect(result.prevEntropy).toBe(0); // 어제는 음악만
   });
 
   it("카테고리를 못 가져온 영상은 분포에서만 빠지고 영상 수·제목에는 들어간다", () => {
@@ -176,61 +228,7 @@ describe("aggregateTodayCumulative", () => {
     expect(result.entropy).toBe(1);
   });
 
-  it("직전 시청일이 없으면 prevEntropy는 null이다", () => {
-    const result = aggregateTodayCumulative({
-      events: [
-        video({ watchedAt: "2026-03-10T11:00:00+09:00", categoryId: SPORTS }),
-      ],
-      now: NOW,
-    });
-    expect(result.prevEntropy).toBeNull();
-  });
-
-  it("가장 최근 직전 날짜만 prevEntropy에 반영한다(더 오래된 과거 영상은 제외)", () => {
-    const result = aggregateTodayCumulative({
-      events: [
-        // 2일 전 — 음악 단독(entropy 0)
-        video({ watchedAt: "2026-03-08T20:00:00+09:00" }),
-        // 어제 — 게임/교육 반반(entropy 1)
-        video({ watchedAt: "2026-03-09T20:00:00+09:00", categoryId: GAME }),
-        video({ watchedAt: "2026-03-09T20:30:00+09:00", categoryId: EDU }),
-        video({ watchedAt: "2026-03-10T09:00:00+09:00", categoryId: SPORTS }),
-      ],
-      now: NOW,
-    });
-    expect(result.prevEntropy).toBe(1);
-  });
-
-  it("직전 날짜에 잠깐 본 영상만 있으면 그 전 시청일을 쓴다", () => {
-    const result = aggregateTodayCumulative({
-      events: [
-        // 2일 전 — 게임/교육 반반(entropy 1)
-        video({ watchedAt: "2026-03-08T20:00:00+09:00", categoryId: GAME }),
-        video({ watchedAt: "2026-03-08T20:30:00+09:00", categoryId: EDU }),
-        // 어제 — 잠깐 본 영상뿐
-        video({ watchedAt: "2026-03-09T20:00:00+09:00", watchedSeconds: 2 }),
-        video({ watchedAt: "2026-03-10T09:00:00+09:00", categoryId: SPORTS }),
-      ],
-      now: NOW,
-    });
-    expect(result.prevEntropy).toBe(1);
-  });
-
-  it("단말 시계가 앞서 있어 미래 날짜 영상이 섞여도 prevEntropy에 반영하지 않는다", () => {
-    const result = aggregateTodayCumulative({
-      events: [
-        video({ watchedAt: "2026-03-09T20:00:00+09:00", categoryId: GAME }),
-        video({ watchedAt: "2026-03-09T20:30:00+09:00", categoryId: EDU }),
-        video({ watchedAt: "2026-03-10T09:00:00+09:00", categoryId: SPORTS }),
-        // 단말 시계 오류로 미래로 찍힌 영상(음악 단독, entropy 0)
-        video({ watchedAt: "2026-03-15T09:00:00+09:00" }),
-      ],
-      now: NOW,
-    });
-    expect(result.prevEntropy).toBe(1);
-  });
-
-  it("파싱할 수 없는 watchedAt을 가진 영상은 오늘·직전 시청일 계산에서 제외한다", () => {
+  it("파싱할 수 없는 watchedAt을 가진 영상은 오늘 집계에서 제외한다", () => {
     const result = aggregateTodayCumulative({
       events: [
         video({ watchedAt: "2026-03-09T20:00:00+09:00", categoryId: GAME }),
@@ -239,7 +237,6 @@ describe("aggregateTodayCumulative", () => {
       ],
       now: NOW,
     });
-    expect(result.prevEntropy).toBe(0);
     expect(result.videoCount).toBe(1);
   });
 
