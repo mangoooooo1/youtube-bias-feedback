@@ -362,14 +362,17 @@ function screenToday() {
 // 오늘은 서버의 today_reviews 캐시(VL._todayCumulative)를 쓰고, 과거 날짜는
 // buildDataForDate가 서버 이력에서 찾은 리뷰(d.review)를 그대로 보여준다.
 // 영상 목록은 그날 재생한 영상 전부(진행 중인 세션 포함, VL.playedVideos)라 위 "영상 N개"와 수가 다를 수 있다.
+// "10월 15일 수요일" → "10월 15일엔 어떤 영상을 봤을까요?"
+function _pastDayReviewTitle(dateLabel) {
+  return `${dateLabel.replace(/\s*\S+요일$/, "")}엔 어떤 영상을 봤을까요?`;
+}
+
 function _todayCumulativeCard(isToday, d, locked) {
   const videos = d.videos || [];
   if (!isToday) {
     if (!isRealReview(d.review)) return "";
-    // "10월 15일 수요일" → "10월 15일엔 어떤 영상을 봤을까요?"
-    const day = d.dateLabel.replace(/\s*\S+요일$/, "");
     return vlReview({
-      title: `${day}엔 어떤 영상을 봤을까요?`,
+      title: _pastDayReviewTitle(d.dateLabel),
       text: d.review,
       topic: d.reviewTopic || "",
       videos,
@@ -664,7 +667,7 @@ function screenPastDayRevealModal(pastDay) {
   return `<div style="position:absolute;inset:0;z-index:20;display:flex;align-items:flex-end;justify-content:center;padding:16px;background:color-mix(in oklab,var(--vl-ink) 45%,transparent)">
     <div style="width:100%;max-height:88%;overflow-y:auto;background:var(--vl-card);border-radius:18px;padding:18px 16px 16px;box-shadow:0 -12px 40px -8px rgba(0,0,0,.35);animation:vlSheet .35s ease-out">
       ${vlReview({
-        title: `${pastDay.dateLabel.replace(/s*S+요일$/, "")}엔 어떤 영상을 봤을까요?`,
+        title: _pastDayReviewTitle(pastDay.dateLabel),
         text: pastDay.review,
         topic: pastDay.reviewTopic,
         videos: pastDay.videos,
