@@ -17,12 +17,7 @@ const {
   getDurationsForVideos,
   findMissingVideoIds,
 } = require("./video-metadata-store");
-const {
-  calculateDistribution,
-  calculateEntropy,
-  isValidWatch,
-  calculateWeightedDistribution,
-} = require("../pipeline/category-diversity");
+const { aggregateViewing } = require("../pipeline/viewing-aggregate");
 
 const router = express.Router();
 
@@ -30,6 +25,7 @@ const router = express.Router();
  * categoryId가 전부 해소된 뒤 호출한다. 클릭성 이탈(오클릭) 영상을 걸러낸 1차 지표
  * (영상 개수 가중)와, 같은 필터를 통과한 영상들을 실제 시청 시간으로 가중한 보조 지표(weightedEntropy)를 함께 산출한다.
  * watchedSecondsList가 전혀 없는(구버전 확장) 요청은 isValidWatch가 전부 true를 반환해 기존 동작과 동일하게 유지되고, weighted 계열만 "데이터 없음(null)"으로 남는다.
+ * 시청시간은 영상 길이로 상한을 두고, 카테고리가 있는 영상의 시청시간이 하나도 없으면 weighted 계열은 null이다(viewing-aggregate.js).
  * @param {import("better-sqlite3").Database} db - DB 커넥션
  * @param {string[]} videoIds - 세션에서 시청한 videoId 목록 (중복 포함)
  * @param {(number|null)[]|undefined} watchedSecondsList - videoIds와 병렬인 시청시간(초) 원시값, 없으면 undefined
@@ -42,42 +38,21 @@ function computeSessionAnalysis(db, videoIds, watchedSecondsList) {
     ? watchedSecondsList
     : videoIds.map(() => null);
 
-  const entries = videoIds.map((_, i) => ({
-    categoryId: categoryIds[i],
-    durationSeconds: durations[i],
-    watchedSeconds: list[i] ?? null,
-  }));
-  const validEntries = entries.filter((e) => isValidWatch(e));
-
-  const categoryDistribution = calculateDistribution(
-    validEntries.map((e) => e.categoryId),
+  // 유효 시청 판정·영상 길이 상한·분포 계산은 기간·오늘 집계와 같은 공통 모듈을 쓴다
+  const aggregate = aggregateViewing(
+    videoIds.map((_, i) => ({
+      categoryId: categoryIds[i],
+      durationSeconds: durations[i],
+      watchedSeconds: list[i] ?? null,
+    })),
   );
-  const entropy = calculateEntropy(categoryDistribution);
-
-  // 합을 구해 0보다 큰지 보는 대신 양수 항목의 존재 자체를 본다.
-  // 유효 항목이 많으면 개별 값은 유한해도 그 합이 부동소수점 오버플로로 Infinity가 될 수 있는데,
-  // 이 분기 판단에 굳이 그런 위험을 지닌 합계를 만들어 쓸 이유가 없다.
-  const hasPositiveWatchedSeconds = validEntries.some(
-    (e) => (e.watchedSeconds ?? 0) > 0,
-  );
-  let weightedCategoryDistribution = null;
-  let weightedEntropy = null;
-  if (hasPositiveWatchedSeconds) {
-    weightedCategoryDistribution = calculateWeightedDistribution(
-      validEntries.map((e) => ({
-        categoryId: e.categoryId,
-        weight: e.watchedSeconds ?? 0,
-      })),
-    );
-    weightedEntropy = calculateEntropy(weightedCategoryDistribution);
-  }
 
   return {
-    categoryDistribution,
-    entropy,
-    weightedCategoryDistribution,
-    weightedEntropy,
-    validVideoCount: validEntries.length,
+    categoryDistribution: aggregate.analysisDistribution,
+    entropy: aggregate.entropy,
+    weightedCategoryDistribution: aggregate.weightedDistribution,
+    weightedEntropy: aggregate.weightedEntropy,
+    validVideoCount: aggregate.validCount,
   };
 }
 

@@ -83,6 +83,17 @@ function createTestDb() {
   return db;
 }
 
+// 기간 집계는 세션이 아니라 영상 기록(video_events)에서 직접 계산하므로, Gemini 호출을 기대하는
+// 테스트는 운영처럼 세션과 함께 그 세션에서 본 영상 기록도 넣는다.
+function insertWatchedVideo(db, anonymousId, watchedAt) {
+  db.prepare(
+    "INSERT OR IGNORE INTO video_metadata (videoId, categoryId, durationSeconds) VALUES ('vid-music', '10', 600)",
+  ).run();
+  db.prepare(
+    "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, 'vid-music', '음악 영상', ?, 300)",
+  ).run(anonymousId, watchedAt);
+}
+
 // 설치일로부터 이미 12일이 지난 것으로 고정 — 현재 구성(DAYS_PER_PERIOD=4, TOTAL_DAYS=12)
 // 기준으로 3개 기간(베이스라인 1구간 + 일반 2구간) 전부 완료 대상이 된다.
 const INSTALL_DATE = "2026-06-01T00:00:00+09:00";
@@ -315,6 +326,185 @@ describe("generate-period-reviews.js — run()", () => {
     expect(JSON.parse(row.weightedCategoryDistribution)).toEqual({ 음악: 1 });
   });
 
+  // 세션 분포를 전체 영상 수로 병합하던 방식은 이 예시를 음악 83% / 게임 17%로 만들었다
+  it("유효 영상 비율이 다른 세션이 섞여도 기간 분포를 영상 기록에서 직접 계산한다(50/50)", async () => {
+    const userId = "merge-user";
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run(userId, INSTALL_DATE);
+    const insertSession = db.prepare(
+      "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+    );
+    // 세션 A: 전체 10개 중 유효 음악 2개(나머지 8개는 스포츠를 5초씩), 세션 B: 전체 2개 중 유효 게임 2개
+    insertSession.run(
+      userId,
+      JSON.stringify({ 음악: 1 }),
+      10,
+      "2026-06-01T11:00:00+09:00",
+    );
+    insertSession.run(
+      userId,
+      JSON.stringify({ 게임: 1 }),
+      2,
+      "2026-06-02T11:00:00+09:00",
+    );
+    const insertMeta = db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, 600)",
+    );
+    insertMeta.run("m-music", "10");
+    insertMeta.run("m-sports", "17");
+    insertMeta.run("m-game", "20");
+    const insertEvent = db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, ?, ?, ?, ?)",
+    );
+    for (let i = 0; i < 2; i++)
+      insertEvent.run(
+        userId,
+        "m-music",
+        "음악",
+        "2026-06-01T10:00:00+09:00",
+        300,
+      );
+    for (let i = 0; i < 8; i++)
+      insertEvent.run(
+        userId,
+        "m-sports",
+        "스포츠",
+        "2026-06-01T10:30:00+09:00",
+        5,
+      );
+    for (let i = 0; i < 2; i++)
+      insertEvent.run(
+        userId,
+        "m-game",
+        "게임",
+        "2026-06-02T10:00:00+09:00",
+        300,
+      );
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":"문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await run(db, "fake-key");
+
+    const row = db
+      .prepare(
+        "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+      )
+      .get(userId);
+    expect(JSON.parse(row.categoryDistribution)).toEqual({
+      음악: 0.5,
+      게임: 0.5,
+    });
+    expect(row.entropy).toBe(1);
+    expect(row.validVideoCount).toBe(4);
+    expect(row.videoCount).toBe(12); // 잠깐 본 영상까지 포함한 영상 기록 수
+    expect(row.sessionCount).toBe(2);
+  });
+
+  // 오늘 리뷰와 같은 기준. 근거 분포 없이 LLM을 부르지 않는다
+  it("기간 유효 영상이 모두 카테고리를 못 가져왔으면 Gemini 없이 '분석하지 못했다' 폴백을 저장한다", async () => {
+    const userId = "no-category-user";
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run(userId, INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+    ).run(userId, JSON.stringify({}), 2, "2026-06-01T11:00:00+09:00");
+    // 메타데이터 행 없이 영상 기록만. 카테고리를 못 가져온 상태
+    const insertEvent = db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, ?, ?, ?, 300)",
+    );
+    insertEvent.run(userId, "unknown-1", "영상 1", "2026-06-01T10:00:00+09:00");
+    insertEvent.run(userId, "unknown-2", "영상 2", "2026-06-01T10:10:00+09:00");
+
+    global.fetch = vi.fn();
+    const recordMetric = vi.fn();
+    const summary = await run(db, "fake-key", { recordMetric });
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(recordMetric).not.toHaveBeenCalled();
+    const row = db
+      .prepare(
+        "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+      )
+      .get(userId);
+    expect(row.llmStatus).toBe("fallback");
+    expect(row.failureReason).toBeNull();
+    expect(row.review).toContain("분석하지 못했어요");
+    expect(row.validVideoCount).toBe(2);
+    // 실패가 아닌 fallback으로 집계돼 크론이 실패로 끝나지 않는다
+    expect(summary.llmFailures).toBe(0);
+  });
+
+  it("기간 시간 가중 분포도 영상 길이로 상한을 둔다", async () => {
+    const userId = "cap-user";
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run(userId, INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+    ).run(
+      userId,
+      JSON.stringify({ 음악: 0.5, 게임: 0.5 }),
+      2,
+      "2026-06-01T11:00:00+09:00",
+    );
+    const insertMeta = db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, ?)",
+    );
+    insertMeta.run("c-music", "10", 100);
+    insertMeta.run("c-game", "20", 600);
+    const insertEvent = db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, ?, ?, ?, ?)",
+    );
+    // 길이 100초 음악을 250초 본 것으로 기록 → 100초로 셈. 게임은 100초
+    insertEvent.run(
+      userId,
+      "c-music",
+      "음악",
+      "2026-06-01T10:00:00+09:00",
+      250,
+    );
+    insertEvent.run(userId, "c-game", "게임", "2026-06-01T10:10:00+09:00", 100);
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":"문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await run(db, "fake-key");
+
+    const row = db
+      .prepare(
+        "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+      )
+      .get(userId);
+    expect(JSON.parse(row.weightedCategoryDistribution)).toEqual({
+      음악: 0.5,
+      게임: 0.5,
+    });
+    expect(row.weightedEntropy).toBe(1);
+  });
+
   it("밀린 여러 기간을 오래된 순서로 순차 처리한다 (동시 호출 없음)", async () => {
     db.prepare(
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
@@ -330,6 +520,7 @@ describe("generate-period-reviews.js — run()", () => {
       db.prepare(
         "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
       ).run("active-user", JSON.stringify({ 음악: 1 }), count, day);
+      insertWatchedVideo(db, "active-user", day);
     }
 
     let inFlight = 0;
@@ -449,6 +640,7 @@ describe("generate-period-reviews.js — run()", () => {
       5,
       "2026-06-01T10:00:00+09:00",
     );
+    insertWatchedVideo(db, "fail-user", "2026-06-01T10:00:00+09:00");
 
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
@@ -492,6 +684,7 @@ describe("generate-period-reviews.js — run()", () => {
       5,
       "2026-06-01T10:00:00+09:00",
     );
+    insertWatchedVideo(db, "metric-user", "2026-06-01T10:00:00+09:00");
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 429,
@@ -532,6 +725,7 @@ describe("generate-period-reviews.js — run()", () => {
         5,
         P1_SESSION_AT,
       );
+      insertWatchedVideo(db, "locked-success-user", P1_SESSION_AT);
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
@@ -575,6 +769,7 @@ describe("generate-period-reviews.js — run()", () => {
       db.prepare(
         "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
       ).run("retry-user", JSON.stringify({ 음악: 1 }), 5, P1_SESSION_AT);
+      insertWatchedVideo(db, "retry-user", P1_SESSION_AT);
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: false,
@@ -640,6 +835,7 @@ describe("generate-period-reviews.js — run()", () => {
       db.prepare(
         "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
       ).run("expired-user", JSON.stringify({ 음악: 1 }), 5, P1_SESSION_AT);
+      insertWatchedVideo(db, "expired-user", P1_SESSION_AT);
 
       global.fetch = vi.fn().mockResolvedValue({
         ok: false,

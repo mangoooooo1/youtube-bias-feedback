@@ -197,10 +197,13 @@ function generatePeriodFallbackReview({ categoryDistribution, videoCount }) {
   );
 
   if (sorted.length === 0) {
+    // 유효 영상은 있는데 카테고리를 하나도 못 가져온 경우는 "분석하지 못했다"고 알린다.
     return {
       topic: "분석 불가",
       feedback:
-        "이 기간엔 분석할 시청 기록이 없어요. 다음 기간을 기대해 주세요!",
+        videoCount > 0
+          ? "이 기간의 시청 기록을 분석하지 못했어요. 잠시 후 다시 확인해 주세요!"
+          : "이 기간엔 분석할 시청 기록이 없어요. 다음 기간을 기대해 주세요!",
       source: "fallback",
       promptVersion: PROMPT_VERSION,
     };

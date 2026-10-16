@@ -1,4 +1,5 @@
-// 기간(일차·주차) 경계 계산 + 세션 분포 병합
+// 기간(일차·주차) 경계 계산
+// (분포 집계는 영상 기록에서 직접 계산한다 — viewing-aggregate.js)
 
 const KST_TZ = "Asia/Seoul";
 
@@ -10,45 +11,6 @@ function kstDateStr(date) {
 function dayFromInstall(installDate, offsetDays) {
   const ms = new Date(installDate).getTime() + offsetDays * 86400000;
   return kstDateStr(new Date(ms));
-}
-
-function calculateEntropy(distribution) {
-  const proportions = Object.values(distribution);
-  if (proportions.length === 0) return 0;
-  const H = -proportions.reduce(
-    (sum, p) => (p > 0 ? sum + p * Math.log2(p) : sum),
-    0,
-  );
-  return Math.round(H * 100) / 100 || 0;
-}
-
-// extension/popup/viewlens-popup.js의 mergeDist와 동일한 가중 병합(videoCount 가중) + 정규화.
-function mergeSessionDistributions(sessions) {
-  const totalVideos = sessions.reduce((sum, s) => sum + (s.videoCount ?? 1), 0);
-  if (totalVideos === 0) {
-    return { categoryDistribution: {}, entropy: 0, videoCount: 0 };
-  }
-
-  const merged = {};
-  for (const session of sessions) {
-    const weight = (session.videoCount ?? 1) / totalVideos;
-    for (const [cat, ratio] of Object.entries(
-      session.categoryDistribution ?? {},
-    )) {
-      merged[cat] = (merged[cat] ?? 0) + ratio * weight;
-    }
-  }
-  // 부동소수점 드리프트 보정 — 합이 1이 되도록 정규화
-  const sum = Object.values(merged).reduce((a, b) => a + b, 0);
-  if (sum > 0) {
-    for (const cat of Object.keys(merged)) merged[cat] = merged[cat] / sum;
-  }
-
-  return {
-    categoryDistribution: merged,
-    entropy: calculateEntropy(merged),
-    videoCount: totalVideos,
-  };
 }
 
 /**
@@ -92,7 +54,5 @@ function pendingCompletedPeriods({
 module.exports = {
   kstDateStr,
   dayFromInstall,
-  calculateEntropy,
-  mergeSessionDistributions,
   pendingCompletedPeriods,
 };

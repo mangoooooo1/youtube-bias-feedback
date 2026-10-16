@@ -122,3 +122,32 @@ describe("period_review_versions — 기간 리뷰 생성 이력(append-only)", 
     ]);
   });
 });
+
+describe("video_events 인덱스", () => {
+  it("참여자별 영상 기록 조회가 (anonymousId, watchedAt) 인덱스를 쓴다", () => {
+    initializeDB();
+    const plan = db
+      .prepare(
+        "EXPLAIN QUERY PLAN SELECT videoId, watchedAt FROM video_events WHERE anonymousId = ? ORDER BY watchedAt",
+      )
+      .all("p1")
+      .map((row) => row.detail)
+      .join("\n");
+
+    expect(plan).toContain("idx_video_events_participant_watched");
+    // 인덱스 순서를 그대로 쓰면 별도 정렬 단계가 없다
+    expect(plan).not.toContain("USE TEMP B-TREE");
+  });
+
+  it("기간 범위 조회도 같은 인덱스를 쓴다", () => {
+    const plan = db
+      .prepare(
+        "EXPLAIN QUERY PLAN SELECT videoId FROM video_events WHERE anonymousId = ? AND watchedAt >= ? AND watchedAt < ?",
+      )
+      .all("p1", "2026-10-01", "2026-10-05")
+      .map((row) => row.detail)
+      .join("\n");
+
+    expect(plan).toContain("idx_video_events_participant_watched");
+  });
+});

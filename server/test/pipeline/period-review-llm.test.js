@@ -82,6 +82,15 @@ describe("generatePeriodFallbackReview", () => {
     expect(result.promptVersion).toBe(PROMPT_VERSION);
   });
 
+  it("영상은 있는데 카테고리를 하나도 모르면 '기록 없음'이 아니라 '분석하지 못했다'고 알린다", () => {
+    const result = generatePeriodFallbackReview(
+      baseArgs({ categoryDistribution: {}, videoCount: 3 }),
+    );
+    expect(result.topic).toBe("분석 불가");
+    expect(result.feedback).toContain("분석하지 못했어요");
+    expect(result.feedback).not.toContain("시청 기록이 없어요");
+  });
+
   it("카테고리가 1개뿐이면 집중 시청 문구를 만든다", () => {
     const result = generatePeriodFallbackReview(
       baseArgs({ categoryDistribution: { 음악: 1 }, videoCount: 3 }),

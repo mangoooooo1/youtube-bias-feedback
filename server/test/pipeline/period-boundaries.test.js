@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   kstDateStr,
   dayFromInstall,
-  mergeSessionDistributions,
   pendingCompletedPeriods,
 } from "../../pipeline/period-boundaries.js";
 
@@ -22,39 +21,6 @@ describe("kstDateStr / dayFromInstall — KST 고정 날짜 계산", () => {
     expect(dayFromInstall("2026-06-01T00:00:00Z", 0)).toBe("2026-06-01");
     expect(dayFromInstall("2026-06-01T00:00:00Z", 1)).toBe("2026-06-02");
     expect(dayFromInstall("2026-06-01T00:00:00Z", 6)).toBe("2026-06-07");
-  });
-});
-
-describe("mergeSessionDistributions — videoCount 가중 병합", () => {
-  it("세션이 없으면 빈 분포·entropy 0을 반환한다", () => {
-    const result = mergeSessionDistributions([]);
-    expect(result).toEqual({
-      categoryDistribution: {},
-      entropy: 0,
-      videoCount: 0,
-    });
-  });
-
-  it("videoCount로 가중 평균해 병합하고 합이 1이 되도록 정규화한다", () => {
-    const result = mergeSessionDistributions([
-      { categoryDistribution: { 음악: 1 }, videoCount: 3 },
-      { categoryDistribution: { 게임: 1 }, videoCount: 1 },
-    ]);
-    expect(result.videoCount).toBe(4);
-    expect(result.categoryDistribution.음악).toBeCloseTo(0.75);
-    expect(result.categoryDistribution.게임).toBeCloseTo(0.25);
-    const sum = Object.values(result.categoryDistribution).reduce(
-      (a, b) => a + b,
-      0,
-    );
-    expect(sum).toBeCloseTo(1);
-  });
-
-  it("videoCount가 없는 세션은 1개로 취급한다", () => {
-    const result = mergeSessionDistributions([
-      { categoryDistribution: { 음악: 1 } },
-    ]);
-    expect(result.videoCount).toBe(1);
   });
 });
 

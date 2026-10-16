@@ -23,7 +23,6 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const {
   kstDateStr,
-  mergeSessionDistributions,
   pendingCompletedPeriods,
 } = require("../pipeline/period-boundaries");
 const {
@@ -37,11 +36,7 @@ const {
   BASELINE_DAYS,
 } = require("../pipeline/study-constants");
 const { recordLlmCall, closeLlmMetrics } = require("../monitoring/llm-metrics");
-const {
-  isValidWatch,
-  calculateWeightedDistribution,
-  calculateEntropy,
-} = require("../pipeline/category-diversity");
+const { aggregateViewing } = require("../pipeline/viewing-aggregate");
 const {
   getCategoryIdsForVideos,
   getDurationsForVideos,
@@ -64,49 +59,23 @@ function isRetryEligible(periodEnd) {
 }
 
 /**
- * 기간 내 video_events(재시청 포함)로부터 시간 가중 보조 지표를 계산한다.
- * sessions.js의 computeSessionAnalysis와 동일한 계산(isValidWatch 필터 +
- * calculateWeightedDistribution)을 세션이 아니라 기간 전체 단위로 수행한다.
- * 세션별로 이미 정규화된 weightedCategoryDistribution을 병합하면 mergeSessionDistributions가
- * categoryDistribution에서 겪는 것과 같은 리치니스 인플레이션 문제가 생기므로, 원본 video_events를 직접 풀링해 한 번에 계산한다.
+ * 기간 내 video_events(재시청 포함)를 영상 단위로 직접 집계한다.
+ * 세션별로 이미 계산된 분포를 병합하면 유효 영상 비율이 다른 세션끼리 가중치가 틀어져
+ * (예: 50/50이어야 할 분포가 83/17), 원본 영상 기록에서 한 번에 계산한다(viewing-aggregate.js).
  * @param {import("better-sqlite3").Database} db - DB 커넥션
  * @param {{videoId: string, watchedSeconds: number|null}[]} eventsInRange - 기간 내 시청 이벤트
- * @returns {{weightedCategoryDistribution: object|null, weightedEntropy: number|null, validVideoCount: number}}
  */
-function computeWeightedPeriodDistribution(db, eventsInRange) {
+function aggregatePeriodEvents(db, eventsInRange) {
   const videoIds = eventsInRange.map((e) => e.videoId);
   const categoryIds = getCategoryIdsForVideos(db, videoIds);
   const durations = getDurationsForVideos(db, videoIds);
-
-  const entries = eventsInRange.map((e, i) => ({
-    categoryId: categoryIds[i],
-    durationSeconds: durations[i],
-    watchedSeconds: e.watchedSeconds ?? null,
-  }));
-  const validEntries = entries.filter((e) => isValidWatch(e));
-
-  const hasPositiveWatchedSeconds = validEntries.some(
-    (e) => (e.watchedSeconds ?? 0) > 0,
-  );
-  if (!hasPositiveWatchedSeconds) {
-    return {
-      weightedCategoryDistribution: null,
-      weightedEntropy: null,
-      validVideoCount: validEntries.length,
-    };
-  }
-
-  const weightedCategoryDistribution = calculateWeightedDistribution(
-    validEntries.map((e) => ({
-      categoryId: e.categoryId,
-      weight: e.watchedSeconds ?? 0,
+  return aggregateViewing(
+    eventsInRange.map((e, i) => ({
+      categoryId: categoryIds[i],
+      durationSeconds: durations[i],
+      watchedSeconds: e.watchedSeconds ?? null,
     })),
   );
-  return {
-    weightedCategoryDistribution,
-    weightedEntropy: calculateEntropy(weightedCategoryDistribution),
-    validVideoCount: validEntries.length,
-  };
 }
 
 async function processPeriod({
@@ -134,26 +103,38 @@ async function processPeriod({
     ),
   );
   // Gemini 프롬프트에는 title이 있는 이벤트만 넘긴다.
-  // computeWeightedPeriodDistribution은 아래에서 eventsInRange 전체(title 유무와 무관)로 별도 계산한다.
+  // 집계(aggregatePeriodEvents)는 eventsInRange 전체(title 유무와 무관)로 계산한다.
   const titlesInRange = eventsInRange
     .map((v) => v.title)
     .filter((t) => t != null);
 
-  const { categoryDistribution, entropy, videoCount } =
-    mergeSessionDistributions(sessionsInRange);
-  const { weightedCategoryDistribution, weightedEntropy, validVideoCount } =
-    computeWeightedPeriodDistribution(db, eventsInRange);
+  const aggregate = aggregatePeriodEvents(db, eventsInRange);
+  const categoryDistribution = aggregate.analysisDistribution;
+  const { entropy, weightedEntropy } = aggregate;
+  const weightedCategoryDistribution = aggregate.weightedDistribution;
+  const validVideoCount = aggregate.validCount;
+  // 잠깐 본 영상까지 포함한 기간 내 영상 기록 수(세션 videoCount 합과 같은 의미)
+  const videoCount = eventsInRange.length;
 
   let result;
   let llmStatus;
   let failureReason = null;
   let geminiMs = null;
 
-  if (sessionsInRange.length === 0) {
-    // 이 기간엔 분석할 시청 기록이 없음 — Gemini 호출 자체를 생략(불필요한 비용 방지).
+  if (validVideoCount === 0) {
+    // 이 기간엔 분석할 시청 기록(유효 시청 영상)이 없음 — Gemini 호출 자체를 생략(불필요한 비용 방지).
     result = generatePeriodFallbackReview({
       categoryDistribution: {},
       videoCount: 0,
+    });
+    llmStatus = "fallback";
+  } else if (Object.keys(categoryDistribution).length === 0) {
+    // 유효 영상이 모두 카테고리를 못 가져오는 경우
+    // 프롬프트가 근거로 삼을 분포가 없어 Gemini를 부르지 않는다.
+    // 실패가 아닌 fallback이라 재시도 기간(periodEnd+3일) 안에 카테고리를 다시 가져오면 다음 실행에서 정상 리뷰로 바뀐다.
+    result = generatePeriodFallbackReview({
+      categoryDistribution: {},
+      videoCount: validVideoCount,
     });
     llmStatus = "fallback";
   } else {
@@ -242,7 +223,7 @@ async function run(db, apiKey, { recordMetric } = {}) {
     WHERE anonymousId = ? AND endTime IS NOT NULL AND categoryDistribution IS NOT NULL
   `);
   // title IS NOT NULL로 거르지 않는다.
-  // computeWeightedPeriodDistribution(가중 엔트로피)은 title 없이도 videoId/watchedSeconds만으로 계산 가능한데,
+  // 기간 집계(aggregatePeriodEvents)는 title 없이도 videoId/watchedSeconds만으로 계산 가능한데,
   // 여기서 title 없는 이벤트를 미리 제외하면 실제로는 유효한 시청인데도 validVideoCount·가중 분포·가중 엔트로피가
   // 과소 산정된다. title 필터는 Gemini 프롬프트용 titlesInRange를 만들 때만 적용한다.
   const selectVideoEvents = db.prepare(`
