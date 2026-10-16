@@ -23,8 +23,10 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const {
   kstDateStr,
+  dayFromInstall,
   pendingCompletedPeriods,
 } = require("../pipeline/period-boundaries");
+const { buildPeriodComparison } = require("../pipeline/period-comparison");
 const {
   buildPeriodPrompt,
   generatePeriodReview,
@@ -64,28 +66,51 @@ function isRetryEligible(periodEnd) {
  * 기간 내 video_events(재시청 포함)를 영상 단위로 직접 집계한다.
  * 세션별로 이미 계산된 분포를 병합하면 유효 영상 비율이 다른 세션끼리 가중치가 틀어져
  * (예: 50/50이어야 할 분포가 83/17), 원본 영상 기록에서 한 번에 계산한다(viewing-aggregate.js).
- * @param {import("better-sqlite3").Database} db - DB 커넥션
- * @param {{videoId: string, title: string|null, watchedAt: string, watchedSeconds: number|null}[]} eventsInRange - 기간 내 시청 이벤트
+ * @param {Array} entries - 기간 내 영상 기록(toEntries 결과)
  * @param {number} periodDays - 구간 일수(제목 상한 계산용)
  * @returns {{aggregate: object, titleGroups: Array}} 집계와 리뷰 LLM용 분야별 제목 묶음
  */
-function aggregatePeriodEvents(db, eventsInRange, periodDays) {
-  const videoIds = eventsInRange.map((e) => e.videoId);
-  const categoryIds = getCategoryIdsForVideos(db, videoIds);
-  const durations = getDurationsForVideos(db, videoIds);
-  const entries = eventsInRange.map((e, i) => ({
-    title: e.title,
-    watchedAt: e.watchedAt,
-    categoryId: categoryIds[i],
-    durationSeconds: durations[i],
-    watchedSeconds: e.watchedSeconds ?? null,
-  }));
+function aggregatePeriodEvents(entries, periodDays) {
   return {
     aggregate: aggregateViewing(entries),
     titleGroups: groupTitlesByCategory(entries, {
       maxTitles: maxTitlesForPeriod(periodDays),
     }),
   };
+}
+
+/**
+ * video_events에 카테고리·영상 길이를 붙여 집계용 영상 기록으로 바꾼다.
+ * @param {import("better-sqlite3").Database} db - DB 커넥션
+ * @param {{videoId: string, title: string|null, watchedAt: string, watchedSeconds: number|null}[]} events
+ */
+function toEntries(db, events) {
+  const videoIds = events.map((e) => e.videoId);
+  const categoryIds = getCategoryIdsForVideos(db, videoIds);
+  const durations = getDurationsForVideos(db, videoIds);
+  return events.map((e, i) => ({
+    title: e.title,
+    watchedAt: e.watchedAt,
+    categoryId: categoryIds[i],
+    durationSeconds: durations[i],
+    watchedSeconds: e.watchedSeconds ?? null,
+  }));
+}
+
+/** 본 날짜(KST)가 기간 안인 영상 기록 */
+function eventsInPeriod(events, { periodStart, periodEnd }) {
+  return events.filter((v) =>
+    inRange(kstDateStr(new Date(v.watchedAt)), periodStart, periodEnd),
+  );
+}
+
+/** 1구간부터 periodIndex 구간까지의 날짜 범위(설치일 기준, pendingCompletedPeriods와 같은 계산) */
+function periodsUpTo(installDate, periodIndex) {
+  return Array.from({ length: periodIndex }, (_, i) => ({
+    periodIndex: i + 1,
+    periodStart: dayFromInstall(installDate, i * DAYS_PER_PERIOD),
+    periodEnd: dayFromInstall(installDate, (i + 1) * DAYS_PER_PERIOD - 1),
+  }));
 }
 
 /** 구간 일수(시작·끝 날짜 포함) */
@@ -100,6 +125,7 @@ async function processPeriod({
   apiKey,
   recordMetric = recordLlmCall,
   anonymousId,
+  installDate,
   period,
   allSessions,
   allEvents,
@@ -112,18 +138,11 @@ async function processPeriod({
       period.periodEnd,
     ),
   );
-  const eventsInRange = allEvents.filter((v) =>
-    inRange(
-      kstDateStr(new Date(v.watchedAt)),
-      period.periodStart,
-      period.periodEnd,
-    ),
-  );
+  const eventsInRange = eventsInPeriod(allEvents, period);
   // 집계는 eventsInRange 전체(title 유무와 무관)로 계산하고, 제목 묶음에서만 제목 없는 영상이 빠진다.
   const periodDays = periodLengthDays(period);
   const { aggregate, titleGroups } = aggregatePeriodEvents(
-    db,
-    eventsInRange,
+    toEntries(db, eventsInRange),
     periodDays,
   );
   const categoryDistribution = aggregate.analysisDistribution;
@@ -164,6 +183,13 @@ async function processPeriod({
       categoryDistribution,
       titleGroups,
       periodDays,
+      // 이전 구간 비교·구간 안의 흐름. 원본 영상 기록에서 매번 다시 계산한다
+      comparison: buildPeriodComparison(
+        periodsUpTo(installDate, period.periodIndex).map((p) => ({
+          ...p,
+          entries: toEntries(db, eventsInPeriod(allEvents, p)),
+        })),
+      ),
     };
     const prompt = buildPeriodPrompt(reviewInput);
 
@@ -328,6 +354,7 @@ async function run(db, apiKey, { recordMetric } = {}) {
           apiKey,
           recordMetric,
           anonymousId,
+          installDate,
           period,
           allSessions,
           allEvents,
