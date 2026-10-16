@@ -248,6 +248,7 @@ function execSchema() {
       llmStatus            TEXT,              -- 'success' | 'fallback'
       failureReason        TEXT,              -- timeout | http_error | empty_response
                                                -- | parse_error | network_error | policy_filtered
+                                               -- | number_mismatch(입력에 없는 숫자를 씀)
       geminiMs             INTEGER,
       generatedAt          TEXT    NOT NULL,  -- cron이 이 행을 생성(확정)한 시각
       createdAt            TEXT    DEFAULT (datetime('now'))

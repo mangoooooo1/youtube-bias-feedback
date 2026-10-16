@@ -412,6 +412,149 @@ describe("generate-period-reviews.js — run()", () => {
     expect(row.sessionCount).toBe(2);
   });
 
+  // 결정 8 — 2구간부터 직전 구간 비교를 프롬프트에 넣고, 리뷰 첫 문장을 비교로 쓰게 한다
+  describe("직전 구간 비교", () => {
+    const userId = "compare-user";
+
+    // 1구간(6/1~6/4) 음악만, 2구간(6/5~6/8) 음악·게임 반반, 3구간은 기록 없음
+    function seedTwoPeriods() {
+      db.prepare(
+        "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+      ).run(userId, INSTALL_DATE);
+      const insertMeta = db.prepare(
+        "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, 600)",
+      );
+      insertMeta.run("c-music", "10");
+      insertMeta.run("c-game", "20");
+      const insertEvent = db.prepare(
+        "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, ?, ?, ?, 300)",
+      );
+      for (let i = 0; i < 8; i++)
+        insertEvent.run(
+          userId,
+          "c-music",
+          `음악 ${i}`,
+          "2026-06-01T10:00:00+09:00",
+        );
+      for (let i = 0; i < 4; i++) {
+        insertEvent.run(
+          userId,
+          "c-music",
+          `음악 ${i}`,
+          "2026-06-05T10:00:00+09:00",
+        );
+        insertEvent.run(
+          userId,
+          "c-game",
+          `게임 ${i}`,
+          "2026-06-06T10:00:00+09:00",
+        );
+      }
+    }
+
+    // 비교를 요청한 프롬프트(2구간부터)에는 비교 문장으로 시작하는 리뷰로 답한다
+    function geminiAnswering(comparedFeedback) {
+      return vi.fn(async (_url, opts) => {
+        const prompt = JSON.parse(opts.body).contents[0].parts[0].text;
+        const answer = {
+          topic: "음악",
+          feedback: prompt.includes("feedback의 첫 문장은 직전 구간과의 비교")
+            ? comparedFeedback
+            : "관찰 문장",
+        };
+        return {
+          ok: true,
+          json: async () => ({
+            candidates: [
+              { content: { parts: [{ text: JSON.stringify(answer) }] } },
+            ],
+          }),
+        };
+      });
+    }
+
+    function rows() {
+      return db
+        .prepare(
+          "SELECT periodIndex, llmStatus, failureReason, review FROM period_reviews WHERE anonymousId = ? ORDER BY periodIndex",
+        )
+        .all(userId);
+    }
+
+    it("2구간 프롬프트에 직전 구간 비교와 날짜별 비중을 넣고, 비교로 시작하는 리뷰를 저장한다", async () => {
+      seedTwoPeriods();
+      global.fetch = geminiAnswering(
+        "직전 구간보다 게임 비중이 50%p 늘었어요. 시청 시간의 50%가 게임이었어요.",
+      );
+
+      await run(db, "fake-key");
+
+      const prompts = global.fetch.mock.calls.map(
+        ([, opts]) => JSON.parse(opts.body).contents[0].parts[0].text,
+      );
+      expect(prompts).toHaveLength(2); // 3구간은 기록이 없어 Gemini를 부르지 않는다
+      expect(prompts[0]).not.toContain("[이전 구간과 비교]");
+      expect(prompts[1]).toContain(
+        "- 직전 구간(1구간) 시청 시간 비중: 음악 100% (영상 8개)",
+      );
+      expect(prompts[1]).toContain(
+        "- 직전 구간 대비 변화(크기 순): 게임 +50%p (0% → 50%), 음악 -50%p (100% → 50%)",
+      );
+      expect(prompts[1]).toContain("- 새로 본 분야: 게임");
+      // 이전 구간이 1구간 하나뿐이라 "이전 구간 전체" 목록은 넣지 않는다(직전 구간 줄과 중복)
+      expect(prompts[1]).not.toContain("- 이전 구간 전체:");
+      expect(prompts[1]).toContain("[이번 구간 날짜별 시청 시간 비중]\n- 6/5(");
+      // 같은 분야 안의 소재 변화를 짚을 수 있게 직전 구간 제목도 넘긴다
+      expect(prompts[1]).toContain(
+        "- 직전 구간 분야별 영상 제목 (시청 시간이 많은 분야부터, 최근 본 순서, 괄호는 본 횟수):\n  [음악] 영상 8개",
+      );
+
+      expect(rows()).toEqual([
+        {
+          periodIndex: 1,
+          llmStatus: "success",
+          failureReason: null,
+          review: "관찰 문장",
+        },
+        {
+          periodIndex: 2,
+          llmStatus: "success",
+          failureReason: null,
+          review:
+            "직전 구간보다 게임 비중이 50%p 늘었어요. 시청 시간의 50%가 게임이었어요.",
+        },
+        {
+          periodIndex: 3,
+          llmStatus: "fallback",
+          failureReason: null,
+          review:
+            "이 기간엔 분석할 시청 기록이 없어요. 다음 기간을 기대해 주세요!",
+        },
+      ]);
+    });
+
+    it("입력에 없는 숫자를 쓰면 number_mismatch 폴백이 되고, 대체 문구 첫 문장은 코드 비교 문장이다", async () => {
+      seedTwoPeriods();
+      global.fetch = geminiAnswering(
+        "직전 구간보다 게임 비중이 37%p 늘었어요.",
+      );
+      vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const summary = await run(db, "fake-key");
+
+      expect(rows()[1]).toEqual({
+        periodIndex: 2,
+        llmStatus: "fallback",
+        failureReason: "number_mismatch",
+        review:
+          "직전 구간보다 게임 비중이 50%p 늘었어요. 이 기간에는 영상 8개를 보셨고, 시청 시간은 음악 50%, 게임 50% 순이었어요.",
+      });
+      // Gemini를 불렀다가 실패한 것으로 센다(1구간 성공이 있어 전량 실패는 아님)
+      expect(summary.llmFailures).toBe(1);
+      expect(summary.created).toBe(1);
+    });
+  });
+
   // 오늘 리뷰와 같은 기준 — 유효 영상 수, 시청 시간 비중, 분야별 제목 전부(잠깐 본 영상 제외)
   it("프롬프트에 유효 영상 수·시청 시간 비중·분야별 제목 전부를 넣고, 잠깐 본 영상 제목은 넣지 않는다", async () => {
     const userId = "prompt-input-user";
