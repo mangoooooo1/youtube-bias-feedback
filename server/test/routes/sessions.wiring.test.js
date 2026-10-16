@@ -702,6 +702,59 @@ describe("POST /api/sessions — 오늘 리뷰 생성 결과를 세션 행에 �
     expect(latest.llmStatus).toBe("success");
   });
 
+  function notifiedAt(sessionId) {
+    return db
+      .prepare("SELECT feedbackNotifiedAt FROM sessions WHERE sessionId = ?")
+      .get(sessionId).feedbackNotifiedAt;
+  }
+
+  function geminiCallCount() {
+    return global.fetch.mock.calls.filter(
+      ([url]) => new URL(url).hostname === "generativelanguage.googleapis.com",
+    ).length;
+  }
+
+  it("유효 시청 영상이 늘지 않은 세션은 리뷰를 다시 만들지 않고, 응답에 리뷰가 없으며 알림 시각을 비운다", async () => {
+    geminiResponses.push(geminiOk("게임", "오늘은 게임 영상을 보셨네요."));
+    const endTime = new Date().toISOString();
+    const sentNotifiedAt = new Date().toISOString();
+
+    insertTodayVideos("wiring-user", "skip-s1");
+    const first = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "skip-s1",
+          endTime,
+          feedbackNotifiedAt: sentNotifiedAt,
+        }),
+      );
+    // 새 영상 기록 없이 끝난 세션
+    const second = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "skip-s2",
+          endTime,
+          feedbackNotifiedAt: sentNotifiedAt,
+        }),
+      );
+
+    expect(first.body.data.todayReview).not.toBeNull();
+    expect(second.status).toBe(200);
+    expect(second.body.data.todayReview).toBeNull();
+    expect(geminiCallCount()).toBe(1);
+    // 리뷰가 나간 세션은 알림 시각을 그대로 남기고, 건너뛴 세션만 비운다
+    expect(notifiedAt("skip-s1")).toBe(sentNotifiedAt);
+    expect(notifiedAt("skip-s2")).toBeNull();
+    expect(sessionRow("skip-s2").review).toBeNull();
+    expect(
+      db
+        .prepare("SELECT genCount FROM today_reviews WHERE anonymousId = ?")
+        .get("wiring-user").genCount,
+    ).toBe(1);
+  });
+
   it("클라이언트가 보낸 LLM 값은 저장하지 않는다", async () => {
     // 오늘 본 영상 기록이 없어 리뷰가 생성되지 않는 경우라 서버가 덮어쓰지도 않는다
     process.env.YOUTUBE_API_KEY = "";

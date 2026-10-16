@@ -6,6 +6,7 @@ const {
   insertSession,
   recordSessionReview,
   recordFeedbackTimestamp,
+  clearFeedbackNotifiedAt,
 } = require("./sessions-store");
 const { requireParticipant } = require("../middleware/requireParticipant");
 const { oneLine } = require("../log-line");
@@ -158,7 +159,7 @@ router.post("/", requireParticipant, async (req, res, next) => {
     return next(err);
   }
 
-  // "오늘" 누적 리뷰는 그룹·자격과 무관하게 항상 다시 계산해 저장하고, 지금 이 요청자가 볼 자격이 있을 때만 응답에 싣는다.
+  // "오늘" 누적 리뷰는 그룹·자격과 무관하게 유효 시청 영상이 늘었으면 다시 계산해 저장하고, 지금 이 요청자가 볼 자격이 있을 때만 응답에 싣는다.
   let todayReview = null;
   try {
     const anonymousId = req.body.anonymousId;
@@ -186,6 +187,15 @@ router.post("/", requireParticipant, async (req, res, next) => {
     }
   } catch (err) {
     console.error("[sessions] 오늘 리뷰 생성 오류:", oneLine(err.message));
+  }
+
+  // 리뷰를 싣지 않으면 확장이 알림을 띄우지 않으므로, 미리 기록된 알림 시각을 비운다
+  if (!todayReview) {
+    try {
+      clearFeedbackNotifiedAt(db, req.body.sessionId, req.body.anonymousId);
+    } catch (err) {
+      console.error("[sessions] 알림 시각 정리 실패:", oneLine(err.message));
+    }
   }
 
   // categoryDistribution/entropy를 응답에 실어 돌려준다.

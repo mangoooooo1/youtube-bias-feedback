@@ -78,6 +78,15 @@ function insertWatchedVideos(
   }
 }
 
+// 3초만 본 영상 — 유효 시청이 아님
+function insertShortVideo(db, anonymousId, watchedAt) {
+  videoSeq += 1;
+  db.prepare(
+    `INSERT INTO video_events (eventId, anonymousId, videoId, sessionId, title, watchedAt, watchedSeconds)
+     VALUES (?, ?, ?, 's1', '잠깐', ?, 3)`,
+  ).run(`e-${videoSeq}`, anonymousId, `vid-${videoSeq}`, watchedAt);
+}
+
 const originalFetch = global.fetch;
 
 afterEach(() => {
@@ -244,17 +253,7 @@ describe("generateAndStoreTodayReview", () => {
       watchedAt: "2026-03-10T10:00:00+09:00",
       count: 2,
     });
-    // 3초만 본 영상 — 유효 시청이 아님
-    db.prepare(
-      "INSERT INTO video_events (eventId, anonymousId, videoId, sessionId, title, watchedAt, watchedSeconds) VALUES (?, ?, ?, ?, ?, ?, 3)",
-    ).run(
-      "e-short",
-      "u-valid",
-      "vid-short",
-      "s1",
-      "잠깐",
-      "2026-03-10T10:30:00+09:00",
-    );
+    insertShortVideo(db, "u-valid", "2026-03-10T10:30:00+09:00");
 
     await generateAndStoreTodayReview(db, {
       anonymousId: "u-valid",
@@ -336,6 +335,126 @@ describe("generateAndStoreTodayReview", () => {
     const prompt = JSON.parse(global.fetch.mock.calls[0][1].body).contents[0]
       .parts[0].text;
     expect(prompt).toContain("분류 없는 영상");
+  });
+});
+
+// 유효 시청 영상이 늘었을 때만 다시 만든다 — 근거가 같으면 Gemini 비용·중복 알림을 줄인다
+describe("generateAndStoreTodayReview — 재생성 조건", () => {
+  const NOW = new Date("2026-03-10T20:00:00+09:00");
+
+  function geminiOk(feedback = "관찰 문장") {
+    return vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: JSON.stringify({ topic: "음악", feedback }) }],
+            },
+          },
+        ],
+      }),
+    });
+  }
+
+  async function generate(db, anonymousId, extra = {}) {
+    return generateAndStoreTodayReview(db, {
+      anonymousId,
+      apiKey: "fake-key",
+      now: NOW,
+      recordMetric: vi.fn(),
+      ...extra,
+    });
+  }
+
+  function storedRow(db, anonymousId) {
+    return db
+      .prepare("SELECT * FROM today_reviews WHERE anonymousId = ?")
+      .get(anonymousId);
+  }
+
+  it("유효 시청 영상이 늘지 않았으면 Gemini 없이 건너뛰고 null을 반환한다(저장된 리뷰 유지)", async () => {
+    const db = createTestDb();
+    insertWatchedVideos(db, {
+      anonymousId: "same",
+      watchedAt: "2026-03-10T10:00:00+09:00",
+      count: 2,
+    });
+    global.fetch = geminiOk("첫 리뷰");
+    await generate(db, "same");
+
+    const recordMetric = vi.fn();
+    const result = await generate(db, "same", { recordMetric });
+
+    expect(result).toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(recordMetric).not.toHaveBeenCalled();
+    expect(storedRow(db, "same")).toMatchObject({
+      genCount: 1,
+      review: "첫 리뷰",
+      validVideoCount: 2,
+    });
+  });
+
+  it("잠깐 본 영상만 늘었으면 건너뛴다", async () => {
+    const db = createTestDb();
+    insertWatchedVideos(db, {
+      anonymousId: "short-only",
+      watchedAt: "2026-03-10T10:00:00+09:00",
+    });
+    global.fetch = geminiOk();
+    await generate(db, "short-only");
+
+    insertShortVideo(db, "short-only", "2026-03-10T11:00:00+09:00");
+    const result = await generate(db, "short-only");
+
+    expect(result).toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(storedRow(db, "short-only").videoCount).toBe(1);
+  });
+
+  it("유효 시청 영상이 1개라도 늘면 다시 생성한다", async () => {
+    const db = createTestDb();
+    insertWatchedVideos(db, {
+      anonymousId: "plus-one",
+      watchedAt: "2026-03-10T10:00:00+09:00",
+    });
+    global.fetch = geminiOk();
+    await generate(db, "plus-one");
+
+    insertWatchedVideos(db, {
+      anonymousId: "plus-one",
+      watchedAt: "2026-03-10T11:00:00+09:00",
+    });
+    const result = await generate(db, "plus-one");
+
+    expect(result.genCount).toBe(2);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(storedRow(db, "plus-one").validVideoCount).toBe(2);
+  });
+
+  it("지난 결과가 폴백이면 유효 영상이 늘지 않아도 다시 생성한다", async () => {
+    const db = createTestDb();
+    insertWatchedVideos(db, {
+      anonymousId: "after-fallback",
+      watchedAt: "2026-03-10T10:00:00+09:00",
+    });
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      text: async () => "server error",
+    });
+    const first = await generate(db, "after-fallback");
+    expect(first.llmStatus).toBe("fallback");
+
+    global.fetch = geminiOk("다시 만든 리뷰");
+    const second = await generate(db, "after-fallback");
+
+    expect(second.llmStatus).toBe("success");
+    expect(storedRow(db, "after-fallback")).toMatchObject({
+      genCount: 2,
+      review: "다시 만든 리뷰",
+    });
   });
 });
 

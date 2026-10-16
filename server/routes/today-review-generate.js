@@ -8,6 +8,22 @@ const {
 const { upsertTodayReview } = require("./today-reviews-upsert");
 const { recordLlmCall } = require("../monitoring/llm-metrics");
 
+/**
+ * 저장된 최신본을 다시 만들 필요가 있는지 판단한다.
+ * 유효 시청 영상이 늘지 않았으면 근거가 같아 건너뛴다.
+ * 단 지난 결과가 폴백(Gemini 실패·카테고리 없음)이면 정상 리뷰로 바꿀 기회를 주기 위해 다시 만든다.
+ */
+function needsRegeneration(db, anonymousId, reviewDate, validVideoCount) {
+  const existing = db
+    .prepare(
+      "SELECT validVideoCount, llmStatus FROM today_reviews WHERE anonymousId = ? AND reviewDate = ?",
+    )
+    .get(anonymousId, reviewDate);
+  if (!existing || existing.validVideoCount == null) return true;
+  if (existing.llmStatus === "fallback") return true;
+  return validVideoCount > existing.validVideoCount;
+}
+
 /** 같은 (anonymousId, reviewDate)의 기존 genCount보다 1 큰 값을 계산한다(없으면 1). */
 function nextGenCount(db, anonymousId, reviewDate) {
   const existing = db
@@ -20,7 +36,8 @@ function nextGenCount(db, anonymousId, reviewDate) {
 
 /**
  * anonymousId의 "오늘" 누적 리뷰를 다시 계산해 today_reviews에 저장하고 그 결과를 반환한다.
- * 오늘 유효 시청 영상이 하나도 없으면 null을 반환한다. apiKey가 없으면(.env 미설정) Gemini 호출 없이
+ * 오늘 유효 시청 영상이 하나도 없거나, 다시 만들 필요가 없으면(needsRegeneration) 아무것도
+ * 저장하지 않고 null을 반환한다. apiKey가 없으면(.env 미설정) Gemini 호출 없이
  * 결정론적 폴백 문구만 사용한다.
  */
 async function generateAndStoreTodayReview(
@@ -42,6 +59,16 @@ async function generateAndStoreTodayReview(
 
   const aggregate = aggregateTodayCumulative({ events, now });
   if (!aggregate) return null;
+  if (
+    !needsRegeneration(
+      db,
+      anonymousId,
+      aggregate.reviewDate,
+      aggregate.validVideoCount,
+    )
+  ) {
+    return null;
+  }
 
   const prompt = buildTodayCumulativePrompt(aggregate);
 
