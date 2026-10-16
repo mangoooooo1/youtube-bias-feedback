@@ -412,6 +412,41 @@ describe("generate-period-reviews.js — run()", () => {
     expect(row.sessionCount).toBe(2);
   });
 
+  // 오늘 리뷰와 같은 기준. 근거 분포 없이 LLM을 부르지 않는다
+  it("기간 유효 영상이 모두 카테고리를 못 가져왔으면 Gemini 없이 '분석하지 못했다' 폴백을 저장한다", async () => {
+    const userId = "no-category-user";
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run(userId, INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+    ).run(userId, JSON.stringify({}), 2, "2026-06-01T11:00:00+09:00");
+    // 메타데이터 행 없이 영상 기록만. 카테고리를 못 가져온 상태
+    const insertEvent = db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, ?, ?, ?, 300)",
+    );
+    insertEvent.run(userId, "unknown-1", "영상 1", "2026-06-01T10:00:00+09:00");
+    insertEvent.run(userId, "unknown-2", "영상 2", "2026-06-01T10:10:00+09:00");
+
+    global.fetch = vi.fn();
+    const recordMetric = vi.fn();
+    const summary = await run(db, "fake-key", { recordMetric });
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(recordMetric).not.toHaveBeenCalled();
+    const row = db
+      .prepare(
+        "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+      )
+      .get(userId);
+    expect(row.llmStatus).toBe("fallback");
+    expect(row.failureReason).toBeNull();
+    expect(row.review).toContain("분석하지 못했어요");
+    expect(row.validVideoCount).toBe(2);
+    // 실패가 아닌 fallback으로 집계돼 크론이 실패로 끝나지 않는다
+    expect(summary.llmFailures).toBe(0);
+  });
+
   it("기간 시간 가중 분포도 영상 길이로 상한을 둔다", async () => {
     const userId = "cap-user";
     db.prepare(

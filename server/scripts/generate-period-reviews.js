@@ -128,6 +128,15 @@ async function processPeriod({
       videoCount: 0,
     });
     llmStatus = "fallback";
+  } else if (Object.keys(categoryDistribution).length === 0) {
+    // 유효 영상이 모두 카테고리를 못 가져오는 경우
+    // 프롬프트가 근거로 삼을 분포가 없어 Gemini를 부르지 않는다.
+    // 실패가 아닌 fallback이라 재시도 기간(periodEnd+3일) 안에 카테고리를 다시 가져오면 다음 실행에서 정상 리뷰로 바뀐다.
+    result = generatePeriodFallbackReview({
+      categoryDistribution: {},
+      videoCount: validVideoCount,
+    });
+    llmStatus = "fallback";
   } else {
     const prompt = buildPeriodPrompt({
       categoryDistribution,
