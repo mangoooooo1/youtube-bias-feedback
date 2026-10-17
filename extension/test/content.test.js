@@ -10,6 +10,7 @@ import {
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import vm from "node:vm";
 import "../study-schedule.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1876,5 +1877,46 @@ describe("content.js recordVideo — 기록 실패를 오류 보고로 넘긴다
     await recordVideo("v1", "영상1");
 
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+// 브라우저는 content.js를 module·exports가 없는 classic script로 실행한다. 테스트용 내보내기
+// 블록이 그 환경에서 오류를 내거나 전역을 만들지 않는지 같은 조건(vm, 모듈 아님)으로 확인한다.
+describe("content.js classic script 실행 — 테스트용 내보내기가 브라우저에 영향을 주지 않는다", () => {
+  function createBrowserLikeContext() {
+    return vm.createContext({
+      document: {
+        referrer: "",
+        title: "",
+        hidden: false,
+        addEventListener: () => {},
+        querySelector: () => null,
+      },
+      window: { addEventListener: () => {} },
+      location: { href: "https://www.youtube.com/" },
+      chrome: {
+        storage: { local: { get: async () => ({}), set: async () => {} } },
+      },
+      fetch: () => Promise.resolve(),
+      ViewLensStudy: globalThis.ViewLensStudy,
+      console: { log: () => {}, warn: () => {}, error: () => {} },
+      crypto: globalThis.crypto,
+      setTimeout,
+    });
+  }
+
+  it("모듈이 아닌 스크립트로 파싱된다(export 문이 없다)", () => {
+    expect(
+      () => new vm.Script(readFileSync(CONTENT_PATH, "utf8")),
+    ).not.toThrow();
+  });
+
+  it("module이 없는 환경에서 오류 없이 실행되고 module·exports를 만들지 않는다", () => {
+    const context = createBrowserLikeContext();
+    expect(() =>
+      vm.runInContext(readFileSync(CONTENT_PATH, "utf8"), context),
+    ).not.toThrow();
+    expect(context.module).toBeUndefined();
+    expect(context.exports).toBeUndefined();
   });
 });

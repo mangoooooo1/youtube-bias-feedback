@@ -699,3 +699,22 @@ window.addEventListener("pagehide", () => {
   if (!target?.eventId) return;
   applyWatchStatsPatch(target, { ...stats, watchStatsSent: false });
 });
+
+// 테스트(Vitest)에서만 내부 함수를 꺼낸다. 콘텐츠 스크립트에는 module이 없어 이 블록은 실행되지 않는다.
+// export 문은 classic script에서 SyntaxError라 쓸 수 없다.
+/* global module */
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    extractVideoId,
+    parseEntryLocation,
+    parseTitle,
+    classifyNavigationTrigger,
+    recordVideo,
+    handleVideoChange,
+    captureWatchStatsSnapshot,
+    captureTrackedVideoIdentity,
+    rememberTrackedVideo,
+    currentWatchedMs,
+    resetWatchTracker,
+  };
+}
