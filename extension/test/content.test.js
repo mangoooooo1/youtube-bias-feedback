@@ -16,72 +16,50 @@ import "../study-schedule.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONTENT_PATH = path.join(__dirname, "../content.js");
 
-// content.js는 manifest.json에서 type:module이 아닌 일반 콘텐츠 스크립트로 선언돼 있어
-// export를 붙이면 실제 브라우저에서 SyntaxError로 깨진다.
-// 그래서 함수 정의 텍스트만 추출해 격리 실행한다.
-const EXTRACT_VIDEO_ID_DECL = /function extractVideoId\(url\) \{[\s\S]*?\n\}/;
-const PARSE_TITLE_DECL = /function parseTitle\(\) \{[\s\S]*?\n\}/;
-
-function loadExtractVideoId() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(EXTRACT_VIDEO_ID_DECL);
-  if (!match) {
-    throw new Error(
-      "extractVideoId 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  return new Function(`${match[0]}\nreturn extractVideoId;`)();
-}
-
-// parseTitle()은 인자 없이 전역 document.title을 읽으므로, document를 격리 함수의
-// 매개변수로 넘겨 매번 다른 title 값으로 호출할 수 있는 래퍼를 만든다.
-function loadParseTitle() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(PARSE_TITLE_DECL);
-  if (!match) {
-    throw new Error(
-      "parseTitle 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  const factory = new Function("document", `${match[0]}\nreturn parseTitle();`);
-  return (title) => factory({ title });
-}
-
-// classifyNavigationTrigger()는 모듈 스코프 변수(lastEndedAt/lastInteractionAt)를 직접
-// 읽고 쓰므로, 함수 본문만 떼어내면 그 변수들이 없어 참조 에러가 난다. 선언부까지 함께
-// 추출하고, 테스트에서 그 변수들을 직접 조작할 수 있게 setter를 얹어 반환한다.
-const NAV_TRIGGER_DECL =
-  /let lastEndedAt = null;[\s\S]*?\nfunction classifyNavigationTrigger\(now\) \{[\s\S]*?\n\}/;
-
-function loadClassifyNavigationTrigger() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(NAV_TRIGGER_DECL);
-  if (!match) {
-    throw new Error(
-      "classifyNavigationTrigger 관련 코드를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  // 추출된 구간에 document.addEventListener("ended"/"click"/"keydown", ...) 등록도
-  // 함께 포함돼 있다 — 실제 이벤트 발생은 이 테스트의 관심사가 아니므로 no-op으로 흘려보낸다.
-  const factory = new Function(
-    "document",
-    `
-    ${match[0]}
-    return {
-      classify: classifyNavigationTrigger,
-      setEndedAt: (t) => { lastEndedAt = t; },
-      setInteractionAt: (t) => { lastInteractionAt = t; },
-    };
-  `,
+// content.js 전체를 새 인스턴스로 불러온다.
+// 불러오는 순간 최상위 코드가 실행되므로 필요한 브라우저 전역을 먼저 가짜로 넣는다.
+async function loadContent(env = {}) {
+  vi.resetModules();
+  const documentListeners = {};
+  vi.stubGlobal("document", {
+    referrer: "",
+    title: "",
+    hidden: false,
+    addEventListener: (type, cb) => {
+      (documentListeners[type] ??= []).push(cb);
+    },
+    querySelector: () => null,
+    ...env.document,
+  });
+  vi.stubGlobal("window", { addEventListener: () => {}, ...env.window });
+  vi.stubGlobal(
+    "location",
+    env.location ?? { href: "https://www.youtube.com/" },
   );
-  return factory({ addEventListener: () => {} });
+  vi.stubGlobal(
+    "chrome",
+    env.chrome ?? {
+      storage: { local: { get: async () => ({}), set: async () => {} } },
+    },
+  );
+  vi.stubGlobal("fetch", env.fetch ?? (() => Promise.resolve()));
+  const api = (await import("../content.js")).default;
+  return { api, documentListeners };
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+// 아래 로더들은 아직 함수 정의 텍스트만 추출해 격리 실행하는 예전 방식이다(loadContent로 옮기는 중).
 
 describe("content.js extractVideoId", () => {
   let extractVideoId;
 
-  beforeAll(() => {
-    extractVideoId = loadExtractVideoId();
+  beforeEach(async () => {
+    ({
+      api: { extractVideoId },
+    } = await loadContent());
   });
 
   it("/watch?v=ID 형태에서 영상 id를 추출한다", () => {
@@ -121,27 +99,13 @@ describe("content.js extractVideoId", () => {
   });
 });
 
-// server/routes/video-events-classify.js와 동일한 YOUTUBE_HOSTS 목록 선언까지 포함해서 추출해야
-// parseEntryLocation 내부에서 참조하는 상수가 존재한다.
-const PARSE_ENTRY_LOCATION_DECL =
-  /const YOUTUBE_HOSTS = new Set\(\[[\s\S]*?\nfunction parseEntryLocation\(href\) \{[\s\S]*?\n\}/;
-
-function loadParseEntryLocation() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(PARSE_ENTRY_LOCATION_DECL);
-  if (!match) {
-    throw new Error(
-      "parseEntryLocation 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  return new Function(`${match[0]}\nreturn parseEntryLocation;`)();
-}
-
 describe("content.js parseEntryLocation", () => {
   let parseEntryLocation;
 
-  beforeAll(() => {
-    parseEntryLocation = loadParseEntryLocation();
+  beforeEach(async () => {
+    ({
+      api: { parseEntryLocation },
+    } = await loadContent());
   });
 
   it("href가 없으면 entryHost/entryPath 모두 null을 반환한다", () => {
@@ -176,8 +140,13 @@ describe("content.js parseEntryLocation", () => {
 describe("content.js parseTitle", () => {
   let parseTitle;
 
-  beforeAll(() => {
-    parseTitle = loadParseTitle();
+  // parseTitle()은 인자 없이 전역 document.title을 읽으므로, 호출 전에 title을 바꿔 넣는 래퍼를 쓴다.
+  beforeEach(async () => {
+    const { api } = await loadContent();
+    parseTitle = (title) => {
+      globalThis.document.title = title;
+      return api.parseTitle();
+    };
   });
 
   it("안 읽은 알림 개수 접두사와 ' - YouTube' 접미사를 제거한다", () => {
@@ -208,8 +177,24 @@ describe("content.js parseTitle", () => {
 describe("content.js classifyNavigationTrigger", () => {
   let trigger;
 
-  beforeEach(() => {
-    trigger = loadClassifyNavigationTrigger();
+  // lastEndedAt/lastInteractionAt은 모듈 내부 상태라, 그 시각으로 시계를 맞춘 뒤 content.js가
+  // 실제로 등록한 ended/click 리스너를 실행해 기록하게 한다.
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { api, documentListeners } = await loadContent();
+    const fire = (type, at) => {
+      vi.setSystemTime(at);
+      for (const cb of documentListeners[type]) cb();
+    };
+    trigger = {
+      classify: api.classifyNavigationTrigger,
+      setEndedAt: (t) => fire("ended", t),
+      setInteractionAt: (t) => fire("click", t),
+    };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("ended 신호가 최근이면 'ended'를 반환한다", () => {
