@@ -542,51 +542,46 @@ describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 �
 // (retryUnsentVideoEvents)가 실패분을 찾아낼 수 있게 한다.
 
 // captureWatchStatsSnapshot
-// watchTracker가 아직 초기화되지 않은 상태에서도 예외 없이 null을 반환하는지가 핵심 회귀 지점이다.
+// 파일을 처음 불러올 때 최상위 handleVideoChange()가 resetWatchTracker()보다 먼저 실행돼
+// watchTracker가 아직 null이다. 이 순간에도 예외 없이 진행돼야 첫 영상이 기록된다.
+// pagehide 로더(아래)가 아직 이 정규식들을 쓴다.
 const CAPTURE_SNAPSHOT_DECL =
   /function captureWatchStatsSnapshot\(\) \{[\s\S]*?\n\}/;
-
-function loadCaptureWatchStatsSnapshot() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(CAPTURE_SNAPSHOT_DECL);
-  if (!match) {
-    throw new Error(
-      "captureWatchStatsSnapshot 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  return new Function(`${match[0]}\nreturn captureWatchStatsSnapshot;`)();
-}
-
-describe("content.js captureWatchStatsSnapshot", () => {
-  it("watchTracker가 선언조차 안 된 격리 환경에서도 예외 없이 null을 반환한다", () => {
-    const captureWatchStatsSnapshot = loadCaptureWatchStatsSnapshot();
-    expect(() => captureWatchStatsSnapshot()).not.toThrow();
-    expect(captureWatchStatsSnapshot()).toBeNull();
-  });
-});
-
-// currentWatchedMs — 순수 함수라 클로저 의존 없이 그대로 추출해 검증할 수 있다.
 const CURRENT_WATCHED_MS_DECL =
   /function currentWatchedMs\(tracker\) \{[\s\S]*?\n\}/;
 
-function loadCurrentWatchedMs() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(CURRENT_WATCHED_MS_DECL);
-  if (!match) {
-    throw new Error(
-      "currentWatchedMs 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  // Date를 별도로 주입하지 않는다 — 전역 Date를 그대로 참조해야 vi.setSystemTime이
-  // 호출 시점(로드 시점이 아니라)에 반영된다.
-  return new Function(`${match[0]}\nreturn currentWatchedMs;`)();
-}
+describe("content.js captureWatchStatsSnapshot", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
+  it("영상 페이지에서 처음 불러올 때 watchTracker가 아직 없어도 예외 없이 첫 영상을 기록한다", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const set = vi.fn(async () => {});
+    const { api } = await loadContent({
+      document: { title: "첫 영상 - YouTube" },
+      location: { href: "https://www.youtube.com/watch?v=FIRST" },
+      chrome: {
+        runtime: { id: "fake-extension-id" },
+        storage: { local: { get: async () => ({}), set } },
+      },
+    });
+
+    await vi.waitFor(() => expect(set).toHaveBeenCalled());
+    expect(set.mock.calls[0][0].lastRecordedVideo.videoId).toBe("FIRST");
+    // 최상위 resetWatchTracker()까지 끝나 이후에는 스냅샷을 만들 수 있다
+    expect(api.captureWatchStatsSnapshot()).not.toBeNull();
+  });
+});
+
+// currentWatchedMs — 순수 함수
 describe("content.js currentWatchedMs", () => {
   let currentWatchedMs;
 
-  beforeAll(() => {
-    currentWatchedMs = loadCurrentWatchedMs();
+  beforeEach(async () => {
+    ({
+      api: { currentWatchedMs },
+    } = await loadContent());
   });
 
   it("tracker가 없으면 0을 반환한다", () => {
@@ -611,14 +606,6 @@ describe("content.js currentWatchedMs", () => {
 
 // ── 비디오 엘리먼트 계측 통합 테스트
 // 벽시계 경과 시간(Date.now() 차이) 기반으로 바뀌었는지를 실제 play/pause/seeking/seeked 이벤트를 발생시켜 검증한다.
-// watchTracker/trackedVideoEl 선언은 파일 초반(TDZ 회귀 수정 이후)으로, 이를 쓰는
-// currentWatchedMs~resetWatchTracker 함수들은 파일 후반에 있어 더 이상 한 구간으로
-// 붙어 있지 않다 — 두 조각을 따로 추출해 이어 붙인다.
-const WATCH_TRACKER_VARS_DECL =
-  /let watchTracker = null;\nlet trackedVideoEl = null;/;
-const VIDEO_TRACKING_SECTION_DECL =
-  /function currentWatchedMs\(tracker\) \{[\s\S]*?\nfunction resetWatchTracker\(\) \{[\s\S]*?\n\}/;
-
 function createFakeVideoElement({ paused = true, playbackRate = 1 } = {}) {
   const listeners = {};
   return {
@@ -636,40 +623,19 @@ function createFakeVideoElement({ paused = true, playbackRate = 1 } = {}) {
   };
 }
 
-function loadVideoTrackingSection(documentMock) {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const varsMatch = raw.match(WATCH_TRACKER_VARS_DECL);
-  const funcsMatch = raw.match(VIDEO_TRACKING_SECTION_DECL);
-  if (!varsMatch) {
-    throw new Error(
-      "watchTracker/trackedVideoEl 선언을 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!funcsMatch) {
-    throw new Error(
-      "비디오 엘리먼트 계측 섹션을 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  const factory = new Function(
-    "document",
-    `
-    ${varsMatch[0]}
-    ${funcsMatch[0]}
-    return {
-      reset: resetWatchTracker,
-      getTracker: () => watchTracker,
-      currentWatchedMs: () => currentWatchedMs(watchTracker),
-    };
-    `,
-  );
-  return factory(documentMock);
-}
-
-function makeDocumentMock(videoEl, { hidden = false } = {}) {
+// 불러오는 순간의 최상위 resetWatchTracker()는 <video>가 없는 페이지로 지나가게 하고,
+// 그 뒤 querySelector가 videoEl을 돌려주게 해 테스트의 reset() 시점에 연결되게 한다.
+async function loadVideoTrackingSection(videoEl, { hidden = false } = {}) {
+  let video = null;
+  const { api } = await loadContent({
+    document: { hidden, querySelector: () => video },
+  });
+  video = videoEl;
   return {
-    hidden,
-    querySelector: () => videoEl,
-    addEventListener: () => {},
+    reset: api.resetWatchTracker,
+    snapshot: api.captureWatchStatsSnapshot,
+    currentWatchedMs: () =>
+      api.captureWatchStatsSnapshot().watchedSeconds * 1000,
   };
 }
 
@@ -683,9 +649,9 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     vi.useRealTimers();
   });
 
-  it("2배속으로 실제 15초를 재생해도 watchedSeconds는 15초로 기록된다(콘텐츠 소비량이 아니라 벽시계 경과 시간)", () => {
+  it("2배속으로 실제 15초를 재생해도 watchedSeconds는 15초로 기록된다(콘텐츠 소비량이 아니라 벽시계 경과 시간)", async () => {
     const videoEl = createFakeVideoElement({ paused: false, playbackRate: 2 });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset(); // attachVideoTracking이 이미 재생 중임을 감지해 즉시 구간을 연다.
     vi.setSystemTime(15000); // 벽시계 15초 경과(재생 상태 유지)
@@ -693,12 +659,12 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     expect(section.currentWatchedMs()).toBe(15000);
   });
 
-  it("0.5배속으로 실제 30초를 재생해도 watchedSeconds는 30초로 기록된다(과소평가되지 않음)", () => {
+  it("0.5배속으로 실제 30초를 재생해도 watchedSeconds는 30초로 기록된다(과소평가되지 않음)", async () => {
     const videoEl = createFakeVideoElement({
       paused: false,
       playbackRate: 0.5,
     });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset();
     vi.setSystemTime(30000);
@@ -706,9 +672,9 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     expect(section.currentWatchedMs()).toBe(30000);
   });
 
-  it("pause 중에는 시간이 누적되지 않고, 재개하면 그 이후부터 다시 누적된다", () => {
+  it("pause 중에는 시간이 누적되지 않고, 재개하면 그 이후부터 다시 누적된다", async () => {
     const videoEl = createFakeVideoElement({ paused: false });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset();
     vi.setSystemTime(10000); // 10초 재생
@@ -726,9 +692,9 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     expect(section.currentWatchedMs()).toBe(15000);
   });
 
-  it("탐색(seeking) 중에는 시간이 누적되지 않고, 탐색 종료 후 재생 중이면 다시 누적된다", () => {
+  it("탐색(seeking) 중에는 시간이 누적되지 않고, 탐색 종료 후 재생 중이면 다시 누적된다", async () => {
     const videoEl = createFakeVideoElement({ paused: false });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset();
     vi.setSystemTime(5000); // 5초 재생 후 탐색 시작
@@ -740,9 +706,9 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     expect(section.currentWatchedMs()).toBe(15000); // 5000 + 10000, 탐색 100ms는 제외
   });
 
-  it("탐색 후 일시정지 상태로 남으면(paused=true) 재생을 다시 열지 않는다", () => {
+  it("탐색 후 일시정지 상태로 남으면(paused=true) 재생을 다시 열지 않는다", async () => {
     const videoEl = createFakeVideoElement({ paused: false });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset();
     vi.setSystemTime(3000);
@@ -754,9 +720,9 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     expect(section.currentWatchedMs()).toBe(3000); // 늘어나지 않아야 함
   });
 
-  it("영상이 처음부터 일시정지 상태면(자동재생 꺼짐) 시간이 쌓이지 않는다", () => {
+  it("영상이 처음부터 일시정지 상태면(자동재생 꺼짐) 시간이 쌓이지 않는다", async () => {
     const videoEl = createFakeVideoElement({ paused: true });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset();
     vi.setSystemTime(20000);
@@ -764,45 +730,28 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     expect(section.currentWatchedMs()).toBe(0);
   });
 
-  it("ratechange 발생 시 마지막 배속 값을 기록한다(시간 계산에는 영향 없이 원시 데이터로만 보존)", () => {
+  it("ratechange 발생 시 마지막 배속 값을 기록한다(시간 계산에는 영향 없이 원시 데이터로만 보존)", async () => {
     const videoEl = createFakeVideoElement({ paused: false, playbackRate: 1 });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset();
     videoEl.playbackRate = 1.5;
     videoEl.dispatch("ratechange");
 
-    expect(section.getTracker().lastPlaybackRate).toBe(1.5);
+    expect(section.snapshot().playbackRate).toBe(1.5);
   });
 });
 
+// pagehide 로더(아래)가 아직 이 정규식을 쓴다.
 const TRACKED_IDENTITY_DECL =
   /let trackedVideoIdentity = null;[\s\S]*?\nfunction captureTrackedVideoIdentity\(\) \{[\s\S]*?\n\}/;
-const REMEMBER_TRACKED_VIDEO_DECL =
-  /function rememberTrackedVideo\(sessionId, eventId\) \{[\s\S]*?\n\}/;
 
-function loadTrackedVideoIdentityHelpers() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const identityMatch = raw.match(TRACKED_IDENTITY_DECL);
-  const rememberMatch = raw.match(REMEMBER_TRACKED_VIDEO_DECL);
-  if (!identityMatch) {
-    throw new Error(
-      "trackedVideoIdentity/captureTrackedVideoIdentity를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!rememberMatch) {
-    throw new Error(
-      "rememberTrackedVideo 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  return new Function(`
-    ${identityMatch[0]}
-    ${rememberMatch[0]}
-    return {
-      remember: rememberTrackedVideo,
-      capture: captureTrackedVideoIdentity,
-    };
-  `)();
+async function loadTrackedVideoIdentityHelpers() {
+  const { api } = await loadContent();
+  return {
+    remember: api.rememberTrackedVideo,
+    capture: api.captureTrackedVideoIdentity,
+  };
 }
 
 // pagehide 핸들러 — 코드리뷰 지적 회귀 테스트(탭 종료 시에도 공유 lastRecordedVideo가
@@ -990,19 +939,19 @@ describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코
 });
 
 describe("content.js trackedVideoIdentity — 세션 타임아웃에 영향받지 않는 시청시간 확정 대상 추적 (코드리뷰 회귀)", () => {
-  it("초기값은 null이다", () => {
-    const { capture } = loadTrackedVideoIdentityHelpers();
+  it("초기값은 null이다", async () => {
+    const { capture } = await loadTrackedVideoIdentityHelpers();
     expect(capture()).toBeNull();
   });
 
-  it("rememberTrackedVideo로 기억해 둔 값을 그대로 돌려준다", () => {
-    const { remember, capture } = loadTrackedVideoIdentityHelpers();
+  it("rememberTrackedVideo로 기억해 둔 값을 그대로 돌려준다", async () => {
+    const { remember, capture } = await loadTrackedVideoIdentityHelpers();
     remember("s1", "evt-1");
     expect(capture()).toEqual({ sessionId: "s1", eventId: "evt-1" });
   });
 
-  it("여러 번 기억하면 가장 최근 값으로 덮어쓴다(영상이 여러 번 전환된 경우)", () => {
-    const { remember, capture } = loadTrackedVideoIdentityHelpers();
+  it("여러 번 기억하면 가장 최근 값으로 덮어쓴다(영상이 여러 번 전환된 경우)", async () => {
+    const { remember, capture } = await loadTrackedVideoIdentityHelpers();
     remember("s1", "evt-1");
     remember("s1", "evt-2");
     expect(capture()).toEqual({ sessionId: "s1", eventId: "evt-2" });
