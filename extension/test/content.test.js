@@ -1,12 +1,4 @@
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  beforeEach,
-  afterEach,
-  vi,
-} from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -43,6 +35,7 @@ async function loadContent(env = {}) {
     },
   );
   vi.stubGlobal("fetch", env.fetch ?? (() => Promise.resolve()));
+  if (env.console) vi.stubGlobal("console", env.console);
   const api = (await import("../content.js")).default;
   return { api, documentListeners };
 }
@@ -249,23 +242,16 @@ describe("content.js classifyNavigationTrigger", () => {
 const RECORD_VIDEO_DECL =
   /let writeQueue = Promise\.resolve\(\);[\s\S]*?\nfunction recordVideo\(\n {2}videoId,\n {2}title,\n {2}entryHost,\n {2}entryPath,\n {2}navigationTrigger,\n {2}isShorts,\n {2}previousWatchStats,\n {2}previousVideoIdentity,\n\) \{[\s\S]*?\n\}/;
 
-// recordVideo는 전역 chrome/fetch/console을 참조한다. 매개변수로 감싸서 넘기면 그 이름들이
-// 지역 바인딩으로 가려지므로, 이 팩토리를 두 번 호출하는 것만으로 "서로 다른 탭 = 서로 다른
-// writeQueue 클로저"를 실제 코드 그대로 재현할 수 있다(로직을 다시 옮겨 적지 않음).
-function loadRecordVideoFactory() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(RECORD_VIDEO_DECL);
-  if (!match) {
-    throw new Error(
-      "recordVideo 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  return new Function(
-    "chrome",
-    "fetch",
-    "console",
-    `${match[0]}\nreturn recordVideo;`,
-  );
+// content.js를 새 인스턴스로 불러와 그 recordVideo를 돌려준다. 두 번 부르면 "서로 다른 탭 =
+// 서로 다른 writeQueue"가 된다. 전역 chrome/fetch는 나중에 부른 쪽으로 바뀌므로, 탭끼리
+// 저장소·fetch가 같아야 하는 테스트에서만 쓴다.
+async function loadRecordVideo(chromeMock, fetchMock, consoleMock) {
+  const { api } = await loadContent({
+    chrome: chromeMock,
+    fetch: fetchMock,
+    console: consoleMock,
+  });
+  return api.recordVideo;
 }
 
 // 실제 chrome.storage.local과 동일하게 "탭이 몇 개든 저장소 자체는 하나"를 흉내 낸다.
@@ -446,27 +432,21 @@ describe("content.js handleVideoChange — 재진입 경합(연구 무결성 점
 });
 
 describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 항목 3)", () => {
-  let recordVideoFactory;
-
-  beforeAll(() => {
-    recordVideoFactory = loadRecordVideoFactory();
-  });
-
-  function makeTab(sharedStorage) {
+  async function makeTab(sharedStorage) {
     const chromeMock = {
       runtime: { id: "fake-extension-id" },
       storage: { local: sharedStorage },
     };
     const fetchMock = () => Promise.resolve({ ok: true });
     const consoleMock = { log: () => {}, warn: () => {} };
-    return recordVideoFactory(chromeMock, fetchMock, consoleMock);
+    return loadRecordVideo(chromeMock, fetchMock, consoleMock);
   }
 
   it("한 탭에서 연달아 두 영상을 기록하면 각자 독립된 키에 둘 다 남는다", async () => {
     const storage = createSharedStorage({
       currentSession: { sessionId: "s1", startTime: "t0" },
     });
-    const recordVideo = makeTab(storage);
+    const recordVideo = await makeTab(storage);
 
     await recordVideo("v1", "영상1");
     await recordVideo("v2", "영상2");
@@ -487,7 +467,7 @@ describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 �
     const storage = createSharedStorage({
       currentSession: { sessionId: "s1", startTime: "t0" },
     });
-    const recordVideo = makeTab(storage);
+    const recordVideo = await makeTab(storage);
 
     await recordVideo("v1", "영상1");
     await recordVideo("v1", "영상1"); // 새로고침으로 같은 영상이 다시 감지된 상황
@@ -503,8 +483,8 @@ describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 �
     });
     // 탭 A와 탭 B는 실제로도 서로 다른 콘텐츠 스크립트 인스턴스라 writeQueue를 공유하지
     // 않는다 — 별도로 만든 두 recordVideo가 정확히 그 상황을 재현한다.
-    const recordVideoTabA = makeTab(storage);
-    const recordVideoTabB = makeTab(storage);
+    const recordVideoTabA = await makeTab(storage);
+    const recordVideoTabB = await makeTab(storage);
 
     const pA = recordVideoTabA("vA", "탭A 영상");
     const pB = recordVideoTabB("vB", "탭B 영상");
@@ -959,19 +939,13 @@ describe("content.js trackedVideoIdentity — 세션 타임아웃에 영향받�
 });
 
 describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플래그로 남긴다", () => {
-  let recordVideoFactory;
-
-  beforeAll(() => {
-    recordVideoFactory = loadRecordVideoFactory();
-  });
-
-  function makeTabWithFetch(sharedStorage, fetchMock) {
+  async function makeTabWithFetch(sharedStorage, fetchMock) {
     const chromeMock = {
       runtime: { id: "fake-extension-id" },
       storage: { local: sharedStorage },
     };
     const consoleMock = { log: () => {}, warn: () => {} };
-    return recordVideoFactory(chromeMock, fetchMock, consoleMock);
+    return loadRecordVideo(chromeMock, fetchMock, consoleMock);
   }
 
   it("서버가 200을 반환하면 해당 영상 키를 sent:true로 갱신한다", async () => {
@@ -980,7 +954,7 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
       anonymousId: "a1",
       serverUrl: "http://localhost:3000",
     });
-    const recordVideo = makeTabWithFetch(storage, () =>
+    const recordVideo = await makeTabWithFetch(storage, () =>
       Promise.resolve({ ok: true }),
     );
 
@@ -999,7 +973,7 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
       anonymousId: "a1",
       serverUrl: "http://localhost:3000",
     });
-    const recordVideo = makeTabWithFetch(storage, () =>
+    const recordVideo = await makeTabWithFetch(storage, () =>
       Promise.resolve({ ok: false, status: 500 }),
     );
 
@@ -1018,7 +992,7 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
       anonymousId: "a1",
       serverUrl: "http://localhost:3000",
     });
-    const recordVideo = makeTabWithFetch(storage, () =>
+    const recordVideo = await makeTabWithFetch(storage, () =>
       Promise.reject(new TypeError("network down")),
     );
 
@@ -1038,7 +1012,7 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
       serverUrl: "http://localhost:3000",
     });
     let sentBody = null;
-    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (_url, options) => {
       sentBody = JSON.parse(options.body);
       return Promise.resolve({ ok: true });
     });
@@ -1056,19 +1030,13 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
 // 시청시간 원시 데이터 — 다음 영상으로 전환될 때 직전 영상의 시청시간을
 // PATCH로 확정 반영하는지 검증한다.
 describe("content.js recordVideo — previousWatchStats로 직전 영상의 시청시간을 확정한다", () => {
-  let recordVideoFactory;
-
-  beforeAll(() => {
-    recordVideoFactory = loadRecordVideoFactory();
-  });
-
-  function makeTabWithFetch(sharedStorage, fetchMock) {
+  async function makeTabWithFetch(sharedStorage, fetchMock) {
     const chromeMock = {
       runtime: { id: "fake-extension-id" },
       storage: { local: sharedStorage },
     };
     const consoleMock = { log: () => {}, warn: () => {} };
-    return recordVideoFactory(chromeMock, fetchMock, consoleMock);
+    return loadRecordVideo(chromeMock, fetchMock, consoleMock);
   }
 
   it("직전 영상의 eventId로 PATCH /api/video-events/:eventId를 호출하고, 성공하면 로컬 기록을 watchStatsSent:true로 남긴다", async () => {
@@ -1078,7 +1046,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       serverUrl: "http://localhost:3000",
     });
     const patchCalls = [];
-    const recordVideo = makeTabWithFetch(storage, (url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (url, options) => {
       if (options?.method === "PATCH") {
         patchCalls.push({ url: String(url), body: JSON.parse(options.body) });
         return Promise.resolve({ ok: true });
@@ -1132,7 +1100,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       anonymousId: "a1",
       serverUrl: "http://localhost:3000",
     });
-    const recordVideo = makeTabWithFetch(storage, (_url, options) =>
+    const recordVideo = await makeTabWithFetch(storage, (_url, options) =>
       options?.method === "PATCH"
         ? Promise.resolve({ ok: false, status: 500 })
         : Promise.resolve({ ok: true }),
@@ -1169,7 +1137,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       serverUrl: "http://localhost:3000",
     });
     const patchCalls = [];
-    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (_url, options) => {
       if (options?.method === "PATCH") patchCalls.push(1);
       return Promise.resolve({ ok: true });
     });
@@ -1208,7 +1176,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       ],
     });
     const patchCalls = [];
-    const recordVideo = makeTabWithFetch(storage, (url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (url, options) => {
       if (options?.method === "PATCH") {
         patchCalls.push({ url: String(url), body: JSON.parse(options.body) });
         return Promise.resolve({ ok: true });
@@ -1264,7 +1232,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       },
     });
     const patchCalls = [];
-    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (_url, options) => {
       if (options?.method === "PATCH") patchCalls.push(1);
       return Promise.resolve({ ok: true });
     });
@@ -1302,8 +1270,8 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       }
       return Promise.resolve({ ok: true });
     };
-    const recordVideoTabA = makeTabWithFetch(storage, fetchMock);
-    const recordVideoTabB = makeTabWithFetch(storage, fetchMock);
+    const recordVideoTabA = await makeTabWithFetch(storage, fetchMock);
+    const recordVideoTabB = await makeTabWithFetch(storage, fetchMock);
 
     // 탭 A: 영상1 기록 — 탭 A 자신의 trackedVideoIdentity에 영상1의 eventId가 남는다
     // (이 테스트에서는 recordVideoTabA 클로저 자체가 그 역할을 못하므로, 탭 A가
@@ -1351,7 +1319,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       serverUrl: "http://localhost:3000",
     });
     const patchCalls = [];
-    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (_url, options) => {
       if (options?.method === "PATCH") patchCalls.push(1);
       return Promise.resolve({ ok: true });
     });
@@ -1390,7 +1358,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
     const videoAPostPromise = new Promise((resolve) => {
       resolveVideoAPost = () => resolve({ ok: true });
     });
-    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (_url, options) => {
       if (options?.method === "PATCH") return Promise.resolve({ ok: true });
       const body = JSON.parse(options.body);
       if (body.videoId === "vA") return videoAPostPromise; // 아직 응답 안 옴
@@ -1754,13 +1722,7 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
 });
 
 describe("content.js recordVideo — 기록 실패를 오류 보고로 넘긴다", () => {
-  let recordVideoFactory;
-
-  beforeAll(() => {
-    recordVideoFactory = loadRecordVideoFactory();
-  });
-
-  function makeFailingTab({ invalidateOnFailure = false } = {}) {
+  async function makeFailingTab({ invalidateOnFailure = false } = {}) {
     const chromeMock = {
       runtime: {
         id: "fake-extension-id",
@@ -1777,7 +1739,7 @@ describe("content.js recordVideo — 기록 실패를 오류 보고로 넘긴다
       },
     };
     const consoleMock = { log: () => {}, warn: () => {} };
-    const recordVideo = recordVideoFactory(
+    const recordVideo = await loadRecordVideo(
       chromeMock,
       () => Promise.resolve({ ok: true }),
       consoleMock,
@@ -1786,7 +1748,7 @@ describe("content.js recordVideo — 기록 실패를 오류 보고로 넘긴다
   }
 
   it("storage 실패면 RECORD_FAILED를 코드·위치만 담아 background에 보낸다", async () => {
-    const { recordVideo, sendMessage } = makeFailingTab();
+    const { recordVideo, sendMessage } = await makeFailingTab();
 
     await recordVideo("v1", "민감한 영상 제목", "www.google.com", null);
 
@@ -1804,7 +1766,7 @@ describe("content.js recordVideo — 기록 실패를 오류 보고로 넘긴다
   });
 
   it("컨텍스트가 무효화돼 실패했으면 보고하지 않는다", async () => {
-    const { recordVideo, sendMessage } = makeFailingTab({
+    const { recordVideo, sendMessage } = await makeFailingTab({
       invalidateOnFailure: true,
     });
 
