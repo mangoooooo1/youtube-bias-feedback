@@ -56,6 +56,12 @@ export default defineConfig({
           functions: 96,
           lines: 96,
         },
+        "extension/content.js": {
+          statements: 92,
+          branches: 85,
+          functions: 92,
+          lines: 95,
+        },
       },
     },
   },
