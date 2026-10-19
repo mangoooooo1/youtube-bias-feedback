@@ -1,23 +1,15 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { isConGroup as isConGroupShared } from "../../pipeline/study-period.js";
 import { isBaselinePeriod as isBaselinePeriodShared } from "../../pipeline/baseline.js";
+import { loadPopup } from "./load-popup.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const VIEWLENS_DATA_PATH = path.join(__dirname, "../../popup/viewlens-data.js");
-
-// viewlens-data.js는 classic script(window.VL = {...})라 그냥 import할 수 없다.
-// window 스텁 위에서 실제 파일 소스를 그대로 평가(eval)해 VL을 꺼낸다.
-// 로직을 다시 옮겨 적으면 실제ㅡ팝업이 로드하는 코드와 몰래 달라질 수 있어, 소스 자체를 실행해서 검증한다.
-function loadVL() {
-  const src = readFileSync(VIEWLENS_DATA_PATH, "utf8");
-  const sandbox = {};
-  sandbox.window = sandbox;
-  const evaluate = new Function("window", `${src}\nreturn window.VL;`);
-  return evaluate(sandbox);
+async function loadVL() {
+  return (await loadPopup()).VL;
 }
+
+afterAll(() => {
+  vi.unstubAllGlobals();
+});
 
 // viewlens-data.js는 모듈 경계(classic script) 때문에 pipeline/baseline.js의
 // isBaselinePeriod를 그대로 import하지 못하고 동일 로직을 다시 정의한다 — 두 사본이
@@ -25,8 +17,8 @@ function loadVL() {
 describe("VL.isBaselinePeriod — pipeline/baseline.js와 동치성", () => {
   let VL;
 
-  beforeAll(() => {
-    VL = loadVL();
+  beforeAll(async () => {
+    VL = await loadVL();
   });
 
   it("경과일이 BASELINE_DAYS 경계 전/당일/후에서 공유 구현과 동일한 결과를 낸다", () => {
@@ -57,8 +49,8 @@ describe("VL.isBaselinePeriod — pipeline/baseline.js와 동치성", () => {
 describe("VL.isConGroup — pipeline/study-period.js와 동치성", () => {
   let VL;
 
-  beforeAll(() => {
-    VL = loadVL();
+  beforeAll(async () => {
+    VL = await loadVL();
   });
 
   it.each(["CON", "TEST-CON", "EXP", "TEST-EXP", undefined, null, ""])(
@@ -69,36 +61,36 @@ describe("VL.isConGroup — pipeline/study-period.js와 동치성", () => {
   );
 });
 
-// TOTAL_DAYS를 치환해 로드 — 실제 설정값과 무관하게 두 표기 분기를 고정 검증한다.
-function loadVLWithTotalDays(days) {
-  const src = readFileSync(VIEWLENS_DATA_PATH, "utf8").replace(
-    /const TOTAL_DAYS = \d+;/,
-    `const TOTAL_DAYS = ${days};`,
-  );
-  const sandbox = {};
-  sandbox.window = sandbox;
-  return new Function(
-    "window",
-    `${src}
-return window.VL;`,
-  )(sandbox);
-}
-
+// 일수를 인자로 넘겨 실제 설정값과 무관하게 두 표기 분기를 고정 검증한다.
 describe("VL.studyDurationLabel — 연구 기간 표기", () => {
+  let VL;
+
+  beforeAll(async () => {
+    VL = await loadVL();
+  });
+
   it("7의 배수가 아니면(파일럿 12일) 일 단위로 표기한다", () => {
-    expect(loadVLWithTotalDays(12).studyDurationLabel()).toBe("12일간");
+    expect(VL.studyDurationLabel(12)).toBe("12일간");
+  });
+
+  it("7의 배수가 아니면(15일로 바꿔 테스트할 때) 일 단위로 표기한다", () => {
+    expect(VL.studyDurationLabel(15)).toBe("15일간");
   });
 
   it("7의 배수(본 연구 42일)면 주 단위로 표기한다", () => {
-    expect(loadVLWithTotalDays(42).studyDurationLabel()).toBe("6주간");
+    expect(VL.studyDurationLabel(42)).toBe("6주간");
+  });
+
+  it("인자 없이 부르면 현재 설정(TOTAL_DAYS)으로 표기한다", () => {
+    expect(VL.studyDurationLabel()).toBe(VL.studyDurationLabel(VL.TOTAL_DAYS));
   });
 });
 
 // ── 서버 집계(/api/viewing-summary) → 화면 값 (Task 5) ─────────────────────────
 describe("VL.serverDist — 유튜브 분야 15종 + 기타", () => {
   let VL;
-  beforeAll(() => {
-    VL = loadVL();
+  beforeAll(async () => {
+    VL = await loadVL();
   });
 
   it("업로더가 고를 수 있는 15종은 서로 다른 고정 색, 그 밖의 이름은 기타 색", () => {
@@ -147,8 +139,8 @@ describe("VL.serverDist — 유튜브 분야 15종 + 기타", () => {
 
 describe("VL.titleSentence — 탭 맨 위 제목 문장", () => {
   let VL;
-  beforeAll(() => {
-    VL = loadVL();
+  beforeAll(async () => {
+    VL = await loadVL();
   });
   const sentence = (time, count) =>
     VL.titleSentence(VL.serverDist(time), VL.serverDist(count));
@@ -188,8 +180,8 @@ describe("VL.titleSentence — 탭 맨 위 제목 문장", () => {
 
 describe("VL.dayView — 하루치 화면 값", () => {
   let VL;
-  beforeAll(() => {
-    VL = loadVL();
+  beforeAll(async () => {
+    VL = await loadVL();
   });
 
   it("영상 수(확인됨)·확인 중·잠깐 본 영상 수와 영상별 제외 사유를 정리한다", () => {
@@ -233,8 +225,8 @@ describe("VL.dayView — 하루치 화면 값", () => {
 
 describe("VL.periodLines — 기간 탭 꺾은선", () => {
   let VL;
-  beforeAll(() => {
-    VL = loadVL();
+  beforeAll(async () => {
+    VL = await loadVL();
   });
   const period = {
     start: "2026-03-05",
@@ -321,8 +313,8 @@ describe("VL.periodLines — 기간 탭 꺾은선", () => {
 
 describe("VL.formatDuration·VL.donutPair — 오늘 탭 도넛 툴팁", () => {
   let VL;
-  beforeAll(() => {
-    VL = loadVL();
+  beforeAll(async () => {
+    VL = await loadVL();
   });
 
   it("초를 시간·분으로 바꾼다", () => {
@@ -362,8 +354,8 @@ describe("VL.formatDuration·VL.donutPair — 오늘 탭 도넛 툴팁", () => {
 
 describe("VL.playedVideos — 그날 재생한 영상 목록", () => {
   let VL;
-  beforeAll(() => {
-    VL = loadVL();
+  beforeAll(async () => {
+    VL = await loadVL();
   });
   const v = (eventId, watchedAt, extra = {}) => ({
     eventId,
@@ -426,8 +418,8 @@ describe("VL.playedVideos — 그날 재생한 영상 목록", () => {
 
 describe("VL.reviewAsOfLabel — 리뷰 카드의 기준 시각", () => {
   let VL;
-  beforeAll(() => {
-    VL = loadVL();
+  beforeAll(async () => {
+    VL = await loadVL();
   });
 
   it("리뷰를 만든 시각을 KST 시:분으로, 만든 날이 리뷰 날짜와 다르면 날짜도 붙인다", () => {
