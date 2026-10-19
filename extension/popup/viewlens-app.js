@@ -845,3 +845,5 @@ window.ViewLensPopup = ViewLensPopup;
 window.Studio = Studio;
 window._isStudyEndTimeReached = _isStudyEndTimeReached;
 window._dayViewForDate = _dayViewForDate;
+window._isStudyEndReviewReady = _isStudyEndReviewReady;
+window._isParticipationEnded = _isParticipationEnded;

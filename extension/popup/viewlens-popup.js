@@ -4,6 +4,7 @@ window.findUnrevealedPastDate = findUnrevealedPastDate;
 window.addDaysKst = addDaysKst;
 window.dateStr = dateStr;
 window.dayFromInstall = dayFromInstall;
+window.shouldRetryParticipantSync = shouldRetryParticipantSync;
 const DEFAULT_TONE = "indigo";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
