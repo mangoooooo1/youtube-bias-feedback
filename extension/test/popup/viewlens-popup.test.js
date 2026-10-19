@@ -1,28 +1,28 @@
-import { describe, it, expect, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { loadPopup } from "./load-popup.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const VIEWLENS_POPUP_PATH = path.join(
-  __dirname,
-  "../../popup/viewlens-popup.js",
-);
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+// 실제 팝업 파일을 불러온 뒤 이 테스트의 chrome·fetch를 넣는다(팝업 함수는 호출 시점에 전역을 찾는다).
+// console은 전역 console의 warn·log를 가로채 돌려준다.
+function stubConsole() {
+  return {
+    warn: vi.spyOn(globalThis.console, "warn").mockImplementation(() => {}),
+    log: vi.spyOn(globalThis.console, "log").mockImplementation(() => {}),
+  };
+}
 
 // 팝업 사용 기록 큐 — 큐에 들어갈 때의 토큰이 아니라 보낼 때의 토큰을 써야, 토큰 기능 이전(2.2.0)이나
 // 등록 전에 쌓인 기록이 403에 막혀 큐 전체가 영원히 멈추지 않는다.
 describe("flushPendingPopupEvents — 팝업 사용 기록 큐 전송", () => {
-  const POST_DECL =
-    /async function postPopupEvent\(serverUrl, event\) \{[\s\S]*?\n\}/;
-  const FLUSH_DECL =
-    /async function flushPendingPopupEvents\(serverUrl\) \{[\s\S]*?\n\}/;
   const ID = "697236fb-5dd0-420f-aaae-c42128e1950a";
 
-  function load(initialStorage, respond) {
-    const raw = readFileSync(VIEWLENS_POPUP_PATH, "utf8");
-    const src = [POST_DECL, FLUSH_DECL]
-      .map((re) => raw.match(re)[0])
-      .join("\n");
+  async function load(initialStorage, respond) {
+    const { flushPendingPopupEvents: flush } = await loadPopup();
     let store = { ...initialStorage };
     const chrome = {
       storage: {
@@ -41,13 +41,9 @@ describe("flushPendingPopupEvents — 팝업 사용 기록 큐 전송", () => {
       sent.push(body);
       return respond(body);
     });
-    const console = { warn: vi.fn(), log: vi.fn() };
-    const flush = new Function(
-      "chrome",
-      "fetch",
-      "console",
-      `${src}\nreturn flushPendingPopupEvents;`,
-    )(chrome, fetch, console);
+    vi.stubGlobal("chrome", chrome);
+    vi.stubGlobal("fetch", fetch);
+    const console = stubConsole();
     return { flush, sent, fetch, console, dump: () => store };
   }
 
@@ -60,7 +56,7 @@ describe("flushPendingPopupEvents — 팝업 사용 기록 큐 전송", () => {
     }));
 
   it("토큰 없이 쌓인 옛 기록(2.2.0)을 지금 토큰으로 보내 큐를 비운다", async () => {
-    const { flush, sent, dump } = load(
+    const { flush, sent, dump } = await load(
       {
         pendingPopupEvents: events(7),
         anonymousId: ID,
@@ -76,8 +72,29 @@ describe("flushPendingPopupEvents — 팝업 사용 기록 큐 전송", () => {
     expect(dump().pendingPopupEvents).toEqual([]);
   });
 
+  // 큐에 넣을 때(buildPopupEventPayload) 그 시점의 토큰도 함께 저장된다. 등록 전이면 null,
+  // 이후 토큰이 바뀌었으면 옛 값이라, 보낼 때 지금 토큰으로 덮어써야 403에 막히지 않는다.
+  it.each([
+    ["등록 전에 쌓여 토큰이 null인 기록", null],
+    ["예전 토큰이 남은 기록", "old-tok"],
+  ])("%s도 지금 토큰으로 보낸다", async (_label, queuedToken) => {
+    const { flush, sent, dump } = await load(
+      {
+        pendingPopupEvents: events(2, { participantToken: queuedToken }),
+        anonymousId: ID,
+        participantToken: "tok",
+      },
+      ok,
+    );
+
+    await flush("https://srv.example");
+
+    expect(sent.map((e) => e.participantToken)).toEqual(["tok", "tok"]);
+    expect(dump().pendingPopupEvents).toEqual([]);
+  });
+
   it("다른 anonymousId로 쌓인 기록은 요청 없이 건너뛰고 뒤 기록은 정상 전송한다", async () => {
-    const { flush, sent, dump, console } = load(
+    const { flush, sent, dump, console } = await load(
       {
         pendingPopupEvents: [
           { eventId: "old", anonymousId: "other-id" },
@@ -99,7 +116,7 @@ describe("flushPendingPopupEvents — 팝업 사용 기록 큐 전송", () => {
   });
 
   it("403 INVALID_PARTICIPANT_TOKEN이면 등록 게이트가 토큰을 다시 받도록 되돌리고 큐는 남긴다", async () => {
-    const { flush, sent, dump } = load(
+    const { flush, sent, dump } = await load(
       {
         pendingPopupEvents: events(3),
         anonymousId: ID,
@@ -135,7 +152,7 @@ describe("flushPendingPopupEvents — 팝업 사용 기록 큐 전송", () => {
       },
     ],
   ])("%s면 등록 상태는 그대로 두고 큐도 남긴다", async (_label, respond) => {
-    const { flush, dump } = load(
+    const { flush, dump } = await load(
       {
         pendingPopupEvents: events(3),
         anonymousId: ID,
@@ -153,27 +170,18 @@ describe("flushPendingPopupEvents — 팝업 사용 기록 큐 전송", () => {
 });
 
 // boot().catch 블록과 보고 함수만 떼어 내고, boot는 인자로 바꿔 끼워 실패를 재현한다
-const REPORT_CLIENT_ERROR_DECL =
-  /function reportClientError\(code, where\) \{[\s\S]*?\n\}/;
-const BOOT_CATCH_DECL = /boot\(\)\.catch\(\(err\) => \{[\s\S]*?\n\}\);/;
-
-function runBootCatch({ chrome, bootError }) {
-  const raw = readFileSync(VIEWLENS_POPUP_PATH, "utf8");
-  const blocks = [REPORT_CLIENT_ERROR_DECL, BOOT_CATCH_DECL].map((re) => {
-    const match = raw.match(re);
-    if (!match) {
-      throw new Error(
-        `${re}에 매칭되는 선언을 찾지 못했습니다 — viewlens-popup.js 구조가 바뀌었을 수 있습니다.`,
-      );
-    }
-    return match[0];
+// 불러오는 순간 실행되는 실제 boot()를 저장소 읽기 실패로 실패시켜, 맨 아래 boot().catch 경로를 탄다
+async function runBootCatch({ chrome, bootError }) {
+  const consoleMock = {
+    error: vi.spyOn(console, "error").mockImplementation(() => {}),
+  };
+  await loadPopup({
+    chrome: {
+      ...chrome,
+      storage: { local: { get: () => Promise.reject(bootError) } },
+    },
+    quietBoot: false,
   });
-  const consoleMock = { error: vi.fn() };
-  new Function("chrome", "console", "boot", blocks.join("\n"))(
-    chrome,
-    consoleMock,
-    () => Promise.reject(bootError),
-  );
   return consoleMock;
 }
 
@@ -182,7 +190,7 @@ describe("boot 실패 — 빈 팝업을 오류 보고로 넘긴다", () => {
     const sendMessage = vi.fn(() => Promise.resolve());
     const chrome = { storage: { local: {} }, runtime: { sendMessage } };
 
-    runBootCatch({
+    await runBootCatch({
       chrome,
       bootError: new Error("render failed: 참여코드 VL-ABCD 민감한 영상 제목"),
     });
@@ -204,7 +212,10 @@ describe("boot 실패 — 빈 팝업을 오류 보고로 넘긴다", () => {
     });
     const chrome = { storage: { local: {} }, runtime: { sendMessage } };
 
-    const consoleMock = runBootCatch({ chrome, bootError: new Error("x") });
+    const consoleMock = await runBootCatch({
+      chrome,
+      bootError: new Error("x"),
+    });
     await vi.waitFor(() => expect(sendMessage).toHaveBeenCalled());
 
     expect(consoleMock.error).toHaveBeenCalledTimes(1);
@@ -213,21 +224,12 @@ describe("boot 실패 — 빈 팝업을 오류 보고로 넘긴다", () => {
 
 // 화면 그래프의 원천(서버 집계) — 저장본으로 바로 그리고, 열 때마다 새로 받아 덮어쓴다
 describe("viewing-summary 조회와 저장본", () => {
-  const TIMEOUT_DECL = /const VIEWING_SUMMARY_TIMEOUT_MS = \d+;/;
-  const FETCH_DECL =
-    /async function fetchViewingSummary\(serverUrl, anonymousId, participantToken\) \{[\s\S]*?\n\}/;
-  const LOAD_DECL =
-    /async function loadViewingSummaryCache\(anonymousId\) \{[\s\S]*?\n\}/;
-  const REFRESH_DECL =
-    /async function refreshViewingSummary\(serverUrl, anonymousId, participantToken\) \{[\s\S]*?\n\}/;
   const ID = "697236fb-5dd0-420f-aaae-c42128e1950a";
   const SUMMARY = { days: [{ date: "2026-03-05" }], periods: [] };
 
-  function load(initialStorage, fetchImpl) {
-    const raw = readFileSync(VIEWLENS_POPUP_PATH, "utf8");
-    const src = [TIMEOUT_DECL, FETCH_DECL, LOAD_DECL, REFRESH_DECL]
-      .map((re) => raw.match(re)[0])
-      .join("\n");
+  async function load(initialStorage, fetchImpl) {
+    const { loadViewingSummaryCache, refreshViewingSummary } =
+      await loadPopup();
     let store = { ...initialStorage };
     const chrome = {
       storage: {
@@ -241,14 +243,15 @@ describe("viewing-summary 조회와 저장본", () => {
       },
     };
     const fetch = vi.fn(fetchImpl);
-    const console = { warn: vi.fn(), log: vi.fn() };
-    const fns = new Function(
-      "chrome",
-      "fetch",
-      "console",
-      `${src}\nreturn { loadViewingSummaryCache, refreshViewingSummary };`,
-    )(chrome, fetch, console);
-    return { ...fns, fetch, dump: () => store };
+    vi.stubGlobal("chrome", chrome);
+    vi.stubGlobal("fetch", fetch);
+    stubConsole();
+    return {
+      loadViewingSummaryCache,
+      refreshViewingSummary,
+      fetch,
+      dump: () => store,
+    };
   }
 
   const ok = (data) => async () => ({
@@ -258,10 +261,8 @@ describe("viewing-summary 조회와 저장본", () => {
   });
 
   it("새로 받으면 저장본을 덮어쓰고, 다음에 같은 참여자로 읽을 수 있다", async () => {
-    const { refreshViewingSummary, loadViewingSummaryCache, fetch } = load(
-      {},
-      ok(SUMMARY),
-    );
+    const { refreshViewingSummary, loadViewingSummaryCache, fetch } =
+      await load({}, ok(SUMMARY));
 
     const fresh = await refreshViewingSummary("https://srv", ID, "tok");
     const cached = await loadViewingSummaryCache(ID);
@@ -282,7 +283,7 @@ describe("viewing-summary 조회와 저장본", () => {
       fetchedAt: "2026-03-05T00:00:00Z",
       data: SUMMARY,
     };
-    const { refreshViewingSummary, dump } = load(
+    const { refreshViewingSummary, dump } = await load(
       { viewingSummaryCache: saved },
       async () => ({ ok: false, status: 500 }),
     );
@@ -292,10 +293,10 @@ describe("viewing-summary 조회와 저장본", () => {
   });
 
   it("네트워크 오류·형식이 다른 응답도 null", async () => {
-    const offline = load({}, async () => {
+    const offline = await load({}, async () => {
       throw new TypeError("Failed to fetch");
     });
-    const malformed = load({}, ok({ days: "x" }));
+    const malformed = await load({}, ok({ days: "x" }));
 
     expect(
       await offline.refreshViewingSummary("https://srv", ID, "tok"),
@@ -306,7 +307,7 @@ describe("viewing-summary 조회와 저장본", () => {
   });
 
   it("다른 참여자의 저장본은 쓰지 않는다(재설치·코드 복구)", async () => {
-    const { loadViewingSummaryCache } = load(
+    const { loadViewingSummaryCache } = await load(
       {
         viewingSummaryCache: {
           anonymousId: "someone-else",
@@ -321,7 +322,7 @@ describe("viewing-summary 조회와 저장본", () => {
   });
 
   it("서버 주소나 참여자 id가 없으면 요청하지 않는다", async () => {
-    const { refreshViewingSummary, fetch } = load({}, ok(SUMMARY));
+    const { refreshViewingSummary, fetch } = await load({}, ok(SUMMARY));
 
     expect(
       await refreshViewingSummary("YOUR_SERVER_URL", ID, "tok"),
@@ -333,24 +334,23 @@ describe("viewing-summary 조회와 저장본", () => {
 
 // 서버는 유효 시청 영상이 늘지 않은 세션에서 리뷰를 다시 만들지 않는다
 describe("resolveTodayCumulative — 오늘 리뷰 카드 상태", () => {
-  const DECL =
-    /async function resolveTodayCumulative\(eligible, reviews, todaySessions\) \{[\s\S]*?\n\}/;
   const TODAY = "2026-03-05";
 
-  function load(confirmed = []) {
-    const raw = readFileSync(VIEWLENS_POPUP_PATH, "utf8");
-    const isFeedbackConfirmed = vi.fn(async (id) => confirmed.includes(id));
-    const resolve = new Function(
-      "dateStr",
-      "isRealReview",
-      "isFeedbackConfirmed",
-      `${raw.match(DECL)[0]}\nreturn resolveTodayCumulative;`,
-    )(
-      () => TODAY,
-      (t) => typeof t === "string" && t.length > 0,
-      isFeedbackConfirmed,
-    );
-    return { resolve, isFeedbackConfirmed };
+  // dateStr는 같은 파일 안의 함수라 바꿔 끼울 수 없어 시스템 날짜를 TODAY(KST)로 고정한다.
+  // 확인한 세션은 실제 isFeedbackConfirmed가 읽는 저장소(confirmedFeedbackSessionIds)에 넣는다.
+  async function load(confirmed = []) {
+    const { resolveTodayCumulative: resolve } = await loadPopup();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(`${TODAY}T12:00:00+09:00`));
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: async () => ({ confirmedFeedbackSessionIds: confirmed }),
+          set: async () => {},
+        },
+      },
+    });
+    return { resolve };
   }
   const row = {
     reviewDate: TODAY,
@@ -361,7 +361,7 @@ describe("resolveTodayCumulative — 오늘 리뷰 카드 상태", () => {
   };
 
   it("대상이 아니면 빈 상태", async () => {
-    const { resolve } = load();
+    const { resolve } = await load();
     expect(await resolve(false, [row], [])).toMatchObject({
       eligible: false,
       generating: false,
@@ -369,7 +369,7 @@ describe("resolveTodayCumulative — 오늘 리뷰 카드 상태", () => {
   });
 
   it("서버 응답을 아직 못 받은 오늘 세션이 있으면 생성 중", async () => {
-    const { resolve } = load();
+    const { resolve } = await load();
     const result = await resolve(
       true,
       [row],
@@ -382,13 +382,13 @@ describe("resolveTodayCumulative — 오늘 리뷰 카드 상태", () => {
   });
 
   it("세션 종료 직후 전송 상태가 아직 없으면 생성 중", async () => {
-    const { resolve } = load();
+    const { resolve } = await load();
     const result = await resolve(true, [row], [{ sessionId: "s1" }]);
     expect(result.generating).toBe(true);
   });
 
   it("서버가 거절한 세션(invalid)은 생성 중으로 남기지 않는다", async () => {
-    const { resolve } = load(["s1"]);
+    const { resolve } = await load(["s1"]);
     expect(
       await resolve(
         true,
@@ -409,7 +409,7 @@ describe("resolveTodayCumulative — 오늘 리뷰 카드 상태", () => {
   });
 
   it("리뷰를 건너뛴 세션(응답은 받았지만 리뷰 없음) 뒤에도 생성 중이 아니고 기존 리뷰를 보여 준다", async () => {
-    const { resolve } = load(["s1"]);
+    const { resolve } = await load(["s1"]);
     const result = await resolve(
       true,
       [row],
@@ -430,7 +430,7 @@ describe("resolveTodayCumulative — 오늘 리뷰 카드 상태", () => {
   });
 
   it("리뷰를 받은 세션을 아직 확인하지 않았으면 잠근다", async () => {
-    const { resolve } = load([]);
+    const { resolve } = await load([]);
     const result = await resolve(
       true,
       [row],
@@ -440,7 +440,7 @@ describe("resolveTodayCumulative — 오늘 리뷰 카드 상태", () => {
   });
 
   it("기기에 리뷰를 받은 세션 기록이 없으면(재설치 등) 마지막 세션으로 대신한다", async () => {
-    const { resolve } = load([]);
+    const { resolve } = await load([]);
     const result = await resolve(
       true,
       [row],
@@ -453,7 +453,7 @@ describe("resolveTodayCumulative — 오늘 리뷰 카드 상태", () => {
   });
 
   it("모든 세션이 응답을 받았는데 오늘 리뷰가 없으면 noReview(생성 중 아님)", async () => {
-    const { resolve } = load();
+    const { resolve } = await load();
     const result = await resolve(
       true,
       [],

@@ -1,0 +1,44 @@
+import { vi } from "vitest";
+
+export const POPUP_SCRIPTS = [
+  "study-schedule.js",
+  "popup/viewlens-data.js",
+  "popup/viewlens-logo.js",
+  "popup/viewlens-ui.js",
+  "popup/viewlens-screens.js",
+  "popup/viewlens-app.js",
+  "popup/viewlens-popup.js",
+];
+
+// realDom: jsdom 환경 테스트(// @vitest-environment jsdom)에서 진짜 document를 그대로 쓴다
+export async function loadPopup({
+  chrome,
+  fetch,
+  quietBoot = true,
+  realDom = false,
+} = {}) {
+  vi.resetModules();
+  vi.stubGlobal("window", globalThis);
+  if (!realDom) {
+    vi.stubGlobal("document", {
+      getElementById: () => null,
+      querySelector: () => null,
+      addEventListener: () => {},
+    });
+  }
+  vi.stubGlobal(
+    "chrome",
+    chrome ?? {
+      runtime: { id: "fake-extension-id", sendMessage: async () => {} },
+      storage: { local: { get: async () => ({}), set: async () => {} } },
+    },
+  );
+  vi.stubGlobal("fetch", fetch ?? (async () => ({ ok: false })));
+  const errorSpy = quietBoot
+    ? vi.spyOn(console, "error").mockImplementation(() => {})
+    : null;
+  for (const f of POPUP_SCRIPTS) await import(`../../${f}`);
+  for (let i = 0; i < 20; i++) await Promise.resolve();
+  errorSpy?.mockRestore();
+  return globalThis;
+}

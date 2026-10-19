@@ -1,27 +1,22 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { loadPopup } from "./load-popup.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const POPUP_DIR = path.join(__dirname, "../../popup");
-
-// classic script 세 개(데이터·UI·화면)를 팝업과 같은 순서로 한 스코프에서 실행한다.
-// 브라우저 전역(VL, koreanDateLabel)은 window에서 꺼내 같은 이름으로 둔다. koreanDateLabel은 Studio 스텁.
-function loadScreens() {
-  const src = ["viewlens-data.js", "viewlens-ui.js", "viewlens-screens.js"]
-    .map((f) => readFileSync(path.join(POPUP_DIR, f), "utf8"))
-    .join("\n;\n");
-  const sandbox = {};
-  sandbox.window = sandbox;
-  return new Function(
-    "window",
-    "document",
-    "markSVG",
-    `${src}\n;const koreanDateLabel = window.koreanDateLabel;
-const VL = window.VL;\nreturn { screenToday, screenFeedback, screenPastDayRevealModal, vlShareLines, VL, koreanDateLabel };`,
-  )(sandbox, {}, () => "");
+// 실제 팝업 파일을 popup.html 순서대로 불러와 화면 함수와 전역(VL, koreanDateLabel)을 꺼낸다.
+async function loadScreens() {
+  const g = await loadPopup();
+  return {
+    screenToday: g.screenToday,
+    screenFeedback: g.screenFeedback,
+    screenPastDayRevealModal: g.screenPastDayRevealModal,
+    vlShareLines: g.vlShareLines,
+    VL: g.VL,
+    koreanDateLabel: g.koreanDateLabel,
+  };
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 const DAY = {
   date: "2026-03-05",
@@ -39,8 +34,8 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
   let screenToday;
   let VL;
 
-  beforeEach(() => {
-    ({ screenToday, VL } = loadScreens());
+  beforeEach(async () => {
+    ({ screenToday, VL } = await loadScreens());
   });
 
   function render(dayOverrides = {}, status = "ok", todayOverrides = {}) {
@@ -153,8 +148,8 @@ describe("screenToday — 리뷰 카드와 재생한 영상 목록", () => {
   let VL;
   let koreanDateLabel;
 
-  beforeEach(() => {
-    ({ screenToday, VL, koreanDateLabel } = loadScreens());
+  beforeEach(async () => {
+    ({ screenToday, VL, koreanDateLabel } = await loadScreens());
   });
 
   function renderToday(cumulative, { videos = [], unconfirmedCount = 0 } = {}) {
@@ -287,8 +282,8 @@ describe("vlShareLines — 날마다 분야별 비중 꺾은선", () => {
   let vlShareLines;
   let VL;
 
-  beforeEach(() => {
-    ({ vlShareLines, VL } = loadScreens());
+  beforeEach(async () => {
+    ({ vlShareLines, VL } = await loadScreens());
   });
 
   function draw(focus = null, today = "2026-06-08") {
@@ -354,8 +349,8 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
   let screenFeedback;
   let VL;
 
-  beforeEach(() => {
-    ({ screenFeedback, VL } = loadScreens());
+  beforeEach(async () => {
+    ({ screenFeedback, VL } = await loadScreens());
     VL.weeks[1] = {
       ...VL.weeks[1],
       label: "2구간",
@@ -435,8 +430,8 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
 });
 
 describe("screenPastDayRevealModal — 어제 돌아보기 모달", () => {
-  it("제목은 요일을 뺀 날짜로 '○월 ○일엔 어떤 영상을 봤을까요?'", () => {
-    const { screenPastDayRevealModal } = loadScreens();
+  it("제목은 요일을 뺀 날짜로 '○월 ○일엔 어떤 영상을 봤을까요?'", async () => {
+    const { screenPastDayRevealModal } = await loadScreens();
     const html = screenPastDayRevealModal({
       dateLabel: "10월 15일 수요일",
       review: "어제 리뷰",

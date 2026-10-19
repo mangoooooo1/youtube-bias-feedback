@@ -7,8 +7,6 @@ const ROOT = path.join(__dirname, "..");
 const summaryPath =
   process.argv[2] || path.join(ROOT, "coverage", "coverage-summary.json");
 
-// 소스 텍스트를 추출해 new Function으로 실행하는 테스트라 테스트가 있어도 0%로 집계되는 파일
-const EXTRACTION_TESTED = [/^extension\/popup\//];
 const METRICS = ["statements", "branches", "functions", "lines"];
 
 if (!fs.existsSync(summaryPath)) {
@@ -18,19 +16,6 @@ if (!fs.existsSync(summaryPath)) {
 }
 
 const summary = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
-
-const measurable = Object.fromEntries(
-  METRICS.map((m) => [m, { covered: 0, total: 0 }]),
-);
-for (const [file, data] of Object.entries(summary)) {
-  if (file === "total") continue;
-  const rel = path.relative(ROOT, file).split(path.sep).join("/");
-  if (EXTRACTION_TESTED.some((re) => re.test(rel))) continue;
-  for (const m of METRICS) {
-    measurable[m].covered += data[m].covered;
-    measurable[m].total += data[m].total;
-  }
-}
 
 // vitest(istanbul) 출력·최소선 판정과 같게 소수 둘째 자리 아래는 버린다
 const pct = ({ covered, total }) =>
@@ -45,8 +30,5 @@ console.log(
     "| 범위 | Statements | Branches | Functions | Lines |",
     "|---|---:|---:|---:|---:|",
     row("전체", summary.total),
-    row("측정 가능 범위", measurable),
-    "",
-    "측정 가능 범위: `extension/popup/**` 제외(소스 추출 방식 테스트라 0%로 집계됨)",
   ].join("\n"),
 );

@@ -359,8 +359,8 @@ const DAYS_PER_PERIOD = 4;
 const TOTAL_WEEKS = Math.ceil(TOTAL_DAYS / DAYS_PER_PERIOD);
 
 // 연구 기간 표기
-function studyDurationLabel() {
-  return TOTAL_DAYS % 7 === 0 ? `${TOTAL_DAYS / 7}주간` : `${TOTAL_DAYS}일간`;
+function studyDurationLabel(totalDays = TOTAL_DAYS) {
+  return totalDays % 7 === 0 ? `${totalDays / 7}주간` : `${totalDays}일간`;
 }
 
 function periodLabel(n) {
