@@ -1,13 +1,19 @@
 // @vitest-environment jsdom
-/* global document */
 import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
 import { loadPopup } from "./load-popup.js";
+import {
+  SERVER,
+  bootPopup,
+  cleanupPopup,
+  daysAgo,
+  hasFeedbackTabs,
+  hasHome,
+  participant,
+  session,
+} from "./boot-popup.js";
 
 // 팝업을 열면 boot()가 저장소 상태를 읽어 화면을 고르고 서버 요청을 보낸다.
 // 저장소·서버를 가짜로 두고 실제 팝업 파일을 불러와, 상태별로 화면과 요청이 맞는지 확인한다.
-const DAY = 86400000;
-const SERVER = "https://server.test";
-
 let BASELINE_DAYS, TOTAL_DAYS, END_GRACE_DAYS;
 
 beforeAll(async () => {
@@ -17,98 +23,7 @@ beforeAll(async () => {
   vi.unstubAllGlobals();
 });
 
-afterEach(() => {
-  vi.clearAllTimers();
-  vi.useRealTimers();
-  vi.unstubAllGlobals();
-  document.body.innerHTML = "";
-});
-
-const daysAgo = (n) => new Date(Date.now() - n * DAY).toISOString();
-
-function fakeChrome(initial) {
-  const data = structuredClone(initial);
-  const pick = (keys) =>
-    keys == null
-      ? { ...data }
-      : Object.fromEntries(
-          []
-            .concat(keys)
-            .filter((k) => k in data)
-            .map((k) => [k, data[k]]),
-        );
-  return {
-    data,
-    chrome: {
-      runtime: {
-        id: "fake-extension-id",
-        sendMessage: async () => {},
-        getURL: (p) => `chrome-extension://fake/${p}`,
-      },
-      action: { setIcon: () => {} },
-      storage: {
-        local: {
-          get: async (keys) => structuredClone(pick(keys)),
-          set: async (obj) => void Object.assign(data, structuredClone(obj)),
-          remove: async (keys) =>
-            [].concat(keys).forEach((k) => delete data[k]),
-        },
-        onChanged: { addListener: () => {} },
-      },
-    },
-  };
-}
-
-const RESPONSES = {
-  "/api/viewing-summary": { data: { days: [], periods: [] } },
-  "/api/today-reviews": { data: [] },
-  "/api/period-reviews": { data: [] },
-  "/api/participants": { data: { participantToken: "new-tok" } },
-  "/api/popup-events": {},
-};
-
-function fakeFetch() {
-  const calls = [];
-  const fn = async (url, init) => {
-    const path = new URL(url).pathname;
-    calls.push({ path, body: init?.body ? JSON.parse(init.body) : null });
-    return { ok: true, status: 200, json: async () => RESPONSES[path] ?? {} };
-  };
-  return { fn, calls, paths: () => calls.map((c) => c.path) };
-}
-
-async function bootPopup(stored) {
-  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-  vi.stubGlobal("requestAnimationFrame", () => 0);
-  const root = document.createElement("div");
-  root.id = "vl-popup-root";
-  document.body.appendChild(root);
-  const { chrome, data } = fakeChrome(stored);
-  const server = fakeFetch();
-  vi.spyOn(console, "warn").mockImplementation(() => {});
-  await loadPopup({ realDom: true, chrome, fetch: server.fn });
-  return { root, data, server };
-}
-
-const session = (id) => ({
-  sessionId: id,
-  endTime: new Date().toISOString(),
-  categoryDistribution: { 뉴스: 1 },
-  syncedToServer: true,
-});
-
-const participant = (over) => ({
-  serverUrl: SERVER,
-  anonymousId: "anon-1",
-  participantToken: "tok-1",
-  participantCode: "P-001",
-  participantSynced: true,
-  studyEndNoticeShown: true,
-  ...over,
-});
-
-const hasFeedbackTabs = (c) => c.querySelectorAll("[data-tab]").length > 0;
-const hasHome = (c) => c.textContent.includes("ViewLens와 함께한 지");
+afterEach(cleanupPopup);
 
 describe("boot — 저장소 상태별 화면과 서버 요청", () => {
   it("온보딩 전이면 코드 입력 화면을 띄우고 서버에 아무것도 보내지 않는다", async () => {
