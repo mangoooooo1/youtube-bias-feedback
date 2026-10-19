@@ -35,15 +35,14 @@ export default defineConfig({
         "server/scripts/sample-embedding-validation-sessions.js",
       ],
       reporter: ["text", "json-summary", "html"],
-      // 2026-10-11 실측치보다 2%p 낮게 잡은 회귀 방지용 바닥선.
-      // 당시 로컬이 CI보다 B·F가 약 0.1%p 낮았는데 원인은 Node 버전이 아니라 로컬 CRLF 파일이었다.
-      // .gitattributes(eol=lf) 적용 후 두 환경 수치가 같다. 폴더별 값은 그 폴더 파일들을 합친 수치로 검사한다.
+      // 실측치보다 2%p 낮게(소수점 버림) 잡은 회귀 방지용 바닥선. 전역은 2026-10-19 실측(63.66/56.97/63.90/63.60) 기준.
+      // 로컬·CI 수치는 .gitattributes(eol=lf) 적용 후 같다. 폴더·파일별 값은 그 범위 파일들을 합친 수치로 검사한다.
       // "이 정도는 유지하자"는 최소선이지 목표치가 아니다. 값을 낮추는 수정은 지양.
       thresholds: {
-        statements: 52,
-        branches: 47,
-        functions: 53,
-        lines: 52,
+        statements: 61,
+        branches: 54,
+        functions: 61,
+        lines: 61,
         "server/routes/**": {
           statements: 91,
           branches: 89,
@@ -55,6 +54,12 @@ export default defineConfig({
           branches: 91,
           functions: 96,
           lines: 96,
+        },
+        "extension/content.js": {
+          statements: 92,
+          branches: 85,
+          functions: 92,
+          lines: 95,
         },
       },
     },

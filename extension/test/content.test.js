@@ -1,86 +1,56 @@
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  beforeEach,
-  afterEach,
-  vi,
-} from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import vm from "node:vm";
 import "../study-schedule.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONTENT_PATH = path.join(__dirname, "../content.js");
 
-// content.js는 manifest.json에서 type:module이 아닌 일반 콘텐츠 스크립트로 선언돼 있어
-// export를 붙이면 실제 브라우저에서 SyntaxError로 깨진다.
-// 그래서 함수 정의 텍스트만 추출해 격리 실행한다.
-const EXTRACT_VIDEO_ID_DECL = /function extractVideoId\(url\) \{[\s\S]*?\n\}/;
-const PARSE_TITLE_DECL = /function parseTitle\(\) \{[\s\S]*?\n\}/;
-
-function loadExtractVideoId() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(EXTRACT_VIDEO_ID_DECL);
-  if (!match) {
-    throw new Error(
-      "extractVideoId 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  return new Function(`${match[0]}\nreturn extractVideoId;`)();
-}
-
-// parseTitle()은 인자 없이 전역 document.title을 읽으므로, document를 격리 함수의
-// 매개변수로 넘겨 매번 다른 title 값으로 호출할 수 있는 래퍼를 만든다.
-function loadParseTitle() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(PARSE_TITLE_DECL);
-  if (!match) {
-    throw new Error(
-      "parseTitle 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  const factory = new Function("document", `${match[0]}\nreturn parseTitle();`);
-  return (title) => factory({ title });
-}
-
-// classifyNavigationTrigger()는 모듈 스코프 변수(lastEndedAt/lastInteractionAt)를 직접
-// 읽고 쓰므로, 함수 본문만 떼어내면 그 변수들이 없어 참조 에러가 난다. 선언부까지 함께
-// 추출하고, 테스트에서 그 변수들을 직접 조작할 수 있게 setter를 얹어 반환한다.
-const NAV_TRIGGER_DECL =
-  /let lastEndedAt = null;[\s\S]*?\nfunction classifyNavigationTrigger\(now\) \{[\s\S]*?\n\}/;
-
-function loadClassifyNavigationTrigger() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(NAV_TRIGGER_DECL);
-  if (!match) {
-    throw new Error(
-      "classifyNavigationTrigger 관련 코드를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  // 추출된 구간에 document.addEventListener("ended"/"click"/"keydown", ...) 등록도
-  // 함께 포함돼 있다 — 실제 이벤트 발생은 이 테스트의 관심사가 아니므로 no-op으로 흘려보낸다.
-  const factory = new Function(
-    "document",
-    `
-    ${match[0]}
-    return {
-      classify: classifyNavigationTrigger,
-      setEndedAt: (t) => { lastEndedAt = t; },
-      setInteractionAt: (t) => { lastInteractionAt = t; },
-    };
-  `,
+// content.js 전체를 새 인스턴스로 불러온다.
+// 불러오는 순간 최상위 코드가 실행되므로 필요한 브라우저 전역을 먼저 가짜로 넣는다.
+async function loadContent(env = {}) {
+  vi.resetModules();
+  const documentListeners = {};
+  vi.stubGlobal("document", {
+    referrer: "",
+    title: "",
+    hidden: false,
+    addEventListener: (type, cb) => {
+      (documentListeners[type] ??= []).push(cb);
+    },
+    querySelector: () => null,
+    ...env.document,
+  });
+  vi.stubGlobal("window", { addEventListener: () => {}, ...env.window });
+  vi.stubGlobal(
+    "location",
+    env.location ?? { href: "https://www.youtube.com/" },
   );
-  return factory({ addEventListener: () => {} });
+  vi.stubGlobal(
+    "chrome",
+    env.chrome ?? {
+      storage: { local: { get: async () => ({}), set: async () => {} } },
+    },
+  );
+  vi.stubGlobal("fetch", env.fetch ?? (() => Promise.resolve()));
+  if (env.console) vi.stubGlobal("console", env.console);
+  const api = (await import("../content.js")).default;
+  return { api, documentListeners };
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("content.js extractVideoId", () => {
   let extractVideoId;
 
-  beforeAll(() => {
-    extractVideoId = loadExtractVideoId();
+  beforeEach(async () => {
+    ({
+      api: { extractVideoId },
+    } = await loadContent());
   });
 
   it("/watch?v=ID 형태에서 영상 id를 추출한다", () => {
@@ -120,27 +90,13 @@ describe("content.js extractVideoId", () => {
   });
 });
 
-// server/routes/video-events-classify.js와 동일한 YOUTUBE_HOSTS 목록 선언까지 포함해서 추출해야
-// parseEntryLocation 내부에서 참조하는 상수가 존재한다.
-const PARSE_ENTRY_LOCATION_DECL =
-  /const YOUTUBE_HOSTS = new Set\(\[[\s\S]*?\nfunction parseEntryLocation\(href\) \{[\s\S]*?\n\}/;
-
-function loadParseEntryLocation() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(PARSE_ENTRY_LOCATION_DECL);
-  if (!match) {
-    throw new Error(
-      "parseEntryLocation 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  return new Function(`${match[0]}\nreturn parseEntryLocation;`)();
-}
-
 describe("content.js parseEntryLocation", () => {
   let parseEntryLocation;
 
-  beforeAll(() => {
-    parseEntryLocation = loadParseEntryLocation();
+  beforeEach(async () => {
+    ({
+      api: { parseEntryLocation },
+    } = await loadContent());
   });
 
   it("href가 없으면 entryHost/entryPath 모두 null을 반환한다", () => {
@@ -175,8 +131,13 @@ describe("content.js parseEntryLocation", () => {
 describe("content.js parseTitle", () => {
   let parseTitle;
 
-  beforeAll(() => {
-    parseTitle = loadParseTitle();
+  // parseTitle()은 인자 없이 전역 document.title을 읽으므로, 호출 전에 title을 바꿔 넣는 래퍼를 쓴다.
+  beforeEach(async () => {
+    const { api } = await loadContent();
+    parseTitle = (title) => {
+      globalThis.document.title = title;
+      return api.parseTitle();
+    };
   });
 
   it("안 읽은 알림 개수 접두사와 ' - YouTube' 접미사를 제거한다", () => {
@@ -207,8 +168,24 @@ describe("content.js parseTitle", () => {
 describe("content.js classifyNavigationTrigger", () => {
   let trigger;
 
-  beforeEach(() => {
-    trigger = loadClassifyNavigationTrigger();
+  // lastEndedAt/lastInteractionAt은 모듈 내부 상태라, 그 시각으로 시계를 맞춘 뒤 content.js가
+  // 실제로 등록한 ended/click 리스너를 실행해 기록하게 한다.
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { api, documentListeners } = await loadContent();
+    const fire = (type, at) => {
+      vi.setSystemTime(at);
+      for (const cb of documentListeners[type]) cb();
+    };
+    trigger = {
+      classify: api.classifyNavigationTrigger,
+      setEndedAt: (t) => fire("ended", t),
+      setInteractionAt: (t) => fire("click", t),
+    };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("ended 신호가 최근이면 'ended'를 반환한다", () => {
@@ -260,26 +237,17 @@ describe("content.js classifyNavigationTrigger", () => {
 // 여러 개면 탭마다 별도의 writeQueue 변수를 갖는다. 이 테스트는 "탭 2개가 거의 동시에
 // recordVideo를 호출하면" 두 writeQueue가 서로를 모른 채 같은 저장소를 놓고 경합해
 // 한쪽의 기록이 사라지는지를 재현한다(연구 무결성 점검 항목 3).
-const RECORD_VIDEO_DECL =
-  /let writeQueue = Promise\.resolve\(\);[\s\S]*?\nfunction recordVideo\(\n {2}videoId,\n {2}title,\n {2}entryHost,\n {2}entryPath,\n {2}navigationTrigger,\n {2}isShorts,\n {2}previousWatchStats,\n {2}previousVideoIdentity,\n\) \{[\s\S]*?\n\}/;
-
-// recordVideo는 전역 chrome/fetch/console을 참조한다. 매개변수로 감싸서 넘기면 그 이름들이
-// 지역 바인딩으로 가려지므로, 이 팩토리를 두 번 호출하는 것만으로 "서로 다른 탭 = 서로 다른
-// writeQueue 클로저"를 실제 코드 그대로 재현할 수 있다(로직을 다시 옮겨 적지 않음).
-function loadRecordVideoFactory() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(RECORD_VIDEO_DECL);
-  if (!match) {
-    throw new Error(
-      "recordVideo 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  return new Function(
-    "chrome",
-    "fetch",
-    "console",
-    `${match[0]}\nreturn recordVideo;`,
-  );
+//
+// content.js를 새 인스턴스로 불러와 그 recordVideo를 돌려준다. 두 번 부르면 "서로 다른 탭 =
+// 서로 다른 writeQueue"가 된다. 전역 chrome/fetch는 나중에 부른 쪽으로 바뀌므로, 탭끼리
+// 저장소·fetch가 같아야 하는 테스트에서만 쓴다.
+async function loadRecordVideo(chromeMock, fetchMock, consoleMock) {
+  const { api } = await loadContent({
+    chrome: chromeMock,
+    fetch: fetchMock,
+    console: consoleMock,
+  });
+  return api.recordVideo;
 }
 
 // 실제 chrome.storage.local과 동일하게 "탭이 몇 개든 저장소 자체는 하나"를 흉내 낸다.
@@ -361,54 +329,29 @@ function collectVideos(storeDump, sessionId) {
     .map(([, v]) => v);
 }
 
-// handleVideoChange는 extractVideoId부터 자기 자신까지 순서대로 의존하므로 그 구간을
-// 통째로 추출한다. 실제 recordVideo(storage/fetch 의존, 별도 describe에서 이미 검증됨)는
-// 이 테스트의 관심사가 아니라 호출 인자만 기록하는 목으로 치환한다.
-const HANDLE_VIDEO_CHANGE_BLOCK_DECL =
-  /function extractVideoId\(url\) \{[\s\S]*?\nasync function handleVideoChange\(\) \{[\s\S]*?\n\}/;
-
-function loadHandleVideoChangeFactory() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const blockMatch = raw.match(HANDLE_VIDEO_CHANGE_BLOCK_DECL);
-  if (!blockMatch) {
-    throw new Error(
-      "handleVideoChange 관련 코드를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!RECORD_VIDEO_DECL.test(blockMatch[0])) {
-    throw new Error(
-      "recordVideo 선언을 찾지 못해 목(mock)으로 치환할 수 없습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  const body = blockMatch[0].replace(
-    RECORD_VIDEO_DECL,
-    "function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger, isShorts, previousWatchStats, previousVideoIdentity) { recordVideoCalls.push({ videoId, title, entryHost, entryPath, navigationTrigger, isShorts, previousWatchStats, previousVideoIdentity }); return Promise.resolve(); }",
-  );
-  return new Function(
-    "document",
-    "location",
-    "recordVideoCalls",
-    `${body}\nreturn handleVideoChange;`,
-  );
-}
-
+// handleVideoChange 재진입 경합 — 실제 recordVideo가 저장소에 남긴 영상 기록으로 검증한다.
+// 홈 화면 주소로 불러온다. 영상 주소로 불러오면 최상위 handleVideoChange()가 그 영상을 미리 기록해
+// 테스트의 첫 호출이 "같은 영상"으로 무시된다.
 describe("content.js handleVideoChange — 재진입 경합(연구 무결성 점검 항목 4)", () => {
-  let handleVideoChange, recordVideoCalls, documentMock, locationMock;
+  let handleVideoChange, storage, documentMock, locationMock;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers();
-    recordVideoCalls = [];
-    documentMock = {
-      referrer: "",
-      title: "YouTube",
-      addEventListener: () => {},
-    };
-    locationMock = { href: "https://www.youtube.com/watch?v=AAAA" };
-    handleVideoChange = loadHandleVideoChangeFactory()(
-      documentMock,
-      locationMock,
-      recordVideoCalls,
-    );
+    storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+    });
+    const { api } = await loadContent({
+      document: { title: "YouTube" },
+      chrome: {
+        runtime: { id: "fake-extension-id" },
+        storage: { local: storage },
+      },
+      console: { log: () => {}, warn: () => {} },
+    });
+    handleVideoChange = api.handleVideoChange;
+    documentMock = globalThis.document;
+    locationMock = globalThis.location;
+    locationMock.href = "https://www.youtube.com/watch?v=AAAA";
   });
 
   afterEach(() => {
@@ -432,8 +375,9 @@ describe("content.js handleVideoChange — 재진입 경합(연구 무결성 점
     await vi.advanceTimersByTimeAsync(250);
     await callA;
 
-    expect(recordVideoCalls).toHaveLength(1);
-    expect(recordVideoCalls[0]).toMatchObject({
+    const videos = collectVideos(storage.dump(), "s1");
+    expect(videos).toHaveLength(1);
+    expect(videos[0]).toMatchObject({
       videoId: "BBBB",
       title: "영상 B 실제 제목",
     });
@@ -447,12 +391,13 @@ describe("content.js handleVideoChange — 재진입 경합(연구 무결성 점
     documentMock.title = "영상 B 실제 제목 - YouTube";
     await handleVideoChange();
 
-    expect(recordVideoCalls).toHaveLength(2);
-    expect(recordVideoCalls[0]).toMatchObject({
+    const videos = collectVideos(storage.dump(), "s1");
+    expect(videos).toHaveLength(2);
+    expect(videos[0]).toMatchObject({
       videoId: "AAAA",
       title: "영상 A 실제 제목",
     });
-    expect(recordVideoCalls[1]).toMatchObject({
+    expect(videos[1]).toMatchObject({
       videoId: "BBBB",
       title: "영상 B 실제 제목",
     });
@@ -460,27 +405,21 @@ describe("content.js handleVideoChange — 재진입 경합(연구 무결성 점
 });
 
 describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 항목 3)", () => {
-  let recordVideoFactory;
-
-  beforeAll(() => {
-    recordVideoFactory = loadRecordVideoFactory();
-  });
-
-  function makeTab(sharedStorage) {
+  async function makeTab(sharedStorage) {
     const chromeMock = {
       runtime: { id: "fake-extension-id" },
       storage: { local: sharedStorage },
     };
     const fetchMock = () => Promise.resolve({ ok: true });
     const consoleMock = { log: () => {}, warn: () => {} };
-    return recordVideoFactory(chromeMock, fetchMock, consoleMock);
+    return loadRecordVideo(chromeMock, fetchMock, consoleMock);
   }
 
   it("한 탭에서 연달아 두 영상을 기록하면 각자 독립된 키에 둘 다 남는다", async () => {
     const storage = createSharedStorage({
       currentSession: { sessionId: "s1", startTime: "t0" },
     });
-    const recordVideo = makeTab(storage);
+    const recordVideo = await makeTab(storage);
 
     await recordVideo("v1", "영상1");
     await recordVideo("v2", "영상2");
@@ -501,7 +440,7 @@ describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 �
     const storage = createSharedStorage({
       currentSession: { sessionId: "s1", startTime: "t0" },
     });
-    const recordVideo = makeTab(storage);
+    const recordVideo = await makeTab(storage);
 
     await recordVideo("v1", "영상1");
     await recordVideo("v1", "영상1"); // 새로고침으로 같은 영상이 다시 감지된 상황
@@ -517,8 +456,8 @@ describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 �
     });
     // 탭 A와 탭 B는 실제로도 서로 다른 콘텐츠 스크립트 인스턴스라 writeQueue를 공유하지
     // 않는다 — 별도로 만든 두 recordVideo가 정확히 그 상황을 재현한다.
-    const recordVideoTabA = makeTab(storage);
-    const recordVideoTabB = makeTab(storage);
+    const recordVideoTabA = await makeTab(storage);
+    const recordVideoTabB = await makeTab(storage);
 
     const pA = recordVideoTabA("vA", "탭A 영상");
     const pB = recordVideoTabB("vB", "탭B 영상");
@@ -556,51 +495,40 @@ describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 �
 // (retryUnsentVideoEvents)가 실패분을 찾아낼 수 있게 한다.
 
 // captureWatchStatsSnapshot
-// watchTracker가 아직 초기화되지 않은 상태에서도 예외 없이 null을 반환하는지가 핵심 회귀 지점이다.
-const CAPTURE_SNAPSHOT_DECL =
-  /function captureWatchStatsSnapshot\(\) \{[\s\S]*?\n\}/;
-
-function loadCaptureWatchStatsSnapshot() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(CAPTURE_SNAPSHOT_DECL);
-  if (!match) {
-    throw new Error(
-      "captureWatchStatsSnapshot 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  return new Function(`${match[0]}\nreturn captureWatchStatsSnapshot;`)();
-}
-
+// 파일을 처음 불러올 때 최상위 handleVideoChange()가 resetWatchTracker()보다 먼저 실행돼
+// watchTracker가 아직 null이다. 이 순간에도 예외 없이 진행돼야 첫 영상이 기록된다.
 describe("content.js captureWatchStatsSnapshot", () => {
-  it("watchTracker가 선언조차 안 된 격리 환경에서도 예외 없이 null을 반환한다", () => {
-    const captureWatchStatsSnapshot = loadCaptureWatchStatsSnapshot();
-    expect(() => captureWatchStatsSnapshot()).not.toThrow();
-    expect(captureWatchStatsSnapshot()).toBeNull();
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("영상 페이지에서 처음 불러올 때 watchTracker가 아직 없어도 예외 없이 첫 영상을 기록한다", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const set = vi.fn(async () => {});
+    const { api } = await loadContent({
+      document: { title: "첫 영상 - YouTube" },
+      location: { href: "https://www.youtube.com/watch?v=FIRST" },
+      chrome: {
+        runtime: { id: "fake-extension-id" },
+        storage: { local: { get: async () => ({}), set } },
+      },
+    });
+
+    await vi.waitFor(() => expect(set).toHaveBeenCalled());
+    expect(set.mock.calls[0][0].lastRecordedVideo.videoId).toBe("FIRST");
+    // 최상위 resetWatchTracker()까지 끝나 이후에는 스냅샷을 만들 수 있다
+    expect(api.captureWatchStatsSnapshot()).not.toBeNull();
   });
 });
 
-// currentWatchedMs — 순수 함수라 클로저 의존 없이 그대로 추출해 검증할 수 있다.
-const CURRENT_WATCHED_MS_DECL =
-  /function currentWatchedMs\(tracker\) \{[\s\S]*?\n\}/;
-
-function loadCurrentWatchedMs() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(CURRENT_WATCHED_MS_DECL);
-  if (!match) {
-    throw new Error(
-      "currentWatchedMs 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  // Date를 별도로 주입하지 않는다 — 전역 Date를 그대로 참조해야 vi.setSystemTime이
-  // 호출 시점(로드 시점이 아니라)에 반영된다.
-  return new Function(`${match[0]}\nreturn currentWatchedMs;`)();
-}
-
+// currentWatchedMs — 순수 함수
 describe("content.js currentWatchedMs", () => {
   let currentWatchedMs;
 
-  beforeAll(() => {
-    currentWatchedMs = loadCurrentWatchedMs();
+  beforeEach(async () => {
+    ({
+      api: { currentWatchedMs },
+    } = await loadContent());
   });
 
   it("tracker가 없으면 0을 반환한다", () => {
@@ -625,14 +553,6 @@ describe("content.js currentWatchedMs", () => {
 
 // ── 비디오 엘리먼트 계측 통합 테스트
 // 벽시계 경과 시간(Date.now() 차이) 기반으로 바뀌었는지를 실제 play/pause/seeking/seeked 이벤트를 발생시켜 검증한다.
-// watchTracker/trackedVideoEl 선언은 파일 초반(TDZ 회귀 수정 이후)으로, 이를 쓰는
-// currentWatchedMs~resetWatchTracker 함수들은 파일 후반에 있어 더 이상 한 구간으로
-// 붙어 있지 않다 — 두 조각을 따로 추출해 이어 붙인다.
-const WATCH_TRACKER_VARS_DECL =
-  /let watchTracker = null;\nlet trackedVideoEl = null;/;
-const VIDEO_TRACKING_SECTION_DECL =
-  /function currentWatchedMs\(tracker\) \{[\s\S]*?\nfunction resetWatchTracker\(\) \{[\s\S]*?\n\}/;
-
 function createFakeVideoElement({ paused = true, playbackRate = 1 } = {}) {
   const listeners = {};
   return {
@@ -650,40 +570,28 @@ function createFakeVideoElement({ paused = true, playbackRate = 1 } = {}) {
   };
 }
 
-function loadVideoTrackingSection(documentMock) {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const varsMatch = raw.match(WATCH_TRACKER_VARS_DECL);
-  const funcsMatch = raw.match(VIDEO_TRACKING_SECTION_DECL);
-  if (!varsMatch) {
-    throw new Error(
-      "watchTracker/trackedVideoEl 선언을 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!funcsMatch) {
-    throw new Error(
-      "비디오 엘리먼트 계측 섹션을 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  const factory = new Function(
-    "document",
-    `
-    ${varsMatch[0]}
-    ${funcsMatch[0]}
-    return {
-      reset: resetWatchTracker,
-      getTracker: () => watchTracker,
-      currentWatchedMs: () => currentWatchedMs(watchTracker),
-    };
-    `,
-  );
-  return factory(documentMock);
-}
-
-function makeDocumentMock(videoEl, { hidden = false } = {}) {
+// 불러오는 순간의 최상위 resetWatchTracker()는 <video>가 없는 페이지로 지나가게 하고,
+// 그 뒤 querySelector가 videoEl을 돌려주게 해 테스트의 reset() 시점에 연결되게 한다.
+async function loadVideoTrackingSection(videoEl, { hidden = false } = {}) {
+  let video = null;
+  const { api, documentListeners } = await loadContent({
+    document: { hidden, querySelector: () => video },
+  });
+  video = videoEl;
   return {
-    hidden,
-    querySelector: () => videoEl,
-    addEventListener: () => {},
+    reset: api.resetWatchTracker,
+    // 탭이 백그라운드로 가거나 돌아오면 document.hidden이 바뀌고 visibilitychange가 온다
+    setHidden: (value) => {
+      globalThis.document.hidden = value;
+      for (const cb of documentListeners.visibilitychange) cb();
+    },
+    // SPA 전환으로 페이지의 <video>가 다른 엘리먼트로 바뀐 상황을 만든다
+    replaceVideo: (el) => {
+      video = el;
+    },
+    snapshot: api.captureWatchStatsSnapshot,
+    currentWatchedMs: () =>
+      api.captureWatchStatsSnapshot().watchedSeconds * 1000,
   };
 }
 
@@ -697,9 +605,9 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     vi.useRealTimers();
   });
 
-  it("2배속으로 실제 15초를 재생해도 watchedSeconds는 15초로 기록된다(콘텐츠 소비량이 아니라 벽시계 경과 시간)", () => {
+  it("2배속으로 실제 15초를 재생해도 watchedSeconds는 15초로 기록된다(콘텐츠 소비량이 아니라 벽시계 경과 시간)", async () => {
     const videoEl = createFakeVideoElement({ paused: false, playbackRate: 2 });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset(); // attachVideoTracking이 이미 재생 중임을 감지해 즉시 구간을 연다.
     vi.setSystemTime(15000); // 벽시계 15초 경과(재생 상태 유지)
@@ -707,12 +615,12 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     expect(section.currentWatchedMs()).toBe(15000);
   });
 
-  it("0.5배속으로 실제 30초를 재생해도 watchedSeconds는 30초로 기록된다(과소평가되지 않음)", () => {
+  it("0.5배속으로 실제 30초를 재생해도 watchedSeconds는 30초로 기록된다(과소평가되지 않음)", async () => {
     const videoEl = createFakeVideoElement({
       paused: false,
       playbackRate: 0.5,
     });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset();
     vi.setSystemTime(30000);
@@ -720,9 +628,9 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     expect(section.currentWatchedMs()).toBe(30000);
   });
 
-  it("pause 중에는 시간이 누적되지 않고, 재개하면 그 이후부터 다시 누적된다", () => {
+  it("pause 중에는 시간이 누적되지 않고, 재개하면 그 이후부터 다시 누적된다", async () => {
     const videoEl = createFakeVideoElement({ paused: false });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset();
     vi.setSystemTime(10000); // 10초 재생
@@ -740,9 +648,9 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     expect(section.currentWatchedMs()).toBe(15000);
   });
 
-  it("탐색(seeking) 중에는 시간이 누적되지 않고, 탐색 종료 후 재생 중이면 다시 누적된다", () => {
+  it("탐색(seeking) 중에는 시간이 누적되지 않고, 탐색 종료 후 재생 중이면 다시 누적된다", async () => {
     const videoEl = createFakeVideoElement({ paused: false });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset();
     vi.setSystemTime(5000); // 5초 재생 후 탐색 시작
@@ -754,9 +662,9 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     expect(section.currentWatchedMs()).toBe(15000); // 5000 + 10000, 탐색 100ms는 제외
   });
 
-  it("탐색 후 일시정지 상태로 남으면(paused=true) 재생을 다시 열지 않는다", () => {
+  it("탐색 후 일시정지 상태로 남으면(paused=true) 재생을 다시 열지 않는다", async () => {
     const videoEl = createFakeVideoElement({ paused: false });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset();
     vi.setSystemTime(3000);
@@ -768,9 +676,9 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     expect(section.currentWatchedMs()).toBe(3000); // 늘어나지 않아야 함
   });
 
-  it("영상이 처음부터 일시정지 상태면(자동재생 꺼짐) 시간이 쌓이지 않는다", () => {
+  it("영상이 처음부터 일시정지 상태면(자동재생 꺼짐) 시간이 쌓이지 않는다", async () => {
     const videoEl = createFakeVideoElement({ paused: true });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset();
     vi.setSystemTime(20000);
@@ -778,125 +686,116 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     expect(section.currentWatchedMs()).toBe(0);
   });
 
-  it("ratechange 발생 시 마지막 배속 값을 기록한다(시간 계산에는 영향 없이 원시 데이터로만 보존)", () => {
+  it("ratechange 발생 시 마지막 배속 값을 기록한다(시간 계산에는 영향 없이 원시 데이터로만 보존)", async () => {
     const videoEl = createFakeVideoElement({ paused: false, playbackRate: 1 });
-    const section = loadVideoTrackingSection(makeDocumentMock(videoEl));
+    const section = await loadVideoTrackingSection(videoEl);
 
     section.reset();
     videoEl.playbackRate = 1.5;
     videoEl.dispatch("ratechange");
 
-    expect(section.getTracker().lastPlaybackRate).toBe(1.5);
+    expect(section.snapshot().playbackRate).toBe(1.5);
+  });
+
+  // wasBackgrounded는 분석 변수
+  // 시청 중 한 번이라도 탭이 숨겨졌으면 1로 남아야 한다.
+  it("시청 중 탭이 백그라운드로 가면 wasBackgrounded가 1로 남고, 다음 영상에서는 다시 0부터 센다", async () => {
+    const videoEl = createFakeVideoElement({ paused: false });
+    const section = await loadVideoTrackingSection(videoEl);
+    section.reset();
+    expect(section.snapshot().wasBackgrounded).toBe(0);
+
+    section.setHidden(true);
+    expect(section.snapshot().wasBackgrounded).toBe(1);
+
+    section.setHidden(false); // 다시 보여도 이번 영상에서 숨겨졌던 사실은 남는다
+    expect(section.snapshot().wasBackgrounded).toBe(1);
+
+    section.reset(); // 보이는 상태에서 다음 영상으로 전환
+    expect(section.snapshot().wasBackgrounded).toBe(0);
+  });
+
+  // 쇼츠 피드 등 SPA 전환 중 <video> 엘리먼트가 교체되는 경우. 이전 엘리먼트의 play/pause/seeking
+  // 리스너를 떼지 않으면 그 엘리먼트의 이벤트가 새 영상의 재생 구간을 열거나 닫는다.
+  // (seeked·ratechange는 지금 추적 중인 엘리먼트의 상태를 읽어 값이 섞이지 않는다.)
+  it("<video>가 다른 엘리먼트로 바뀌면 이전 엘리먼트의 play/pause/seeking은 새 영상 시청 시간에 반영되지 않는다", async () => {
+    const oldVideo = createFakeVideoElement({ paused: false });
+    const section = await loadVideoTrackingSection(oldVideo);
+    section.reset();
+    vi.setSystemTime(10000);
+
+    // 새 영상으로 전환: 새 엘리먼트는 아직 일시정지 상태
+    const newVideo = createFakeVideoElement({ paused: true });
+    section.replaceVideo(newVideo);
+    section.reset();
+
+    vi.setSystemTime(12000);
+    oldVideo.dispatch("play"); // 떼어 냈다면 새 영상의 구간을 열지 못한다
+    vi.setSystemTime(20000);
+    expect(section.currentWatchedMs()).toBe(0);
+
+    newVideo.paused = false;
+    newVideo.dispatch("play");
+    vi.setSystemTime(22000);
+    oldVideo.dispatch("pause"); // 떼어 냈다면 새 영상의 구간을 닫지 못한다
+    oldVideo.dispatch("seeking"); // seeking도 구간을 닫는다
+    vi.setSystemTime(30000);
+    expect(section.currentWatchedMs()).toBe(10000); // 새 영상 20초~30초
   });
 });
 
-const TRACKED_IDENTITY_DECL =
-  /let trackedVideoIdentity = null;[\s\S]*?\nfunction captureTrackedVideoIdentity\(\) \{[\s\S]*?\n\}/;
-const REMEMBER_TRACKED_VIDEO_DECL =
-  /function rememberTrackedVideo\(sessionId, eventId\) \{[\s\S]*?\n\}/;
-
-function loadTrackedVideoIdentityHelpers() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const identityMatch = raw.match(TRACKED_IDENTITY_DECL);
-  const rememberMatch = raw.match(REMEMBER_TRACKED_VIDEO_DECL);
-  if (!identityMatch) {
-    throw new Error(
-      "trackedVideoIdentity/captureTrackedVideoIdentity를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!rememberMatch) {
-    throw new Error(
-      "rememberTrackedVideo 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  return new Function(`
-    ${identityMatch[0]}
-    ${rememberMatch[0]}
-    return {
-      remember: rememberTrackedVideo,
-      capture: captureTrackedVideoIdentity,
-    };
-  `)();
+async function loadTrackedVideoIdentityHelpers() {
+  const { api } = await loadContent();
+  return {
+    remember: api.rememberTrackedVideo,
+    capture: api.captureTrackedVideoIdentity,
+  };
 }
 
 // pagehide 핸들러 — 코드리뷰 지적 회귀 테스트(탭 종료 시에도 공유 lastRecordedVideo가
-// 아니라 이 탭 자신의 trackedVideoIdentity만 써야 한다). applyWatchStatsPatch까지
-// 함께 추출해 실제 dual-location 갱신까지 검증한다.
-const APPLY_WATCH_STATS_PATCH_DECL =
-  /async function applyWatchStatsPatch\(target, patch\) \{[\s\S]*?\n\}/;
-const PAGEHIDE_HANDLER_DECL =
-  /window\.addEventListener\("pagehide", \(\) => \{[\s\S]*?\n\}\);/;
-
-function loadPagehideHandlerFactory() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const identityMatch = raw.match(TRACKED_IDENTITY_DECL);
-  const snapshotMatch = raw.match(CAPTURE_SNAPSHOT_DECL);
-  const watchedMsMatch = raw.match(CURRENT_WATCHED_MS_DECL);
-  const applyMatch = raw.match(APPLY_WATCH_STATS_PATCH_DECL);
-  const pagehideMatch = raw.match(PAGEHIDE_HANDLER_DECL);
-  if (!identityMatch) {
-    throw new Error(
-      "trackedVideoIdentity/captureTrackedVideoIdentity를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!snapshotMatch) {
-    throw new Error(
-      "captureWatchStatsSnapshot 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!watchedMsMatch) {
-    throw new Error(
-      "currentWatchedMs 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!applyMatch) {
-    throw new Error(
-      "applyWatchStatsPatch 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!pagehideMatch) {
-    throw new Error(
-      "pagehide 리스너를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  // pagehide는 이제 captureWatchStatsSnapshot()을 그대로 재사용하므로(코드리뷰 대응으로
-  // watchTracker/video.played 계산 방식이 바뀌면서 함께 재사용하게 됨), 그 함수와
-  // currentWatchedMs까지 함께 묶어야 실제 파일과 동일하게 동작한다.
-  return new Function(
-    "chrome",
-    "fetch",
-    "window",
-    "watchTracker",
-    "initialTrackedIdentity",
-    `
-    ${identityMatch[0]}
-    trackedVideoIdentity = initialTrackedIdentity;
-    ${watchedMsMatch[0]}
-    ${snapshotMatch[0]}
-    ${applyMatch[0]}
-    let capturedPagehideHandler = null;
-    const originalAddEventListener = window.addEventListener;
-    window.addEventListener = (name, cb) => {
-      if (name === "pagehide") capturedPagehideHandler = cb;
-      else if (originalAddEventListener) originalAddEventListener(name, cb);
-    };
-    ${pagehideMatch[0]}
-    return capturedPagehideHandler;
-    `,
-  );
+// 아니라 이 탭 자신의 trackedVideoIdentity만 써야 한다). content.js가 window에 등록한
+// 실제 핸들러를 받아 실행하고, applyWatchStatsPatch의 로컬 저장 결과로 검증한다.
+async function loadPagehideHandler(sharedStorage, fetchMock) {
+  let pagehide = null;
+  let video = null;
+  const { api } = await loadContent({
+    chrome: {
+      runtime: { id: "fake-extension-id" },
+      storage: { local: sharedStorage },
+    },
+    fetch: fetchMock,
+    window: {
+      addEventListener: (type, cb) => {
+        if (type === "pagehide") pagehide = cb;
+      },
+    },
+    document: { querySelector: () => video },
+    console: { log: () => {}, warn: () => {} },
+  });
+  return {
+    api,
+    pagehide: () => pagehide(),
+    // 0초부터 seconds초까지 재생한 뒤 멈춘다 — 닫힌 구간 seconds초만 남는다
+    watchThenPause(seconds) {
+      const videoEl = createFakeVideoElement({ paused: false });
+      video = videoEl;
+      api.resetWatchTracker();
+      vi.setSystemTime(seconds * 1000);
+      videoEl.paused = true;
+      videoEl.dispatch("pause");
+    },
+  };
 }
 
 describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코드리뷰 회귀: 다른 탭의 공유 lastRecordedVideo 오염 방지)", () => {
-  function makeEnv(sharedStorage, fetchMock) {
-    return {
-      chrome: {
-        runtime: { id: "fake-extension-id" },
-        storage: { local: sharedStorage },
-      },
-      fetch: fetchMock,
-      window: {},
-    };
-  }
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   // pagehide는 로컬 저장에만 최선노력을 기울인다(네트워크 전송은 background.js의
   // 재시도 큐 몫 — 파일 상단 주석 "탭 종료 시... 로컬에만 남긴다" 참고). 그래서 이
@@ -923,23 +822,13 @@ describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코
       },
     });
     const fetchMock = () => Promise.resolve({ ok: true });
-    const env = makeEnv(storage, fetchMock);
-    // 이미 닫힌 구간 77초만 있고(재생 중은 아님, segmentStartAt: null) — captureWatchStatsSnapshot이
+    const tab = await loadPagehideHandler(storage, fetchMock);
+    // 이미 닫힌 구간 77초만 있고(재생 중은 아님) — captureWatchStatsSnapshot이
     // currentWatchedMs로 계산해 77초를 그대로 돌려줘야 한다.
-    const watchTracker = {
-      accumulatedMs: 77000,
-      segmentStartAt: null,
-      lastPlaybackRate: 1,
-      sawHidden: false,
-    };
+    tab.watchThenPause(77);
+    tab.api.rememberTrackedVideo("s1", "evt-mine");
 
-    const factory = loadPagehideHandlerFactory();
-    const handler = factory(env.chrome, env.fetch, env.window, watchTracker, {
-      sessionId: "s1",
-      eventId: "evt-mine",
-    });
-
-    handler();
+    tab.pagehide();
     await flushMicrotasks();
     await flushMicrotasks();
 
@@ -954,69 +843,55 @@ describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코
     expect(mine.watchStatsSent).toBe(false);
   });
 
-  it("watchTracker가 없으면(추적 시작 전) 아무 것도 하지 않는다", async () => {
-    const storage = createSharedStorage({ anonymousId: "a1" });
-    const patchCalls = [];
-    const fetchMock = (_url, options) => {
-      if (options?.method === "PATCH") patchCalls.push(1);
-      return Promise.resolve({ ok: true });
-    };
-    const env = makeEnv(storage, fetchMock);
-
-    const factory = loadPagehideHandlerFactory();
-    const handler = factory(env.chrome, env.fetch, env.window, null, null);
-
-    handler();
-    await flushMicrotasks();
-
-    expect(patchCalls).toHaveLength(0);
-  });
-
+  // watchTracker는 content.js를 불러오는 순간 만들어져 pagehide 시점에 없을 수 없다.
+  // 그래서 "trackedVideoIdentity가 없을 때"만 검증한다. pagehide는 네트워크를 쓰지 않으므로
+  // PATCH 0회만으로는 아무것도 지키지 못해, 저장소가 그대로인지까지 확인한다.
   it("trackedVideoIdentity가 없으면(첫 영상도 아직 없음) 아무 것도 하지 않는다", async () => {
-    const storage = createSharedStorage({ anonymousId: "a1" });
+    // 다른 탭이 써 둔 공유 값 — 자기 식별자가 없다고 이쪽으로 대신 쓰면 안 된다.
+    const storage = createSharedStorage({
+      anonymousId: "a1",
+      lastRecordedVideo: {
+        videoId: "other-tab-video",
+        sessionId: "s-other",
+        eventId: "evt-other",
+      },
+      "video__s-other__evt-other": {
+        videoId: "other-tab-video",
+        eventId: "evt-other",
+        sent: true,
+      },
+    });
     const patchCalls = [];
     const fetchMock = (_url, options) => {
       if (options?.method === "PATCH") patchCalls.push(1);
       return Promise.resolve({ ok: true });
     };
-    const env = makeEnv(storage, fetchMock);
-    const watchTracker = {
-      accumulatedMs: 5000,
-      segmentStartAt: null,
-      lastPlaybackRate: 1,
-      sawHidden: false,
-    };
+    const tab = await loadPagehideHandler(storage, fetchMock);
+    tab.watchThenPause(5);
+    const before = storage.dump();
 
-    const factory = loadPagehideHandlerFactory();
-    const handler = factory(
-      env.chrome,
-      env.fetch,
-      env.window,
-      watchTracker,
-      null,
-    );
-
-    handler();
+    tab.pagehide();
     await flushMicrotasks();
 
     expect(patchCalls).toHaveLength(0);
+    expect(storage.dump()).toEqual(before);
   });
 });
 
 describe("content.js trackedVideoIdentity — 세션 타임아웃에 영향받지 않는 시청시간 확정 대상 추적 (코드리뷰 회귀)", () => {
-  it("초기값은 null이다", () => {
-    const { capture } = loadTrackedVideoIdentityHelpers();
+  it("초기값은 null이다", async () => {
+    const { capture } = await loadTrackedVideoIdentityHelpers();
     expect(capture()).toBeNull();
   });
 
-  it("rememberTrackedVideo로 기억해 둔 값을 그대로 돌려준다", () => {
-    const { remember, capture } = loadTrackedVideoIdentityHelpers();
+  it("rememberTrackedVideo로 기억해 둔 값을 그대로 돌려준다", async () => {
+    const { remember, capture } = await loadTrackedVideoIdentityHelpers();
     remember("s1", "evt-1");
     expect(capture()).toEqual({ sessionId: "s1", eventId: "evt-1" });
   });
 
-  it("여러 번 기억하면 가장 최근 값으로 덮어쓴다(영상이 여러 번 전환된 경우)", () => {
-    const { remember, capture } = loadTrackedVideoIdentityHelpers();
+  it("여러 번 기억하면 가장 최근 값으로 덮어쓴다(영상이 여러 번 전환된 경우)", async () => {
+    const { remember, capture } = await loadTrackedVideoIdentityHelpers();
     remember("s1", "evt-1");
     remember("s1", "evt-2");
     expect(capture()).toEqual({ sessionId: "s1", eventId: "evt-2" });
@@ -1024,19 +899,13 @@ describe("content.js trackedVideoIdentity — 세션 타임아웃에 영향받�
 });
 
 describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플래그로 남긴다", () => {
-  let recordVideoFactory;
-
-  beforeAll(() => {
-    recordVideoFactory = loadRecordVideoFactory();
-  });
-
-  function makeTabWithFetch(sharedStorage, fetchMock) {
+  async function makeTabWithFetch(sharedStorage, fetchMock) {
     const chromeMock = {
       runtime: { id: "fake-extension-id" },
       storage: { local: sharedStorage },
     };
     const consoleMock = { log: () => {}, warn: () => {} };
-    return recordVideoFactory(chromeMock, fetchMock, consoleMock);
+    return loadRecordVideo(chromeMock, fetchMock, consoleMock);
   }
 
   it("서버가 200을 반환하면 해당 영상 키를 sent:true로 갱신한다", async () => {
@@ -1045,7 +914,7 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
       anonymousId: "a1",
       serverUrl: "http://localhost:3000",
     });
-    const recordVideo = makeTabWithFetch(storage, () =>
+    const recordVideo = await makeTabWithFetch(storage, () =>
       Promise.resolve({ ok: true }),
     );
 
@@ -1064,7 +933,7 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
       anonymousId: "a1",
       serverUrl: "http://localhost:3000",
     });
-    const recordVideo = makeTabWithFetch(storage, () =>
+    const recordVideo = await makeTabWithFetch(storage, () =>
       Promise.resolve({ ok: false, status: 500 }),
     );
 
@@ -1083,7 +952,7 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
       anonymousId: "a1",
       serverUrl: "http://localhost:3000",
     });
-    const recordVideo = makeTabWithFetch(storage, () =>
+    const recordVideo = await makeTabWithFetch(storage, () =>
       Promise.reject(new TypeError("network down")),
     );
 
@@ -1103,7 +972,7 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
       serverUrl: "http://localhost:3000",
     });
     let sentBody = null;
-    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (_url, options) => {
       sentBody = JSON.parse(options.body);
       return Promise.resolve({ ok: true });
     });
@@ -1121,19 +990,13 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
 // 시청시간 원시 데이터 — 다음 영상으로 전환될 때 직전 영상의 시청시간을
 // PATCH로 확정 반영하는지 검증한다.
 describe("content.js recordVideo — previousWatchStats로 직전 영상의 시청시간을 확정한다", () => {
-  let recordVideoFactory;
-
-  beforeAll(() => {
-    recordVideoFactory = loadRecordVideoFactory();
-  });
-
-  function makeTabWithFetch(sharedStorage, fetchMock) {
+  async function makeTabWithFetch(sharedStorage, fetchMock) {
     const chromeMock = {
       runtime: { id: "fake-extension-id" },
       storage: { local: sharedStorage },
     };
     const consoleMock = { log: () => {}, warn: () => {} };
-    return recordVideoFactory(chromeMock, fetchMock, consoleMock);
+    return loadRecordVideo(chromeMock, fetchMock, consoleMock);
   }
 
   it("직전 영상의 eventId로 PATCH /api/video-events/:eventId를 호출하고, 성공하면 로컬 기록을 watchStatsSent:true로 남긴다", async () => {
@@ -1143,7 +1006,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       serverUrl: "http://localhost:3000",
     });
     const patchCalls = [];
-    const recordVideo = makeTabWithFetch(storage, (url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (url, options) => {
       if (options?.method === "PATCH") {
         patchCalls.push({ url: String(url), body: JSON.parse(options.body) });
         return Promise.resolve({ ok: true });
@@ -1158,8 +1021,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
 
     // 영상 B로 전환하며 영상 A의 시청시간 스냅샷과 식별자를 함께 전달 — 실제로는
     // handleVideoChange가 captureTrackedVideoIdentity()로 얻어 넘기는 값이다(이
-    // 격리 테스트는 recordVideo 자체만 추출해 rememberTrackedVideo가 실제
-    // trackedVideoIdentity에 쓰지 않으므로 인자로 직접 재현한다).
+    // 테스트는 recordVideo를 직접 호출하므로 그 값을 인자로 직접 재현한다).
     await recordVideo(
       "vB",
       "영상B",
@@ -1191,13 +1053,69 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
     expect(videoA.watchedSeconds).toBe(55.5);
   });
 
+  // 시청 중 오래 쉬어 세션이 끝나면 background.js가 video__ 키를 sessions[]로 옮긴다
+  // 그 뒤 다음 영상으로 넘어가 직전 영상을 확정할 때는 sessions[] 안의 항목을 찾아 갱신해야 한다 — 못 찾으면 시청 시간이 조용히 사라진다.
+  it("직전 영상 기록이 세션 종료로 sessions[]에 옮겨진 뒤에도 그 항목에 시청시간을 확정하고, 다른 영상은 건드리지 않는다", async () => {
+    const archivedSession = {
+      sessionId: "s-old",
+      videos: [
+        { videoId: "vA", eventId: "evt-A", sent: true },
+        { videoId: "vX", eventId: "evt-X", sent: true },
+      ],
+    };
+    const otherSession = {
+      sessionId: "s-other",
+      videos: [{ videoId: "vY", eventId: "evt-Y", sent: true }],
+    };
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s-new", startTime: "t1" },
+      sessions: [archivedSession, otherSession],
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    const patchCalls = [];
+    const recordVideo = await makeTabWithFetch(storage, (url, options) => {
+      if (options?.method === "PATCH") patchCalls.push(String(url));
+      return Promise.resolve({ ok: true });
+    });
+
+    await recordVideo(
+      "vB",
+      "영상B",
+      null,
+      null,
+      null,
+      null,
+      { watchedSeconds: 42, playbackRate: 1.25, wasBackgrounded: 1 },
+      { sessionId: "s-old", eventId: "evt-A" },
+    );
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(patchCalls).toEqual([
+      "http://localhost:3000/api/video-events/evt-A",
+    ]);
+    const [oldSession, untouchedSession] = storage.dump().sessions;
+    expect(oldSession.videos[0]).toEqual({
+      videoId: "vA",
+      eventId: "evt-A",
+      sent: true,
+      watchedSeconds: 42,
+      playbackRate: 1.25,
+      wasBackgrounded: 1,
+      watchStatsSent: true,
+    });
+    expect(oldSession.videos[1]).toEqual(archivedSession.videos[1]);
+    expect(untouchedSession).toEqual(otherSession);
+  });
+
   it("PATCH가 실패하면 watchStatsSent:false로 남아 재시도 큐 대상이 된다", async () => {
     const storage = createSharedStorage({
       currentSession: { sessionId: "s1", startTime: "t0" },
       anonymousId: "a1",
       serverUrl: "http://localhost:3000",
     });
-    const recordVideo = makeTabWithFetch(storage, (_url, options) =>
+    const recordVideo = await makeTabWithFetch(storage, (_url, options) =>
       options?.method === "PATCH"
         ? Promise.resolve({ ok: false, status: 500 })
         : Promise.resolve({ ok: true }),
@@ -1234,7 +1152,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       serverUrl: "http://localhost:3000",
     });
     const patchCalls = [];
-    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (_url, options) => {
       if (options?.method === "PATCH") patchCalls.push(1);
       return Promise.resolve({ ok: true });
     });
@@ -1273,7 +1191,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       ],
     });
     const patchCalls = [];
-    const recordVideo = makeTabWithFetch(storage, (url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (url, options) => {
       if (options?.method === "PATCH") {
         patchCalls.push({ url: String(url), body: JSON.parse(options.body) });
         return Promise.resolve({ ok: true });
@@ -1329,7 +1247,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       },
     });
     const patchCalls = [];
-    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (_url, options) => {
       if (options?.method === "PATCH") patchCalls.push(1);
       return Promise.resolve({ ok: true });
     });
@@ -1367,8 +1285,8 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       }
       return Promise.resolve({ ok: true });
     };
-    const recordVideoTabA = makeTabWithFetch(storage, fetchMock);
-    const recordVideoTabB = makeTabWithFetch(storage, fetchMock);
+    const recordVideoTabA = await makeTabWithFetch(storage, fetchMock);
+    const recordVideoTabB = await makeTabWithFetch(storage, fetchMock);
 
     // 탭 A: 영상1 기록 — 탭 A 자신의 trackedVideoIdentity에 영상1의 eventId가 남는다
     // (이 테스트에서는 recordVideoTabA 클로저 자체가 그 역할을 못하므로, 탭 A가
@@ -1416,7 +1334,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       serverUrl: "http://localhost:3000",
     });
     const patchCalls = [];
-    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (_url, options) => {
       if (options?.method === "PATCH") patchCalls.push(1);
       return Promise.resolve({ ok: true });
     });
@@ -1455,7 +1373,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
     const videoAPostPromise = new Promise((resolve) => {
       resolveVideoAPost = () => resolve({ ok: true });
     });
-    const recordVideo = makeTabWithFetch(storage, (_url, options) => {
+    const recordVideo = await makeTabWithFetch(storage, (_url, options) => {
       if (options?.method === "PATCH") return Promise.resolve({ ok: true });
       const body = JSON.parse(options.body);
       if (body.videoId === "vA") return videoAPostPromise; // 아직 응답 안 옴
@@ -1510,49 +1428,29 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
 // 만들기도 전에 watchTracker를 초기화해, 영상A → 비영상 페이지 → 무관한 영상C로 이동할 때
 // A의 시청시간이 0으로 오염될 수 있었다는 지적을 "영상 엘리먼트 재생 → 실제 URL 이동" 흐름
 // 그대로 재현해 검증한다.
-const FULL_VIDEO_LIFECYCLE_DECL =
-  /function extractVideoId\(url\) \{[\s\S]*?\nfunction resetWatchTracker\(\) \{[\s\S]*?\n\}/;
-
-function loadFullVideoLifecycle(
+// 영상 수명주기 전체를 실제 content.js로 돌린다. loadContent는 document를 복사해 전역에 넣으므로,
+// 테스트가 title을 바꿀 수 있게 실제로 들어간 전역 document를 함께 돌려준다.
+// getTrackedVideoIdentity는 실제 captureTrackedVideoIdentity와 같은 함수다(trackedVideoIdentity를 그대로 반환).
+async function loadFullVideoLifecycle(
   documentMock,
   locationMock,
   chromeMock,
   fetchMock,
 ) {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(FULL_VIDEO_LIFECYCLE_DECL);
-  if (!match) {
-    throw new Error(
-      "영상 수명주기 전체 구간(extractVideoId~resetWatchTracker)을 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  const consoleMock = { log: () => {}, warn: () => {} };
-  // 추출 구간에 window.addEventListener("popstate", ...) 등록이 포함돼 있어
-  // window도 넘겨야 한다 — 실제 popstate 발생은 이 테스트의 관심사가 아니므로 no-op으로 흘려보낸다.
-  const windowMock = { addEventListener: () => {} };
-  const factory = new Function(
-    "document",
-    "location",
-    "chrome",
-    "fetch",
-    "console",
-    "window",
-    `
-    ${match[0]}
-    return {
-      handleVideoChange,
-      getTrackedVideoIdentity: () => trackedVideoIdentity,
-    };
-    `,
-  );
-  return factory(
-    documentMock,
-    locationMock,
-    chromeMock,
-    fetchMock,
-    consoleMock,
-    windowMock,
-  );
+  const { api } = await loadContent({
+    document: documentMock,
+    location: locationMock,
+    chrome: chromeMock,
+    fetch: fetchMock,
+    console: { log: () => {}, warn: () => {} },
+  });
+  return {
+    api: {
+      handleVideoChange: api.handleVideoChange,
+      getTrackedVideoIdentity: api.captureTrackedVideoIdentity,
+    },
+    document: globalThis.document,
+  };
 }
 
 // finalizePreviousWatchStats는 handleVideoChange 안에서 await 없이(fire-and-forget) 호출된다.
@@ -1576,7 +1474,7 @@ function findVideoRecordByEventId(storeDump, eventId) {
 describe("content.js handleVideoChange 전체 수명주기 — 비영상 페이지 경유 시 직전 영상 시청시간 오염 방지 (코드리뷰 회귀 5)", () => {
   let videoEl, documentMock, locationMock, storage, api;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
 
@@ -1599,14 +1497,14 @@ describe("content.js handleVideoChange 전체 수명주기 — 비영상 페이�
     const fetchMock = () =>
       Promise.reject(new Error("이 테스트는 네트워크 전송이 없어야 한다"));
 
-    // 팩토리 로드 시점에 파일 최하단의 handleVideoChange() 즉시 호출이 함께 실행된다
+    // 불러오는 순간 최상위 handleVideoChange()·resetWatchTracker()가 실행된다
     // (비영상 페이지라 조용히 반환됨) — 실제 스크립트 로드 순서와 동일하다.
-    api = loadFullVideoLifecycle(
+    ({ api, document: documentMock } = await loadFullVideoLifecycle(
       documentMock,
       locationMock,
       chromeMock,
       fetchMock,
-    );
+    ));
   });
 
   afterEach(() => {
@@ -1700,7 +1598,7 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
 
   let videoEl, documentMock, locationMock, storage, fetchCalls, api;
 
-  function setup(initialStorage) {
+  async function setup(initialStorage) {
     videoEl = createFakeVideoElement({ paused: true });
     documentMock = {
       title: "YouTube",
@@ -1716,12 +1614,12 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
       fetchCalls.push({ url, method: options.method });
       return Promise.resolve({ ok: true });
     };
-    api = loadFullVideoLifecycle(
+    ({ api, document: documentMock } = await loadFullVideoLifecycle(
       documentMock,
       locationMock,
       { runtime: { id: "fake-extension-id" }, storage: { local: storage } },
       fetchMock,
-    );
+    ));
   }
 
   async function watch(videoId, seconds) {
@@ -1749,7 +1647,7 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
   it("수집 종료 후 본 영상은 기록하지 않고, 그 시청시간이 종료 전 영상에 붙지 않는다", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(COLLECTION_ENDS_AT - 60000);
-    setup({ installDate: INSTALL_DATE });
+    await setup({ installDate: INSTALL_DATE });
 
     await watch("AAAA", 30);
     const eventIdA = api.getTrackedVideoIdentity()?.eventId;
@@ -1774,7 +1672,7 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
   it("수집 종료 후에는 새 영상 POST를 보내지 않는다", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(COLLECTION_ENDS_AT + 1000);
-    setup({
+    await setup({
       installDate: INSTALL_DATE,
       anonymousId: "a1",
       serverUrl: "https://srv.example",
@@ -1794,7 +1692,7 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
     async (_label, finalizeAt, expectedPatches) => {
       vi.useFakeTimers();
       vi.setSystemTime(COLLECTION_ENDS_AT - 60000);
-      setup({
+      await setup({
         installDate: INSTALL_DATE,
         anonymousId: "a1",
         serverUrl: "https://srv.example",
@@ -1819,13 +1717,7 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
 });
 
 describe("content.js recordVideo — 기록 실패를 오류 보고로 넘긴다", () => {
-  let recordVideoFactory;
-
-  beforeAll(() => {
-    recordVideoFactory = loadRecordVideoFactory();
-  });
-
-  function makeFailingTab({ invalidateOnFailure = false } = {}) {
+  async function makeFailingTab({ invalidateOnFailure = false } = {}) {
     const chromeMock = {
       runtime: {
         id: "fake-extension-id",
@@ -1842,7 +1734,7 @@ describe("content.js recordVideo — 기록 실패를 오류 보고로 넘긴다
       },
     };
     const consoleMock = { log: () => {}, warn: () => {} };
-    const recordVideo = recordVideoFactory(
+    const recordVideo = await loadRecordVideo(
       chromeMock,
       () => Promise.resolve({ ok: true }),
       consoleMock,
@@ -1851,7 +1743,7 @@ describe("content.js recordVideo — 기록 실패를 오류 보고로 넘긴다
   }
 
   it("storage 실패면 RECORD_FAILED를 코드·위치만 담아 background에 보낸다", async () => {
-    const { recordVideo, sendMessage } = makeFailingTab();
+    const { recordVideo, sendMessage } = await makeFailingTab();
 
     await recordVideo("v1", "민감한 영상 제목", "www.google.com", null);
 
@@ -1869,12 +1761,53 @@ describe("content.js recordVideo — 기록 실패를 오류 보고로 넘긴다
   });
 
   it("컨텍스트가 무효화돼 실패했으면 보고하지 않는다", async () => {
-    const { recordVideo, sendMessage } = makeFailingTab({
+    const { recordVideo, sendMessage } = await makeFailingTab({
       invalidateOnFailure: true,
     });
 
     await recordVideo("v1", "영상1");
 
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+});
+
+// 브라우저는 content.js를 module·exports가 없는 classic script로 실행한다. 테스트용 내보내기
+// 블록이 그 환경에서 오류를 내거나 전역을 만들지 않는지 같은 조건(vm, 모듈 아님)으로 확인한다.
+describe("content.js classic script 실행 — 테스트용 내보내기가 브라우저에 영향을 주지 않는다", () => {
+  function createBrowserLikeContext() {
+    return vm.createContext({
+      document: {
+        referrer: "",
+        title: "",
+        hidden: false,
+        addEventListener: () => {},
+        querySelector: () => null,
+      },
+      window: { addEventListener: () => {} },
+      location: { href: "https://www.youtube.com/" },
+      chrome: {
+        storage: { local: { get: async () => ({}), set: async () => {} } },
+      },
+      fetch: () => Promise.resolve(),
+      ViewLensStudy: globalThis.ViewLensStudy,
+      console: { log: () => {}, warn: () => {}, error: () => {} },
+      crypto: globalThis.crypto,
+      setTimeout,
+    });
+  }
+
+  it("모듈이 아닌 스크립트로 파싱된다(export 문이 없다)", () => {
+    expect(
+      () => new vm.Script(readFileSync(CONTENT_PATH, "utf8")),
+    ).not.toThrow();
+  });
+
+  it("module이 없는 환경에서 오류 없이 실행되고 module·exports를 만들지 않는다", () => {
+    const context = createBrowserLikeContext();
+    expect(() =>
+      vm.runInContext(readFileSync(CONTENT_PATH, "utf8"), context),
+    ).not.toThrow();
+    expect(context.module).toBeUndefined();
+    expect(context.exports).toBeUndefined();
   });
 });
