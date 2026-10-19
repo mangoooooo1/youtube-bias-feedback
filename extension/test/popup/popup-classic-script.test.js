@@ -3,20 +3,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import vm from "node:vm";
+import { POPUP_SCRIPTS, loadPopup } from "./load-popup.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXTENSION_DIR = path.join(__dirname, "../..");
-
-// popup.html의 <script> 순서와 같다
-const POPUP_SCRIPTS = [
-  "study-schedule.js",
-  "popup/viewlens-data.js",
-  "popup/viewlens-logo.js",
-  "popup/viewlens-ui.js",
-  "popup/viewlens-screens.js",
-  "popup/viewlens-app.js",
-  "popup/viewlens-popup.js",
-];
 
 // 다른 팝업 파일이 이름만으로 쓰는 함수 — 테스트는 파일을 따로 불러오므로 window 노출이 있어야 이어진다
 const CROSS_FILE_NAMES = [
@@ -28,6 +18,16 @@ const CROSS_FILE_NAMES = [
 ];
 
 const read = (f) => readFileSync(path.join(EXTENSION_DIR, f), "utf8");
+
+// 팝업 테스트는 모두 POPUP_SCRIPTS 순서로 불러온다. popup.html과 어긋나면 브라우저와 다른 조건이 된다
+describe("POPUP_SCRIPTS", () => {
+  it("popup.html의 <script> 목록·순서와 같다", () => {
+    const srcs = [
+      ...read("popup/popup.html").matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g),
+    ].map(([, src]) => path.posix.normalize(`popup/${src}`));
+    expect(srcs).toEqual(POPUP_SCRIPTS);
+  });
+});
 
 // 브라우저처럼 하나의 전역(window)을 공유하는 classic script 환경
 function createPopupLikeContext() {
@@ -76,27 +76,11 @@ describe("팝업 classic script 실행 — 테스트를 위한 window 노출이 
 describe("팝업 파일을 테스트처럼 따로 불러와도 파일 간 이름 참조가 이어진다", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-    vi.restoreAllMocks();
     vi.resetModules();
   });
 
   it.each(CROSS_FILE_NAMES)("%s가 전역에서 보인다", async (name) => {
-    vi.resetModules();
-    vi.stubGlobal("window", globalThis);
-    vi.stubGlobal("document", {
-      getElementById: () => null,
-      querySelector: () => null,
-      addEventListener: () => {},
-    });
-    vi.stubGlobal("chrome", {
-      runtime: { id: "fake-extension-id", sendMessage: async () => {} },
-      storage: { local: { get: async () => ({}), set: async () => {} } },
-    });
-    vi.stubGlobal("fetch", async () => ({ ok: false }));
-    // DOM이 없어 boot()가 실패하고 자체 catch가 console.error로 남긴다
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    for (const f of POPUP_SCRIPTS) await import(`../../${f}`);
-
+    await loadPopup();
     expect(typeof globalThis[name]).toBe("function");
   });
 });
