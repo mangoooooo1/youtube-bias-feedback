@@ -35,14 +35,14 @@ export default defineConfig({
         "server/scripts/sample-embedding-validation-sessions.js",
       ],
       reporter: ["text", "json-summary", "html"],
-      // 실측치보다 2%p 낮게(소수점 버림) 잡은 회귀 방지용 바닥선. 전역은 2026-10-19 실측(63.66/56.97/63.90/63.60) 기준.
+      // 실측치보다 2%p 낮게(소수점 버림) 잡은 회귀 방지용 바닥선. 전역은 2026-10-19 실측(88.67/86.92/89.23/89.35) 기준.
       // 로컬·CI 수치는 .gitattributes(eol=lf) 적용 후 같다. 폴더·파일별 값은 그 범위 파일들을 합친 수치로 검사한다.
       // "이 정도는 유지하자"는 최소선이지 목표치가 아니다. 값을 낮추는 수정은 지양.
       thresholds: {
-        statements: 61,
-        branches: 54,
-        functions: 61,
-        lines: 61,
+        statements: 86,
+        branches: 84,
+        functions: 87,
+        lines: 87,
         "server/routes/**": {
           statements: 91,
           branches: 89,
@@ -54,6 +54,12 @@ export default defineConfig({
           branches: 91,
           functions: 96,
           lines: 96,
+        },
+        "extension/popup/**": {
+          statements: 84,
+          branches: 79,
+          functions: 79,
+          lines: 86,
         },
         "extension/content.js": {
           statements: 92,
