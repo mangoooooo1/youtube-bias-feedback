@@ -574,12 +574,17 @@ function createFakeVideoElement({ paused = true, playbackRate = 1 } = {}) {
 // 그 뒤 querySelector가 videoEl을 돌려주게 해 테스트의 reset() 시점에 연결되게 한다.
 async function loadVideoTrackingSection(videoEl, { hidden = false } = {}) {
   let video = null;
-  const { api } = await loadContent({
+  const { api, documentListeners } = await loadContent({
     document: { hidden, querySelector: () => video },
   });
   video = videoEl;
   return {
     reset: api.resetWatchTracker,
+    // 탭이 백그라운드로 가거나 돌아오면 document.hidden이 바뀌고 visibilitychange가 온다
+    setHidden: (value) => {
+      globalThis.document.hidden = value;
+      for (const cb of documentListeners.visibilitychange) cb();
+    },
     // SPA 전환으로 페이지의 <video>가 다른 엘리먼트로 바뀐 상황을 만든다
     replaceVideo: (el) => {
       video = el;
@@ -690,6 +695,24 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     videoEl.dispatch("ratechange");
 
     expect(section.snapshot().playbackRate).toBe(1.5);
+  });
+
+  // wasBackgrounded는 분석 변수
+  // 시청 중 한 번이라도 탭이 숨겨졌으면 1로 남아야 한다.
+  it("시청 중 탭이 백그라운드로 가면 wasBackgrounded가 1로 남고, 다음 영상에서는 다시 0부터 센다", async () => {
+    const videoEl = createFakeVideoElement({ paused: false });
+    const section = await loadVideoTrackingSection(videoEl);
+    section.reset();
+    expect(section.snapshot().wasBackgrounded).toBe(0);
+
+    section.setHidden(true);
+    expect(section.snapshot().wasBackgrounded).toBe(1);
+
+    section.setHidden(false); // 다시 보여도 이번 영상에서 숨겨졌던 사실은 남는다
+    expect(section.snapshot().wasBackgrounded).toBe(1);
+
+    section.reset(); // 보이는 상태에서 다음 영상으로 전환
+    expect(section.snapshot().wasBackgrounded).toBe(0);
   });
 
   // 쇼츠 피드 등 SPA 전환 중 <video> 엘리먼트가 교체되는 경우. 이전 엘리먼트의 play/pause/seeking
@@ -1028,6 +1051,62 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
     );
     expect(videoA.watchStatsSent).toBe(true);
     expect(videoA.watchedSeconds).toBe(55.5);
+  });
+
+  // 시청 중 오래 쉬어 세션이 끝나면 background.js가 video__ 키를 sessions[]로 옮긴다
+  // 그 뒤 다음 영상으로 넘어가 직전 영상을 확정할 때는 sessions[] 안의 항목을 찾아 갱신해야 한다 — 못 찾으면 시청 시간이 조용히 사라진다.
+  it("직전 영상 기록이 세션 종료로 sessions[]에 옮겨진 뒤에도 그 항목에 시청시간을 확정하고, 다른 영상은 건드리지 않는다", async () => {
+    const archivedSession = {
+      sessionId: "s-old",
+      videos: [
+        { videoId: "vA", eventId: "evt-A", sent: true },
+        { videoId: "vX", eventId: "evt-X", sent: true },
+      ],
+    };
+    const otherSession = {
+      sessionId: "s-other",
+      videos: [{ videoId: "vY", eventId: "evt-Y", sent: true }],
+    };
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s-new", startTime: "t1" },
+      sessions: [archivedSession, otherSession],
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    const patchCalls = [];
+    const recordVideo = await makeTabWithFetch(storage, (url, options) => {
+      if (options?.method === "PATCH") patchCalls.push(String(url));
+      return Promise.resolve({ ok: true });
+    });
+
+    await recordVideo(
+      "vB",
+      "영상B",
+      null,
+      null,
+      null,
+      null,
+      { watchedSeconds: 42, playbackRate: 1.25, wasBackgrounded: 1 },
+      { sessionId: "s-old", eventId: "evt-A" },
+    );
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(patchCalls).toEqual([
+      "http://localhost:3000/api/video-events/evt-A",
+    ]);
+    const [oldSession, untouchedSession] = storage.dump().sessions;
+    expect(oldSession.videos[0]).toEqual({
+      videoId: "vA",
+      eventId: "evt-A",
+      sent: true,
+      watchedSeconds: 42,
+      playbackRate: 1.25,
+      wasBackgrounded: 1,
+      watchStatsSent: true,
+    });
+    expect(oldSession.videos[1]).toEqual(archivedSession.videos[1]);
+    expect(untouchedSession).toEqual(otherSession);
   });
 
   it("PATCH가 실패하면 watchStatsSent:false로 남아 재시도 큐 대상이 된다", async () => {
