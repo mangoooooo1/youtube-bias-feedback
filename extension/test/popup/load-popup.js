@@ -10,14 +10,21 @@ export const POPUP_SCRIPTS = [
   "popup/viewlens-popup.js",
 ];
 
-export async function loadPopup({ chrome, quietBoot = true } = {}) {
+// realDom: jsdom 환경 테스트(// @vitest-environment jsdom)에서 진짜 document를 그대로 쓴다
+export async function loadPopup({
+  chrome,
+  quietBoot = true,
+  realDom = false,
+} = {}) {
   vi.resetModules();
   vi.stubGlobal("window", globalThis);
-  vi.stubGlobal("document", {
-    getElementById: () => null,
-    querySelector: () => null,
-    addEventListener: () => {},
-  });
+  if (!realDom) {
+    vi.stubGlobal("document", {
+      getElementById: () => null,
+      querySelector: () => null,
+      addEventListener: () => {},
+    });
+  }
   vi.stubGlobal(
     "chrome",
     chrome ?? {
