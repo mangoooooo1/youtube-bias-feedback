@@ -2,6 +2,8 @@ window.buildDataForDate = buildDataForDate;
 window.koreanDateLabel = koreanDateLabel;
 window.findUnrevealedPastDate = findUnrevealedPastDate;
 window.addDaysKst = addDaysKst;
+window.dateStr = dateStr;
+window.dayFromInstall = dayFromInstall;
 const DEFAULT_TONE = "indigo";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────

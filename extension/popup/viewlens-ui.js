@@ -380,3 +380,4 @@ window.vlLegend = vlLegend;
 window.vlShareLines = vlShareLines;
 window.vlReview = vlReview;
 window.vlConfirmModal = vlConfirmModal;
+window.vlEscapeHtml = vlEscapeHtml;

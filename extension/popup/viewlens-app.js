@@ -843,3 +843,5 @@ class Studio {
 
 window.ViewLensPopup = ViewLensPopup;
 window.Studio = Studio;
+window._isStudyEndTimeReached = _isStudyEndTimeReached;
+window._dayViewForDate = _dayViewForDate;
