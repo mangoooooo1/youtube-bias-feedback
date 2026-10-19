@@ -8,7 +8,7 @@ const summaryPath =
   process.argv[2] || path.join(ROOT, "coverage", "coverage-summary.json");
 
 // 소스 텍스트를 추출해 new Function으로 실행하는 테스트라 테스트가 있어도 0%로 집계되는 파일
-const EXTRACTION_TESTED = [/^extension\/content\.js$/, /^extension\/popup\//];
+const EXTRACTION_TESTED = [/^extension\/popup\//];
 const METRICS = ["statements", "branches", "functions", "lines"];
 
 if (!fs.existsSync(summaryPath)) {
@@ -47,6 +47,6 @@ console.log(
     row("전체", summary.total),
     row("측정 가능 범위", measurable),
     "",
-    "측정 가능 범위: `extension/content.js`, `extension/popup/**` 제외(소스 추출 방식 테스트라 0%로 집계됨)",
+    "측정 가능 범위: `extension/popup/**` 제외(소스 추출 방식 테스트라 0%로 집계됨)",
   ].join("\n"),
 );
