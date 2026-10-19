@@ -9,6 +9,8 @@ categories:
     labels:
       - "fix"
       - "bug"
+  - title: "🧪 Tests"
+    label: "test"
   - title: "🧰 Maintenance"
     label: "chore"
 change-template: "- $TITLE @$AUTHOR (#$NUMBER)"

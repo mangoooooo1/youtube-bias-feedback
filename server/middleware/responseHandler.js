@@ -71,6 +71,17 @@ function errorHandler(err, req, res, _next) {
     `[Error] ${req.method} ${req.path} : ${oneLine(err.message)}${who}${traceRef()}${stack}`,
   );
 
+  // express.json의 파싱 실패는 code가 없어 INTERNAL_SERVER_ERROR로 나가므로 입력 오류로 바꾼다
+  if (err.type === "entity.parse.failed") {
+    return fail(
+      res,
+      400,
+      ERROR_CODES.INVALID_FIELD_VALUE,
+      "요청 본문이 올바른 JSON이 아닙니다.",
+      "body",
+    );
+  }
+
   const code = err.code || ERROR_CODES.INTERNAL_SERVER_ERROR;
   const message = err.message || "서버 오류가 발생했습니다.";
 

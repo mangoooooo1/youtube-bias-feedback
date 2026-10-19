@@ -126,6 +126,38 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
     expect(row.sessionId).toBeNull();
   });
 
+  it("POST /api/video-events — title 미전송이면 null로 저장된다", async () => {
+    const payload = basePayload();
+    delete payload.title;
+
+    const res = await request(app).post("/api/video-events").send(payload);
+    expect(res.status).toBe(200);
+    expect(
+      db
+        .prepare("SELECT title FROM video_events WHERE videoId = ?")
+        .get("wiring-v1").title,
+    ).toBeNull();
+  });
+
+  it.each([
+    ["1", 1, 1],
+    ["0", 0, 0],
+    ["미전송(구버전 확장)", undefined, null],
+  ])(
+    "POST /api/video-events — isShortsUrl이 %s이면 %s로 저장된다",
+    async (_label, isShortsUrl, expected) => {
+      const res = await request(app)
+        .post("/api/video-events")
+        .send(basePayload({ isShortsUrl }));
+      expect(res.status).toBe(200);
+      expect(
+        db
+          .prepare("SELECT isShortsUrl FROM video_events WHERE videoId = ?")
+          .get("wiring-v1").isShortsUrl,
+      ).toBe(expected);
+    },
+  );
+
   it("POST /api/video-events — sessionId가 빈 문자열이면 400", async () => {
     const res = await request(app)
       .post("/api/video-events")
@@ -342,5 +374,25 @@ describe("PATCH /api/video-events/:eventId — 시청시간 확정", () => {
     expect(row.watchedSeconds).toBe(12);
     expect(row.playbackRate).toBeNull();
     expect(row.wasBackgrounded).toBeNull();
+  });
+
+  it("watchedSeconds 없이 다른 필드만 보내도 watchedSeconds는 null로 저장된다", async () => {
+    await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ eventId: "watch-evt-5" }));
+
+    const res = await request(app).patch("/api/video-events/watch-evt-5").send({
+      anonymousId: "wiring-user",
+      playbackRate: 2,
+      wasBackgrounded: 0,
+    });
+
+    expect(res.status).toBe(200);
+    const row = db
+      .prepare("SELECT * FROM video_events WHERE eventId = ?")
+      .get("watch-evt-5");
+    expect(row.watchedSeconds).toBeNull();
+    expect(row.playbackRate).toBe(2);
+    expect(row.wasBackgrounded).toBe(0);
   });
 });

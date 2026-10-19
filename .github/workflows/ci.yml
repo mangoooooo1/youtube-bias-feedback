@@ -27,6 +27,7 @@ jobs:
       - name: Validate server syntax
         run: |
           node --check server/app.js
+          node --check server/create-app.js
           node --check server/db.js
           node --check server/routes/sessions.js
           node --check server/routes/health.js

@@ -8,8 +8,8 @@ import {
 
 const MOUNT_PATHS = ["/api/video-events", "/api/sessions"];
 
-// app.js는 require 시점에 DB 초기화·listen을 수행해 테스트에서 불러올 수 없으므로,
-// 같은 순서(접근 로그 → express.json → 라우터 → errorHandler)로 최소 앱을 조립한다.
+// 접근 로그만 보려고 같은 순서(접근 로그 → express.json → 라우터 → errorHandler)로 최소 앱을 조립한다.
+// 실제 앱(create-app.js)의 조립 순서는 create-app.test.js가 검증한다.
 function buildApp() {
   const app = express();
   app.use(createAccessLog(MOUNT_PATHS));

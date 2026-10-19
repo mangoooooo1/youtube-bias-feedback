@@ -130,6 +130,28 @@ describe("실제 server/routes/popup-events.js 라우터 배선", () => {
     expect(rows[0].dwellMs).toBe(1200); // 재전송 값(9999)이 아니라 최초 값 유지
   });
 
+  it("카운트·열람 필드를 보내지 않으면(구버전 확장) 500 없이 null로 저장된다", async () => {
+    const res = await request(app).post("/api/popup-events").send({
+      eventId: "wiring-evt-1",
+      anonymousId: "wiring-user",
+    });
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare(
+        `SELECT dwellMs, tabTodayClicks, tabWeekClicks, todayFeedbackViewed, periodFeedbackViewed
+           FROM popup_events WHERE eventId = ?`,
+      )
+      .get("wiring-evt-1");
+    expect(row).toEqual({
+      dwellMs: null,
+      tabTodayClicks: null,
+      tabWeekClicks: null,
+      todayFeedbackViewed: null,
+      periodFeedbackViewed: null,
+    });
+  });
+
   it("eventId 없는 구버전 요청은 dedup 없이 매번 새 행으로 저장된다", async () => {
     const payload = basePayload();
     delete payload.eventId;
