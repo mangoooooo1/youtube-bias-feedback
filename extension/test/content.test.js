@@ -524,12 +524,6 @@ describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 �
 // captureWatchStatsSnapshot
 // 파일을 처음 불러올 때 최상위 handleVideoChange()가 resetWatchTracker()보다 먼저 실행돼
 // watchTracker가 아직 null이다. 이 순간에도 예외 없이 진행돼야 첫 영상이 기록된다.
-// pagehide 로더(아래)가 아직 이 정규식들을 쓴다.
-const CAPTURE_SNAPSHOT_DECL =
-  /function captureWatchStatsSnapshot\(\) \{[\s\S]*?\n\}/;
-const CURRENT_WATCHED_MS_DECL =
-  /function currentWatchedMs\(tracker\) \{[\s\S]*?\n\}/;
-
 describe("content.js captureWatchStatsSnapshot", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -722,10 +716,6 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
   });
 });
 
-// pagehide 로더(아래)가 아직 이 정규식을 쓴다.
-const TRACKED_IDENTITY_DECL =
-  /let trackedVideoIdentity = null;[\s\S]*?\nfunction captureTrackedVideoIdentity\(\) \{[\s\S]*?\n\}/;
-
 async function loadTrackedVideoIdentityHelpers() {
   const { api } = await loadContent();
   return {
@@ -735,83 +725,49 @@ async function loadTrackedVideoIdentityHelpers() {
 }
 
 // pagehide 핸들러 — 코드리뷰 지적 회귀 테스트(탭 종료 시에도 공유 lastRecordedVideo가
-// 아니라 이 탭 자신의 trackedVideoIdentity만 써야 한다). applyWatchStatsPatch까지
-// 함께 추출해 실제 dual-location 갱신까지 검증한다.
-const APPLY_WATCH_STATS_PATCH_DECL =
-  /async function applyWatchStatsPatch\(target, patch\) \{[\s\S]*?\n\}/;
-const PAGEHIDE_HANDLER_DECL =
-  /window\.addEventListener\("pagehide", \(\) => \{[\s\S]*?\n\}\);/;
-
-function loadPagehideHandlerFactory() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const identityMatch = raw.match(TRACKED_IDENTITY_DECL);
-  const snapshotMatch = raw.match(CAPTURE_SNAPSHOT_DECL);
-  const watchedMsMatch = raw.match(CURRENT_WATCHED_MS_DECL);
-  const applyMatch = raw.match(APPLY_WATCH_STATS_PATCH_DECL);
-  const pagehideMatch = raw.match(PAGEHIDE_HANDLER_DECL);
-  if (!identityMatch) {
-    throw new Error(
-      "trackedVideoIdentity/captureTrackedVideoIdentity를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!snapshotMatch) {
-    throw new Error(
-      "captureWatchStatsSnapshot 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!watchedMsMatch) {
-    throw new Error(
-      "currentWatchedMs 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!applyMatch) {
-    throw new Error(
-      "applyWatchStatsPatch 함수를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!pagehideMatch) {
-    throw new Error(
-      "pagehide 리스너를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  // pagehide는 이제 captureWatchStatsSnapshot()을 그대로 재사용하므로(코드리뷰 대응으로
-  // watchTracker/video.played 계산 방식이 바뀌면서 함께 재사용하게 됨), 그 함수와
-  // currentWatchedMs까지 함께 묶어야 실제 파일과 동일하게 동작한다.
-  return new Function(
-    "chrome",
-    "fetch",
-    "window",
-    "watchTracker",
-    "initialTrackedIdentity",
-    `
-    ${identityMatch[0]}
-    trackedVideoIdentity = initialTrackedIdentity;
-    ${watchedMsMatch[0]}
-    ${snapshotMatch[0]}
-    ${applyMatch[0]}
-    let capturedPagehideHandler = null;
-    const originalAddEventListener = window.addEventListener;
-    window.addEventListener = (name, cb) => {
-      if (name === "pagehide") capturedPagehideHandler = cb;
-      else if (originalAddEventListener) originalAddEventListener(name, cb);
-    };
-    ${pagehideMatch[0]}
-    return capturedPagehideHandler;
-    `,
-  );
+// 아니라 이 탭 자신의 trackedVideoIdentity만 써야 한다). content.js가 window에 등록한
+// 실제 핸들러를 받아 실행하고, applyWatchStatsPatch의 로컬 저장 결과로 검증한다.
+async function loadPagehideHandler(sharedStorage, fetchMock) {
+  let pagehide = null;
+  let video = null;
+  const { api } = await loadContent({
+    chrome: {
+      runtime: { id: "fake-extension-id" },
+      storage: { local: sharedStorage },
+    },
+    fetch: fetchMock,
+    window: {
+      addEventListener: (type, cb) => {
+        if (type === "pagehide") pagehide = cb;
+      },
+    },
+    document: { querySelector: () => video },
+    console: { log: () => {}, warn: () => {} },
+  });
+  return {
+    api,
+    pagehide: () => pagehide(),
+    // 0초부터 seconds초까지 재생한 뒤 멈춘다 — 닫힌 구간 seconds초만 남는다
+    watchThenPause(seconds) {
+      const videoEl = createFakeVideoElement({ paused: false });
+      video = videoEl;
+      api.resetWatchTracker();
+      vi.setSystemTime(seconds * 1000);
+      videoEl.paused = true;
+      videoEl.dispatch("pause");
+    },
+  };
 }
 
 describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코드리뷰 회귀: 다른 탭의 공유 lastRecordedVideo 오염 방지)", () => {
-  function makeEnv(sharedStorage, fetchMock) {
-    return {
-      chrome: {
-        runtime: { id: "fake-extension-id" },
-        storage: { local: sharedStorage },
-      },
-      fetch: fetchMock,
-      window: {},
-    };
-  }
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   // pagehide는 로컬 저장에만 최선노력을 기울인다(네트워크 전송은 background.js의
   // 재시도 큐 몫 — 파일 상단 주석 "탭 종료 시... 로컬에만 남긴다" 참고). 그래서 이
@@ -838,23 +794,13 @@ describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코
       },
     });
     const fetchMock = () => Promise.resolve({ ok: true });
-    const env = makeEnv(storage, fetchMock);
-    // 이미 닫힌 구간 77초만 있고(재생 중은 아님, segmentStartAt: null) — captureWatchStatsSnapshot이
+    const tab = await loadPagehideHandler(storage, fetchMock);
+    // 이미 닫힌 구간 77초만 있고(재생 중은 아님) — captureWatchStatsSnapshot이
     // currentWatchedMs로 계산해 77초를 그대로 돌려줘야 한다.
-    const watchTracker = {
-      accumulatedMs: 77000,
-      segmentStartAt: null,
-      lastPlaybackRate: 1,
-      sawHidden: false,
-    };
+    tab.watchThenPause(77);
+    tab.api.rememberTrackedVideo("s1", "evt-mine");
 
-    const factory = loadPagehideHandlerFactory();
-    const handler = factory(env.chrome, env.fetch, env.window, watchTracker, {
-      sessionId: "s1",
-      eventId: "evt-mine",
-    });
-
-    handler();
+    tab.pagehide();
     await flushMicrotasks();
     await flushMicrotasks();
 
@@ -869,52 +815,38 @@ describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코
     expect(mine.watchStatsSent).toBe(false);
   });
 
-  it("watchTracker가 없으면(추적 시작 전) 아무 것도 하지 않는다", async () => {
-    const storage = createSharedStorage({ anonymousId: "a1" });
-    const patchCalls = [];
-    const fetchMock = (_url, options) => {
-      if (options?.method === "PATCH") patchCalls.push(1);
-      return Promise.resolve({ ok: true });
-    };
-    const env = makeEnv(storage, fetchMock);
-
-    const factory = loadPagehideHandlerFactory();
-    const handler = factory(env.chrome, env.fetch, env.window, null, null);
-
-    handler();
-    await flushMicrotasks();
-
-    expect(patchCalls).toHaveLength(0);
-  });
-
+  // watchTracker는 content.js를 불러오는 순간 만들어져 pagehide 시점에 없을 수 없다.
+  // 그래서 "trackedVideoIdentity가 없을 때"만 검증한다. pagehide는 네트워크를 쓰지 않으므로
+  // PATCH 0회만으로는 아무것도 지키지 못해, 저장소가 그대로인지까지 확인한다.
   it("trackedVideoIdentity가 없으면(첫 영상도 아직 없음) 아무 것도 하지 않는다", async () => {
-    const storage = createSharedStorage({ anonymousId: "a1" });
+    // 다른 탭이 써 둔 공유 값 — 자기 식별자가 없다고 이쪽으로 대신 쓰면 안 된다.
+    const storage = createSharedStorage({
+      anonymousId: "a1",
+      lastRecordedVideo: {
+        videoId: "other-tab-video",
+        sessionId: "s-other",
+        eventId: "evt-other",
+      },
+      "video__s-other__evt-other": {
+        videoId: "other-tab-video",
+        eventId: "evt-other",
+        sent: true,
+      },
+    });
     const patchCalls = [];
     const fetchMock = (_url, options) => {
       if (options?.method === "PATCH") patchCalls.push(1);
       return Promise.resolve({ ok: true });
     };
-    const env = makeEnv(storage, fetchMock);
-    const watchTracker = {
-      accumulatedMs: 5000,
-      segmentStartAt: null,
-      lastPlaybackRate: 1,
-      sawHidden: false,
-    };
+    const tab = await loadPagehideHandler(storage, fetchMock);
+    tab.watchThenPause(5);
+    const before = storage.dump();
 
-    const factory = loadPagehideHandlerFactory();
-    const handler = factory(
-      env.chrome,
-      env.fetch,
-      env.window,
-      watchTracker,
-      null,
-    );
-
-    handler();
+    tab.pagehide();
     await flushMicrotasks();
 
     expect(patchCalls).toHaveLength(0);
+    expect(storage.dump()).toEqual(before);
   });
 });
 
