@@ -167,7 +167,11 @@ describe("createApp — 접근 로그·오류 처리 순서", () => {
       .send("{bad json");
 
     expect(res.status).toBe(400);
-    expect(res.body.success).toBe(false);
+    expect(res.body).toMatchObject({
+      success: false,
+      code: "INVALID_FIELD_VALUE",
+      detail: "body",
+    });
     expect(await accessLines()).toEqual(["[access] POST /api/sessions 400"]);
   });
 });

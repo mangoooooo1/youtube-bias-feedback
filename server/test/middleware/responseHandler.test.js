@@ -142,6 +142,32 @@ describe("errorHandler", () => {
     consoleSpy.mockRestore();
   });
 
+  it("express.json 파싱 실패(entity.parse.failed)는 INVALID_FIELD_VALUE(body) 400으로 응답한다", () => {
+    process.env.NODE_ENV = "development";
+    const res = createMockRes();
+    const req = { method: "POST", path: "/api/sessions" };
+    // body-parser가 만드는 에러와 같은 모양(status·type만 있고 code는 없음)
+    const err = Object.assign(new SyntaxError("Unexpected token b in JSON"), {
+      status: 400,
+      type: "entity.parse.failed",
+    });
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    errorHandler(err, req, res, vi.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.body).toEqual({
+      success: false,
+      message: "요청 본문이 올바른 JSON이 아닙니다.",
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      detail: "body",
+    });
+    // 원인 파악용으로 파서 메시지는 로그에 그대로 남긴다
+    expect(consoleSpy.mock.calls[0][0]).toContain("Unexpected token b in JSON");
+
+    consoleSpy.mockRestore();
+  });
+
   it("프로덕션 환경에서는 err.detail도 숨긴다", () => {
     process.env.NODE_ENV = "production";
     const res = createMockRes();
