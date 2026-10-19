@@ -197,6 +197,7 @@ describe("VL.dayView — 하루치 화면 값", () => {
         { eventId: "e1", reason: "short" },
         { eventId: "e2", reason: "pending_time" },
       ],
+      correctedTitles: { e3: "실제 제목" },
     });
 
     expect(view).toMatchObject({
@@ -205,6 +206,7 @@ describe("VL.dayView — 하루치 화면 값", () => {
       shortCount: 2,
       chartCount: 2,
       excludedReasons: { e1: "short", e2: "pending_time" },
+      correctedTitles: { e3: "실제 제목" },
     });
     expect(view.timeDist.map((d) => d.key)).toEqual(["음악", "게임"]);
     expect(view.title).toBe(
@@ -219,6 +221,7 @@ describe("VL.dayView — 하루치 화면 값", () => {
       timeDist: [],
       title: null,
       excludedReasons: {},
+      correctedTitles: {},
     });
   });
 });
@@ -412,6 +415,37 @@ describe("VL.playedVideos — 그날 재생한 영상 목록", () => {
       ["pending", "확인 중"],
       ["local-null", "확인 중"],
       ["ok", null],
+    ]);
+  });
+
+  it("제목은 서버 메타데이터 제목 → 기록한 제목 → oEmbed 제목 → 제목 없음 순으로 고른다", () => {
+    const list = VL.playedVideos(
+      [],
+      [
+        v("shifted", "2026-03-05T10:00:00+09:00", { title: "직전 영상 제목" }),
+        v("local", "2026-03-05T10:01:00+09:00"),
+        v("fetched", "2026-03-05T10:02:00+09:00", { title: null }),
+        v("blank", "2026-03-05T10:03:00+09:00", { title: "  " }),
+        v("none", "2026-03-05T10:04:00+09:00", { title: null }),
+      ],
+      "2026-03-05",
+      {},
+      {
+        correctedTitles: { shifted: "실제 제목", local: "  " },
+        fetchedTitles: {
+          "vid-fetched": "oEmbed 제목",
+          "vid-local": "쓰이지 않는 oEmbed 제목",
+          "vid-none": null,
+        },
+      },
+    );
+
+    expect(list.map((x) => [x.eventId, x.title])).toEqual([
+      ["shifted", "실제 제목"],
+      ["local", "영상 local"],
+      ["fetched", "oEmbed 제목"],
+      ["blank", VL.UNKNOWN_VIDEO_TITLE],
+      ["none", VL.UNKNOWN_VIDEO_TITLE],
     ]);
   });
 });

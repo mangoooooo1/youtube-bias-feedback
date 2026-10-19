@@ -103,6 +103,8 @@ function dayView(day) {
     excludedReasons: Object.fromEntries(
       (day?.excluded || []).map((e) => [e.eventId, e.reason]),
     ),
+    // 영상 목록 제목 — 기록한 제목과 다른 YouTube 메타데이터 제목(eventId → 제목)
+    correctedTitles: day?.correctedTitles ?? {},
   };
 }
 
@@ -146,6 +148,24 @@ const PLAYED_VIDEO_MARKS = {
   pending_time: "확인 중",
 };
 
+// 어디서도 제목을 못 구한 영상의 표시
+const UNKNOWN_VIDEO_TITLE = "제목 없음";
+
+const nonEmpty = (s) => (typeof s === "string" && s.trim() ? s : null);
+
+/**
+ * 영상 목록에 보여 줄 제목. 서버 메타데이터 제목 → 기록한 제목 → oEmbed로 받아 둔 제목 순.
+ * 기록한 제목은 탭 제목을 읽어 다른 영상 것이 붙었을 수 있어 서버 제목을 먼저 쓴다.
+ */
+function videoTitle(v, { correctedTitles = {}, fetchedTitles = {} } = {}) {
+  return (
+    nonEmpty(v.eventId ? correctedTitles[v.eventId] : null) ??
+    nonEmpty(v.title) ??
+    nonEmpty(v.videoId ? fetchedTitles[v.videoId] : null) ??
+    UNKNOWN_VIDEO_TITLE
+  );
+}
+
 /**
  * 그날 재생한 영상 목록
  * 끝난 세션과 진행 중인 세션의 영상 기록을 모두 모아 본 시각 순으로.
@@ -153,9 +173,17 @@ const PLAYED_VIDEO_MARKS = {
  * @param {Array<object>} liveVideos - 진행 중인 세션의 영상 기록(video__ 키)
  * @param {string} dateKey - YYYY-MM-DD(KST)
  * @param {Record<string, string>} reasons - eventId → 서버 사유(VL.dayView().excludedReasons)
+ * @param {{correctedTitles?: Record<string, string>, fetchedTitles?: Record<string, string|null>}} [titles]
+ *   서버 메타데이터 제목(eventId →, VL.dayView().correctedTitles)·oEmbed 제목(videoId →)
  * @returns {Array<{title: string, videoId: string|null, eventId: string|null, mark: string|null}>}
  */
-function playedVideos(sessions, liveVideos, dateKey, reasons = {}) {
+function playedVideos(
+  sessions,
+  liveVideos,
+  dateKey,
+  reasons = {},
+  titles = {},
+) {
   const all = [
     ...(sessions || []).flatMap((s) => s.videos || []),
     ...(liveVideos || []),
@@ -183,7 +211,7 @@ function playedVideos(sessions, liveVideos, dateKey, reasons = {}) {
             ? PLAYED_VIDEO_MARKS.pending_time
             : null;
       return {
-        title: v.title,
+        title: videoTitle(v, titles),
         videoId: v.videoId || null,
         eventId: v.eventId || null,
         mark,
@@ -472,6 +500,7 @@ window.VL = {
   formatDuration,
   donutPair,
   playedVideos,
+  UNKNOWN_VIDEO_TITLE,
   reviewAsOfLabel,
   today,
   weeks,
