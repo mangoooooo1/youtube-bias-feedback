@@ -44,8 +44,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// 아래 로더들은 아직 함수 정의 텍스트만 추출해 격리 실행하는 예전 방식이다(loadContent로 옮기는 중).
-
 describe("content.js extractVideoId", () => {
   let extractVideoId;
 
@@ -239,9 +237,7 @@ describe("content.js classifyNavigationTrigger", () => {
 // 여러 개면 탭마다 별도의 writeQueue 변수를 갖는다. 이 테스트는 "탭 2개가 거의 동시에
 // recordVideo를 호출하면" 두 writeQueue가 서로를 모른 채 같은 저장소를 놓고 경합해
 // 한쪽의 기록이 사라지는지를 재현한다(연구 무결성 점검 항목 3).
-const RECORD_VIDEO_DECL =
-  /let writeQueue = Promise\.resolve\(\);[\s\S]*?\nfunction recordVideo\(\n {2}videoId,\n {2}title,\n {2}entryHost,\n {2}entryPath,\n {2}navigationTrigger,\n {2}isShorts,\n {2}previousWatchStats,\n {2}previousVideoIdentity,\n\) \{[\s\S]*?\n\}/;
-
+//
 // content.js를 새 인스턴스로 불러와 그 recordVideo를 돌려준다. 두 번 부르면 "서로 다른 탭 =
 // 서로 다른 writeQueue"가 된다. 전역 chrome/fetch는 나중에 부른 쪽으로 바뀌므로, 탭끼리
 // 저장소·fetch가 같아야 하는 테스트에서만 쓴다.
@@ -333,54 +329,29 @@ function collectVideos(storeDump, sessionId) {
     .map(([, v]) => v);
 }
 
-// handleVideoChange는 extractVideoId부터 자기 자신까지 순서대로 의존하므로 그 구간을
-// 통째로 추출한다. 실제 recordVideo(storage/fetch 의존, 별도 describe에서 이미 검증됨)는
-// 이 테스트의 관심사가 아니라 호출 인자만 기록하는 목으로 치환한다.
-const HANDLE_VIDEO_CHANGE_BLOCK_DECL =
-  /function extractVideoId\(url\) \{[\s\S]*?\nasync function handleVideoChange\(\) \{[\s\S]*?\n\}/;
-
-function loadHandleVideoChangeFactory() {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const blockMatch = raw.match(HANDLE_VIDEO_CHANGE_BLOCK_DECL);
-  if (!blockMatch) {
-    throw new Error(
-      "handleVideoChange 관련 코드를 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  if (!RECORD_VIDEO_DECL.test(blockMatch[0])) {
-    throw new Error(
-      "recordVideo 선언을 찾지 못해 목(mock)으로 치환할 수 없습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  const body = blockMatch[0].replace(
-    RECORD_VIDEO_DECL,
-    "function recordVideo(videoId, title, entryHost, entryPath, navigationTrigger, isShorts, previousWatchStats, previousVideoIdentity) { recordVideoCalls.push({ videoId, title, entryHost, entryPath, navigationTrigger, isShorts, previousWatchStats, previousVideoIdentity }); return Promise.resolve(); }",
-  );
-  return new Function(
-    "document",
-    "location",
-    "recordVideoCalls",
-    `${body}\nreturn handleVideoChange;`,
-  );
-}
-
+// handleVideoChange 재진입 경합 — 실제 recordVideo가 저장소에 남긴 영상 기록으로 검증한다.
+// 홈 화면 주소로 불러온다. 영상 주소로 불러오면 최상위 handleVideoChange()가 그 영상을 미리 기록해
+// 테스트의 첫 호출이 "같은 영상"으로 무시된다.
 describe("content.js handleVideoChange — 재진입 경합(연구 무결성 점검 항목 4)", () => {
-  let handleVideoChange, recordVideoCalls, documentMock, locationMock;
+  let handleVideoChange, storage, documentMock, locationMock;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers();
-    recordVideoCalls = [];
-    documentMock = {
-      referrer: "",
-      title: "YouTube",
-      addEventListener: () => {},
-    };
-    locationMock = { href: "https://www.youtube.com/watch?v=AAAA" };
-    handleVideoChange = loadHandleVideoChangeFactory()(
-      documentMock,
-      locationMock,
-      recordVideoCalls,
-    );
+    storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+    });
+    const { api } = await loadContent({
+      document: { title: "YouTube" },
+      chrome: {
+        runtime: { id: "fake-extension-id" },
+        storage: { local: storage },
+      },
+      console: { log: () => {}, warn: () => {} },
+    });
+    handleVideoChange = api.handleVideoChange;
+    documentMock = globalThis.document;
+    locationMock = globalThis.location;
+    locationMock.href = "https://www.youtube.com/watch?v=AAAA";
   });
 
   afterEach(() => {
@@ -404,8 +375,9 @@ describe("content.js handleVideoChange — 재진입 경합(연구 무결성 점
     await vi.advanceTimersByTimeAsync(250);
     await callA;
 
-    expect(recordVideoCalls).toHaveLength(1);
-    expect(recordVideoCalls[0]).toMatchObject({
+    const videos = collectVideos(storage.dump(), "s1");
+    expect(videos).toHaveLength(1);
+    expect(videos[0]).toMatchObject({
       videoId: "BBBB",
       title: "영상 B 실제 제목",
     });
@@ -419,12 +391,13 @@ describe("content.js handleVideoChange — 재진입 경합(연구 무결성 점
     documentMock.title = "영상 B 실제 제목 - YouTube";
     await handleVideoChange();
 
-    expect(recordVideoCalls).toHaveLength(2);
-    expect(recordVideoCalls[0]).toMatchObject({
+    const videos = collectVideos(storage.dump(), "s1");
+    expect(videos).toHaveLength(2);
+    expect(videos[0]).toMatchObject({
       videoId: "AAAA",
       title: "영상 A 실제 제목",
     });
-    expect(recordVideoCalls[1]).toMatchObject({
+    expect(videos[1]).toMatchObject({
       videoId: "BBBB",
       title: "영상 B 실제 제목",
     });
@@ -993,8 +966,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
 
     // 영상 B로 전환하며 영상 A의 시청시간 스냅샷과 식별자를 함께 전달 — 실제로는
     // handleVideoChange가 captureTrackedVideoIdentity()로 얻어 넘기는 값이다(이
-    // 격리 테스트는 recordVideo 자체만 추출해 rememberTrackedVideo가 실제
-    // trackedVideoIdentity에 쓰지 않으므로 인자로 직접 재현한다).
+    // 테스트는 recordVideo를 직접 호출하므로 그 값을 인자로 직접 재현한다).
     await recordVideo(
       "vB",
       "영상B",
@@ -1345,49 +1317,29 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
 // 만들기도 전에 watchTracker를 초기화해, 영상A → 비영상 페이지 → 무관한 영상C로 이동할 때
 // A의 시청시간이 0으로 오염될 수 있었다는 지적을 "영상 엘리먼트 재생 → 실제 URL 이동" 흐름
 // 그대로 재현해 검증한다.
-const FULL_VIDEO_LIFECYCLE_DECL =
-  /function extractVideoId\(url\) \{[\s\S]*?\nfunction resetWatchTracker\(\) \{[\s\S]*?\n\}/;
-
-function loadFullVideoLifecycle(
+// 영상 수명주기 전체를 실제 content.js로 돌린다. loadContent는 document를 복사해 전역에 넣으므로,
+// 테스트가 title을 바꿀 수 있게 실제로 들어간 전역 document를 함께 돌려준다.
+// getTrackedVideoIdentity는 실제 captureTrackedVideoIdentity와 같은 함수다(trackedVideoIdentity를 그대로 반환).
+async function loadFullVideoLifecycle(
   documentMock,
   locationMock,
   chromeMock,
   fetchMock,
 ) {
-  const raw = readFileSync(CONTENT_PATH, "utf8");
-  const match = raw.match(FULL_VIDEO_LIFECYCLE_DECL);
-  if (!match) {
-    throw new Error(
-      "영상 수명주기 전체 구간(extractVideoId~resetWatchTracker)을 찾지 못했습니다 — content.js 구조가 바뀌었을 수 있습니다.",
-    );
-  }
-  const consoleMock = { log: () => {}, warn: () => {} };
-  // 추출 구간에 window.addEventListener("popstate", ...) 등록이 포함돼 있어
-  // window도 넘겨야 한다 — 실제 popstate 발생은 이 테스트의 관심사가 아니므로 no-op으로 흘려보낸다.
-  const windowMock = { addEventListener: () => {} };
-  const factory = new Function(
-    "document",
-    "location",
-    "chrome",
-    "fetch",
-    "console",
-    "window",
-    `
-    ${match[0]}
-    return {
-      handleVideoChange,
-      getTrackedVideoIdentity: () => trackedVideoIdentity,
-    };
-    `,
-  );
-  return factory(
-    documentMock,
-    locationMock,
-    chromeMock,
-    fetchMock,
-    consoleMock,
-    windowMock,
-  );
+  const { api } = await loadContent({
+    document: documentMock,
+    location: locationMock,
+    chrome: chromeMock,
+    fetch: fetchMock,
+    console: { log: () => {}, warn: () => {} },
+  });
+  return {
+    api: {
+      handleVideoChange: api.handleVideoChange,
+      getTrackedVideoIdentity: api.captureTrackedVideoIdentity,
+    },
+    document: globalThis.document,
+  };
 }
 
 // finalizePreviousWatchStats는 handleVideoChange 안에서 await 없이(fire-and-forget) 호출된다.
@@ -1411,7 +1363,7 @@ function findVideoRecordByEventId(storeDump, eventId) {
 describe("content.js handleVideoChange 전체 수명주기 — 비영상 페이지 경유 시 직전 영상 시청시간 오염 방지 (코드리뷰 회귀 5)", () => {
   let videoEl, documentMock, locationMock, storage, api;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
 
@@ -1434,14 +1386,14 @@ describe("content.js handleVideoChange 전체 수명주기 — 비영상 페이�
     const fetchMock = () =>
       Promise.reject(new Error("이 테스트는 네트워크 전송이 없어야 한다"));
 
-    // 팩토리 로드 시점에 파일 최하단의 handleVideoChange() 즉시 호출이 함께 실행된다
+    // 불러오는 순간 최상위 handleVideoChange()·resetWatchTracker()가 실행된다
     // (비영상 페이지라 조용히 반환됨) — 실제 스크립트 로드 순서와 동일하다.
-    api = loadFullVideoLifecycle(
+    ({ api, document: documentMock } = await loadFullVideoLifecycle(
       documentMock,
       locationMock,
       chromeMock,
       fetchMock,
-    );
+    ));
   });
 
   afterEach(() => {
@@ -1535,7 +1487,7 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
 
   let videoEl, documentMock, locationMock, storage, fetchCalls, api;
 
-  function setup(initialStorage) {
+  async function setup(initialStorage) {
     videoEl = createFakeVideoElement({ paused: true });
     documentMock = {
       title: "YouTube",
@@ -1551,12 +1503,12 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
       fetchCalls.push({ url, method: options.method });
       return Promise.resolve({ ok: true });
     };
-    api = loadFullVideoLifecycle(
+    ({ api, document: documentMock } = await loadFullVideoLifecycle(
       documentMock,
       locationMock,
       { runtime: { id: "fake-extension-id" }, storage: { local: storage } },
       fetchMock,
-    );
+    ));
   }
 
   async function watch(videoId, seconds) {
@@ -1584,7 +1536,7 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
   it("수집 종료 후 본 영상은 기록하지 않고, 그 시청시간이 종료 전 영상에 붙지 않는다", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(COLLECTION_ENDS_AT - 60000);
-    setup({ installDate: INSTALL_DATE });
+    await setup({ installDate: INSTALL_DATE });
 
     await watch("AAAA", 30);
     const eventIdA = api.getTrackedVideoIdentity()?.eventId;
@@ -1609,7 +1561,7 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
   it("수집 종료 후에는 새 영상 POST를 보내지 않는다", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(COLLECTION_ENDS_AT + 1000);
-    setup({
+    await setup({
       installDate: INSTALL_DATE,
       anonymousId: "a1",
       serverUrl: "https://srv.example",
@@ -1629,7 +1581,7 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
     async (_label, finalizeAt, expectedPatches) => {
       vi.useFakeTimers();
       vi.setSystemTime(COLLECTION_ENDS_AT - 60000);
-      setup({
+      await setup({
         installDate: INSTALL_DATE,
         anonymousId: "a1",
         serverUrl: "https://srv.example",
