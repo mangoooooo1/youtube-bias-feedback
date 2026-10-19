@@ -139,8 +139,8 @@ function collectRecentActivity(
   const hasParticipants =
     db.prepare("SELECT COUNT(*) AS c FROM participants").get().c > 0;
 
-  // installDate(등록 시 Date.parse로 검증된 문자열, participants-store.js)가
-  // compareOffsetMs 이상 지난 참여자가 있어야 "N일 전 같은 시간대" 비교가 의미를 가진다.
+  // installDate는 등록 시 toISOString 형식으로 정규화돼(participants-store.js) 문자열 MIN이 곧 가장 이른 시각이다.
+  // 이 값이 compareOffsetMs 이상 지난 참여자가 있어야 "N일 전 같은 시간대" 비교가 의미를 가진다.
   const earliestInstall = db
     .prepare("SELECT MIN(installDate) AS earliest FROM participants")
     .get().earliest;
