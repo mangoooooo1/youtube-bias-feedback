@@ -13,6 +13,7 @@ export const POPUP_SCRIPTS = [
 // realDom: jsdom 환경 테스트(// @vitest-environment jsdom)에서 진짜 document를 그대로 쓴다
 export async function loadPopup({
   chrome,
+  fetch,
   quietBoot = true,
   realDom = false,
 } = {}) {
@@ -32,7 +33,7 @@ export async function loadPopup({
       storage: { local: { get: async () => ({}), set: async () => {} } },
     },
   );
-  vi.stubGlobal("fetch", async () => ({ ok: false }));
+  vi.stubGlobal("fetch", fetch ?? (async () => ({ ok: false })));
   const errorSpy = quietBoot
     ? vi.spyOn(console, "error").mockImplementation(() => {})
     : null;
