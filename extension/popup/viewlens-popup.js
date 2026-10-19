@@ -5,6 +5,10 @@ window.addDaysKst = addDaysKst;
 window.dateStr = dateStr;
 window.dayFromInstall = dayFromInstall;
 window.shouldRetryParticipantSync = shouldRetryParticipantSync;
+window.flushPendingPopupEvents = flushPendingPopupEvents;
+window.loadViewingSummaryCache = loadViewingSummaryCache;
+window.refreshViewingSummary = refreshViewingSummary;
+window.resolveTodayCumulative = resolveTodayCumulative;
 const DEFAULT_TONE = "indigo";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ export const POPUP_SCRIPTS = [
   "popup/viewlens-popup.js",
 ];
 
-export async function loadPopup() {
+export async function loadPopup({ chrome, quietBoot = true } = {}) {
   vi.resetModules();
   vi.stubGlobal("window", globalThis);
   vi.stubGlobal("document", {
@@ -18,14 +18,19 @@ export async function loadPopup() {
     querySelector: () => null,
     addEventListener: () => {},
   });
-  vi.stubGlobal("chrome", {
-    runtime: { id: "fake-extension-id", sendMessage: async () => {} },
-    storage: { local: { get: async () => ({}), set: async () => {} } },
-  });
+  vi.stubGlobal(
+    "chrome",
+    chrome ?? {
+      runtime: { id: "fake-extension-id", sendMessage: async () => {} },
+      storage: { local: { get: async () => ({}), set: async () => {} } },
+    },
+  );
   vi.stubGlobal("fetch", async () => ({ ok: false }));
-  const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const errorSpy = quietBoot
+    ? vi.spyOn(console, "error").mockImplementation(() => {})
+    : null;
   for (const f of POPUP_SCRIPTS) await import(`../../${f}`);
   for (let i = 0; i < 20; i++) await Promise.resolve();
-  errorSpy.mockRestore();
+  errorSpy?.mockRestore();
   return globalThis;
 }
