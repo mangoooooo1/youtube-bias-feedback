@@ -148,7 +148,7 @@ describe("validatePopupEvent — openedAt", () => {
     expect(validatePopupEvent(basePayload({ openedAt: value }))).toBeNull();
   });
 
-  it("파싱 가능한 날짜 문자열이면 통과한다", () => {
+  it("시간대가 명시된 ISO 문자열이면 통과한다", () => {
     expect(
       validatePopupEvent(
         basePayload({ openedAt: "2026-08-13T10:00:00+09:00" }),
@@ -163,5 +163,17 @@ describe("validatePopupEvent — openedAt", () => {
         field: "openedAt",
       },
     );
+  });
+
+  it.each([
+    ["시간대 없음", "2026-09-01T00:00:00"],
+    ["날짜만", "2026-09-01"],
+    ["없는 날짜", "2026-02-30T00:00:00Z"],
+    ["toString이 null인 객체", { toString: null }],
+  ])("%s이면 예외 없이 거부한다", (_label, openedAt) => {
+    expect(validatePopupEvent(basePayload({ openedAt }))).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "openedAt",
+    });
   });
 });

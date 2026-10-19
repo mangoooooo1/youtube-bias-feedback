@@ -108,6 +108,31 @@ describe("실제 server/routes/sessions.js 라우터 배선", () => {
     expect(row.anonymousId).toBe("wiring-user");
   });
 
+  it("POST /api/sessions — startTime/endTime은 UTC ISO로 정규화해 저장한다", async () => {
+    const res = await request(app).post("/api/sessions").send(basePayload());
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare("SELECT startTime, endTime FROM sessions WHERE sessionId = ?")
+      .get("wiring-s1");
+    expect(row).toEqual({
+      startTime: "2026-08-13T00:00:00.000Z",
+      endTime: "2026-08-13T00:10:00.000Z",
+    });
+  });
+
+  it("POST /api/sessions — 시간대 없는 startTime은 400이고 저장하지 않는다", async () => {
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(basePayload({ startTime: "2026-08-13T09:00:00" }));
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({
+      code: "INVALID_FIELD_VALUE",
+      detail: "startTime",
+    });
+    expect(db.prepare("SELECT COUNT(*) AS c FROM sessions").get().c).toBe(0);
+  });
+
   it("POST /api/sessions — 필수 필드 누락 시 400 (validateSession이 실제로 연결돼 있는지)", async () => {
     const payload = basePayload();
     delete payload.anonymousId;

@@ -1,5 +1,7 @@
 // sessions 테이블 저장/갱신 로직
 
+const { normalizeIsoTimestamp } = require("./iso-timestamp");
+
 /**
  * 검증을 통과한 세션 데이터를 sessions 테이블에 저장한다.
  * LLM 생성 결과 칸(llmStatus~promptVersion)은 서버가 recordSessionReview로만 채운다.
@@ -33,8 +35,8 @@ function insertSession(db, body) {
   ).run({
     anonymousId,
     sessionId,
-    startTime,
-    endTime,
+    startTime: normalizeIsoTimestamp(startTime),
+    endTime: normalizeIsoTimestamp(endTime),
     videoCount: videoCount ?? null,
     categoryDistribution:
       categoryDistribution != null
@@ -49,7 +51,7 @@ function insertSession(db, body) {
     validVideoCount: validVideoCount ?? null,
     totalMs: totalMs ?? null,
     youtubeMs: youtubeMs ?? null,
-    feedbackNotifiedAt: feedbackNotifiedAt ?? null,
+    feedbackNotifiedAt: normalizeIsoTimestamp(feedbackNotifiedAt),
   });
 }
 

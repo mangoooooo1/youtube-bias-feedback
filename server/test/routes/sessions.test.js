@@ -172,6 +172,40 @@ describe("POST /api/sessions", () => {
     });
   });
 
+  it("startTime/endTime/feedbackNotifiedAt은 같은 순간의 UTC ISO로 저장한다", async () => {
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(basePayload({ feedbackNotifiedAt: "2026-08-13T09:10:05.5+09:00" }));
+    expect(res.status).toBe(200);
+    expect(
+      db
+        .prepare(
+          "SELECT startTime, endTime, feedbackNotifiedAt FROM sessions WHERE sessionId = ?",
+        )
+        .get("s1"),
+    ).toEqual({
+      startTime: "2026-08-13T00:00:00.000Z",
+      endTime: "2026-08-13T00:10:00.000Z",
+      feedbackNotifiedAt: "2026-08-13T00:10:05.500Z",
+    });
+  });
+
+  it("확장이 보내는 toISOString 형식은 입력 그대로 저장하고, feedbackNotifiedAt 미전송은 null로 저장한다", async () => {
+    const startTime = "2026-08-13T00:00:00.123Z";
+    const endTime = "2026-08-13T00:10:00.456Z";
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(basePayload({ startTime, endTime }));
+    expect(res.status).toBe(200);
+    expect(
+      db
+        .prepare(
+          "SELECT startTime, endTime, feedbackNotifiedAt FROM sessions WHERE sessionId = ?",
+        )
+        .get("s1"),
+    ).toEqual({ startTime, endTime, feedbackNotifiedAt: null });
+  });
+
   it("필수 필드가 없으면 400과 함께 validateSession의 에러를 그대로 응답한다", async () => {
     const payload = basePayload();
     delete payload.anonymousId;

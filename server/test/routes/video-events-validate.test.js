@@ -92,6 +92,20 @@ describe("validateVideoEvent — watchedAt 형식", () => {
       field: "watchedAt",
     });
   });
+
+  it.each([
+    ["시간대 없음", "2026-09-01T00:00:00"],
+    ["날짜만", "2026-09-01"],
+    ["없는 날짜", "2026-02-30T00:00:00Z"],
+  ])(
+    "%s(%s)이면 INVALID_FIELD_VALUE(watchedAt)를 반환한다",
+    (_label, watchedAt) => {
+      expect(validateVideoEvent(basePayload({ watchedAt }))).toEqual({
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "watchedAt",
+      });
+    },
+  );
 });
 
 describe("validateVideoEvent — sessionId (옵션 필드, 하위호환)", () => {

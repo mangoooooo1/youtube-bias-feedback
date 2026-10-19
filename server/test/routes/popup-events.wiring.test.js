@@ -74,6 +74,36 @@ describe("실제 server/routes/popup-events.js 라우터 배선", () => {
     expect(row.anonymousId).toBe("wiring-user");
   });
 
+  it.each([
+    ["+09:00", "2026-08-13T09:00:00+09:00", "2026-08-13T00:00:00.000Z"],
+    ["toISOString", "2026-08-13T00:00:00.123Z", "2026-08-13T00:00:00.123Z"],
+    ["미전송(null)", null, null],
+  ])(
+    "POST /api/popup-events — openedAt %s 입력은 UTC ISO로 저장된다",
+    async (_label, openedAt, expected) => {
+      const res = await request(app)
+        .post("/api/popup-events")
+        .send(basePayload({ openedAt }));
+      expect(res.status).toBe(200);
+      expect(
+        db
+          .prepare("SELECT openedAt FROM popup_events WHERE eventId = ?")
+          .get("wiring-evt-1").openedAt,
+      ).toBe(expected);
+    },
+  );
+
+  it("POST /api/popup-events — 시간대 없는 openedAt은 400이고 저장하지 않는다", async () => {
+    const res = await request(app)
+      .post("/api/popup-events")
+      .send(basePayload({ openedAt: "2026-08-13T09:00:00" }));
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("INVALID_FIELD_VALUE");
+    expect(db.prepare("SELECT COUNT(*) AS c FROM popup_events").get().c).toBe(
+      0,
+    );
+  });
+
   it("POST /api/popup-events — anonymousId 누락 시 400 (validatePopupEvent가 실제로 연결돼 있는지)", async () => {
     const payload = basePayload();
     delete payload.anonymousId;
