@@ -434,6 +434,35 @@ describe("videoIdsWithoutTitle — oEmbed로 물어볼 영상", () => {
   });
 });
 
+// 다시 그리면 스크롤·입력값이 사라져, 화면에 새로 보일 제목이 생겼을 때만 다시 그린다
+describe("hasNewDisplayTitle — oEmbed 조회 뒤 다시 그릴지", () => {
+  it("새 제목이 생기거나 제목이 바뀌면 true", async () => {
+    const { hasNewDisplayTitle } = await loadPopup();
+
+    expect(hasNewDisplayTitle({}, { a: "제목" })).toBe(true);
+    expect(hasNewDisplayTitle({ a: null }, { a: "제목" })).toBe(true);
+    expect(hasNewDisplayTitle({ a: "옛 제목" }, { a: "새 제목" })).toBe(true);
+  });
+
+  it("비공개·삭제 영상(null)·빈 제목만 추가되면 false", async () => {
+    const { hasNewDisplayTitle } = await loadPopup();
+
+    expect(hasNewDisplayTitle({ a: "제목" }, { a: "제목", b: null })).toBe(
+      false,
+    );
+    expect(hasNewDisplayTitle({}, { b: "  " })).toBe(false);
+  });
+
+  it("내용이 같은 다른 객체·조회할 게 없어 같은 저장본이 돌아오면 false", async () => {
+    const { hasNewDisplayTitle } = await loadPopup();
+    const cache = { a: "제목", b: null };
+
+    expect(hasNewDisplayTitle(cache, { ...cache })).toBe(false);
+    expect(hasNewDisplayTitle(cache, cache)).toBe(false);
+    expect(hasNewDisplayTitle(undefined, {})).toBe(false);
+  });
+});
+
 // 서버는 유효 시청 영상이 늘지 않은 세션에서 리뷰를 다시 만들지 않는다
 describe("resolveTodayCumulative — 오늘 리뷰 카드 상태", () => {
   const TODAY = "2026-03-05";

@@ -10,6 +10,7 @@ window.loadViewingSummaryCache = loadViewingSummaryCache;
 window.refreshViewingSummary = refreshViewingSummary;
 window.fillMissingTitles = fillMissingTitles;
 window.videoIdsWithoutTitle = videoIdsWithoutTitle;
+window.hasNewDisplayTitle = hasNewDisplayTitle;
 window.resolveTodayCumulative = resolveTodayCumulative;
 const DEFAULT_TONE = "indigo";
 
@@ -497,6 +498,22 @@ function videoIdsWithoutTitle(sessions, liveVideos, summary) {
         !(v.eventId && corrected.has(v.eventId)),
     )
     .map((v) => v.videoId);
+}
+
+/**
+ * 받아 온 oEmbed 제목 중 화면에 새로 보일 제목이 있는지.
+ * 다시 그리면 스크롤·입력값이 사라져 보일 제목이 생겼을 때만 다시 그린다.
+ * null(비공개·삭제)은 "제목 없음" 그대로라 세지 않는다.
+ * @param {Record<string, string|null>} before - 이전 저장본
+ * @param {Record<string, string|null>} after - 새 저장본
+ */
+function hasNewDisplayTitle(before, after) {
+  return Object.entries(after ?? {}).some(
+    ([id, title]) =>
+      typeof title === "string" &&
+      title.trim() !== "" &&
+      (before ?? {})[id] !== title,
+  );
 }
 
 const TODAY_REVIEWS_TIMEOUT_MS = 5000;
@@ -1219,8 +1236,9 @@ async function boot() {
       ),
     )
     .then((titles) => {
+      const changed = hasNewDisplayTitle(VL._fetchedTitles, titles);
       VL._fetchedTitles = titles;
-      popup.render();
+      if (changed) popup.render();
     })
     .catch((error) => {
       console.warn("[popup] 영상 제목 조회 오류:", error.message);
