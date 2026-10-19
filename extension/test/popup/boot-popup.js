@@ -79,6 +79,8 @@ export async function bootPopup(stored, { responses = {} } = {}) {
   const { chrome, data, listeners } = fakeChrome(stored);
   const server = fakeFetch(responses);
   vi.spyOn(console, "warn").mockImplementation(() => {});
+  trackListeners(globalThis);
+  trackListeners(document);
   await loadPopup({ realDom: true, chrome, fetch: server.fn });
   // 다른 확장 화면이 저장소를 바꾼 것처럼 onChanged 리스너를 부른다
   const emitChange = (changes, area = "local") =>
@@ -86,7 +88,30 @@ export async function bootPopup(stored, { responses = {} } = {}) {
   return { root, data, server, chrome, emitChange };
 }
 
+// jsdom의 location.reload는 가로챌 수 없어 window만 바꾼다(나머지는 원래 전역을 그대로 본다)
+export function stubReload() {
+  const reload = vi.fn();
+  vi.stubGlobal(
+    "window",
+    Object.assign(Object.create(globalThis), { location: { reload } }),
+  );
+  return reload;
+}
+
+// boot가 창·문서에 붙인 리스너는 jsdom이 테스트마다 새로 만들지 않아 다음 테스트로 넘어간다
+const added = [];
+function trackListeners(target) {
+  const original = target.addEventListener;
+  vi.spyOn(target, "addEventListener").mockImplementation((...args) => {
+    added.push([target, args]);
+    return original.apply(target, args);
+  });
+}
+
 export function cleanupPopup() {
+  for (const [target, args] of added.splice(0)) {
+    target.removeEventListener(...args);
+  }
   vi.clearAllTimers();
   vi.useRealTimers();
   vi.unstubAllGlobals();
