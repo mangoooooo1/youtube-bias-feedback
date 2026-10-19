@@ -6,6 +6,7 @@ const {
   validateWatchStats,
 } = require("./video-events-validate");
 const { classifyReferrerType } = require("./video-events-classify");
+const { normalizeIsoTimestamp } = require("./iso-timestamp");
 const { requireParticipant } = require("../middleware/requireParticipant");
 
 const router = express.Router();
@@ -72,7 +73,7 @@ router.post("/", requireParticipant, (req, res, next) => {
       anonymousId,
       videoId,
       title: title ?? null,
-      watchedAt,
+      watchedAt: normalizeIsoTimestamp(watchedAt),
       sessionId: sessionId ?? null,
       entryHost: entryHost ?? null,
       entryPath: storedEntryPath,

@@ -1,6 +1,7 @@
 // POST /api/popup-events 요청 본문 검증
 
 const { ERROR_CODES } = require("../middleware/responseHandler");
+const { normalizeIsoTimestamp } = require("./iso-timestamp");
 
 // 값이 있으면 음수 아닌 정수여야 하는 필드 (미전송 시 null)
 const COUNT_FIELDS = ["dwellMs", "tabTodayClicks", "tabWeekClicks"];
@@ -37,7 +38,7 @@ function validatePopupEvent(body) {
   if (
     openedAt !== undefined &&
     openedAt !== null &&
-    isNaN(Date.parse(openedAt))
+    normalizeIsoTimestamp(openedAt) === null
   ) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "openedAt" };
   }

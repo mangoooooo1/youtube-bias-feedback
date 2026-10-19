@@ -1,6 +1,7 @@
 // POST /api/sessions 요청 본문 검증
 
 const { ERROR_CODES } = require("../middleware/responseHandler");
+const { normalizeIsoTimestamp } = require("./iso-timestamp");
 
 //  지연시간 필드: 확장이 측정해 전송. 선택 항목이며, 있으면 음수 아닌 정수여야 한다.
 const LATENCY_FIELDS = ["totalMs", "geminiMs"];
@@ -35,7 +36,7 @@ function validateSession(body) {
   const { startTime, endTime, videoCount, videoIds } = body;
 
   // 문자열 타입까지 요구
-  // 빈 문자열은 허용하지 않는다. (빈 문자열은 Date.parse에서 NaN으로 처리됨)
+  // 빈 문자열은 허용하지 않는다.
   const requiredFields = ["anonymousId", "sessionId", "startTime", "endTime"];
   for (const field of requiredFields) {
     const value = body[field];
@@ -44,15 +45,17 @@ function validateSession(body) {
     }
   }
 
-  // startTime/endTime이 Date.parse로 해석 가능한 형식인지 확인
-  const startMs = Date.parse(startTime);
-  if (isNaN(startMs)) {
+  // startTime/endTime은 시간대가 명시된 ISO 시각이어야 한다(normalizeIsoTimestamp)
+  const start = normalizeIsoTimestamp(startTime);
+  if (start === null) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "startTime" };
   }
-  const endMs = Date.parse(endTime);
-  if (isNaN(endMs)) {
+  const end = normalizeIsoTimestamp(endTime);
+  if (end === null) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "endTime" };
   }
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
   // 세션 기간이 음수가 되는 걸 막는다 — 동시각(0초 세션)은 허용, 역전만 거부.
   if (endMs < startMs) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "endTime" };
@@ -155,7 +158,7 @@ function validateSession(body) {
   if (
     feedbackNotifiedAt !== undefined &&
     feedbackNotifiedAt !== null &&
-    isNaN(Date.parse(feedbackNotifiedAt))
+    normalizeIsoTimestamp(feedbackNotifiedAt) === null
   ) {
     return {
       code: ERROR_CODES.INVALID_FIELD_VALUE,

@@ -1,6 +1,7 @@
 // POST /api/video-events 요청 본문 검증
 
 const { ERROR_CODES } = require("../middleware/responseHandler");
+const { normalizeIsoTimestamp } = require("./iso-timestamp");
 
 /**
  * POST /api/video-events 요청 본문을 검증한다.
@@ -19,7 +20,7 @@ function validateVideoEvent(body) {
     }
   }
 
-  if (isNaN(Date.parse(body.watchedAt))) {
+  if (normalizeIsoTimestamp(body.watchedAt) === null) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "watchedAt" };
   }
 

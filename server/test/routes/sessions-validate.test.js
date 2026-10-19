@@ -119,6 +119,22 @@ describe("validateSession — 날짜/숫자 형식", () => {
     },
   );
 
+  it.each(["startTime", "endTime"])(
+    "%s가 시간대 없음·날짜만·없는 날짜이면 거부한다",
+    (field) => {
+      for (const value of [
+        "2026-08-13T09:00:00",
+        "2026-08-13",
+        "2026-02-30T09:00:00+09:00",
+      ]) {
+        expect(validateSession(basePayload({ [field]: value }))).toEqual({
+          code: ERROR_CODES.INVALID_FIELD_VALUE,
+          field,
+        });
+      }
+    },
+  );
+
   it("endTime이 startTime보다 이르면 거부한다(음수 기간 방지, 회귀)", () => {
     const result = validateSession(
       basePayload({
@@ -397,6 +413,21 @@ describe("validateSession — LLM 폴백 로깅 분류값", () => {
       field: "feedbackNotifiedAt",
     });
   });
+
+  it.each([
+    ["시간대 없음", "2026-09-01T00:00:00"],
+    ["날짜만", "2026-09-01"],
+    ["없는 날짜", "2026-02-30T00:00:00Z"],
+    ["toString이 null인 객체", { toString: null }],
+  ])(
+    "feedbackNotifiedAt이 %s이면 예외 없이 거부한다",
+    (_label, feedbackNotifiedAt) => {
+      expect(validateSession(basePayload({ feedbackNotifiedAt }))).toEqual({
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "feedbackNotifiedAt",
+      });
+    },
+  );
 });
 
 describe("validateSession — 생성된 피드백 텍스트", () => {

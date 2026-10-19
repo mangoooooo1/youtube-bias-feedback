@@ -2,6 +2,7 @@ const express = require("express");
 const { db } = require("../db");
 const { success, fail } = require("../middleware/responseHandler");
 const { validatePopupEvent } = require("./popup-events-validate");
+const { normalizeIsoTimestamp } = require("./iso-timestamp");
 const { requireParticipant } = require("../middleware/requireParticipant");
 
 const router = express.Router();
@@ -49,7 +50,7 @@ router.post("/", requireParticipant, (req, res, next) => {
       tabWeekClicks: tabWeekClicks ?? null,
       todayFeedbackViewed: todayFeedbackViewed ?? null,
       periodFeedbackViewed: periodFeedbackViewed ?? null,
-      openedAt: openedAt ?? null,
+      openedAt: normalizeIsoTimestamp(openedAt),
     });
   } catch (err) {
     return next(err);
