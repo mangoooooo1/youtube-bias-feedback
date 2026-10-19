@@ -87,7 +87,7 @@ describe("createCorsPolicy — HTTP 응답 헤더", () => {
   const YOUTUBE_ORIGIN = "https://www.youtube.com";
   const DENIED_ORIGIN = "https://evil-youtube.com";
 
-  // app.js와 같은 미들웨어를 붙이고, content.js가 호출하는 경로만 더미로 둔다
+  // createCorsPolicy만 붙인 최소 앱. 실제 앱의 CORS 배선은 create-app.test.js가 검증한다
   function buildApp() {
     const app = express();
     app.use(createCorsPolicy({ NODE_ENV: "production" }));
