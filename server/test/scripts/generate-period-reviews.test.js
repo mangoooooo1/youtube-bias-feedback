@@ -29,6 +29,7 @@ function createTestDb() {
     CREATE TABLE video_metadata (
       videoId TEXT PRIMARY KEY,
       categoryId TEXT,
+      title TEXT,
       durationSeconds INTEGER
     );
     CREATE TABLE period_reviews (
@@ -655,6 +656,48 @@ describe("generate-period-reviews.js — run()", () => {
       .parts[0].text;
     expect(prompt.match(/ {2}· 쇼츠 \d+/g)).toHaveLength(150);
     expect(prompt).not.toContain("이 외");
+  });
+
+  it("리뷰 제목은 YouTube 메타데이터 제목을 우선하고, 없으면 확장이 보낸 제목을 쓴다(원본은 그대로)", async () => {
+    const userId = "preferred-title-user";
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run(userId, INSTALL_DATE);
+    const insertMeta = db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, title, durationSeconds) VALUES (?, '10', ?, 600)",
+    );
+    insertMeta.run("pt-shifted", "실제 플레이리스트 제목");
+    insertMeta.run("pt-no-meta-title", null);
+    const insertEvent = db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, ?, ?, '2026-06-01T10:00:00+09:00', 300)",
+    );
+    insertEvent.run(userId, "pt-shifted", "직전 영상 제목");
+    insertEvent.run(userId, "pt-no-meta-title", "확장이 보낸 제목");
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":"문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await run(db, "fake-key");
+
+    const prompt = JSON.parse(global.fetch.mock.calls[0][1].body).contents[0]
+      .parts[0].text;
+    expect(prompt).toContain("실제 플레이리스트 제목");
+    expect(prompt).not.toContain("직전 영상 제목");
+    expect(prompt).toContain("확장이 보낸 제목");
+    expect(
+      db
+        .prepare("SELECT title FROM video_events WHERE videoId = 'pt-shifted'")
+        .get().title,
+    ).toBe("직전 영상 제목");
   });
 
   it("프롬프트 영상 수는 시청 시간이 확인된 영상만 세고, 저장하는 validVideoCount는 분석 기준(시간 모름 포함) 그대로다", async () => {

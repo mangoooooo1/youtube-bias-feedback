@@ -42,6 +42,7 @@ const { recordLlmCall, closeLlmMetrics } = require("../monitoring/llm-metrics");
 const { aggregateViewing } = require("../pipeline/viewing-aggregate");
 const { groupTitlesByCategory } = require("../pipeline/review-titles");
 const {
+  PREFERRED_TITLE_SQL,
   getCategoryIdsForVideos,
   getDurationsForVideos,
 } = require("../routes/video-metadata-store");
@@ -270,9 +271,11 @@ async function run(db, apiKey, { recordMetric } = {}) {
   // 여기서 title 없는 이벤트를 미리 제외하면 실제로는 유효한 시청인데도 validVideoCount·가중 분포·가중 엔트로피가
   // 과소 산정된다. title 필터는 Gemini 프롬프트용 titlesInRange를 만들 때만 적용한다.
   const selectVideoEvents = db.prepare(`
-    SELECT videoId, title, watchedAt, watchedSeconds FROM video_events
-    WHERE anonymousId = ?
-    ORDER BY watchedAt ASC
+    SELECT e.videoId, ${PREFERRED_TITLE_SQL} AS title, e.watchedAt, e.watchedSeconds
+    FROM video_events e
+    LEFT JOIN video_metadata m ON m.videoId = e.videoId
+    WHERE e.anonymousId = ?
+    ORDER BY e.watchedAt ASC
   `);
   const selectExistingPeriodReviews = db.prepare(`
     SELECT periodIndex, llmStatus, periodEnd FROM period_reviews WHERE anonymousId = ?

@@ -7,6 +7,7 @@ const {
 } = require("../pipeline/today-review-llm");
 const { upsertTodayReview } = require("./today-reviews-upsert");
 const { recordLlmCall } = require("../monitoring/llm-metrics");
+const { PREFERRED_TITLE_SQL } = require("./video-metadata-store");
 
 /**
  * 저장된 최신본을 다시 만들 필요가 있는지 판단한다.
@@ -67,7 +68,7 @@ async function generateOnce(
   // 가져온 영상도 포함해 넘긴다. 분포에서만 빠지고 영상 수·제목에는 들어간다.
   const events = db
     .prepare(
-      `SELECT e.eventId, e.sessionId, e.title, e.watchedAt, e.watchedSeconds,
+      `SELECT e.eventId, e.sessionId, ${PREFERRED_TITLE_SQL} AS title, e.watchedAt, e.watchedSeconds,
               m.categoryId, m.durationSeconds
        FROM video_events e
        LEFT JOIN video_metadata m ON m.videoId = e.videoId

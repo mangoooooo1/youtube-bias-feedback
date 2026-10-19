@@ -34,6 +34,26 @@ function toScreenView(aggregate, { withExcluded }) {
   return view;
 }
 
+/**
+ * 날짜별 "시청한 영상" 목록에서 바꿔 보여 줄 제목(eventId → 메타데이터 제목).
+ * 팝업은 확장이 기록한 제목을 보여 주는데, 탭 제목을 읽어 다른 영상 것이 붙을 수 있다.
+ * 기록한 제목과 다르거나 기록한 제목이 없는 영상만 담아 응답을 작게 유지한다.
+ * @returns {Map<string, Record<string, string>>} KST 날짜 → { eventId: 제목 }
+ */
+function correctedTitlesByDate(events) {
+  const byDate = new Map();
+  for (const e of events) {
+    if (!e.eventId || !e.metadataTitle) continue;
+    if (e.metadataTitle === e.sentTitle?.trim()) continue;
+    const ms = Date.parse(e.watchedAt);
+    if (!Number.isFinite(ms)) continue;
+    const date = kstDateStr(new Date(ms));
+    if (!byDate.has(date)) byDate.set(date, {});
+    byDate.get(date)[e.eventId] = e.metadataTitle;
+  }
+  return byDate;
+}
+
 /** 설치일 기준으로 이미 시작된 구간 목록(오늘 진행 중인 구간 포함). */
 function startedPeriods(installDate, today) {
   const totalPeriods = Math.ceil(TOTAL_DAYS / DAYS_PER_PERIOD);
@@ -65,7 +85,8 @@ function getViewingSummary(db, anonymousId, now = new Date()) {
 
   const events = db
     .prepare(
-      `SELECT e.eventId, e.watchedAt, e.watchedSeconds, m.categoryId, m.durationSeconds
+      `SELECT e.eventId, e.watchedAt, e.watchedSeconds, m.categoryId, m.durationSeconds,
+              e.title AS sentTitle, TRIM(m.title) AS metadataTitle
        FROM video_events e
        LEFT JOIN video_metadata m ON m.videoId = e.videoId
        WHERE e.anonymousId = ?
@@ -73,9 +94,11 @@ function getViewingSummary(db, anonymousId, now = new Date()) {
     )
     .all(anonymousId);
 
+  const corrected = correctedTitlesByDate(events);
   const days = aggregateViewingByDay(events).map(({ date, ...aggregate }) => ({
     date,
     ...toScreenView(aggregate, { withExcluded: true }),
+    correctedTitles: corrected.get(date) ?? {},
   }));
 
   const today = kstDateStr(now);

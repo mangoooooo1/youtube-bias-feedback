@@ -20,6 +20,7 @@ function createTestDb() {
     CREATE TABLE video_metadata (
       videoId TEXT PRIMARY KEY,
       categoryId TEXT,
+      title TEXT,
       durationSeconds INTEGER
     );
     CREATE TABLE today_reviews (
@@ -332,6 +333,61 @@ describe("generateAndStoreTodayReview", () => {
     const prompt = JSON.parse(global.fetch.mock.calls[0][1].body).contents[0]
       .parts[0].text;
     expect(prompt).toContain("분류 없는 영상");
+  });
+
+  it("리뷰 제목은 YouTube 메타데이터 제목을 우선하고, 없으면 확장이 보낸 제목을 쓴다(원본은 그대로)", async () => {
+    const db = createTestDb();
+    const now = new Date("2026-03-10T20:00:00+09:00");
+    const addEvent = (videoId, sentTitle, metadataTitle, hour) => {
+      db.prepare(
+        "INSERT INTO video_metadata (videoId, categoryId, title, durationSeconds) VALUES (?, '10', ?, 600)",
+      ).run(videoId, metadataTitle);
+      db.prepare(
+        `INSERT INTO video_events (eventId, anonymousId, videoId, sessionId, title, watchedAt, watchedSeconds)
+         VALUES (?, 'u-title', ?, 's1', ?, ?, 300)`,
+      ).run(
+        `e-${videoId}`,
+        videoId,
+        sentTitle,
+        `2026-03-10T${hour}:00:00+09:00`,
+      );
+    };
+    // 직전 영상 제목이 붙은 기록
+    addEvent("t-shifted", "직전 영상 제목", "실제 플레이리스트 제목 ", "10");
+    addEvent("t-null-sent", null, "제목 없이 보낸 영상", "11");
+    addEvent("t-no-meta", "메타데이터 없는 영상", null, "12");
+    addEvent("t-empty-meta", "빈 메타데이터 영상", "  ", "13");
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":"관찰 문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await generateAndStoreTodayReview(db, {
+      anonymousId: "u-title",
+      apiKey: "fake-key",
+      now,
+    });
+
+    const prompt = JSON.parse(global.fetch.mock.calls[0][1].body).contents[0]
+      .parts[0].text;
+    expect(prompt).toContain("실제 플레이리스트 제목");
+    expect(prompt).not.toContain("직전 영상 제목");
+    expect(prompt).toContain("제목 없이 보낸 영상");
+    expect(prompt).toContain("메타데이터 없는 영상");
+    expect(prompt).toContain("빈 메타데이터 영상");
+    expect(
+      db
+        .prepare("SELECT title FROM video_events WHERE videoId = 't-shifted'")
+        .get().title,
+    ).toBe("직전 영상 제목");
   });
 });
 

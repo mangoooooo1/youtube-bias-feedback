@@ -248,6 +248,71 @@ describe("getViewingSummary — 날짜·구간 나눔과 화면용 값", () => {
     expect(periods[1].validCount).toBe(3);
   });
 
+  it("날짜별로 기록한 제목과 다른 메타데이터 제목만 eventId별로 돌려준다", () => {
+    addParticipant("titles", "TEST-EXP", INSTALL);
+    const addTitled = (videoId, sentTitle, metadataTitle, watchedAt) => {
+      seq += 1;
+      if (metadataTitle !== undefined) {
+        db.prepare(
+          "INSERT INTO video_metadata (videoId, categoryId, title, durationSeconds) VALUES (?, '10', ?, 600)",
+        ).run(videoId, metadataTitle);
+      }
+      db.prepare(
+        `INSERT INTO video_events (eventId, anonymousId, videoId, title, watchedAt, watchedSeconds)
+         VALUES (?, 'titles', ?, ?, ?, 300)`,
+      ).run(`ev-${seq}`, videoId, sentTitle, watchedAt);
+      return `ev-${seq}`;
+    };
+    const shifted = addTitled(
+      `vt-${seq}-a`,
+      "직전 영상 제목",
+      "실제 제목",
+      "2026-03-05T10:00:00+09:00",
+    );
+    const nullSent = addTitled(
+      `vt-${seq}-b`,
+      null,
+      "제목 없이 보낸 영상",
+      "2026-03-05T11:00:00+09:00",
+    );
+    // 끝 공백만 다른 제목·메타데이터 제목 없음·메타데이터 행 없음은 담지 않는다
+    addTitled(
+      `vt-${seq}-c`,
+      "같은 제목",
+      "같은 제목 ",
+      "2026-03-05T12:00:00+09:00",
+    );
+    addTitled(
+      `vt-${seq}-d`,
+      "메타 제목 없음",
+      null,
+      "2026-03-05T13:00:00+09:00",
+    );
+    addTitled(
+      `vt-${seq}-e`,
+      "메타 행 없음",
+      undefined,
+      "2026-03-05T14:00:00+09:00",
+    );
+    const nextDay = addTitled(
+      `vt-${seq}-f`,
+      "다음 날 직전 제목",
+      "다음 날 실제 제목",
+      "2026-03-06T09:00:00+09:00",
+    );
+
+    const { days, periods } = getViewingSummary(db, "titles", NOW);
+
+    expect(days.map((d) => [d.date, d.correctedTitles])).toEqual([
+      [
+        "2026-03-05",
+        { [shifted]: "실제 제목", [nullSent]: "제목 없이 보낸 영상" },
+      ],
+      ["2026-03-06", { [nextDay]: "다음 날 실제 제목" }],
+    ]);
+    expect(periods[1].correctedTitles).toBeUndefined();
+  });
+
   // 화면 "영상 N개"는 리뷰와 같은 기준(시청 시간이 확인된 유효 영상), 시간을 모르는 영상은 따로 센다
   it("시청 시간이 확인된 유효 영상 수와 확인 중인 영상 수를 날짜·구간별로 돌려준다", () => {
     addParticipant("confirmed", "TEST-EXP", INSTALL);

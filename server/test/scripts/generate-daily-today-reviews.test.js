@@ -28,6 +28,7 @@ function createTestDb() {
     CREATE TABLE video_metadata (
       videoId TEXT PRIMARY KEY,
       categoryId TEXT,
+      title TEXT,
       durationSeconds INTEGER
     );
     CREATE TABLE today_reviews (
