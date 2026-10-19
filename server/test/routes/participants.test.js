@@ -196,6 +196,75 @@ describe("POST /api/participants", () => {
     expect(res.body.code).toBe("INVALID_FIELD_VALUE");
   });
 
+  it.each([
+    ["시간대 없음", "2026-09-01T00:00:00"],
+    ["날짜만", "2026-09-01"],
+    ["비 ISO 형식", "Sep 1 2026"],
+    ["없는 날짜", "2026-02-30T00:00:00Z"],
+    ["24시", "2026-09-01T24:00:00Z"],
+    ["소문자 t/z", "2026-09-01t00:00:00z"],
+    ["초 없음", "2026-09-01T00:00Z"],
+    ["콜론 없는 오프셋", "2026-09-01T00:00:00+0900"],
+  ])(
+    "installDate가 %s(%s)이면 400을 반환하고 저장하지 않는다",
+    async (_label, installDate) => {
+      const res = await request(app).post("/api/participants").send({
+        anonymousId: "a1",
+        group_code: "TEST-CON",
+        installDate,
+        participantCode: "TEST-CON",
+      });
+      expect(res.status).toBe(400);
+      expect(res.body).toMatchObject({
+        code: "INVALID_FIELD_VALUE",
+        detail: "installDate",
+      });
+      expect(db.prepare("SELECT COUNT(*) AS c FROM participants").get().c).toBe(
+        0,
+      );
+    },
+  );
+
+  it.each([
+    ["Z", "2026-09-01T00:00:00Z", "2026-09-01T00:00:00.000Z"],
+    ["+09:00", "2026-09-01T09:00:00+09:00", "2026-09-01T00:00:00.000Z"],
+    ["-05:00", "2026-08-31T19:00:00.5-05:00", "2026-09-01T00:00:00.500Z"],
+  ])(
+    "installDate가 %s 형식이면 같은 순간의 UTC ISO로 정규화해 저장한다",
+    async (_label, installDate, expected) => {
+      const res = await request(app).post("/api/participants").send({
+        anonymousId: "a1",
+        group_code: "TEST-CON",
+        installDate,
+        participantCode: "TEST-CON",
+      });
+      expect(res.status).toBe(200);
+      expect(
+        db
+          .prepare("SELECT installDate FROM participants WHERE anonymousId = ?")
+          .get("a1").installDate,
+      ).toBe(expected);
+    },
+  );
+
+  it("확장이 보내는 toISOString 형식은 입력 그대로 저장한다", async () => {
+    const installDate = new Date(
+      Date.UTC(2026, 8, 1, 3, 4, 5, 678),
+    ).toISOString();
+    const res = await request(app).post("/api/participants").send({
+      anonymousId: "a1",
+      group_code: "TEST-CON",
+      installDate,
+      participantCode: "TEST-CON",
+    });
+    expect(res.status).toBe(200);
+    expect(
+      db
+        .prepare("SELECT installDate FROM participants WHERE anonymousId = ?")
+        .get("a1").installDate,
+    ).toBe(installDate);
+  });
+
   it("이미 등록된 anonymousId는 발급 코드 검증 없이 그대로 성공 처리한다(멱등)", async () => {
     db.prepare(
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",

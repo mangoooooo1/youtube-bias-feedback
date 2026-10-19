@@ -7,6 +7,33 @@ const {
 const { normalizeAnonymousId } = require("./anonymous-id");
 const { normalizeParticipantCode } = require("./participant-code");
 
+// 시간대가 없으면 JS(현지 시간)와 SQLite(UTC)가 다르게 읽으므로 Z/±HH:MM을 필수로 한다
+const ISO_WITH_OFFSET =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+
+/** 통과하면 toISOString() 형식(UTC) 문자열, 아니면 null. */
+function normalizeInstallDate(value) {
+  const match = ISO_WITH_OFFSET.exec(value);
+  if (!match) return null;
+
+  // Date는 02-30·24:00을 다음 날로 넘겨 받으므로 적힌 날짜·시각이 실제로 있는지 따로 본다
+  const [y, mo, d, h, mi, s] = match.slice(1, 7).map(Number);
+  const wall = new Date(Date.UTC(y, mo - 1, d, h, mi, s));
+  if (
+    wall.getUTCFullYear() !== y ||
+    wall.getUTCMonth() !== mo - 1 ||
+    wall.getUTCDate() !== d ||
+    wall.getUTCHours() !== h ||
+    wall.getUTCMinutes() !== mi ||
+    wall.getUTCSeconds() !== s
+  ) {
+    return null;
+  }
+
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
 /**
  * 참여자 등록.
  *
@@ -22,7 +49,6 @@ const { normalizeParticipantCode } = require("./participant-code");
  */
 function registerParticipant(db, body) {
   let { group_code } = body;
-  const installDate = body.installDate;
   // GET /validate·POST /recover와 동일하게 정규화
   const participantCode =
     normalizeParticipantCode(body.participantCode) || undefined;
@@ -39,7 +65,8 @@ function registerParticipant(db, body) {
   // 토큰이 나중에 checkParticipant로 검증될 때 어긋나지 않는다.
   const anonymousId = normalizeAnonymousId(body.anonymousId);
 
-  if (isNaN(Date.parse(installDate))) {
+  const installDate = normalizeInstallDate(body.installDate);
+  if (!installDate) {
     return { status: "invalid_install_date" };
   }
 
