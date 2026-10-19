@@ -580,6 +580,10 @@ async function loadVideoTrackingSection(videoEl, { hidden = false } = {}) {
   video = videoEl;
   return {
     reset: api.resetWatchTracker,
+    // SPA 전환으로 페이지의 <video>가 다른 엘리먼트로 바뀐 상황을 만든다
+    replaceVideo: (el) => {
+      video = el;
+    },
     snapshot: api.captureWatchStatsSnapshot,
     currentWatchedMs: () =>
       api.captureWatchStatsSnapshot().watchedSeconds * 1000,
@@ -686,6 +690,34 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     videoEl.dispatch("ratechange");
 
     expect(section.snapshot().playbackRate).toBe(1.5);
+  });
+
+  // 쇼츠 피드 등 SPA 전환 중 <video> 엘리먼트가 교체되는 경우. 이전 엘리먼트의 play/pause/seeking
+  // 리스너를 떼지 않으면 그 엘리먼트의 이벤트가 새 영상의 재생 구간을 열거나 닫는다.
+  // (seeked·ratechange는 지금 추적 중인 엘리먼트의 상태를 읽어 값이 섞이지 않는다.)
+  it("<video>가 다른 엘리먼트로 바뀌면 이전 엘리먼트의 play/pause/seeking은 새 영상 시청 시간에 반영되지 않는다", async () => {
+    const oldVideo = createFakeVideoElement({ paused: false });
+    const section = await loadVideoTrackingSection(oldVideo);
+    section.reset();
+    vi.setSystemTime(10000);
+
+    // 새 영상으로 전환: 새 엘리먼트는 아직 일시정지 상태
+    const newVideo = createFakeVideoElement({ paused: true });
+    section.replaceVideo(newVideo);
+    section.reset();
+
+    vi.setSystemTime(12000);
+    oldVideo.dispatch("play"); // 떼어 냈다면 새 영상의 구간을 열지 못한다
+    vi.setSystemTime(20000);
+    expect(section.currentWatchedMs()).toBe(0);
+
+    newVideo.paused = false;
+    newVideo.dispatch("play");
+    vi.setSystemTime(22000);
+    oldVideo.dispatch("pause"); // 떼어 냈다면 새 영상의 구간을 닫지 못한다
+    oldVideo.dispatch("seeking"); // seeking도 구간을 닫는다
+    vi.setSystemTime(30000);
+    expect(section.currentWatchedMs()).toBe(10000); // 새 영상 20초~30초
   });
 });
 
