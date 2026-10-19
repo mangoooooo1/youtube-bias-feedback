@@ -1,47 +1,26 @@
-import { describe, it, expect, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
+import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
+import { loadPopup } from "./load-popup.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCREENS_PATH = path.join(__dirname, "../../popup/viewlens-screens.js");
-const POPUP_PATH = path.join(__dirname, "../../popup/viewlens-popup.js");
-
-// DOM 전역에 의존하는 classic script라 필요한 선언만 정규식으로 추출해 실행한다
-function extract(file, re) {
-  const match = readFileSync(file, "utf8").match(re);
-  if (!match) throw new Error(`${re}에 매칭되는 선언을 찾지 못했습니다.`);
-  return match[0];
+async function loadScreens(validateParticipantCode) {
+  const g = await loadPopup();
+  vi.stubGlobal("validateParticipantCode", validateParticipantCode);
+  return {
+    parseParticipantCode: g.parseParticipantCode,
+    bindOnboarding: g.bindOnboarding,
+  };
 }
 
-function loadScreens(win) {
-  const src = [
-    extract(
-      SCREENS_PATH,
-      /function parseParticipantCode\(raw\) \{[\s\S]*?\n\}/,
-    ),
-    extract(
-      SCREENS_PATH,
-      /function bindOnboarding\(root, onSubmit\) \{[\s\S]*?\n\}/,
-    ),
-  ].join("\n");
-  return new Function(
-    "window",
-    `${src}\nreturn { parseParticipantCode, bindOnboarding };`,
-  )(win);
+// 실제 팝업 파일을 불러온 뒤 이 테스트의 chrome·fetch를 넣는다(validateParticipantCode는 호출 시점에 전역을 찾는다)
+async function loadValidate(chrome, fetch) {
+  const { validateParticipantCode } = await loadPopup();
+  vi.stubGlobal("chrome", chrome);
+  vi.stubGlobal("fetch", fetch);
+  return validateParticipantCode;
 }
 
-function loadValidate(chrome, fetch) {
-  const src = extract(
-    POPUP_PATH,
-    /async function validateParticipantCode\(code\) \{[\s\S]*?\n\}/,
-  );
-  return new Function(
-    "chrome",
-    "fetch",
-    `${src}\nreturn validateParticipantCode;`,
-  )(chrome, fetch);
-}
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function fakeEl() {
   const listeners = {};
@@ -65,8 +44,8 @@ async function submitCode(code, check) {
     "#vl-onboard-btn": fakeEl(),
   };
   const root = { querySelector: (sel) => els[sel] };
-  const win = check && { validateParticipantCode: vi.fn(async () => check) };
-  const { bindOnboarding } = loadScreens(win ?? {});
+  const validate = check && vi.fn(async () => check);
+  const { bindOnboarding } = await loadScreens(validate);
   const onSubmit = vi.fn();
   bindOnboarding(root, onSubmit);
 
@@ -80,7 +59,11 @@ async function submitCode(code, check) {
 }
 
 describe("parseParticipantCode — 형식만 검사하고 집단은 정하지 않는다", () => {
-  const { parseParticipantCode } = loadScreens({});
+  let parseParticipantCode;
+
+  beforeAll(async () => {
+    ({ parseParticipantCode } = await loadScreens());
+  });
 
   it.each(["VL-K7M2", "QWE-K7M2", "ASD-AB23", " vl-k7m2 "])(
     "%j는 통과하되 group이 없다",
@@ -152,13 +135,13 @@ describe("validateParticipantCode — 확인 실패를 통과로 취급하지 �
   const unavailable = { ok: false, reason: "unavailable" };
 
   it("서버 미설정이면 unavailable", async () => {
-    const validate = loadValidate(chrome(undefined), vi.fn());
+    const validate = await loadValidate(chrome(undefined), vi.fn());
     expect(await validate("VL-K7M2")).toEqual(unavailable);
   });
 
   it("서버 오류 응답이면 unavailable", async () => {
     const fetch = vi.fn(async () => ({ ok: false }));
-    const validate = loadValidate(chrome("https://x"), fetch);
+    const validate = await loadValidate(chrome("https://x"), fetch);
     expect(await validate("VL-K7M2")).toEqual(unavailable);
   });
 
@@ -166,7 +149,7 @@ describe("validateParticipantCode — 확인 실패를 통과로 취급하지 �
     const fetch = vi.fn(async () => {
       throw new Error("offline");
     });
-    const validate = loadValidate(chrome("https://x"), fetch);
+    const validate = await loadValidate(chrome("https://x"), fetch);
     expect(await validate("VL-K7M2")).toEqual(unavailable);
   });
 
@@ -175,7 +158,7 @@ describe("validateParticipantCode — 확인 실패를 통과로 취급하지 �
       ok: true,
       json: async () => ({ data: { valid: false } }),
     }));
-    const validate = loadValidate(chrome("https://x"), fetch);
+    const validate = await loadValidate(chrome("https://x"), fetch);
     expect(await validate("VL-K7M2")).toEqual({ ok: false });
   });
 
@@ -186,7 +169,7 @@ describe("validateParticipantCode — 확인 실패를 통과로 취급하지 �
         data: { valid: true, group_code: "EXP", previouslyRegistered: false },
       }),
     }));
-    const validate = loadValidate(chrome("https://x"), fetch);
+    const validate = await loadValidate(chrome("https://x"), fetch);
     expect(await validate("VL-K7M2")).toEqual({
       ok: true,
       group: "EXP",

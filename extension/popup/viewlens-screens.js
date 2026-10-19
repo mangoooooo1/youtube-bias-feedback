@@ -694,3 +694,4 @@ window.screenStudyEndNoticeModal = screenStudyEndNoticeModal;
 window.screenParticipationEndedBanner = screenParticipationEndedBanner;
 window.screenPastDayRevealModal = screenPastDayRevealModal;
 window.screenRecoverConfirmModal = screenRecoverConfirmModal;
+window.parseParticipantCode = parseParticipantCode;
