@@ -72,6 +72,27 @@ describe("flushPendingPopupEvents — 팝업 사용 기록 큐 전송", () => {
     expect(dump().pendingPopupEvents).toEqual([]);
   });
 
+  // 큐에 넣을 때(buildPopupEventPayload) 그 시점의 토큰도 함께 저장된다. 등록 전이면 null,
+  // 이후 토큰이 바뀌었으면 옛 값이라, 보낼 때 지금 토큰으로 덮어써야 403에 막히지 않는다.
+  it.each([
+    ["등록 전에 쌓여 토큰이 null인 기록", null],
+    ["예전 토큰이 남은 기록", "old-tok"],
+  ])("%s도 지금 토큰으로 보낸다", async (_label, queuedToken) => {
+    const { flush, sent, dump } = await load(
+      {
+        pendingPopupEvents: events(2, { participantToken: queuedToken }),
+        anonymousId: ID,
+        participantToken: "tok",
+      },
+      ok,
+    );
+
+    await flush("https://srv.example");
+
+    expect(sent.map((e) => e.participantToken)).toEqual(["tok", "tok"]);
+    expect(dump().pendingPopupEvents).toEqual([]);
+  });
+
   it("다른 anonymousId로 쌓인 기록은 요청 없이 건너뛰고 뒤 기록은 정상 전송한다", async () => {
     const { flush, sent, dump, console } = await load(
       {
