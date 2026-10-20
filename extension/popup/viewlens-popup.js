@@ -1095,6 +1095,7 @@ async function boot() {
   VL._allSessions = sessions;
   VL._installDate = installDate;
   VL._lastWatchedAt = stored.lastWatchedAt || null;
+  VL._collectingCount = collectingCount;
 
   // 화면 그래프·숫자의 원천(서버 집계). 저장본을 먼저 쓰고, 새로 받아 오면 바꾼다.
   VL._liveVideos = await loadLiveVideos();
@@ -1454,6 +1455,8 @@ async function boot() {
       localCurrentSession = changes.currentSession.newValue || null;
     if (changes.lastWatchedAt)
       localLastWatchedAt = changes.lastWatchedAt.newValue || null;
+    VL._collectingCount = localCurrentSession?.videoCount ?? 0;
+    VL._lastWatchedAt = localLastWatchedAt;
 
     if (changes.sessions) {
       // 세션이 끝나 기록이 바뀌었으니 서버 집계도 다시 받는다(받은 뒤 다시 그림)
@@ -1539,6 +1542,7 @@ async function boot() {
 
   setInterval(() => {
     VL._lastWatchedAt = localLastWatchedAt;
+    VL._collectingCount = localCurrentSession?.videoCount ?? 0;
 
     if (popupMetrics) {
       // 주차별 탭에 머문 실제 경과 시간을 갱신. tick 횟수가 아니라 feedbackTabEnteredAt과의
