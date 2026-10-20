@@ -13,19 +13,38 @@
 
 const fs = require("fs");
 const path = require("path");
+const { CODE_GROUPS } = require("./generate-codes");
+
+const isAllowedGroup = (group) => CODE_GROUPS.includes(group.toUpperCase());
+
+function invalidGroupError(where) {
+  return new Error(
+    `group은 ${CODE_GROUPS.join("/")}만 쓸 수 있어 아무것도 등록하지 않았습니다: ${where.join(", ")}`,
+  );
+}
 
 /**
  * 명단 CSV를 [code, group] 줄 목록으로 읽는다. 첫 줄은 헤더로 버리고, 칸이 모자란 줄은 뺀다.
+ * 허용되지 않은 group이 하나라도 있으면 그 줄 번호와 group 값을 담아 예외를 던진다.
+ * 코드 원본은 메시지에 넣지 않는다(터미널 기록에 남지 않도록).
  * @param {string} text
  * @returns {string[][]}
  */
 function parseCodesCsv(text) {
-  return text
+  const rows = [];
+  const invalid = [];
+  text
     .trim()
     .split(/\r?\n/)
-    .slice(1) // 헤더 제거
-    .map((l) => l.split(",").map((s) => s.trim()))
-    .filter((r) => r.length >= 2 && r[0] && r[1]);
+    .forEach((l, i) => {
+      if (i === 0) return; // 헤더 제거
+      const r = l.split(",").map((s) => s.trim());
+      if (!(r.length >= 2 && r[0] && r[1])) return;
+      if (!isAllowedGroup(r[1])) invalid.push(`${i + 1}번째 줄(${r[1]})`);
+      rows.push(r);
+    });
+  if (invalid.length > 0) throw invalidGroupError(invalid);
+  return rows;
 }
 
 /**
@@ -35,6 +54,11 @@ function parseCodesCsv(text) {
  * @returns {{inserted: number, total: number}}
  */
 function seedCodes(db, rows) {
+  // parseCodesCsv를 거치지 않고 불러도 잘못된 group은 넣지 않는다
+  const invalid = rows.filter(([, group]) => !isAllowedGroup(group));
+  if (invalid.length > 0) {
+    throw invalidGroupError(invalid.map(([, group]) => group));
+  }
   const stmt = db.prepare(
     "INSERT OR IGNORE INTO issued_codes (code, group_code) VALUES (?, ?)",
   );

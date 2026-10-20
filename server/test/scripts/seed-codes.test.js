@@ -89,6 +89,37 @@ describe("seedCodes", () => {
   });
 });
 
+// 명단의 group은 서버 등록 때 그대로 참여자 그룹이 된다(participants-store.js) — 오타가 있으면 전부 거부한다
+describe("group 검증", () => {
+  it("소문자 exp·con은 대문자로 맞춰 받는다", () => {
+    const rows = parseCodesCsv("code,group\nVL-AAA2,exp\nVL-BBB3,con");
+    expect(seedCodes(db, rows)).toEqual({ inserted: 2, total: 2 });
+  });
+
+  it.each([
+    ["오타", "EPX"],
+    ["테스트 그룹", "TEST-EXP"],
+  ])(
+    "%s group(%s)이 있으면 줄 번호와 값을 알리고 코드는 메시지에 넣지 않는다",
+    (_label, group) => {
+      const text = `code,group\nVL-AAA2,EXP\nVL-BBB3,${group}`;
+
+      expect(() => parseCodesCsv(text)).toThrow(`3번째 줄(${group})`);
+      expect(() => parseCodesCsv(text)).not.toThrow("VL-BBB3");
+    },
+  );
+
+  it("잘못된 group이 하나라도 있으면 같은 명단의 올바른 줄도 등록하지 않는다", () => {
+    expect(() =>
+      seedCodes(db, [
+        ["VL-AAA2", "EXP"],
+        ["VL-BBB3", "EPX"],
+      ]),
+    ).toThrow("EPX");
+    expect(issued()).toEqual([]);
+  });
+});
+
 describe("generate-codes → seed-codes 왕복", () => {
   it("generate-codes가 만든 CSV를 그대로 읽어 생성한 code와 group이 모두 등록된다", () => {
     const rows = generateCodes({ exp: 3, con: 2 });
