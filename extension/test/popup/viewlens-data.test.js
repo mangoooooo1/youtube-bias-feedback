@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  afterEach,
+  vi,
+} from "vitest";
 import { isConGroup as isConGroupShared } from "../../pipeline/study-period.js";
 import { isBaselinePeriod as isBaselinePeriodShared } from "../../pipeline/baseline.js";
 import { loadPopup } from "./load-popup.js";
@@ -360,6 +368,10 @@ describe("VL.playedVideos — 그날 재생한 영상 목록", () => {
   beforeAll(async () => {
     VL = await loadVL();
   });
+  // 오늘/지난 날짜 판정에 쓰는 가짜 시계를 테스트가 어떻게 끝나든 되돌린다
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   const v = (eventId, watchedAt, extra = {}) => ({
     eventId,
     videoId: `vid-${eventId}`,
@@ -411,7 +423,6 @@ describe("VL.playedVideos — 그날 재생한 영상 목록", () => {
       "2026-03-05",
       { short: "short", uncat: "uncategorized", pending: "pending_time" },
     );
-    vi.useRealTimers();
 
     expect(list.map((x) => [x.eventId, x.mark])).toEqual([
       ["short", "거의 안 봄"],
@@ -436,7 +447,6 @@ describe("VL.playedVideos — 그날 재생한 영상 목록", () => {
       "2026-03-05",
       { short: "short", pending: "pending_time" },
     );
-    vi.useRealTimers();
 
     expect(list.map((x) => [x.eventId, x.mark])).toEqual([
       ["short", "거의 안 봄"],
