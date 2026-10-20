@@ -42,20 +42,76 @@ describe("parseCodesCsv", () => {
     ]);
   });
 
-  it("CRLF 줄바꿈과 끝의 빈 줄을 받는다", () => {
-    expect(parseCodesCsv("code,group\r\nVL-AAA2,EXP\r\n\r\n")).toEqual([
+  it.each([
+    ["CRLF", "code,group\r\nVL-AAA2,EXP\r\nVL-BBB3,CON\r\n"],
+    ["LF", "code,group\nVL-AAA2,EXP\nVL-BBB3,CON\n"],
+    ["CR", "code,group\rVL-AAA2,EXP\rVL-BBB3,CON\r"],
+    ["BOM(엑셀 CSV UTF-8)", "\uFEFFcode,group\r\nVL-AAA2,EXP\r\nVL-BBB3,CON"],
+  ])("%s 줄바꿈·형식을 받는다", (_label, text) => {
+    expect(parseCodesCsv(text)).toEqual([
       ["VL-AAA2", "EXP"],
+      ["VL-BBB3", "CON"],
     ]);
   });
 
-  it("빈 줄과 칸이 모자라거나 비어 있는 줄은 뺀다", () => {
+  it("빈 줄과 쉼표만 있는 줄(엑셀의 빈 행)은 건너뛰고, 헤더 대소문자·공백은 가리지 않는다", () => {
     expect(
-      parseCodesCsv("code,group\nVL-AAA2,EXP\n\nVL-BBB3\n,CON\nVL-CCC4,"),
-    ).toEqual([["VL-AAA2", "EXP"]]);
+      parseCodesCsv("\n Code , GROUP \nVL-AAA2,EXP\n\n , \n,\nVL-BBB3,CON\n\n"),
+    ).toEqual([
+      ["VL-AAA2", "EXP"],
+      ["VL-BBB3", "CON"],
+    ]);
   });
 
-  it("헤더만 있으면 빈 목록이다", () => {
+  it("빈 파일이거나 헤더만 있으면 빈 목록이다(0개 실행은 CLI가 막는다)", () => {
+    expect(parseCodesCsv("")).toEqual([]);
     expect(parseCodesCsv("code,group\n")).toEqual([]);
+  });
+
+  it.each([
+    ["헤더 없는 파일", "VL-AAA2,EXP\nVL-BBB3,CON"],
+    ["세미콜론 구분", "code;group\nVL-AAA2;EXP"],
+    ["탭 구분", "code\tgroup\nVL-AAA2\tEXP"],
+  ])(
+    "%s은 헤더가 아니라고 알리고 코드는 메시지에 넣지 않는다",
+    (_label, text) => {
+      expect(() => parseCodesCsv(text)).toThrow(
+        "1번째 줄이 code,group 헤더가 아니라",
+      );
+      expect(() => parseCodesCsv(text)).not.toThrow("VL-AAA2");
+    },
+  );
+});
+
+// 일부만 등록하면 빠진 참여자가 온보딩할 수 없어, 문제가 있는 줄이 하나라도 있으면 전부 거부한다
+describe("parseCodesCsv — 문제가 있는 줄", () => {
+  it("칸이 빈 줄은 줄 번호를 알리고 같은 명단의 올바른 줄도 돌려주지 않는다", () => {
+    expect(() =>
+      parseCodesCsv("code,group\nVL-AAA2,EXP\nVL-BBB3\n,CON\nVL-CCC4,"),
+    ).toThrow("3번째 줄(빈 칸), 4번째 줄(빈 칸), 5번째 줄(빈 칸)");
+  });
+
+  it.each([
+    ["따옴표로 감싼 code", '"VL-AAA2"'],
+    ["자리 수가 틀린 code", "VL-AAA"],
+    ["확장이 받지 않는 문자(1)", "VL-AAA1"],
+  ])("%s는 code 형식 오류로 알리고 코드는 메시지에 넣지 않는다", (_l, code) => {
+    const text = `code,group\nVL-BBB3,CON\n${code},EXP`;
+
+    expect(() => parseCodesCsv(text)).toThrow("3번째 줄(code 형식)");
+    expect(() => parseCodesCsv(text)).not.toThrow(code);
+  });
+
+  it("같은 code(대소문자 무관)가 다시 나오면 처음 나온 줄 번호와 함께 알린다", () => {
+    expect(() =>
+      parseCodesCsv("code,group\nVL-AAA2,EXP\nVL-BBB3,CON\nvl-aaa2,CON"),
+    ).toThrow("4번째 줄(2번째 줄과 같은 code)");
+  });
+
+  it("줄 번호는 앞쪽 빈 줄까지 센 원본 파일 기준이고, 여러 문제를 한 번에 알린다", () => {
+    expect(() =>
+      parseCodesCsv("\n\ncode,group\nVL-AAA2,EXP\nVL-BBB3,XXX\n\nVL-CC,CON"),
+    ).toThrow("5번째 줄(XXX), 7번째 줄(code 형식)");
   });
 });
 
