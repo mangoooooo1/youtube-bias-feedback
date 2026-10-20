@@ -282,28 +282,13 @@ function _isIncompleteForCon(group, reviews) {
   return VL.isConGroup(group) && (reviews || []).length < VL.TOTAL_WEEKS;
 }
 
-// 끝난 구간인데 리뷰가 없으면(화면에 "분석 중") 서버가 아직 만들기 전이다.
-// buildWeeksData와 같은 기준으로 판단해, 그동안은 오늘 캐시가 있어도 다시 묻는다.
-function _hasEndedPeriodWithoutReview(installDate, reviews) {
-  const reviewed = new Set(
-    (reviews || []).filter((r) => r.review).map((r) => r.periodIndex),
-  );
-  const today = dateStr(new Date());
-  for (let w = 1; w <= VL.TOTAL_WEEKS; w++) {
-    const weekEnd = dayFromInstall(installDate, w * VL.DAYS_PER_PERIOD - 1);
-    if (weekEnd < today && !reviewed.has(w)) return true;
-  }
-  return false;
-}
-
 // 기간 리뷰 로컬 캐싱
-// 팝업을 열 때마다 서버를 조회하지 않고, 캐시가 오늘 날짜 것이 아니거나 끝난 구간의 리뷰가 빠졌을 때만 재조회
+// 팝업을 열 때마다 서버를 조회하지 않고, 캐시가 오늘 날짜 것이 아닐 때만 재조회
 async function getPeriodReviewsCached(
   serverUrl,
   anonymousId,
   group,
   participantToken,
-  installDate,
 ) {
   const { periodReviewsCache } =
     await chrome.storage.local.get("periodReviewsCache");
@@ -313,8 +298,7 @@ async function getPeriodReviewsCached(
     periodReviewsCache &&
     periodReviewsCache.anonymousId === anonymousId &&
     periodReviewsCache.dateStr === todayStr &&
-    !_isIncompleteForCon(group, periodReviewsCache.reviews) &&
-    !_hasEndedPeriodWithoutReview(installDate, periodReviewsCache.reviews)
+    !_isIncompleteForCon(group, periodReviewsCache.reviews)
   ) {
     return periodReviewsCache.reviews;
   }
@@ -1221,7 +1205,6 @@ async function boot() {
       stored.anonymousId,
       stored.group,
       stored.participantToken,
-      installDate,
     );
   }
   VL._studyEndNoticeShown = !!stored.studyEndNoticeShown;
