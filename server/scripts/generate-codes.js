@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 참여코드 명단 생성 — seed-codes.js가 그대로 읽는 code,group CSV를 만든다.
+ * 참여코드 명단 생성 — scripts/seed-codes.js가 그대로 읽는 code,group CSV를 만든다.
  *
  * 형식은 확장 프로그램 온보딩의 parseParticipantCode(extension/popup/viewlens-screens.js)가
  * 받는 규칙(^[A-Z]{2,3}-[A-Z2-9]{4}$)을 따라야 한다. 모든 코드가 같은 접두사(VL)를 써서
@@ -21,6 +21,8 @@ const CODE_LENGTH = 4;
 const CODE_SPACE = CODE_CHARS.length ** CODE_LENGTH;
 const PREFIX = "VL";
 const DEFAULT_OUT = path.join(__dirname, "..", "codes.csv");
+// 명단에 쓸 수 있는 그룹. seed-codes.js가 같은 목록으로 명단을 검증한다(TEST 그룹은 명단에 넣지 않음)
+const CODE_GROUPS = ["EXP", "CON"];
 
 /**
  * @param {{exp: number, con: number}} counts
@@ -36,10 +38,9 @@ function generateCodes({ exp, con }, randomInt = crypto.randomInt) {
   }
   const seen = new Set();
   const rows = [];
-  for (const [group, count] of [
-    ["EXP", exp],
-    ["CON", con],
-  ]) {
+  const counts = { EXP: exp, CON: con };
+  for (const group of CODE_GROUPS) {
+    const count = counts[group];
     let made = 0;
     while (made < count) {
       let suffix = "";
@@ -117,4 +118,5 @@ module.exports = {
   parseArgs,
   CODE_CHARS,
   CODE_SPACE,
+  CODE_GROUPS,
 };
