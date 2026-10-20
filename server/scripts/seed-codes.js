@@ -14,38 +14,65 @@
 const fs = require("fs");
 const path = require("path");
 
-// node server/scripts/seed-codes.js처럼 repo 루트에서 실행될 수 있으므로, cwd 기준 기본 동작에
-// 의존하지 않고 명시적으로 server/.env를 불러온다 (server/scripts/backup-db.js와 동일 이유).
-require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
-
-const { db, initializeDB } = require("../db");
-
-initializeDB(); // issued_codes 테이블 보장
-
-const file = process.argv[2];
-if (!file) {
-  console.error("사용법: node scripts/seed-codes.js <codes.csv>");
-  process.exit(1);
+/**
+ * 명단 CSV를 [code, group] 줄 목록으로 읽는다. 첫 줄은 헤더로 버리고, 칸이 모자란 줄은 뺀다.
+ * @param {string} text
+ * @returns {string[][]}
+ */
+function parseCodesCsv(text) {
+  return text
+    .trim()
+    .split(/\r?\n/)
+    .slice(1) // 헤더 제거
+    .map((l) => l.split(",").map((s) => s.trim()))
+    .filter((r) => r.length >= 2 && r[0] && r[1]);
 }
 
-const lines = fs.readFileSync(file, "utf8").trim().split(/\r?\n/);
-const rows = lines
-  .slice(1) // 헤더 제거
-  .map((l) => l.split(",").map((s) => s.trim()))
-  .filter((r) => r.length >= 2 && r[0] && r[1]);
+/**
+ * 명단을 issued_codes에 등록한다(대문자로 맞추고, 이미 있는 code는 건너뜀).
+ * @param {import("better-sqlite3").Database} db
+ * @param {string[][]} rows - parseCodesCsv 결과
+ * @returns {{inserted: number, total: number}}
+ */
+function seedCodes(db, rows) {
+  const stmt = db.prepare(
+    "INSERT OR IGNORE INTO issued_codes (code, group_code) VALUES (?, ?)",
+  );
+  const insertMany = db.transaction((rows) => {
+    let inserted = 0;
+    for (const [code, group] of rows) {
+      const info = stmt.run(code.toUpperCase(), group.toUpperCase());
+      inserted += info.changes;
+    }
+    return inserted;
+  });
 
-const stmt = db.prepare(
-  "INSERT OR IGNORE INTO issued_codes (code, group_code) VALUES (?, ?)",
-);
-const insertMany = db.transaction((rows) => {
-  let inserted = 0;
-  for (const [code, group] of rows) {
-    const info = stmt.run(code.toUpperCase(), group.toUpperCase());
-    inserted += info.changes;
+  const inserted = insertMany(rows);
+  const total = db.prepare("SELECT COUNT(*) AS c FROM issued_codes").get().c;
+  return { inserted, total };
+}
+
+if (require.main === module) {
+  try {
+    const file = process.argv[2];
+    if (!file)
+      throw new Error("사용법: node scripts/seed-codes.js <codes.csv>");
+
+    // node server/scripts/seed-codes.js처럼 repo 루트에서 실행될 수 있으므로, cwd 기준 기본 동작에
+    // 의존하지 않고 명시적으로 server/.env를 불러온다 (server/scripts/backup-db.js와 동일 이유).
+    require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
+    const { db, initializeDB } = require("../db");
+    initializeDB(); // issued_codes 테이블 보장
+
+    const { inserted, total } = seedCodes(
+      db,
+      parseCodesCsv(fs.readFileSync(file, "utf8")),
+    );
+    console.log(`신규 등록: ${inserted}개 / issued_codes 총계: ${total}개`);
+  } catch (err) {
+    console.error(err.message);
+    process.exitCode = 1;
   }
-  return inserted;
-});
+}
 
-const inserted = insertMany(rows);
-const total = db.prepare("SELECT COUNT(*) AS c FROM issued_codes").get().c;
-console.log(`신규 등록: ${inserted}개 / issued_codes 총계: ${total}개`);
+module.exports = { parseCodesCsv, seedCodes };
