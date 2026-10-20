@@ -282,3 +282,30 @@ describe("aggregateViewing — 민감도 분석용 측정 정의 옵션", () => 
     ).toBe(3);
   });
 });
+
+describe("aggregateViewing — 엔트로피 정밀도", () => {
+  it("엔트로피는 반올림 전 비율로 계산하고, 저장·화면용 분포는 반올림된 값 그대로다", () => {
+    // 세 분야 같은 시간 → 원래 비율 1/3, 반올림 비율 0.333
+    const entries = [
+      video({ categoryId: MUSIC }),
+      video({ categoryId: SPORTS }),
+      video({ categoryId: GAME }),
+    ];
+    const result = aggregateViewing(entries);
+    expect(result.analysisDistribution).toEqual({
+      음악: 0.333,
+      스포츠: 0.333,
+      게임: 0.333,
+    });
+    expect(result.weightedDistribution).toEqual({
+      음악: 0.333,
+      스포츠: 0.333,
+      게임: 0.333,
+    });
+    expect(result.entropy).toBeCloseTo(Math.log2(3), 12);
+    expect(result.weightedEntropy).toBeCloseTo(Math.log2(3), 12);
+    // 반올림 비율로 계산한 값(약 0.00014 작음)과 구별된다
+    const fromRounded = -3 * (0.333 * Math.log2(0.333));
+    expect(result.entropy).not.toBeCloseTo(fromRounded, 6);
+  });
+});
