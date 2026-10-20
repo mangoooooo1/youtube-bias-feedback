@@ -34,8 +34,8 @@ function cappedWatchSeconds(watchedSeconds, durationSeconds) {
  * 그래프에서 빠지는 사유. 그래프에 들어가면 null.
  * 카테고리 없음을 시청 시간 모름보다 먼저 본다 — 시청 시간은 나중에 채워지지만 카테고리는 대개 그렇지 않다.
  */
-function excludedReason(entry) {
-  if (!isValidWatch(entry)) return EXCLUDED_REASONS.SHORT;
+function excludedReason(entry, minRelativeRatio) {
+  if (!isValidWatch(entry, { minRelativeRatio })) return EXCLUDED_REASONS.SHORT;
   if (entry.categoryId == null) return EXCLUDED_REASONS.UNCATEGORIZED;
   if (entry.watchedSeconds == null) return EXCLUDED_REASONS.PENDING_TIME;
   return null;
@@ -44,16 +44,27 @@ function excludedReason(entry) {
 /**
  * @param {Array<{eventId?: string, categoryId: number|null, durationSeconds: number|null,
  *   watchedSeconds: number|null, watchedAt?: string}>} entries - 영상 기록(재시청은 별도 항목)
+ * @param {{capWatchSeconds?: boolean, minRelativeRatio?: number}} [options] - 민감도 분석용.
+ *   시청 시간 상한 적용 여부(기본 true)와 유효 시청 상대 기준(기본 isValidWatch 값). 화면·리뷰는 넘기지 않는다
  * @returns {object} 집계 결과 — 필드 설명은 본문 주석 참고
  */
-function aggregateViewing(entries) {
-  const withReason = entries.map((e) => ({ ...e, reason: excludedReason(e) }));
+function aggregateViewing(
+  entries,
+  { capWatchSeconds = true, minRelativeRatio } = {},
+) {
+  const withReason = entries.map((e) => ({
+    ...e,
+    reason: excludedReason(e, minRelativeRatio),
+  }));
   const valid = withReason.filter((e) => e.reason !== EXCLUDED_REASONS.SHORT);
   const chart = withReason.filter((e) => e.reason === null);
   const countOf = (reason) =>
     withReason.filter((e) => e.reason === reason).length;
 
-  const capped = (e) => cappedWatchSeconds(e.watchedSeconds, e.durationSeconds);
+  const capped = (e) =>
+    capWatchSeconds
+      ? cappedWatchSeconds(e.watchedSeconds, e.durationSeconds)
+      : e.watchedSeconds;
   const chartSeconds = chart.reduce((sum, e) => sum + capped(e), 0);
 
   // 분석용: 사전등록 정의. 상한 적용한 시청 시간이 양수인 영상이 없으면 null(기존 동작과 같음).
