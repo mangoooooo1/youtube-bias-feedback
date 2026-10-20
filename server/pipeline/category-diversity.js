@@ -68,15 +68,21 @@ const MIN_RELATIVE_WATCH_RATIO = 0.25;
 
 /**
  * @param {{watchedSeconds: number|null|undefined, durationSeconds: number|null|undefined}} entry
+ * @param {{minRelativeRatio?: number}} [options] - 민감도 분석용 상대 기준. 숫자가 아니면 기본값
+ *   (filter(isValidWatch)처럼 배열 인덱스가 들어와도 기본값을 쓴다)
  * @returns {boolean} true면 "실제 시청"으로 인정. watchedSeconds를 모르면(계측 실패·구버전
  *   확장 등) 보수적으로 true를 반환한다. 데이터가 없다고 없는 셈 치면(무효 처리) 기존
  *   집계 방식(모든 영상 포함)보다 오히려 더 많은 영상을 부당하게 탈락시키게 된다.
  */
-function isValidWatch({ watchedSeconds, durationSeconds }) {
+function isValidWatch({ watchedSeconds, durationSeconds }, options) {
+  const minRelativeRatio =
+    typeof options?.minRelativeRatio === "number"
+      ? options.minRelativeRatio
+      : MIN_RELATIVE_WATCH_RATIO;
   if (watchedSeconds === null || watchedSeconds === undefined) return true;
   if (watchedSeconds >= MIN_ABSOLUTE_WATCH_SECONDS) return true;
   if (durationSeconds && durationSeconds > 0) {
-    return watchedSeconds / durationSeconds >= MIN_RELATIVE_WATCH_RATIO;
+    return watchedSeconds / durationSeconds >= minRelativeRatio;
   }
   return false;
 }
