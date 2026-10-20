@@ -17,33 +17,71 @@ const { CODE_GROUPS } = require("./generate-codes");
 
 const isAllowedGroup = (group) => CODE_GROUPS.includes(group.toUpperCase());
 
+// 확장 온보딩(parseParticipantCode, extension/popup/viewlens-screens.js)이 받는 형식과 같다.
+// 런타임이 달라 모듈 공유가 안 돼 중복 정의(바뀌면 양쪽 다 갱신). 따옴표째 들어온 code도 여기서 걸린다.
+const CODE_PATTERN = /^[A-Z]{2,3}-[A-Z2-9]{4}$/;
+
 function invalidGroupError(where) {
   return new Error(
     `group은 ${CODE_GROUPS.join("/")}만 쓸 수 있어 아무것도 등록하지 않았습니다: ${where.join(", ")}`,
   );
 }
 
+const cellsOf = (line) => line.split(",").map((s) => s.trim());
+
 /**
- * 명단 CSV를 [code, group] 줄 목록으로 읽는다. 첫 줄은 헤더로 버리고, 칸이 모자란 줄은 뺀다.
- * 허용되지 않은 group이 하나라도 있으면 그 줄 번호와 group 값을 담아 예외를 던진다.
+ * 명단 CSV를 [code, group] 줄 목록으로 읽는다.
+ * - BOM과 CRLF·LF·CR 줄바꿈을 받고, 빈 줄(쉼표만 있는 줄 포함)은 건너뛴다.
+ * - 첫 내용 줄은 code,group 헤더여야 한다. 헤더가 없거나 쉼표가 아닌 구분자면 첫 코드가
+ *   빠지거나 0개로 끝나 알아채기 어렵다.
+ * - 칸이 빈 줄, 허용되지 않은 group, 형식이 틀린 code, 같은 code가 다시 나온 줄이 하나라도 있으면
+ *   원본 파일 기준 줄 번호를 담아 예외를 던진다. 일부만 등록하면 빠진 참여자가 온보딩할 수 없다.
  * 코드 원본은 메시지에 넣지 않는다(터미널 기록에 남지 않도록).
  * @param {string} text
  * @returns {string[][]}
  */
 function parseCodesCsv(text) {
+  const lines = text.replace(/^\uFEFF/, "").split(/\r\n|\r|\n/);
+  const isBlank = (line) => cellsOf(line).every((s) => s === "");
+  const headerIndex = lines.findIndex((line) => !isBlank(line));
+  if (headerIndex === -1) return [];
+  const [first, second] = cellsOf(lines[headerIndex]).map((s) =>
+    s.toLowerCase(),
+  );
+  if (first !== "code" || second !== "group") {
+    // 헤더 자리에 코드가 있을 수 있어 내용은 메시지에 넣지 않는다
+    throw new Error(
+      `${headerIndex + 1}번째 줄이 code,group 헤더가 아니라 아무것도 등록하지 않았습니다. 쉼표로 구분한 CSV인지, 첫 줄에 헤더가 있는지 확인하세요.`,
+    );
+  }
+
   const rows = [];
   const invalid = [];
-  text
-    .trim()
-    .split(/\r?\n/)
-    .forEach((l, i) => {
-      if (i === 0) return; // 헤더 제거
-      const r = l.split(",").map((s) => s.trim());
-      if (!(r.length >= 2 && r[0] && r[1])) return;
-      if (!isAllowedGroup(r[1])) invalid.push(`${i + 1}번째 줄(${r[1]})`);
-      rows.push(r);
-    });
-  if (invalid.length > 0) throw invalidGroupError(invalid);
+  const firstLineOf = new Map();
+  lines.slice(headerIndex + 1).forEach((line, offset) => {
+    if (isBlank(line)) return;
+    const lineNo = headerIndex + offset + 2;
+    const [code = "", group = ""] = cellsOf(line);
+    if (!code || !group) {
+      invalid.push(`${lineNo}번째 줄(빈 칸)`);
+    } else if (!isAllowedGroup(group)) {
+      invalid.push(`${lineNo}번째 줄(${group})`);
+    } else if (!CODE_PATTERN.test(code.toUpperCase())) {
+      invalid.push(`${lineNo}번째 줄(code 형식)`);
+    } else if (firstLineOf.has(code.toUpperCase())) {
+      invalid.push(
+        `${lineNo}번째 줄(${firstLineOf.get(code.toUpperCase())}번째 줄과 같은 code)`,
+      );
+    } else {
+      firstLineOf.set(code.toUpperCase(), lineNo);
+      rows.push([code, group]);
+    }
+  });
+  if (invalid.length > 0) {
+    throw new Error(
+      `명단에 문제가 있어 아무것도 등록하지 않았습니다(group은 ${CODE_GROUPS.join("/")}만): ${invalid.join(", ")}`,
+    );
+  }
   return rows;
 }
 
@@ -88,10 +126,12 @@ if (require.main === module) {
     const { db, initializeDB } = require("../db");
     initializeDB(); // issued_codes 테이블 보장
 
-    const { inserted, total } = seedCodes(
-      db,
-      parseCodesCsv(fs.readFileSync(file, "utf8")),
-    );
+    const rows = parseCodesCsv(fs.readFileSync(file, "utf8"));
+    if (rows.length === 0)
+      throw new Error(
+        "등록할 코드가 없습니다. 헤더 아래에 code,group 줄이 있는지 확인하세요.",
+      );
+    const { inserted, total } = seedCodes(db, rows);
     console.log(`신규 등록: ${inserted}개 / issued_codes 총계: ${total}개`);
   } catch (err) {
     console.error(err.message);
