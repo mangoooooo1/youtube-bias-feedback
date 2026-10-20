@@ -197,6 +197,11 @@ let writeQueue = Promise.resolve();
 function rememberTrackedVideo(sessionId, eventId) {
   if (typeof trackedVideoIdentity === "undefined") return;
   trackedVideoIdentity = { sessionId, eventId };
+  // 체크포인트는 지금 재는 값(watchTracker)과 같은 영상에만 쓴다. 다음 영상으로 넘어가며
+  // watchTracker가 리셋된 뒤 이 함수가 불리기 전까지는 대상이 없어 이전 영상 체크포인트를 덮지 않는다.
+  if (typeof watchTracker !== "undefined" && watchTracker) {
+    watchTracker.checkpointTarget = { sessionId, eventId };
+  }
 }
 
 /**
@@ -253,9 +258,11 @@ async function applyWatchStatsPatch(target, patch) {
 async function finalizePreviousWatchStats(target, stats) {
   // 라이브 키·sessions[] 어디에도 없으면(참여자가 데이터를 지웠거나 하는 극단적
   // 경우) 조용히 포기한다. 갱신할 대상 자체가 없다.
+  // 최종값은 체크포인트로 대신 보낸 값보다 항상 우선한다(storage.js hasFinalWatchStats)
   const applied = await applyWatchStatsPatch(target, {
     ...stats,
     watchStatsSent: false,
+    watchStatsSource: "final",
   });
   if (!applied) return;
 
@@ -752,6 +759,34 @@ document.addEventListener(
 // 최초 로드 시 한 번만 직접 호출한다.
 resetWatchTracker();
 
+// 탭을 갑자기 닫아도 마지막 기록 시점까지의 시청시간이 남도록, 재고 있는 영상의 시청시간을
+// 주기적으로 체크포인트 키에 덮어쓴다. 영상 기록과 따로 두어 읽지 않고 한 번에 쓴다.
+// background.js 재시도 큐가 오래된 체크포인트를 대신 보낸다. 접두사는 storage.js의
+// WATCH_CHECKPOINT_PREFIX와, 간격은 WATCH_CHECKPOINT_STALE_MS보다 짧게 맞춘다(classic script라 import 불가).
+const WATCH_CHECKPOINT_PREFIX = "watchcp__";
+const WATCH_CHECKPOINT_INTERVAL_MS = 15 * 1000;
+
+function writeWatchCheckpoint() {
+  const target = watchTracker?.checkpointTarget;
+  const stats = captureWatchStatsSnapshot();
+  if (!target?.eventId || !stats) return;
+  try {
+    chrome.storage.local
+      .set({
+        [`${WATCH_CHECKPOINT_PREFIX}${target.eventId}`]: {
+          ...target,
+          ...stats,
+          at: Date.now(),
+        },
+      })
+      .catch(() => {});
+  } catch {
+    // 확장 리로드·업데이트로 컨텍스트가 무효화되면 storage 접근 자체가 예외를 던진다
+  }
+}
+
+setInterval(writeWatchCheckpoint, WATCH_CHECKPOINT_INTERVAL_MS);
+
 // 탭 종료 시 마지막 영상의 시청시간을 최선노력으로 로컬에만 남긴다. sendBeacon은 POST만
 // 지원해 이 값을 반영할 PATCH를 못 쓰므로, background.js의 재시도 큐가 다음 기회에
 // 전송하게 한다. storage.local.set도 pagehide 시점 완주를 보장하진 않는다.
@@ -759,11 +794,17 @@ resetWatchTracker();
 // 다른 탭이 덮어썼을 수 있어 여기서 그걸 읽으면 다른 탭의 eventId를 이 탭의
 // 시청시간으로 오염시킬 수 있다.
 window.addEventListener("pagehide", () => {
+  // 한 번의 쓰기라 아래 읽고-합쳐-쓰는 저장보다 닫히는 순간에 끝날 가능성이 높다
+  writeWatchCheckpoint();
   const stats = captureWatchStatsSnapshot();
   if (!stats) return;
   const target = captureTrackedVideoIdentity();
   if (!target?.eventId) return;
-  applyWatchStatsPatch(target, { ...stats, watchStatsSent: false });
+  applyWatchStatsPatch(target, {
+    ...stats,
+    watchStatsSent: false,
+    watchStatsSource: "final",
+  });
 });
 
 // 테스트(Vitest)에서만 내부 함수를 꺼낸다. 콘텐츠 스크립트에는 module이 없어 이 블록은 실행되지 않는다.
@@ -782,5 +823,8 @@ if (typeof module !== "undefined" && module.exports) {
     rememberTrackedVideo,
     currentWatchedMs,
     resetWatchTracker,
+    writeWatchCheckpoint,
+    WATCH_CHECKPOINT_PREFIX,
+    WATCH_CHECKPOINT_INTERVAL_MS,
   };
 }
