@@ -180,4 +180,10 @@ if (require.main === module) {
   }
 }
 
-module.exports = { computeGaps, summarizeGaps, collectActivity, run };
+module.exports = {
+  computeGaps,
+  summarizeGaps,
+  collectActivity,
+  run,
+  printSummary,
+};
