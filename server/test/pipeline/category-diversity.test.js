@@ -50,8 +50,40 @@ describe("calculateEntropy", () => {
     expect(calculateEntropy({ a: 0.25, b: 0.25, c: 0.25, d: 0.25 })).toBe(2);
   });
 
-  it("비균등 분포(0.25/0.75)의 entropy를 소수점 2자리로 반올림한다", () => {
-    expect(calculateEntropy({ 음악: 0.25, 게임: 0.75 })).toBe(0.81);
+  it("비균등 분포(0.25/0.75)의 entropy를 반올림하지 않는다", () => {
+    const expected = -(0.25 * Math.log2(0.25) + 0.75 * Math.log2(0.75));
+    expect(calculateEntropy({ 음악: 0.25, 게임: 0.75 })).toBe(expected);
+    expect(expected).not.toBe(0.81);
+  });
+
+  it("단일 카테고리에서 -0이 아니라 0을 돌려준다", () => {
+    expect(Object.is(calculateEntropy({ 음악: 1 }), 0)).toBe(true);
+  });
+});
+
+describe("분포 함수 — round 옵션", () => {
+  it("기본은 소수 셋째 자리로 반올림하고, round: false면 원래 비율이다", () => {
+    const ids = [10, 17, 20];
+    expect(calculateDistribution(ids)).toEqual({
+      음악: 0.333,
+      스포츠: 0.333,
+      게임: 0.333,
+    });
+    expect(calculateDistribution(ids, { round: false }).음악).toBe(1 / 3);
+  });
+
+  it("가중 분포도 같은 규칙을 따른다", () => {
+    const entries = [
+      { categoryId: 10, weight: 1 },
+      { categoryId: 20, weight: 2 },
+    ];
+    expect(calculateWeightedDistribution(entries)).toEqual({
+      음악: 0.333,
+      게임: 0.667,
+    });
+    expect(calculateWeightedDistribution(entries, { round: false }).음악).toBe(
+      1 / 3,
+    );
   });
 });
 
