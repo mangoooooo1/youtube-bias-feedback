@@ -100,8 +100,11 @@ function loadEntries(db, anonymousId) {
   }));
 }
 
-/** 참여자 × 완료된 기간 행 목록 */
-function run(db, { groups, now = new Date() }) {
+/**
+ * 참여자 × 완료된 기간마다 computePeriod(그 기간 영상 기록)를 계산한 리포트.
+ * 측정 정의 기준 민감도 분석(compute-h2-measurement-sensitivity.js)도 같은 틀을 쓴다.
+ */
+function buildPeriodReport(db, { groups, now = new Date() }, computePeriod) {
   const placeholders = groups.map(() => "?").join(",");
   const participants = db
     .prepare(
@@ -122,7 +125,7 @@ function run(db, { groups, now = new Date() }) {
         participant: fingerprint(p.anonymousId),
         groupCode: p.groupCode,
         ...period,
-        ...computePeriodSensitivity(inPeriod),
+        ...computePeriod(inPeriod),
       });
     }
   }
@@ -135,6 +138,11 @@ function run(db, { groups, now = new Date() }) {
     baselineDays: BASELINE_DAYS,
     rows,
   };
+}
+
+/** 참여자 × 완료된 기간 행 목록 */
+function run(db, options) {
+  return buildPeriodReport(db, options, computePeriodSensitivity);
 }
 
 /** 저장한 파일 경로를 돌려준다. 입력이 잘못되면 exitCode 1로 두고 null */
@@ -198,6 +206,7 @@ module.exports = {
   computePeriodSensitivity,
   completedPeriods,
   loadEntries,
+  buildPeriodReport,
   run,
   main,
   DEFAULT_GROUPS,
