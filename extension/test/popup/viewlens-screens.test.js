@@ -33,9 +33,10 @@ const DAY = {
 describe("screenToday — 서버 집계 기준 그래프 영역", () => {
   let screenToday;
   let VL;
+  let koreanDateLabel;
 
   beforeEach(async () => {
-    ({ screenToday, VL } = await loadScreens());
+    ({ screenToday, VL, koreanDateLabel } = await loadScreens());
   });
 
   function render(dayOverrides = {}, status = "ok", todayOverrides = {}) {
@@ -55,7 +56,8 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
   }
 
   it("제목 문장, 공통 범례(시간 순), 영상 수(확인됨)와 확인 중 수를 보여 준다", () => {
-    const html = render();
+    // "확인 중"은 오늘만 보인다
+    const html = render({}, "ok", { dateLabel: koreanDateLabel(new Date()) });
     expect(html).toContain(
       "시청 시간이 가장 긴 분야는 음악이었지만, 영상을 가장 많이 본 분야는 스포츠였어요.",
     );
@@ -68,11 +70,12 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
     expect(html).not.toContain("개 분야");
   });
 
-  it("영상 수 줄이 제목 문장보다 위, 범례는 도넛 카드 안 도넛 아래", () => {
+  it("제목 문장이 영상 수 줄보다 위, 범례는 도넛 카드 안 도넛 아래", () => {
     const html = render();
     const title = html.indexOf("시청 시간이 가장 긴 분야는");
     const card = html.indexOf("유튜브 시청 분야별 비중");
-    expect(html.indexOf("영상 13개")).toBeLessThan(title);
+    expect(title).toBeLessThan(html.indexOf("영상 13개"));
+    expect(html.indexOf("영상 13개")).toBeLessThan(card);
     expect(html.indexOf(">음악</span>")).toBeGreaterThan(card);
     expect(html.indexOf(">음악</span>")).toBeGreaterThan(
       html.lastIndexOf("영상 개수"),
@@ -81,6 +84,22 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
 
   it("확인 중인 영상이 없으면 그 줄을 숨긴다", () => {
     expect(render({ unconfirmedCount: 0 })).not.toContain("시청 시간 확인 중");
+  });
+
+  it("지난 날짜에는 시청 시간 확인 중 수를 보이지 않는다(그날 시청 시간은 더 오지 않음)", () => {
+    const html = render({ unconfirmedCount: 4 });
+    expect(html).toContain("영상 13개");
+    expect(html).not.toContain("시청 시간 확인 중");
+  });
+
+  it("제목이 없으면 영상 수 줄이 날짜 바로 다음에 온다", () => {
+    const html = render({
+      timeDistribution: {},
+      countDistribution: {},
+      chartCount: 0,
+    });
+    expect(html).toContain("영상 13개");
+    expect(html.indexOf("3월 5일")).toBeLessThan(html.indexOf("영상 13개"));
   });
 
   it("도넛 두 개는 가운데 이름만 두고, 조각마다 퍼센트와 시간·개수를 툴팁으로 단다", () => {
@@ -378,6 +397,26 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
     );
     expect(keys.slice(0, 3)).toEqual(["게임", "음악", "스포츠"]);
     expect(keys).toHaveLength(4);
+  });
+
+  it("날짜 범위 아래에 분야 수(그래프 분야)와 영상 수(시청 시간 확인된 영상)를 보인다", () => {
+    const html = render();
+    expect(html).toContain("분야 5개 · 영상 9개");
+    expect(html.indexOf("6/5 ~ 6/8")).toBeLessThan(
+      html.indexOf("분야 5개 · 영상 9개"),
+    );
+  });
+
+  it("그래프에 넣을 기록이 없는 구간에는 분야·영상 수 줄이 없다", () => {
+    const html = render({
+      ...PERIOD,
+      timeDistribution: {},
+      countDistribution: {},
+      chartCount: 0,
+    });
+    expect(html).toContain("6/5 ~ 6/8");
+    expect(html).not.toContain("분야 0개");
+    expect(html).not.toMatch(/분야 \d+개 · 영상/);
   });
 
   it("꺾은선·구간 전체 도넛 2개·안내 문구를 그리고, 리뷰 카드 제목은 직전 구간 비교 질문", () => {

@@ -315,10 +315,10 @@ function screenToday() {
       <span style="font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-accent)">아래로 스크롤해서 피드백 확인하세요!</span>
     </div>`
     : "";
-  // "영상 N개"는 시청 시간이 확인된 유효 영상(리뷰와 같은 기준), 확인 중인 영상은 따로 센다
+  // "영상 N개"는 시청 시간이 확인된 유효 영상(리뷰와 같은 기준), 확인 중인 영상은 따로 센다.
   const countBlock = `<div style="display:flex;flex-direction:column;align-items:flex-end;gap:1px;color:var(--vl-ink-2);font-size:var(--vl-fs-2);font-weight:600;line-height:1.3;white-space:nowrap">
       <span>영상 ${view.confirmedCount}개</span>
-      ${view.unconfirmedCount > 0 ? `<span style="color:var(--vl-ink-3);font-weight:500">시청 시간 확인 중 ${view.unconfirmedCount}개</span>` : ""}
+      ${isToday && view.unconfirmedCount > 0 ? `<span style="color:var(--vl-ink-3);font-weight:500">시청 시간 확인 중 ${view.unconfirmedCount}개</span>` : ""}
     </div>`;
 
   return `<div style="display:flex;flex-direction:column">
@@ -330,15 +330,15 @@ function screenToday() {
       </div>
       ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
     </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-      <div>${isCollecting ? collectingRow : scrollNudgeRow}</div>
-      ${countBlock}
-    </div>
     ${
       view.title
         ? `<div style="font-size:var(--vl-fs-5);font-weight:800;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(view.title)}</div>`
         : ""
     }
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <div>${isCollecting ? collectingRow : scrollNudgeRow}</div>
+      ${countBlock}
+    </div>
 
     ${_todayChartCard(view, isToday)}
 
@@ -496,7 +496,10 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
     약 13.6px) — 아래 제목과 맞추려고 줄 전체를 그만큼 왼쪽으로 당긴다. -->
     <div style="display:flex;align-items:flex-start;gap:4px;margin-left:-14px">
       <div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:2px;min-width:0" id="vl-week-btns">${weekBtns}</div>
-      <span style="margin-left:auto;padding-top:6px;font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-ink-2);white-space:nowrap">${range}</span>
+      <div style="margin-left:auto;padding-top:6px;display:flex;flex-direction:column;align-items:flex-end;gap:1px;font-size:var(--vl-fs-2);line-height:1.3;white-space:nowrap">
+        <span style="font-weight:600;color:var(--vl-ink-2)">${range}</span>
+        ${timeDist.length > 0 ? `<span style="font-weight:500;color:var(--vl-ink-3)">분야 ${timeDist.length}개 · 영상 ${period.confirmedCount ?? 0}개</span>` : ""}
+      </div>
     </div>
 
     ${

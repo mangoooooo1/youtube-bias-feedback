@@ -146,6 +146,7 @@ const PLAYED_VIDEO_MARKS = {
   short: "거의 안 봄",
   uncategorized: "분야 미확인",
   pending_time: "확인 중",
+  unconfirmed: "시청 시간 미확인",
 };
 
 // 어디서도 제목을 못 구한 영상의 표시
@@ -189,6 +190,10 @@ function playedVideos(
     ...(liveVideos || []),
   ];
   const seen = new Set();
+  const noTimeMark =
+    dateKey === kstDate(new Date())
+      ? PLAYED_VIDEO_MARKS.pending_time
+      : PLAYED_VIDEO_MARKS.unconfirmed;
   return all
     .filter((v) => {
       const ms = Date.parse(v.watchedAt);
@@ -208,7 +213,7 @@ function playedVideos(
         reason === "short" || reason === "uncategorized"
           ? PLAYED_VIDEO_MARKS[reason]
           : v.watchedSeconds == null || reason === "pending_time"
-            ? PLAYED_VIDEO_MARKS.pending_time
+            ? noTimeMark
             : null;
       return {
         title: videoTitle(v, titles),

@@ -396,6 +396,9 @@ describe("VL.playedVideos — 그날 재생한 영상 목록", () => {
   });
 
   it("서버 사유로 거의 안 봄·분야 미확인·확인 중, 기기에 시청 시간이 없으면 확인 중을 붙인다", () => {
+    // "확인 중"은 오늘 목록에만 붙는다
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-03-05T12:00:00+09:00"));
     const list = VL.playedVideos(
       [],
       [
@@ -408,12 +411,37 @@ describe("VL.playedVideos — 그날 재생한 영상 목록", () => {
       "2026-03-05",
       { short: "short", uncat: "uncategorized", pending: "pending_time" },
     );
+    vi.useRealTimers();
 
     expect(list.map((x) => [x.eventId, x.mark])).toEqual([
       ["short", "거의 안 봄"],
       ["uncat", "분야 미확인"],
       ["pending", "확인 중"],
       ["local-null", "확인 중"],
+      ["ok", null],
+    ]);
+  });
+
+  it("지난 날짜 목록은 시청 시간이 없는 영상에 시청 시간 미확인을 붙인다(그날 시청 시간은 더 오지 않음)", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-03-06T12:00:00+09:00"));
+    const list = VL.playedVideos(
+      [],
+      [
+        v("short", "2026-03-05T10:00:00+09:00"),
+        v("pending", "2026-03-05T10:02:00+09:00"),
+        v("local-null", "2026-03-05T10:03:00+09:00", { watchedSeconds: null }),
+        v("ok", "2026-03-05T10:04:00+09:00"),
+      ],
+      "2026-03-05",
+      { short: "short", pending: "pending_time" },
+    );
+    vi.useRealTimers();
+
+    expect(list.map((x) => [x.eventId, x.mark])).toEqual([
+      ["short", "거의 안 봄"],
+      ["pending", "시청 시간 미확인"],
+      ["local-null", "시청 시간 미확인"],
       ["ok", null],
     ]);
   });
