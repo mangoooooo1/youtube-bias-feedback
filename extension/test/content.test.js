@@ -1071,6 +1071,124 @@ async function loadPagehideHandler(sharedStorage, fetchMock) {
   };
 }
 
+// 재고 있는 영상의 시청시간을 15초마다·탭 종료 시 체크포인트 키에 남긴다
+async function loadCheckpointSection() {
+  const store = {};
+  let pagehide = null;
+  let video = null;
+  const { api } = await loadContent({
+    chrome: {
+      runtime: { id: "fake-extension-id" },
+      storage: {
+        local: {
+          get: async () => ({}),
+          set: async (obj) => {
+            Object.assign(store, obj);
+          },
+        },
+      },
+    },
+    window: {
+      addEventListener: (type, cb) => {
+        if (type === "pagehide") pagehide = cb;
+      },
+    },
+    document: { querySelector: () => video },
+    console: { log: () => {}, warn: () => {} },
+  });
+  return {
+    api,
+    store,
+    pagehide: () => pagehide(),
+    // 새 영상이 재생 중인 상태로 전환되고(리셋), 그 영상의 기록이 끝난 순간(remember)
+    startVideo(eventId) {
+      video = createFakeVideoElement({ paused: false });
+      api.resetWatchTracker();
+      if (eventId) api.rememberTrackedVideo("s1", eventId);
+    },
+  };
+}
+
+describe("content.js 시청시간 체크포인트", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("접두사는 storage.js와 같고, 쓰는 간격은 오래됐다고 보는 기준보다 짧다", async () => {
+    const { api } = await loadCheckpointSection();
+    const storage = await import("../storage.js");
+
+    expect(api.WATCH_CHECKPOINT_PREFIX).toBe(storage.WATCH_CHECKPOINT_PREFIX);
+    expect(api.WATCH_CHECKPOINT_INTERVAL_MS).toBeLessThan(
+      storage.WATCH_CHECKPOINT_STALE_MS,
+    );
+  });
+
+  it("재고 있는 영상의 시청시간을 15초마다 그 영상의 체크포인트 키에 덮어쓴다", async () => {
+    const section = await loadCheckpointSection();
+    section.startVideo("e1");
+
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(section.store.watchcp__e1).toMatchObject({
+      sessionId: "s1",
+      eventId: "e1",
+      watchedSeconds: 15,
+      at: 15000,
+    });
+
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(section.store.watchcp__e1).toMatchObject({
+      watchedSeconds: 30,
+      at: 30000,
+    });
+  });
+
+  it("다음 영상으로 넘어가 기록이 끝나기 전에는 이전 영상 체크포인트를 0에 가깝게 덮지 않는다", async () => {
+    const section = await loadCheckpointSection();
+    section.startVideo("e1");
+    await vi.advanceTimersByTimeAsync(15000);
+
+    section.startVideo(null); // 리셋됐지만 새 영상 기록 전
+    await vi.advanceTimersByTimeAsync(15000);
+
+    expect(section.store.watchcp__e1).toMatchObject({ watchedSeconds: 15 });
+    expect(Object.keys(section.store)).toEqual(["watchcp__e1"]);
+  });
+
+  it("다음 영상의 기록이 끝나면 새 eventId 키에 쓴다", async () => {
+    const section = await loadCheckpointSection();
+    section.startVideo("e1");
+    await vi.advanceTimersByTimeAsync(15000);
+
+    section.startVideo("e2");
+    await vi.advanceTimersByTimeAsync(15000);
+
+    expect(section.store.watchcp__e1).toMatchObject({ watchedSeconds: 15 });
+    expect(section.store.watchcp__e2).toMatchObject({
+      eventId: "e2",
+      watchedSeconds: 15,
+    });
+  });
+
+  it("탭을 닫으면(pagehide) 다음 주기를 기다리지 않고 그 시점까지의 값을 남긴다", async () => {
+    const section = await loadCheckpointSection();
+    section.startVideo("e1");
+    vi.setSystemTime(7000);
+
+    section.pagehide();
+
+    expect(section.store.watchcp__e1).toMatchObject({
+      watchedSeconds: 7,
+      at: 7000,
+    });
+  });
+});
+
 describe("content.js pagehide 핸들러 — 탭별 식별자만 사용한다(코드리뷰 회귀: 다른 탭의 공유 lastRecordedVideo 오염 방지)", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -2078,6 +2196,8 @@ describe("content.js classic script 실행 — 테스트용 내보내기가 브�
       console: { log: () => {}, warn: () => {}, error: () => {} },
       crypto: globalThis.crypto,
       setTimeout,
+      // 실제 타이머를 남기지 않도록 등록만 받는다
+      setInterval: () => 0,
     });
   }
 
