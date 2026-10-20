@@ -8,6 +8,9 @@ window.shouldRetryParticipantSync = shouldRetryParticipantSync;
 window.flushPendingPopupEvents = flushPendingPopupEvents;
 window.loadViewingSummaryCache = loadViewingSummaryCache;
 window.refreshViewingSummary = refreshViewingSummary;
+window.fillMissingTitles = fillMissingTitles;
+window.videoIdsWithoutTitle = videoIdsWithoutTitle;
+window.hasNewDisplayTitle = hasNewDisplayTitle;
 window.resolveTodayCumulative = resolveTodayCumulative;
 const DEFAULT_TONE = "indigo";
 
@@ -403,6 +406,114 @@ async function refreshViewingSummary(serverUrl, anonymousId, participantToken) {
     viewingSummaryCache: { anonymousId, fetchedAt, data },
   });
   return { fetchedAt, data };
+}
+
+// ── 제목이 없는 영상의 제목(oEmbed) ─────────────────────────────────────────────
+// 기록한 제목도 서버 메타데이터 제목도 없는 영상만 YouTube oEmbed로 제목을 받아 기기에 둔다.
+// 화면 표시에만 쓰고 서버로 보내지 않는다(연구 데이터의 제목 출처를 섞지 않기 위해).
+
+const VIDEO_TITLE_CACHE_KEY = "videoTitleCache";
+const OEMBED_TIMEOUT_MS = 5000;
+// 팝업을 한 번 열 때 조회하는 최대 영상 수
+const OEMBED_MAX_PER_OPEN = 20;
+
+/** 받아 둔 oEmbed 제목(videoId → 제목, 비공개·삭제 영상은 null) */
+async function loadFetchedTitles() {
+  const { [VIDEO_TITLE_CACHE_KEY]: cache } = await chrome.storage.local.get(
+    VIDEO_TITLE_CACHE_KEY,
+  );
+  return cache ?? {};
+}
+
+/**
+ * 영상 하나의 제목을 oEmbed로 받는다.
+ * @returns {Promise<string|null|undefined>} 제목, 비공개·삭제라 없으면 null, 다시 시도할 오류면 undefined
+ */
+async function fetchOembedTitle(videoId) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OEMBED_TIMEOUT_MS);
+  const watchUrl = `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+  try {
+    const res = await fetch(
+      `https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(watchUrl)}`,
+      { signal: controller.signal },
+    );
+    // 401(퍼가기 금지·비공개)·404(삭제)는 다시 물어도 같다
+    if (res.status === 401 || res.status === 403 || res.status === 404)
+      return null;
+    if (!res.ok) return undefined;
+    const json = await res.json();
+    return typeof json?.title === "string" && json.title.trim()
+      ? json.title
+      : null;
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * 제목을 못 구한 영상의 제목을 받아 기기에 저장한다. 이미 받아 둔 영상은 다시 묻지 않는다.
+ * @param {string[]} videoIds - 기록한 제목·서버 제목이 모두 없는 영상
+ * @returns {Promise<Record<string, string|null>>} 갱신된 저장본 전체
+ */
+async function fillMissingTitles(videoIds) {
+  const cache = await loadFetchedTitles();
+  const targets = [...new Set(videoIds)]
+    .filter((id) => id && !(id in cache))
+    .slice(0, OEMBED_MAX_PER_OPEN);
+  if (targets.length === 0) return cache;
+  const results = await Promise.all(targets.map(fetchOembedTitle));
+  const fetched = Object.fromEntries(
+    targets
+      .map((id, i) => [id, results[i]])
+      .filter(([, title]) => title !== undefined),
+  );
+  if (Object.keys(fetched).length === 0) return cache;
+  // 받는 사이 다른 팝업이 저장했을 수 있어 다시 읽어 합친다
+  const merged = { ...(await loadFetchedTitles()), ...fetched };
+  await chrome.storage.local.set({ [VIDEO_TITLE_CACHE_KEY]: merged });
+  return merged;
+}
+
+/**
+ * 영상 목록에서 기록한 제목도 서버 제목도 없는 영상의 videoId
+ * @param {Array<{videos?: Array}>} sessions - 끝난 세션들
+ * @param {Array<object>} liveVideos - 진행 중인 세션의 영상 기록
+ * @param {{days?: Array<{correctedTitles?: Record<string, string>}>}|null} summary - 서버 집계
+ */
+function videoIdsWithoutTitle(sessions, liveVideos, summary) {
+  const corrected = new Set(
+    (summary?.days ?? []).flatMap((d) => Object.keys(d.correctedTitles ?? {})),
+  );
+  return [
+    ...(sessions ?? []).flatMap((s) => s.videos ?? []),
+    ...(liveVideos ?? []),
+  ]
+    .filter(
+      (v) =>
+        v.videoId &&
+        !(typeof v.title === "string" && v.title.trim()) &&
+        !(v.eventId && corrected.has(v.eventId)),
+    )
+    .map((v) => v.videoId);
+}
+
+/**
+ * 받아 온 oEmbed 제목 중 화면에 새로 보일 제목이 있는지.
+ * 다시 그리면 스크롤·입력값이 사라져 보일 제목이 생겼을 때만 다시 그린다.
+ * null(비공개·삭제)은 "제목 없음" 그대로라 세지 않는다.
+ * @param {Record<string, string|null>} before - 이전 저장본
+ * @param {Record<string, string|null>} after - 새 저장본
+ */
+function hasNewDisplayTitle(before, after) {
+  return Object.entries(after ?? {}).some(
+    ([id, title]) =>
+      typeof title === "string" &&
+      title.trim() !== "" &&
+      (before ?? {})[id] !== title,
+  );
 }
 
 const TODAY_REVIEWS_TIMEOUT_MS = 5000;
@@ -973,6 +1084,7 @@ async function boot() {
   VL._liveVideos = await loadLiveVideos();
   VL._viewingSummary = await loadViewingSummaryCache(stored.anonymousId);
   VL._viewingSummaryStatus = "loading";
+  VL._fetchedTitles = await loadFetchedTitles();
   // 새로 받아 오면 VL._viewingSummary를 바꾸고 true. 실패하면 저장본을 그대로 두고 false
   const reloadViewingSummary = () =>
     refreshViewingSummary(
@@ -1055,11 +1167,16 @@ async function boot() {
       if (isRealReview(revealData.review)) {
         // 오늘 탭 카드와 같은 영상 목록(그날 재생한 영상 전부 + 서버 사유)
         revealData.dateKey = revealPastDateStr;
+        const revealView = _dayViewForDate(revealPastDateStr);
         revealData.videos = VL.playedVideos(
           sessions,
           VL._liveVideos,
           revealPastDateStr,
-          _dayViewForDate(revealPastDateStr).excludedReasons,
+          revealView.excludedReasons,
+          {
+            correctedTitles: revealView.correctedTitles,
+            fetchedTitles: VL._fetchedTitles,
+          },
         );
         VL._revealPastDay = { dateStr: revealPastDateStr, data: revealData };
       }
@@ -1107,6 +1224,25 @@ async function boot() {
   initialSummaryLoad.then((changed) => {
     if (changed) popup.render();
   });
+  // 제목을 못 구한 영상은 서버 집계를 받은 뒤(서버 제목이 있는 영상은 빼고) oEmbed로 채운다
+  initialSummaryLoad
+    .then(() =>
+      fillMissingTitles(
+        videoIdsWithoutTitle(
+          VL._allSessions,
+          VL._liveVideos,
+          VL._viewingSummary?.data,
+        ),
+      ),
+    )
+    .then((titles) => {
+      const changed = hasNewDisplayTitle(VL._fetchedTitles, titles);
+      VL._fetchedTitles = titles;
+      if (changed) popup.render();
+    })
+    .catch((error) => {
+      console.warn("[popup] 영상 제목 조회 오류:", error.message);
+    });
   popup.mount({
     onboarded: !!stored.group,
     group: stored.group || null,

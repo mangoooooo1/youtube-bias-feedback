@@ -189,7 +189,13 @@ function getDurationsForVideos(db, videoIds) {
   return videoIds.map((id) => durationById.get(id) ?? null);
 }
 
+// 리뷰에 쓰는 영상 제목. 확장이 보낸 제목(e.title)은 탭 제목을 읽어 다른 영상 것이 붙을 수 있어
+// YouTube 메타데이터 제목(m.title)을 우선한다. 원본 e.title은 바꾸지 않는다.
+// video_events는 e, video_metadata는 m으로 LEFT JOIN한 쿼리에서 쓴다.
+const PREFERRED_TITLE_SQL = "COALESCE(NULLIF(TRIM(m.title), ''), e.title)";
+
 module.exports = {
+  PREFERRED_TITLE_SQL,
   ensureVideoMetadata,
   getCategoryIdsForVideos,
   getDurationsForVideos,

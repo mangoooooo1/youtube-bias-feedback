@@ -404,6 +404,168 @@ describe("content.js handleVideoChange — 재진입 경합(연구 무결성 점
   });
 });
 
+// 영상 제목 확인 — 실제 유튜브에서 본 순서를 재현한다.
+// 일반 영상: 이동 직후 탭 제목·ytd-watch-flexy가 이전 영상 것이고, 잠시 뒤 함께 바뀐다.
+// 쇼츠: 이동 시점에 탭 제목이 이미 새 영상 것이다.
+describe("content.js handleVideoChange — 직전 영상 제목이 다음 기록에 붙지 않는다", () => {
+  let handleVideoChange, storage, documentMock, locationMock, page;
+
+  // 화면 상태를 바꾼다. flexyId가 undefined면 ytd-watch-flexy가 없는 페이지
+  function show({ title, flexyId, heading = title }) {
+    documentMock.title = title ? `${title} - YouTube` : "YouTube";
+    page.flexyId = flexyId;
+    page.heading = heading;
+  }
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    page = { flexyId: undefined, heading: undefined };
+    storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+    });
+    const { api } = await loadContent({
+      document: {
+        title: "YouTube",
+        querySelector: (sel) => {
+          if (sel === "ytd-watch-flexy") {
+            return page.flexyId === undefined
+              ? null
+              : { getAttribute: () => page.flexyId };
+          }
+          if (sel === "ytd-watch-metadata h1") {
+            return page.flexyId === undefined
+              ? null
+              : { textContent: page.heading };
+          }
+          return null;
+        },
+      },
+      chrome: {
+        runtime: { id: "fake-extension-id" },
+        storage: { local: storage },
+      },
+      console: { log: () => {}, warn: () => {} },
+    });
+    handleVideoChange = api.handleVideoChange;
+    documentMock = globalThis.document;
+    locationMock = globalThis.location;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const titles = () =>
+    collectVideos(storage.dump(), "s1").map((v) => [v.videoId, v.title]);
+
+  it("일반 영상은 화면이 이 영상으로 바뀐 뒤의 제목을 기록한다(연속 이동 A→B→C)", async () => {
+    locationMock.href = "https://www.youtube.com/watch?v=AAAA";
+    show({ title: "영상 A", flexyId: "AAAA" });
+    await handleVideoChange();
+
+    for (const [id, name, prev] of [
+      ["BBBB", "영상 B", ["영상 A", "AAAA"]],
+      ["CCCC", "영상 C", ["영상 B", "BBBB"]],
+    ]) {
+      locationMock.href = `https://www.youtube.com/watch?v=${id}`;
+      show({ title: prev[0], flexyId: prev[1] });
+      const call = handleVideoChange();
+      await vi.advanceTimersByTimeAsync(200);
+      show({ title: name, flexyId: id });
+      await vi.advanceTimersByTimeAsync(200);
+      await call;
+    }
+
+    expect(titles()).toEqual([
+      ["AAAA", "영상 A"],
+      ["BBBB", "영상 B"],
+      ["CCCC", "영상 C"],
+    ]);
+  });
+
+  it("직전에 기록한 제목이 틀렸어도 화면의 videoId로 확인해 밀리지 않는다", async () => {
+    // 탭 제목은 이미 X인데 화면은 아직 이전 영상 — 예전 방식이면 기준값과 달라 바로 확정됐다
+    locationMock.href = "https://www.youtube.com/watch?v=BBBB";
+    show({ title: "영상 X", flexyId: "XXXX" });
+    const call = handleVideoChange();
+    await vi.advanceTimersByTimeAsync(400);
+    show({ title: "영상 B", flexyId: "BBBB" });
+    await vi.advanceTimersByTimeAsync(200);
+    await call;
+
+    expect(titles()).toEqual([["BBBB", "영상 B"]]);
+  });
+
+  it("2초 안에 화면이 이 영상으로 바뀌지 않으면 제목을 비워 둔다", async () => {
+    locationMock.href = "https://www.youtube.com/watch?v=BBBB";
+    show({ title: "영상 A", flexyId: "AAAA" });
+    const call = handleVideoChange();
+    await vi.advanceTimersByTimeAsync(2500);
+    await call;
+
+    expect(titles()).toEqual([["BBBB", null]]);
+  });
+
+  it("화면 제목(h1)과 탭 제목이 다르면 쓰지 않는다", async () => {
+    locationMock.href = "https://www.youtube.com/watch?v=BBBB";
+    show({ title: "영상 A", flexyId: "BBBB", heading: "영상 B" });
+    const call = handleVideoChange();
+    await vi.advanceTimersByTimeAsync(400);
+    show({ title: "영상 B", flexyId: "BBBB" });
+    await vi.advanceTimersByTimeAsync(200);
+    await call;
+
+    expect(titles()).toEqual([["BBBB", "영상 B"]]);
+  });
+
+  it("공백 차이만 있는 화면 제목은 같은 제목으로 본다", async () => {
+    locationMock.href = "https://www.youtube.com/watch?v=BBBB";
+    show({ title: "영상  B", flexyId: "BBBB", heading: "\n  영상 B \n" });
+    await handleVideoChange();
+
+    expect(titles()).toEqual([["BBBB", "영상  B"]]);
+  });
+
+  it("쇼츠는 이동 시점에 이미 바뀐 탭 제목을 기록한다", async () => {
+    locationMock.href = "https://www.youtube.com/shorts/S1";
+    // 쇼츠 화면에도 숨겨진 ytd-watch-flexy가 이전 일반 영상 ID로 남아 있다
+    show({ title: "쇼츠 1", flexyId: "AAAA", heading: "영상 A" });
+    await handleVideoChange();
+
+    locationMock.href = "https://www.youtube.com/shorts/S2";
+    show({ title: "쇼츠 2", flexyId: "AAAA", heading: "영상 A" });
+    await handleVideoChange();
+
+    expect(titles()).toEqual([
+      ["S1", "쇼츠 1"],
+      ["S2", "쇼츠 2"],
+    ]);
+  });
+
+  it("화면 요소가 없는 페이지에서 홈을 거쳐도 탭에 남은 직전 제목을 쓰지 않는다", async () => {
+    locationMock.href = "https://www.youtube.com/watch?v=AAAA";
+    show({ title: "영상 A" });
+    await handleVideoChange();
+
+    locationMock.href = "https://www.youtube.com/";
+    await handleVideoChange();
+
+    // 홈에서 곧바로 B로 — 탭 제목은 아직 A
+    locationMock.href = "https://www.youtube.com/watch?v=BBBB";
+    show({ title: "영상 A" });
+    const call = handleVideoChange();
+    await vi.advanceTimersByTimeAsync(200);
+    show({ title: "영상 B" });
+    await vi.advanceTimersByTimeAsync(200);
+    await call;
+
+    expect(titles()).toEqual([
+      ["AAAA", "영상 A"],
+      ["BBBB", "영상 B"],
+    ]);
+  });
+});
+
 describe("content.js recordVideo — 다중 탭 경합(연구 무결성 점검 항목 3)", () => {
   async function makeTab(sharedStorage) {
     const chromeMock = {
@@ -1484,7 +1646,7 @@ describe("content.js handleVideoChange 전체 수명주기 — 비영상 페이�
       referrer: "",
       hidden: false,
       addEventListener: () => {},
-      querySelector: () => videoEl,
+      querySelector: (sel) => (sel === "video" ? videoEl : null),
     };
     locationMock = { href: "https://www.youtube.com/" };
     // serverUrl을 비워 둬 PATCH/POST 네트워크 전송은 건너뛰고(다른 테스트에서 이미 검증됨)
@@ -1605,7 +1767,7 @@ describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
       referrer: "",
       hidden: false,
       addEventListener: () => {},
-      querySelector: () => videoEl,
+      querySelector: (sel) => (sel === "video" ? videoEl : null),
     };
     locationMock = { href: "https://www.youtube.com/" };
     storage = createSharedStorage(initialStorage);

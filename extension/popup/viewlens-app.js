@@ -329,6 +329,10 @@ class ViewLensPopup {
         VL._liveVideos,
         dateKey,
         d.view.excludedReasons,
+        {
+          correctedTitles: d.view.correctedTitles,
+          fetchedTitles: VL._fetchedTitles,
+        },
       );
       VL.today = d;
     }

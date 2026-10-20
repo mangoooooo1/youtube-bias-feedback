@@ -332,6 +332,137 @@ describe("viewing-summary 조회와 저장본", () => {
   });
 });
 
+// 기록한 제목도 서버 제목도 없는 영상만 oEmbed로 제목을 받아 기기에 둔다
+describe("fillMissingTitles — 제목이 없는 영상의 oEmbed 제목", () => {
+  async function load(initialStorage, respond) {
+    const { fillMissingTitles } = await loadPopup();
+    let store = { ...initialStorage };
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: async (keys) =>
+            Object.fromEntries([].concat(keys).map((k) => [k, store[k]])),
+          set: async (obj) => {
+            store = { ...store, ...structuredClone(obj) };
+          },
+        },
+      },
+    });
+    const fetch = vi.fn(async (url) =>
+      respond(new URL(url).searchParams.get("url")),
+    );
+    vi.stubGlobal("fetch", fetch);
+    return { fillMissingTitles, fetch, dump: () => store };
+  }
+  const idOf = (watchUrl) => new URL(watchUrl).searchParams.get("v");
+  const json = (status, body) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+  });
+
+  it("받은 제목을 저장하고, 비공개·삭제 영상은 null로 남겨 다시 묻지 않는다", async () => {
+    const { fillMissingTitles, fetch, dump } = await load({}, (watchUrl) => {
+      const id = idOf(watchUrl);
+      if (id === "ok") return json(200, { title: "받은 제목" });
+      if (id === "private") return json(401);
+      return json(404);
+    });
+
+    const titles = await fillMissingTitles(["ok", "private", "gone", "ok"]);
+
+    expect(titles).toEqual({ ok: "받은 제목", private: null, gone: null });
+    expect(dump().videoTitleCache).toEqual(titles);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(fetch.mock.calls[0][0]).toBe(
+      "https://www.youtube.com/oembed?format=json&url=https%3A%2F%2Fwww.youtube.com%2Fwatch%3Fv%3Dok",
+    );
+
+    await fillMissingTitles(["ok", "private", "gone"]);
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("네트워크 오류·서버 오류는 저장하지 않아 다음에 다시 묻는다", async () => {
+    const { fillMissingTitles, dump } = await load(
+      { videoTitleCache: { old: "이전 제목" } },
+      (watchUrl) => {
+        if (idOf(watchUrl) === "offline")
+          throw new TypeError("Failed to fetch");
+        return json(500);
+      },
+    );
+
+    const titles = await fillMissingTitles(["offline", "busy"]);
+
+    expect(titles).toEqual({ old: "이전 제목" });
+    expect(dump().videoTitleCache).toEqual({ old: "이전 제목" });
+  });
+
+  it("팝업을 한 번 열 때 20개까지만 묻는다", async () => {
+    const { fillMissingTitles, fetch } = await load({}, () =>
+      json(200, { title: "제목" }),
+    );
+
+    await fillMissingTitles(Array.from({ length: 25 }, (_, i) => `v${i}`));
+
+    expect(fetch).toHaveBeenCalledTimes(20);
+  });
+});
+
+describe("videoIdsWithoutTitle — oEmbed로 물어볼 영상", () => {
+  it("기록한 제목이 비어 있고 서버 제목도 없는 영상만 고른다", async () => {
+    const { videoIdsWithoutTitle } = await loadPopup();
+    const sessions = [
+      {
+        videos: [
+          { eventId: "e1", videoId: "has-title", title: "제목" },
+          { eventId: "e2", videoId: "server-fixed", title: null },
+        ],
+      },
+    ];
+    const live = [
+      { eventId: "e3", videoId: "blank", title: "  " },
+      { eventId: "e4", videoId: null, title: null },
+    ];
+    const summary = { days: [{ correctedTitles: { e2: "서버 제목" } }] };
+
+    expect(videoIdsWithoutTitle(sessions, live, summary)).toEqual(["blank"]);
+    expect(videoIdsWithoutTitle(sessions, live, null)).toEqual([
+      "server-fixed",
+      "blank",
+    ]);
+  });
+});
+
+// 다시 그리면 스크롤·입력값이 사라져, 화면에 새로 보일 제목이 생겼을 때만 다시 그린다
+describe("hasNewDisplayTitle — oEmbed 조회 뒤 다시 그릴지", () => {
+  it("새 제목이 생기거나 제목이 바뀌면 true", async () => {
+    const { hasNewDisplayTitle } = await loadPopup();
+
+    expect(hasNewDisplayTitle({}, { a: "제목" })).toBe(true);
+    expect(hasNewDisplayTitle({ a: null }, { a: "제목" })).toBe(true);
+    expect(hasNewDisplayTitle({ a: "옛 제목" }, { a: "새 제목" })).toBe(true);
+  });
+
+  it("비공개·삭제 영상(null)·빈 제목만 추가되면 false", async () => {
+    const { hasNewDisplayTitle } = await loadPopup();
+
+    expect(hasNewDisplayTitle({ a: "제목" }, { a: "제목", b: null })).toBe(
+      false,
+    );
+    expect(hasNewDisplayTitle({}, { b: "  " })).toBe(false);
+  });
+
+  it("내용이 같은 다른 객체·조회할 게 없어 같은 저장본이 돌아오면 false", async () => {
+    const { hasNewDisplayTitle } = await loadPopup();
+    const cache = { a: "제목", b: null };
+
+    expect(hasNewDisplayTitle(cache, { ...cache })).toBe(false);
+    expect(hasNewDisplayTitle(cache, cache)).toBe(false);
+    expect(hasNewDisplayTitle(undefined, {})).toBe(false);
+  });
+});
+
 // 서버는 유효 시청 영상이 늘지 않은 세션에서 리뷰를 다시 만들지 않는다
 describe("resolveTodayCumulative — 오늘 리뷰 카드 상태", () => {
   const TODAY = "2026-03-05";

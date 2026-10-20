@@ -124,19 +124,50 @@ function captureTrackedVideoIdentity() {
 }
 
 /**
- * document.title이 prevTitle과 달라질 때까지 폴링해 새 제목을 기다린다.
+ * 일반 영상 페이지가 videoId의 화면으로 바뀌었으면 그 제목을 돌려준다.
+ * 유튜브는 이동 직후 잠깐 탭 제목·화면을 이전 영상 것으로 두고, 둘을 함께 바꾼다.
+ * 홈 등으로 가도 ytd-watch-flexy는 숨겨진 채 이전 videoId를 갖고 있어 반드시 비교한다.
+ * @param {string} videoId - 주소에서 뽑은 영상 ID
+ * @returns {string|null|undefined} 확인된 제목, 아직이면 null, 확인할 요소가 없으면 undefined
+ */
+function readWatchPageTitle(videoId) {
+  const flexy = document.querySelector("ytd-watch-flexy");
+  if (!flexy) return undefined;
+  if (flexy.getAttribute("video-id") !== videoId) return null;
+  const title = parseTitle();
+  const heading = document.querySelector("ytd-watch-metadata h1")?.textContent;
+  const normalize = (s) => (s ?? "").replace(/\s+/g, " ").trim();
+  // 탭 제목과 화면 제목이 같아야 둘 다 이 영상 것으로 본다
+  return title && normalize(heading) === normalize(title) ? title : null;
+}
+
+/**
+ * 새 영상의 제목을 폴링해 기다린다.
+ * 일반 영상은 화면의 videoId로 확인하고, 쇼츠·확인할 요소가 없는 페이지는
+ * document.title이 prevTitle과 달라지면 새 제목으로 본다(쇼츠는 탭 제목이 먼저 바뀐다).
  * @param {string|null} prevTitle - 비교 기준이 되는 이전 제목
+ * @param {string|null} [videoId=null] - 일반 영상이면 그 ID, 쇼츠면 null
  * @param {number} [maxRetries=10] - 최대 폴링 횟수
  * @param {number} [interval=200] - 폴링 간격(ms)
  * @returns {Promise<string|null>} 새 제목, 시간 내 못 구하면 null
  */
-function waitForTitle(prevTitle, maxRetries = 10, interval = 200) {
+function waitForTitle(
+  prevTitle,
+  videoId = null,
+  maxRetries = 10,
+  interval = 200,
+) {
   return new Promise((resolve) => {
     let attempts = 0;
 
     const check = () => {
+      const confirmed = videoId ? readWatchPageTitle(videoId) : undefined;
+      if (confirmed) {
+        resolve(confirmed);
+        return;
+      }
       const title = parseTitle();
-      if (title && title !== prevTitle) {
+      if (confirmed === undefined && title && title !== prevTitle) {
         resolve(title);
         return;
       }
@@ -505,7 +536,7 @@ async function handleVideoChange() {
     // watch/shorts가 아닌 페이지도 다음 영상의 "직전 페이지"가 될 수 있으므로 갱신한다.
     previousLocationHref = location.href;
     lastVideoId = null;
-    lastTitle = null;
+    // lastTitle은 지우지 않는다. 지우면 탭에 남은 이전 영상 제목이 다음 영상의 제목으로 확정된다.
     return;
   }
 
@@ -529,7 +560,7 @@ async function handleVideoChange() {
   if (typeof resetWatchTracker === "function") resetWatchTracker();
 
   const myGen = ++handleVideoChangeGen;
-  const title = await waitForTitle(lastTitle);
+  const title = await waitForTitle(lastTitle, isShorts ? null : videoId);
   if (myGen !== handleVideoChangeGen) {
     // await 도중 더 최신 이동이 시작됨 — 잡은 title이 그쪽 것일 수 있어 조용히 포기.
     console.warn(
