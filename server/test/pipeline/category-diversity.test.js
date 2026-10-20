@@ -188,3 +188,43 @@ describe("getCategoryName", () => {
     expect(getCategoryName(9999)).toBe("기타");
   });
 });
+
+describe("isValidWatch — 민감도 분석용 상대 기준 옵션", () => {
+  // 30초 미만이라 상대 기준만으로 판정되는 영상(길이 100초)
+  const watch = (watchedSeconds) => ({ watchedSeconds, durationSeconds: 100 });
+
+  it("옵션이 없으면 25% 기준 그대로다", () => {
+    expect(isValidWatch(watch(24))).toBe(false);
+    expect(isValidWatch(watch(25))).toBe(true);
+  });
+
+  it("상대 기준을 10%·50%로 바꿀 수 있다(경계값 포함)", () => {
+    expect(isValidWatch(watch(9), { minRelativeRatio: 0.1 })).toBe(false);
+    expect(isValidWatch(watch(10), { minRelativeRatio: 0.1 })).toBe(true);
+    expect(isValidWatch(watch(25), { minRelativeRatio: 0.5 })).toBe(false);
+    // 50% 경계는 30초 미만 영상으로 본다(길이 50초)
+    const half = { minRelativeRatio: 0.5 };
+    expect(
+      isValidWatch({ watchedSeconds: 24, durationSeconds: 50 }, half),
+    ).toBe(false);
+    expect(
+      isValidWatch({ watchedSeconds: 25, durationSeconds: 50 }, half),
+    ).toBe(true);
+  });
+
+  it("상대 기준을 바꿔도 절대 기준 30초와 시청 시간 모름 처리는 그대로다", () => {
+    const opt = { minRelativeRatio: 0.5 };
+    expect(
+      isValidWatch({ watchedSeconds: 30, durationSeconds: 3600 }, opt),
+    ).toBe(true);
+    expect(
+      isValidWatch({ watchedSeconds: null, durationSeconds: 100 }, opt),
+    ).toBe(true);
+  });
+
+  it("filter(isValidWatch)처럼 인덱스가 두 번째 인자로 와도 기본 기준을 쓴다", () => {
+    const entries = [watch(5), watch(25), watch(10)];
+    expect(entries.filter(isValidWatch)).toEqual([watch(25)]);
+    expect(isValidWatch(watch(25), { minRelativeRatio: "0.5" })).toBe(true);
+  });
+});
