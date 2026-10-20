@@ -95,13 +95,20 @@ function aggregateViewing(
     timeDistribution: calculateWeightedDistribution(
       chart.map((e) => ({ categoryId: e.categoryId, weight: capped(e) })),
     ),
-    // 분석·저장용
+    // 분석·저장용. 엔트로피는 반올림 전 비율로 계산한다
     analysisDistribution,
-    entropy: calculateEntropy(analysisDistribution),
+    entropy: calculateEntropy(
+      calculateDistribution(
+        valid.map((e) => e.categoryId),
+        { round: false },
+      ),
+    ),
     weightedDistribution,
     weightedEntropy:
       weightedDistribution != null
-        ? calculateEntropy(weightedDistribution)
+        ? calculateEntropy(
+            calculateWeightedDistribution(analysisWeighted, { round: false }),
+          )
         : null,
     // 화면의 "오늘 시청한 영상" 목록 표시용
     excluded: withReason
