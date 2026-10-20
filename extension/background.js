@@ -9,6 +9,7 @@ import {
   markVideoEventSent,
   markVideoEventInvalid,
   getUnsentWatchStats,
+  pruneWatchCheckpoints,
   markWatchStatsSent,
   markWatchStatsInvalid,
   getParticipantSyncState,
@@ -513,6 +514,7 @@ export function retryUnsentWatchStats() {
     const onboarding = await getOnboarding();
     if (!onboarding?.anonymousId) return;
 
+    await pruneWatchCheckpoints();
     const items = await getUnsentWatchStats();
     await drainQueue(
       "watch_stats",

@@ -897,6 +897,53 @@ describe("retryUnsentWatchStats — 시청시간 서버 장애 대비 재시도 
     expect(all["video__s1__uuid1"].watchStatsSent).toBe(true);
   });
 
+  it("탭을 닫아 최종값이 없는 영상은 오래된 체크포인트 값을 PATCH하고, 기록에 남긴 뒤 체크포인트를 지운다", async () => {
+    global.chrome = createChromeMock();
+    const patches = [];
+    global.fetch = vi.fn(async (url, options = {}) => {
+      if (options.method === "PATCH") {
+        patches.push({ url: String(url), body: JSON.parse(options.body) });
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${url}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      video__s1__uuid1: { videoId: "v1", eventId: "uuid1", sent: true },
+      watchcp__uuid1: {
+        sessionId: "s1",
+        eventId: "uuid1",
+        watchedSeconds: 37,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        at: Date.now() - 3 * 60 * 1000,
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentWatchStats();
+
+    expect(patches).toHaveLength(1);
+    expect(patches[0].url).toBe("http://localhost:3000/api/video-events/uuid1");
+    expect(patches[0].body).toMatchObject({ watchedSeconds: 37 });
+
+    let all = await global.chrome.storage.local.get(null);
+    expect(all.video__s1__uuid1).toMatchObject({
+      watchedSeconds: 37,
+      watchStatsSent: true,
+    });
+
+    // 다음 알람 틱: 더 보낼 것이 없고 체크포인트는 정리된다
+    await mod.retryUnsentWatchStats();
+    expect(patches).toHaveLength(1);
+    all = await global.chrome.storage.local.get(null);
+    expect(all.watchcp__uuid1).toBeUndefined();
+  });
+
   it("세션 종료 후(sessions[].videos)에 남은 미반영 시청시간도 재전송한다", async () => {
     global.chrome = createChromeMock();
     const calls = { patches: [] };

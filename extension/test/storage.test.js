@@ -9,6 +9,8 @@ import {
   markVideoEventSent,
   getUnsentWatchStats,
   markWatchStatsSent,
+  pruneWatchCheckpoints,
+  WATCH_CHECKPOINT_STALE_MS,
   getParticipantSyncState,
   markParticipantSynced,
   invalidateParticipantSync,
@@ -663,6 +665,185 @@ describe("getUnsentWatchStats / markWatchStatsSent", () => {
 
     const { sessions } = await global.chrome.storage.local.get("sessions");
     expect(sessions[0].videos[0].watchStatsSent).toBe(true);
+  });
+
+  it("전송하는 동안 더 새로운 시청시간이 기록되면 watchStatsSent를 true로 바꾸지 않는다", async () => {
+    await global.chrome.storage.local.set({
+      "video__s1__v1-1": {
+        eventId: "v1-1",
+        watchedSeconds: 42,
+        watchStatsSent: false,
+      },
+    });
+    const [item] = await getUnsentWatchStats();
+    // 전송 중에 content.js가 최종값을 다시 썼다
+    await global.chrome.storage.local.set({
+      "video__s1__v1-1": {
+        eventId: "v1-1",
+        watchedSeconds: 60,
+        watchStatsSent: false,
+      },
+    });
+
+    await markWatchStatsSent(item);
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__v1-1"]).toMatchObject({
+      watchedSeconds: 60,
+      watchStatsSent: false,
+    });
+  });
+});
+
+// 탭을 닫아 최종값을 남기지 못한 영상 — content.js가 남긴 체크포인트(watchcp__<eventId>)를 대신 보낸다
+describe("시청시간 체크포인트", () => {
+  const NOW = Date.parse("2026-10-20T12:00:00Z");
+  const STALE = NOW - WATCH_CHECKPOINT_STALE_MS - 1000;
+
+  function checkpoint(eventId, at, watchedSeconds = 37) {
+    return {
+      [`watchcp__${eventId}`]: {
+        sessionId: "s1",
+        eventId,
+        watchedSeconds,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        at,
+      },
+    };
+  }
+
+  it("시청시간이 없는 영상의 오래된 체크포인트는 그 값으로 전송 대상에 넣는다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__e1: { eventId: "e1", sent: true },
+      ...checkpoint("e1", STALE),
+    });
+
+    expect(await getUnsentWatchStats(NOW)).toEqual([
+      {
+        location: "live",
+        key: "video__s1__e1",
+        sessionId: "s1",
+        eventId: "e1",
+        watchedSeconds: 37,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        source: "checkpoint",
+      },
+    ]);
+  });
+
+  it("세션이 닫혀 sessions[]로 옮겨간 영상도 체크포인트로 찾는다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [{ sessionId: "s1", videos: [{ eventId: "e1", sent: true }] }],
+      ...checkpoint("e1", STALE),
+    });
+
+    const [item] = await getUnsentWatchStats(NOW);
+    expect(item).toMatchObject({
+      location: "session",
+      sessionId: "s1",
+      eventId: "e1",
+      watchedSeconds: 37,
+      source: "checkpoint",
+    });
+  });
+
+  it("최근에 갱신된 체크포인트는(아직 보는 중) 보내지 않는다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__e1: { eventId: "e1", sent: true },
+      ...checkpoint("e1", NOW - 10_000),
+    });
+
+    expect(await getUnsentWatchStats(NOW)).toEqual([]);
+  });
+
+  it("영상 기록에 최종값이 있거나, 영상 POST가 아직이거나, 영구 실패면 체크포인트를 보내지 않는다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__final: {
+        eventId: "final",
+        sent: true,
+        watchedSeconds: 50,
+        watchStatsSent: true,
+      },
+      video__s1__unposted: { eventId: "unposted", sent: false },
+      video__s1__invalid: {
+        eventId: "invalid",
+        sent: true,
+        watchStatsSent: "invalid",
+      },
+      ...checkpoint("final", STALE),
+      ...checkpoint("unposted", STALE),
+      ...checkpoint("invalid", STALE),
+    });
+
+    expect(await getUnsentWatchStats(NOW)).toEqual([]);
+  });
+
+  it("체크포인트로 보내면 그 값과 watchStatsSent:true를 영상 기록에 남긴다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__e1: { eventId: "e1", sent: true },
+      ...checkpoint("e1", STALE),
+    });
+    const [item] = await getUnsentWatchStats(NOW);
+
+    await markWatchStatsSent(item);
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.video__s1__e1).toMatchObject({
+      watchedSeconds: 37,
+      playbackRate: 1,
+      wasBackgrounded: 0,
+      watchStatsSent: true,
+    });
+  });
+
+  it("체크포인트를 보내는 동안 최종값이 들어오면 체크포인트 값으로 덮어쓰지 않는다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__e1: { eventId: "e1", sent: true },
+      ...checkpoint("e1", STALE),
+    });
+    const [item] = await getUnsentWatchStats(NOW);
+    await global.chrome.storage.local.set({
+      video__s1__e1: {
+        eventId: "e1",
+        sent: true,
+        watchedSeconds: 90,
+        watchStatsSent: false,
+      },
+    });
+
+    await markWatchStatsSent(item);
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.video__s1__e1).toMatchObject({
+      watchedSeconds: 90,
+      watchStatsSent: false,
+    });
+  });
+
+  it("최종값이 확정·영구 실패한 체크포인트와 하루 넘게 주인 없는 체크포인트만 지운다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__final: { eventId: "final", sent: true, watchedSeconds: 50 },
+      video__s1__invalid: {
+        eventId: "invalid",
+        sent: true,
+        watchStatsSent: "invalid",
+      },
+      video__s1__watching: { eventId: "watching", sent: true },
+      ...checkpoint("final", STALE),
+      ...checkpoint("invalid", STALE),
+      ...checkpoint("watching", NOW - 10_000),
+      ...checkpoint("orphan-old", NOW - 25 * 60 * 60 * 1000),
+      ...checkpoint("orphan-new", NOW - 10_000),
+    });
+
+    await pruneWatchCheckpoints(NOW);
+
+    const keys = Object.keys(await global.chrome.storage.local.get(null))
+      .filter((k) => k.startsWith("watchcp__"))
+      .sort();
+    expect(keys).toEqual(["watchcp__orphan-new", "watchcp__watching"]);
   });
 });
 

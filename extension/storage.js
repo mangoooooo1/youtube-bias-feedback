@@ -273,12 +273,71 @@ function isWatchStatsPending(v) {
   );
 }
 
+// content.js가 재생 중에 영상마다 덮어쓰는 시청시간 체크포인트 키 접두사(watchcp__<eventId>).
+// 탭을 닫아 최종값을 남기지 못한 영상은 이 값을 대신 보낸다.
+export const WATCH_CHECKPOINT_PREFIX = "watchcp__";
+// 체크포인트가 이 시간 넘게 갱신되지 않으면 그 영상을 재던 탭은 닫혔거나 다른 영상으로 넘어간 것으로 본다
+export const WATCH_CHECKPOINT_STALE_MS = 2 * 60 * 1000;
+// 영상 기록을 찾지 못하는 체크포인트는 세션 정리가 끝난 뒤에도 남은 것만 지운다
+const ORPHAN_CHECKPOINT_MS = 24 * 60 * 60 * 1000;
+
+/** eventId → 영상 기록(live 키가 sessions[]보다 우선). */
+function indexVideoEntries(all) {
+  const entries = new Map();
+  for (const session of all.sessions ?? []) {
+    for (const v of session.videos ?? []) {
+      if (v.eventId) {
+        entries.set(v.eventId, {
+          location: "session",
+          sessionId: session.sessionId,
+          v,
+        });
+      }
+    }
+  }
+  for (const [key, v] of Object.entries(all)) {
+    if (key.startsWith("video__") && v?.eventId) {
+      entries.set(v.eventId, {
+        location: "live",
+        key,
+        sessionId: sessionIdOf(key),
+        v,
+      });
+    }
+  }
+  return entries;
+}
+
+/**
+ * 더 쓸 일이 없는 체크포인트를 지운다 — 영상 기록에 시청시간이 확정됐거나 영구 실패한 것,
+ * 영상 기록을 찾지 못한 채 하루가 지난 것.
+ * @param {number} [now]
+ * @returns {Promise<void>}
+ */
+export async function pruneWatchCheckpoints(now = Date.now()) {
+  const all = await chrome.storage.local.get(null);
+  const entries = indexVideoEntries(all);
+  const done = Object.entries(all)
+    .filter(([key, cp]) => {
+      if (!key.startsWith(WATCH_CHECKPOINT_PREFIX)) return false;
+      const entry = entries.get(cp?.eventId);
+      if (!entry) return now - (cp?.at ?? 0) > ORPHAN_CHECKPOINT_MS;
+      return (
+        entry.v.watchedSeconds != null || entry.v.watchStatsSent === "invalid"
+      );
+    })
+    .map(([key]) => key);
+  if (done.length > 0) await chrome.storage.local.remove(done);
+}
+
 /**
  * 로컬엔 있지만 아직 서버에 확정 반영 못한 시청시간 원시값을 live/sessions[] 양쪽에서
  * 모은다. content.js는 live 키만 갱신할 수 있어, 세션이 그 사이 닫힌 경우의 안전망이다.
+ * 시청시간이 끝내 확정되지 않은 영상은 오래된 체크포인트 값을 대신 넣는다(source:"checkpoint").
+ * @param {number} [now]
  * @returns {Promise<object[]>}
  */
-export async function getUnsentWatchStats() {
+export async function getUnsentWatchStats(now = Date.now()) {
   const all = await chrome.storage.local.get(null);
 
   const fromLive = Object.entries(all)
@@ -304,7 +363,31 @@ export async function getUnsentWatchStats() {
     })),
   );
 
-  return [...fromLive, ...fromSessions];
+  const entries = indexVideoEntries(all);
+  const fromCheckpoints = Object.entries(all)
+    .filter(([key]) => key.startsWith(WATCH_CHECKPOINT_PREFIX))
+    .flatMap(([, cp]) => {
+      const entry = entries.get(cp?.eventId);
+      if (!entry || now - (cp.at ?? 0) <= WATCH_CHECKPOINT_STALE_MS) return [];
+      const { v } = entry;
+      // 최종값이 있거나 영구 실패했거나 영상 POST가 아직이면(PATCH가 404) 보내지 않는다
+      if (v.watchedSeconds != null || v.watchStatsSent === "invalid") return [];
+      if (v.sent === false || v.sent === "invalid") return [];
+      return [
+        {
+          location: entry.location,
+          ...(entry.key ? { key: entry.key } : {}),
+          sessionId: entry.sessionId,
+          eventId: cp.eventId,
+          watchedSeconds: cp.watchedSeconds,
+          playbackRate: cp.playbackRate,
+          wasBackgrounded: cp.wasBackgrounded,
+          source: "checkpoint",
+        },
+      ];
+    });
+
+  return [...fromLive, ...fromSessions, ...fromCheckpoints];
 }
 
 /**
@@ -328,6 +411,27 @@ export function markWatchStatsInvalid(item) {
 }
 
 /**
+ * 전송한 값이 아직 그 영상 기록의 최신 상태일 때만 갱신한 기록을 돌려준다(아니면 null).
+ * 전송 중에 content.js가 더 새로운 시청시간을 썼다면 그 값이 다음 재시도에서 나가도록 둔다.
+ * 체크포인트 값으로 보냈으면 최종값이 없을 때만 그 값을 기록에 함께 남긴다.
+ */
+function withWatchStatsSent(v, item, value) {
+  if (item.source === "checkpoint") {
+    if (v.watchedSeconds != null) return null;
+    if (value !== true) return { ...v, watchStatsSent: value };
+    return {
+      ...v,
+      watchedSeconds: item.watchedSeconds,
+      playbackRate: item.playbackRate,
+      wasBackgrounded: item.wasBackgrounded,
+      watchStatsSent: value,
+    };
+  }
+  if (v.watchedSeconds !== item.watchedSeconds) return null;
+  return { ...v, watchStatsSent: value };
+}
+
+/**
  * watchStatsSent 갱신 로직 — location(live/session)에 따라 대상을 찾아 갱신한다.
  * @param {object} item
  * @param {true|"invalid"} value
@@ -337,24 +441,28 @@ async function _setWatchStatsSent(item, value) {
   if (item.location === "live") {
     const { [item.key]: existing } = await chrome.storage.local.get(item.key);
     if (!existing) return;
-    await chrome.storage.local.set({
-      [item.key]: { ...existing, watchStatsSent: value },
-    });
+    const updated = withWatchStatsSent(existing, item, value);
+    if (updated) await chrome.storage.local.set({ [item.key]: updated });
     return;
   }
 
   const { sessions } = await chrome.storage.local.get("sessions");
   if (!sessions) return;
+  let changed = false;
   const updatedSessions = sessions.map((session) => {
     if (session.sessionId !== item.sessionId) return session;
     return {
       ...session,
-      videos: (session.videos ?? []).map((v) =>
-        v.eventId === item.eventId ? { ...v, watchStatsSent: value } : v,
-      ),
+      videos: (session.videos ?? []).map((v) => {
+        if (v.eventId !== item.eventId) return v;
+        const updated = withWatchStatsSent(v, item, value);
+        if (!updated) return v;
+        changed = true;
+        return updated;
+      }),
     };
   });
-  await chrome.storage.local.set({ sessions: updatedSessions });
+  if (changed) await chrome.storage.local.set({ sessions: updatedSessions });
 }
 
 /**
