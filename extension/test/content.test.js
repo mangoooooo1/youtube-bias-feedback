@@ -13,7 +13,7 @@ const CONTENT_PATH = path.join(__dirname, "../content.js");
 async function loadContent(env = {}) {
   vi.resetModules();
   const documentListeners = {};
-  vi.stubGlobal("document", {
+  const doc = {
     referrer: "",
     title: "",
     hidden: false,
@@ -22,7 +22,12 @@ async function loadContent(env = {}) {
     },
     querySelector: () => null,
     ...env.document,
-  });
+  };
+  doc.querySelectorAll ??= (sel) => {
+    const el = doc.querySelector(sel);
+    return el ? [el] : [];
+  };
+  vi.stubGlobal("document", doc);
   vi.stubGlobal("window", { addEventListener: () => {}, ...env.window });
   vi.stubGlobal(
     "location",
@@ -715,11 +720,17 @@ describe("content.js currentWatchedMs", () => {
 
 // ── 비디오 엘리먼트 계측 통합 테스트
 // 벽시계 경과 시간(Date.now() 차이) 기반으로 바뀌었는지를 실제 play/pause/seeking/seeked 이벤트를 발생시켜 검증한다.
-function createFakeVideoElement({ paused = true, playbackRate = 1 } = {}) {
+function createFakeVideoElement({
+  paused = true,
+  playbackRate = 1,
+  width = 640,
+  height = 360,
+} = {}) {
   const listeners = {};
   return {
     paused,
     playbackRate,
+    getBoundingClientRect: () => ({ width, height }),
     addEventListener(type, cb) {
       (listeners[type] ??= []).push(cb);
     },
@@ -737,7 +748,10 @@ function createFakeVideoElement({ paused = true, playbackRate = 1 } = {}) {
 async function loadVideoTrackingSection(videoEl, { hidden = false } = {}) {
   let video = null;
   const { api, documentListeners } = await loadContent({
-    document: { hidden, querySelector: () => video },
+    document: {
+      hidden,
+      querySelector: () => video,
+    },
   });
   video = videoEl;
   return {
@@ -903,6 +917,114 @@ describe("content.js 비디오 엘리먼트 계측 — 벽시계 경과 시간 �
     oldVideo.dispatch("seeking"); // seeking도 구간을 닫는다
     vi.setSystemTime(30000);
     expect(section.currentWatchedMs()).toBe(10000); // 새 영상 20초~30초
+  });
+});
+
+// <video>가 여럿 남는 페이지. page.videos를 바꾸면 페이지의 <video> 목록이 바뀐다.
+async function loadMultiVideoSection(href) {
+  const page = { videos: [] };
+  const { api, documentListeners } = await loadContent({
+    document: {
+      querySelector: () => page.videos[0] ?? null,
+      querySelectorAll: () => page.videos,
+    },
+    location: { href },
+  });
+  return {
+    page,
+    reset: api.resetWatchTracker,
+    // 브라우저는 play를 document capture 리스너에 먼저, 엘리먼트 리스너에 나중에 전달한다
+    play(videoEl) {
+      videoEl.paused = false;
+      for (const cb of documentListeners.play || []) cb({ target: videoEl });
+      videoEl.dispatch("play");
+    },
+    currentWatchedMs: () =>
+      api.captureWatchStatsSnapshot().watchedSeconds * 1000,
+  };
+}
+
+// 실제 YouTube에서 확인한 상황: 먼저 연 페이지의 플레이어가 크기 0으로 DOM 앞쪽에 남는다
+describe("content.js 비디오 엘리먼트 계측 — <video>가 여럿인 페이지", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("일반 영상을 본 뒤 Shorts로 오면 숨겨진 일반 플레이어가 아니라 재생 중인 Shorts 플레이어를 잰다", async () => {
+    const section = await loadMultiVideoSection(
+      "https://www.youtube.com/shorts/abc",
+    );
+    const hiddenWatch = createFakeVideoElement({ width: 0, height: 0 });
+    const shorts = createFakeVideoElement({ paused: false });
+    section.page.videos = [hiddenWatch, shorts];
+
+    section.reset();
+    vi.setSystemTime(10000);
+
+    expect(section.currentWatchedMs()).toBe(10000);
+  });
+
+  it("Shorts를 본 뒤 일반 영상으로 오면 숨겨진 Shorts 플레이어가 아니라 일반 플레이어를 잰다", async () => {
+    const section = await loadMultiVideoSection(
+      "https://www.youtube.com/watch?v=abc",
+    );
+    const hiddenShorts = createFakeVideoElement({ width: 0, height: 0 });
+    const watch = createFakeVideoElement({ paused: false });
+    section.page.videos = [hiddenShorts, watch];
+
+    section.reset();
+    vi.setSystemTime(10000);
+
+    expect(section.currentWatchedMs()).toBe(10000);
+  });
+
+  it("전환 순간에 없던 <video>가 나중에 재생을 시작하면 그쪽으로 옮겨 잰다", async () => {
+    const section = await loadMultiVideoSection(
+      "https://www.youtube.com/shorts/abc",
+    );
+    section.reset(); // 아직 <video>가 없다
+
+    const shorts = createFakeVideoElement({ paused: true });
+    section.page.videos = [shorts];
+    vi.setSystemTime(2000);
+    section.play(shorts);
+    vi.setSystemTime(12000);
+
+    expect(section.currentWatchedMs()).toBe(10000);
+  });
+
+  it("watch·shorts가 아닌 주소에서 재생된 미리보기로는 옮기지 않는다", async () => {
+    const section = await loadMultiVideoSection("https://www.youtube.com/");
+    const watch = createFakeVideoElement({ paused: true });
+    section.page.videos = [watch];
+    section.reset();
+
+    const preview = createFakeVideoElement({ paused: true });
+    section.play(preview);
+    vi.setSystemTime(10000);
+
+    expect(section.currentWatchedMs()).toBe(0);
+  });
+
+  it("같은 엘리먼트로 다음 영상이 이미 재생 중이면(Shorts 넘기기) 전환 직후부터 잰다", async () => {
+    const section = await loadMultiVideoSection(
+      "https://www.youtube.com/shorts/abc",
+    );
+    const shorts = createFakeVideoElement({ paused: false });
+    section.page.videos = [shorts];
+    section.reset();
+
+    // 다음 Shorts가 같은 <video>로 재생을 먼저 시작하고, 그 뒤 전환을 감지했다
+    vi.setSystemTime(5000);
+    section.reset();
+    vi.setSystemTime(15000);
+
+    expect(section.currentWatchedMs()).toBe(10000);
   });
 });
 
@@ -1944,6 +2066,7 @@ describe("content.js classic script 실행 — 테스트용 내보내기가 브�
         hidden: false,
         addEventListener: () => {},
         querySelector: () => null,
+        querySelectorAll: () => [],
       },
       window: { addEventListener: () => {} },
       location: { href: "https://www.youtube.com/" },

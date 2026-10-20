@@ -598,7 +598,8 @@ window.addEventListener("popstate", handleVideoChange);
 // (2배속으로 실제 30초를 시청하면 60초로, 0.5배속이면 15초로 기록됨).
 // play/pause/seeking/seeked 이벤트로 "재생 중" 구간의 시작·끝을 감지해 그 구간의
 // Date.now() 차이만 더한다 — 배속과 무관하게 항상 실제 경과 시간이 나온다.
-// SPA 전환 중 <video> 엘리먼트가 교체되는 경우(쇼츠 피드 등)는 수동 검증이 필요하다.
+// 페이지에는 <video>가 여럿 남는다(일반 플레이어·Shorts 플레이어·홈 미리보기). 숨겨진 플레이어는
+// 크기가 0이고 DOM 순서는 탭에서 먼저 연 페이지 순이라, 첫 번째 <video>는 재생 중인 영상이 아닐 수 있다.
 // watchTracker/trackedVideoEl 선언은 파일 상단(captureWatchStatsSnapshot 앞)으로 옮겼다 — 이유는 그쪽 주석 참고.
 
 /**
@@ -664,27 +665,49 @@ function onTrackedVideoRateChange() {
 }
 
 /**
- * 현재 페이지의 <video> 엘리먼트에 재생 상태 리스너를 연결한다. SPA 전환으로 엘리먼트가
- * 바뀌면 이전 리스너를 해제하고 새로 연결하며, 연결 시점에 이미 재생 중이면(자동재생 등)
- * play 이벤트를 기다리지 않고 그 즉시 구간을 연다.
+ * 측정할 <video>를 고른다. 보이는(크기가 0보다 큰) 것 중 재생 중인 것 → 보이는 첫 번째 → 첫 번째 순.
+ * @returns {HTMLVideoElement|null}
+ */
+function pickVideoElement() {
+  const videos = [...document.querySelectorAll("video")];
+  const visible = videos.filter((v) => {
+    try {
+      const rect = v.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    } catch {
+      return false;
+    }
+  });
+  return visible.find((v) => !v.paused) ?? visible[0] ?? videos[0] ?? null;
+}
+
+/**
+ * <video> 엘리먼트에 재생 상태 리스너를 연결한다. 엘리먼트가 바뀌면 이전 리스너를 해제하고
+ * 새로 연결한다. 같은 엘리먼트를 다시 쓰는 경우(일반 영상끼리·Shorts 넘기기)도 포함해,
+ * 연결 시점에 이미 재생 중이면 play 이벤트를 기다리지 않고 그 즉시 구간을 연다.
+ * @param {HTMLVideoElement|null} [videoEl] - 연결할 엘리먼트(생략하면 pickVideoElement)
  * @returns {void}
  */
-function attachVideoTracking() {
-  const videoEl = document.querySelector("video");
-  if (!videoEl || videoEl === trackedVideoEl) return;
-  if (trackedVideoEl) {
-    trackedVideoEl.removeEventListener("play", onTrackedVideoPlay);
-    trackedVideoEl.removeEventListener("pause", onTrackedVideoPause);
-    trackedVideoEl.removeEventListener("seeking", onTrackedVideoSeeking);
-    trackedVideoEl.removeEventListener("seeked", onTrackedVideoSeeked);
-    trackedVideoEl.removeEventListener("ratechange", onTrackedVideoRateChange);
+function attachVideoTracking(videoEl = pickVideoElement()) {
+  if (!videoEl) return;
+  if (videoEl !== trackedVideoEl) {
+    if (trackedVideoEl) {
+      trackedVideoEl.removeEventListener("play", onTrackedVideoPlay);
+      trackedVideoEl.removeEventListener("pause", onTrackedVideoPause);
+      trackedVideoEl.removeEventListener("seeking", onTrackedVideoSeeking);
+      trackedVideoEl.removeEventListener("seeked", onTrackedVideoSeeked);
+      trackedVideoEl.removeEventListener(
+        "ratechange",
+        onTrackedVideoRateChange,
+      );
+    }
+    trackedVideoEl = videoEl;
+    trackedVideoEl.addEventListener("play", onTrackedVideoPlay);
+    trackedVideoEl.addEventListener("pause", onTrackedVideoPause);
+    trackedVideoEl.addEventListener("seeking", onTrackedVideoSeeking);
+    trackedVideoEl.addEventListener("seeked", onTrackedVideoSeeked);
+    trackedVideoEl.addEventListener("ratechange", onTrackedVideoRateChange);
   }
-  trackedVideoEl = videoEl;
-  trackedVideoEl.addEventListener("play", onTrackedVideoPlay);
-  trackedVideoEl.addEventListener("pause", onTrackedVideoPause);
-  trackedVideoEl.addEventListener("seeking", onTrackedVideoSeeking);
-  trackedVideoEl.addEventListener("seeked", onTrackedVideoSeeked);
-  trackedVideoEl.addEventListener("ratechange", onTrackedVideoRateChange);
   try {
     if (watchTracker)
       watchTracker.lastPlaybackRate = trackedVideoEl.playbackRate;
@@ -711,6 +734,18 @@ function resetWatchTracker() {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden && watchTracker) watchTracker.sawHidden = true;
 });
+
+// 전환 순간에 아직 없었거나 잘못 고른 <video>가 재생을 시작하면 그쪽으로 옮긴다.
+// play는 버블링되지 않아 capture로 듣는다. 홈 미리보기·채널 예고편도 재생되므로 watch·shorts 주소일 때만 따른다.
+document.addEventListener(
+  "play",
+  (event) => {
+    if (!watchTracker || event.target === trackedVideoEl) return;
+    if (!extractVideoId(location.href)) return;
+    attachVideoTracking(event.target);
+  },
+  true,
+);
 
 // yt-navigate-finish/popstate에서 더 이상 별도로 리스닝하지 않는다.
 // handleVideoChange가 스냅샷 캡처 이후 시점에 직접 resetWatchTracker를 호출한다.
