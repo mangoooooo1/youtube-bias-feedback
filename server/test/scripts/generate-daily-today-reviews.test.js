@@ -236,6 +236,29 @@ describe("generate-daily-today-reviews run", () => {
     });
   });
 
+  it("그날 영상의 분야를 하나도 못 가져왔으면(유튜브 API 장애 등) Gemini를 부르지 않고 fallback으로 센다", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const db = createTestDb();
+    addParticipant(db, "nocat", "CON");
+    db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES ('vid-nocat', NULL, 600)",
+    ).run();
+    db.prepare(
+      `INSERT INTO video_events (eventId, anonymousId, videoId, sessionId, title, watchedAt, watchedSeconds)
+       VALUES ('e-nocat', 'nocat', 'vid-nocat', 's1', '영상', '2026-03-10T10:00:00+09:00', 300)`,
+    ).run();
+    global.fetch = vi.fn();
+
+    const summary = await runAt(db);
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(summary).toMatchObject({ fallback: 1, created: 0, llmFailures: 0 });
+    expect(reviewRow(db, "nocat", "2026-03-10")).toMatchObject({
+      llmStatus: "fallback",
+      failureReason: null,
+    });
+  });
+
   it("한 참여자 처리 중 오류가 나도 다른 참여자는 계속 처리하고 skipped로 센다", async () => {
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});

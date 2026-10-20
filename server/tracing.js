@@ -60,9 +60,10 @@ function onRequestFinish(span, req) {
 /**
  * express 등을 require-hook으로 패치하므로 다른 모듈보다 먼저 호출해야 한다.
  * @param {string} env - Datadog env 태그
+ * @param {object} [ddTrace] - dd-trace 모듈. 실제 init은 전역을 패치하므로 테스트에서는 가짜를 넣는다
  */
-function initTracer(env) {
-  const tracer = require("dd-trace").init({
+function initTracer(env, ddTrace = require("dd-trace")) {
+  const tracer = ddTrace.init({
     service: "youtube-bias-server",
     env,
   });

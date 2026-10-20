@@ -1,8 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import {
+  initTracer,
   redactHttpUrl,
   tagUserId,
   onRequestFinish,
+  traceRef,
+  useTracer,
   UNMATCHED_PATH,
 } from "../tracing.js";
 
@@ -154,5 +157,59 @@ describe("onRequestFinish", () => {
     expect(span.tags["http.url"]).toBe(
       "http://viewlens.site/api/participants/validate",
     );
+  });
+});
+
+// 실제 dd-trace.init은 전역 require를 패치하므로 가짜 모듈을 넣어 연결만 확인한다
+describe("initTracer", () => {
+  afterEach(() => {
+    useTracer(null);
+  });
+
+  function fakeDdTrace() {
+    const calls = { init: [], use: [] };
+    const tracer = {
+      use: (name, options) => calls.use.push({ name, options }),
+      scope: () => ({ active: () => null }),
+    };
+    return {
+      calls,
+      tracer,
+      module: {
+        init: (options) => {
+          calls.init.push(options);
+          return tracer;
+        },
+      },
+    };
+  }
+
+  it("서비스 이름과 env 태그로 초기화하고, express 요청마다 URL 가림·사용자 태그 훅을 건다", () => {
+    const dd = fakeDdTrace();
+
+    const tracer = initTracer("production", dd.module);
+
+    expect(tracer).toBe(dd.tracer);
+    expect(dd.calls.init).toEqual([
+      { service: "youtube-bias-server", env: "production" },
+    ]);
+    // 이 훅이 빠지면 참여 코드가 담긴 URL이 APM에 그대로 남는다
+    expect(dd.calls.use).toEqual([
+      { name: "express", options: { hooks: { request: onRequestFinish } } },
+    ]);
+  });
+
+  it("초기화한 tracer를 로그용 traceRef가 기본으로 쓴다", () => {
+    const dd = fakeDdTrace();
+    let asked = false;
+    dd.tracer.scope = () => {
+      asked = true;
+      return { active: () => null };
+    };
+
+    initTracer("development", dd.module);
+
+    expect(traceRef()).toBe("");
+    expect(asked).toBe(true);
   });
 });

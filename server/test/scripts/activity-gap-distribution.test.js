@@ -1,9 +1,10 @@
-import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import Database from "better-sqlite3-multiple-ciphers";
 import {
   computeGaps,
   summarizeGaps,
   run,
+  printSummary,
 } from "../../scripts/activity-gap-distribution.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -114,5 +115,30 @@ describe("run — DB 조회", () => {
     const text = JSON.stringify(run(db));
     expect(text).not.toContain("anon-secret");
     expect(text).not.toContain("SEC-9999");
+  });
+});
+
+// 결측 임계값을 정할 때 보는 터미널 요약
+describe("printSummary — 터미널 요약", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("참여자·간격 수, 분위수, 참여자별 최대 간격, 임계값 후보별 판정 수를 순서대로 출력한다", () => {
+    const logs = [];
+    vi.spyOn(console, "log").mockImplementation((line) => logs.push(line));
+
+    printSummary(summarizeGaps([[0.5, 2.5], [1, 4], []], [3, 5]));
+
+    expect(logs).toEqual([
+      "[activity-gap] 참여자 3명(연구 기간 중 활동 없음 1명), 간격 4개",
+      expect.stringMatching(
+        /^ {2}전체 간격\(일\): p50=\S+ p90=\S+ p95=\S+ max=4$/,
+      ),
+      "  참여자별 최대 간격(일, 오름차순): 2.5, 4",
+      "  임계값 후보별 결측 판정 수:",
+      "    3일: 간격 1개 / 참여자 1명",
+      "    5일: 간격 0개 / 참여자 0명",
+    ]);
   });
 });

@@ -160,6 +160,15 @@ describe("parseArgs", () => {
     expect(() => parseArgs(argv)).toThrow();
   });
 
+  it("--out을 주면 그 경로를 절대 경로로 쓰고, 없으면 server/codes.csv에 쓴다", () => {
+    expect(
+      parseArgs(["--exp", "1", "--con", "1", "--out", "custom/list.csv"]).out,
+    ).toBe(path.resolve("custom/list.csv"));
+    expect(parseArgs(["--exp", "1", "--con", "1"]).out).toBe(
+      path.join(__dirname, "../../codes.csv"),
+    );
+  });
+
   it("마지막 옵션의 값이 없으면 어떤 옵션인지 알려준다", () => {
     expect(() => parseArgs(["--exp", "20", "--con", "20", "--out"])).toThrow(
       "--out 뒤에 값이 필요합니다.",

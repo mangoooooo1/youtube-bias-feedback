@@ -55,6 +55,20 @@ export default defineConfig({
           functions: 96,
           lines: 96,
         },
+        // server 바로 아래 파일 — app.js는 자식 프로세스로 기동만 검증해 0%로 잡힌다. 2026-10-20 실측 83.64/80.85/84.21/82.69
+        "server/*.js": {
+          statements: 81,
+          branches: 78,
+          functions: 82,
+          lines: 80,
+        },
+        // 운영 CLI — main()·인자 처리는 로컬 실행으로 확인한다. 2026-10-20 실측 81.25/84.12/91.07/80.06
+        "server/scripts/**": {
+          statements: 79,
+          branches: 82,
+          functions: 89,
+          lines: 78,
+        },
         "extension/popup/**": {
           statements: 84,
           branches: 79,

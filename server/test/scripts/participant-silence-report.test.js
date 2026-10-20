@@ -300,6 +300,25 @@ describe("run", () => {
     expect(loggedOutput()).toContain("결측 의심 참여자 없음");
   });
 
+  it("installDate를 해석할 수 없는 참여자는 결측 판정·확인 수에서 빼고 나머지만 본다", () => {
+    const now = Date.now();
+    insertParticipant(db, {
+      anonymousId: "broken-user",
+      groupCode: "EXP",
+      installDate: "not-a-date",
+    });
+    insertParticipant(db, {
+      anonymousId: "active-user",
+      groupCode: "EXP",
+      installDate: new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    });
+
+    const result = run(db, { now, thresholdDays: 3 });
+
+    expect(result).toMatchObject({ flaggedCount: 0, checkedCount: 1 });
+    expect(loggedOutput()).toContain("연구 기간 중인 참여자 1명 확인");
+  });
+
   it("임계값을 넘은 참여자를 찾아 지문과 함께 출력한다", () => {
     const now = Date.now();
     insertParticipant(db, {
