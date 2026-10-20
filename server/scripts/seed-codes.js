@@ -1,7 +1,7 @@
 // 발급 코드 명단을 issued_codes 테이블에 등록 (일회성, 멱등)
 //
 // 사용법:
-//   node seed-codes.js codes.csv
+//   node scripts/seed-codes.js codes.csv   (server/에서 실행)
 //
 // codes.csv 형식 (첫 줄 헤더):
 //   code,group
@@ -14,17 +14,17 @@
 const fs = require("fs");
 const path = require("path");
 
-// node server/seed-codes.js처럼 repo 루트에서 실행될 수 있으므로, cwd 기준 기본 동작에
+// node server/scripts/seed-codes.js처럼 repo 루트에서 실행될 수 있으므로, cwd 기준 기본 동작에
 // 의존하지 않고 명시적으로 server/.env를 불러온다 (server/scripts/backup-db.js와 동일 이유).
-require("dotenv").config({ path: path.join(__dirname, ".env") });
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
-const { db, initializeDB } = require("./db");
+const { db, initializeDB } = require("../db");
 
 initializeDB(); // issued_codes 테이블 보장
 
 const file = process.argv[2];
 if (!file) {
-  console.error("사용법: node seed-codes.js <codes.csv>");
+  console.error("사용법: node scripts/seed-codes.js <codes.csv>");
   process.exit(1);
 }
 
