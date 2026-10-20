@@ -229,4 +229,38 @@ describe("수집 중 표시", () => {
     vi.advanceTimersByTime(1000);
     expect(root.querySelector("#vl-collecting-count")).toBeNull();
   });
+
+  // 지난 날짜를 그리면 VL.today가 그날 데이터(수집 중 0개)로 바뀐다. 오늘로 돌아와 다시 그릴 때
+  // 그 값을 쓰면 1초 갱신 전까지 "분석 중..."이 잠깐 보였다.
+  it("전날로 갔다가 오늘로 돌아오면 1초 갱신을 기다리지 않고 바로 최신 수집 상태를 보인다", async () => {
+    const { root, emitChange } = await bootPopup(
+      participant({
+        group: "EXP",
+        installDate: daysAgo(BASELINE_DAYS + 1),
+        currentSession: { videoCount: 2 },
+        lastWatchedAt: new Date().toISOString(),
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(root.querySelector("#vl-collecting-count")).not.toBeNull(),
+    );
+    // 팝업을 연 뒤에 영상이 하나 더 기록됐다
+    await emitChange({ currentSession: { newValue: { videoCount: 3 } } });
+
+    root.querySelector("#vl-date-prev").click();
+    await vi.waitFor(() =>
+      expect(root.querySelector("#vl-collecting-count")).toBeNull(),
+    );
+    root.querySelector("#vl-date-next").click();
+    await vi.waitFor(() =>
+      expect(root.querySelector("#vl-collecting-count")).not.toBeNull(),
+    );
+
+    expect(root.querySelector("#vl-collecting-count").textContent).toBe(
+      "영상 3개 수집 중",
+    );
+    expect(root.querySelector("#vl-collecting-timer").textContent).toMatch(
+      /^피드백까지 \d+분 \d{2}초$/,
+    );
+  });
 });

@@ -318,7 +318,7 @@ class ViewLensPopup {
     if (this._tab === "today" && VL._allSessions) {
       const d = buildDataForDate(VL._allSessions || [], this._selectedDate);
       const isToday = dateStr(this._selectedDate) === dateStr(new Date());
-      d.collectingCount = isToday ? (VL.today?.collectingCount ?? 0) : 0;
+      d.collectingCount = isToday ? (VL._collectingCount ?? 0) : 0;
       d.collectingTimer = isToday ? _collectingTimerText() : "";
       const dateKey = dateStr(this._selectedDate);
       d.dateKey = dateKey;
