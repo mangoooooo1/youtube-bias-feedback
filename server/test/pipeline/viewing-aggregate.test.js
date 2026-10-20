@@ -221,3 +221,64 @@ describe("aggregateViewing — 시청 시간이 확인된 유효 영상 수", ()
     expect(result.confirmedCount).toBe(2);
   });
 });
+
+describe("aggregateViewing — 민감도 분석용 측정 정의 옵션", () => {
+  const entries = [
+    video({
+      eventId: "a",
+      categoryId: MUSIC,
+      durationSeconds: 100,
+      watchedSeconds: 400,
+    }), // 길이보다 오래 봄
+    video({
+      eventId: "b",
+      categoryId: SPORTS,
+      durationSeconds: 600,
+      watchedSeconds: 100,
+    }),
+    video({
+      eventId: "c",
+      categoryId: GAME,
+      durationSeconds: 100,
+      watchedSeconds: 20,
+    }), // 20%
+    video({
+      eventId: "d",
+      categoryId: GAME,
+      durationSeconds: 100,
+      watchedSeconds: null,
+    }),
+    short({ eventId: "e" }),
+  ];
+
+  it("옵션이 없으면 기본값을 직접 넘긴 것과 결과가 완전히 같다", () => {
+    const base = aggregateViewing(entries);
+    expect(aggregateViewing(entries, {})).toEqual(base);
+    expect(
+      aggregateViewing(entries, {
+        capWatchSeconds: true,
+        minRelativeRatio: 0.25,
+      }),
+    ).toEqual(base);
+  });
+
+  it("capWatchSeconds: false면 영상 길이로 자르지 않은 시청 시간으로 가중한다", () => {
+    const capped = aggregateViewing(entries);
+    const uncapped = aggregateViewing(entries, { capWatchSeconds: false });
+    // 상한 적용: 음악 100초 vs 스포츠 100초 / 상한 없음: 음악 400초 vs 스포츠 100초
+    expect(capped.weightedDistribution).toEqual({ 음악: 0.5, 스포츠: 0.5 });
+    expect(uncapped.weightedDistribution).toEqual({ 음악: 0.8, 스포츠: 0.2 });
+    expect(uncapped.weightedEntropy).toBeLessThan(capped.weightedEntropy);
+    expect(uncapped.validCount).toBe(capped.validCount);
+  });
+
+  it("minRelativeRatio를 낮추면 짧게 본 영상이 유효 시청으로 들어온다", () => {
+    expect(aggregateViewing(entries).validCount).toBe(3); // a, b, d
+    const loose = aggregateViewing(entries, { minRelativeRatio: 0.1 });
+    expect(loose.validCount).toBe(4); // c(20%) 추가
+    expect(loose.weightedDistribution).toHaveProperty("게임");
+    expect(
+      aggregateViewing(entries, { minRelativeRatio: 0.5 }).validCount,
+    ).toBe(3);
+  });
+});
