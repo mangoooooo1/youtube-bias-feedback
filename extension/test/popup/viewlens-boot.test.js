@@ -131,3 +131,93 @@ describe("boot — 저장소 상태별 화면과 서버 요청", () => {
     expect(reg.body.anonymousId).toBe(data.anonymousId);
   });
 });
+
+// 서버는 끝난 구간의 리뷰를 매일 04:00 KST에 만든다. 그 전에 연 팝업이 "리뷰 없음"을 오늘 캐시로
+// 남겨도, 끝난 구간의 리뷰가 빠져 있으면 다시 물어 같은 날 리뷰가 보이게 한다.
+describe("boot — 기간 리뷰 캐시", () => {
+  const DAYS_PER_PERIOD = 4;
+  const todayKst = () =>
+    new Date().toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+  const cache = (reviews) => ({
+    anonymousId: "anon-1",
+    dateStr: todayKst(),
+    reviews,
+  });
+  const review1 = { periodIndex: 1, review: "1구간 리뷰" };
+
+  // 기간 리뷰 조회는 첫 화면을 그리기 전에 끝나므로, 화면이 그려지면 조회 여부가 정해진 것이다
+  async function bootWithCache(over, responses) {
+    const booted = await bootPopup(participant(over), { responses });
+    await vi.waitFor(() =>
+      expect(booted.root.textContent.length).toBeGreaterThan(0),
+    );
+    return booted;
+  }
+
+  it("끝난 구간의 리뷰가 없는 오늘 캐시면 서버에 다시 묻고 받은 리뷰로 캐시를 바꾼다", async () => {
+    const { data, server } = await bootWithCache(
+      {
+        group: "EXP",
+        installDate: daysAgo(DAYS_PER_PERIOD + 1),
+        periodReviewsCache: cache([]),
+      },
+      { "/api/period-reviews": { data: [review1] } },
+    );
+
+    await vi.waitFor(() =>
+      expect(data.periodReviewsCache.reviews).toEqual([review1]),
+    );
+    expect(server.count("/api/period-reviews")).toBe(1);
+  });
+
+  it("끝난 구간의 리뷰가 모두 있는 오늘 캐시면 서버에 묻지 않는다", async () => {
+    const { root, server } = await bootWithCache({
+      group: "EXP",
+      installDate: daysAgo(DAYS_PER_PERIOD + 1),
+      periodReviewsCache: cache([review1]),
+    });
+
+    expect(hasFeedbackTabs(root)).toBe(true);
+    expect(server.count("/api/period-reviews")).toBe(0);
+  });
+
+  it("아직 끝난 구간이 없으면 빈 오늘 캐시를 그대로 쓴다", async () => {
+    const { server } = await bootWithCache({
+      group: "EXP",
+      installDate: daysAgo(1),
+      periodReviewsCache: cache([]),
+    });
+
+    expect(server.count("/api/period-reviews")).toBe(0);
+  });
+
+  it("다시 물었는데 서버가 실패하면 이전 캐시를 그대로 쓴다", async () => {
+    const { root, data, server } = await bootWithCache(
+      {
+        group: "EXP",
+        installDate: daysAgo(DAYS_PER_PERIOD + 1),
+        periodReviewsCache: cache([]),
+      },
+      { "/api/period-reviews": () => ({ status: 500, body: {} }) },
+    );
+
+    expect(hasFeedbackTabs(root)).toBe(true);
+    expect(server.count("/api/period-reviews")).toBe(1);
+    expect(data.periodReviewsCache).toEqual(cache([]));
+  });
+
+  it("대조군은 리뷰가 다 차지 않은 캐시를 쓰지 않고, 다 차지 않은 응답은 캐시에 저장하지 않는다(기존 동작)", async () => {
+    const { root, data, server } = await bootWithCache(
+      {
+        group: "CON",
+        installDate: daysAgo(DAYS_PER_PERIOD + 1),
+        periodReviewsCache: cache([]),
+      },
+      { "/api/period-reviews": { data: [review1] } },
+    );
+
+    expect(hasHome(root)).toBe(true);
+    expect(server.count("/api/period-reviews")).toBe(1);
+    expect(data.periodReviewsCache.reviews).toEqual([]);
+  });
+});
