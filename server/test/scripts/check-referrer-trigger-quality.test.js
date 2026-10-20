@@ -194,13 +194,19 @@ describe("formatQualitySummary", () => {
 
   it("기준 이상이면 보정 필요를 알린다", () => {
     expect(summaryOf(relatedEvents(10, 3))).toBe(
-      "관련영상 유입 10건 중 unknown 30.0% — 기준 30% 이상 — 판정 로직 보정 필요",
+      "관련영상 유입 10건 중 unknown 3건(30.00%) — 기준 30% 이상 — 판정 로직 보정 필요",
     );
   });
 
   it("기준 미만", () => {
     expect(summaryOf(relatedEvents(10, 1))).toBe(
-      "관련영상 유입 10건 중 unknown 10.0% — 기준 30% 미만",
+      "관련영상 유입 10건 중 unknown 1건(10.00%) — 기준 30% 미만",
+    );
+  });
+
+  it("경계 바로 아래(29.96%)는 반올림된 30%가 아니라 개수와 원래 비율로 보인다", () => {
+    expect(summaryOf(relatedEvents(2500, 749))).toBe(
+      "관련영상 유입 2500건 중 unknown 749건(29.96%) — 기준 30% 미만",
     );
   });
 

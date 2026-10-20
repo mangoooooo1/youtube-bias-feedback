@@ -152,11 +152,13 @@ function formatQualitySummary(report) {
   if (judgement.needsLogicFix === null) {
     return "관련영상 유입 0건 — 판정할 수 없음";
   }
-  const percent = (judgement.relatedUnknownRatio * 100).toFixed(1);
+  // 판정과 같은 개수로 비율을 내고 개수도 함께 보인다(반올림된 표시만으로는 경계 근처 판정 근거가 안 보임)
+  const unknownCount = related.unknown.count;
+  const percent = ((unknownCount / related.total) * 100).toFixed(2);
   const verdict = judgement.needsLogicFix
     ? `기준 ${judgement.threshold * 100}% 이상 — 판정 로직 보정 필요`
     : `기준 ${judgement.threshold * 100}% 미만`;
-  return `관련영상 유입 ${related.total}건 중 unknown ${percent}% — ${verdict}`;
+  return `관련영상 유입 ${related.total}건 중 unknown ${unknownCount}건(${percent}%) — ${verdict}`;
 }
 
 function run(db, { groups, now = new Date() }) {
