@@ -258,9 +258,11 @@ async function applyWatchStatsPatch(target, patch) {
 async function finalizePreviousWatchStats(target, stats) {
   // 라이브 키·sessions[] 어디에도 없으면(참여자가 데이터를 지웠거나 하는 극단적
   // 경우) 조용히 포기한다. 갱신할 대상 자체가 없다.
+  // 최종값은 체크포인트로 대신 보낸 값보다 항상 우선한다(storage.js hasFinalWatchStats)
   const applied = await applyWatchStatsPatch(target, {
     ...stats,
     watchStatsSent: false,
+    watchStatsSource: "final",
   });
   if (!applied) return;
 
@@ -798,7 +800,11 @@ window.addEventListener("pagehide", () => {
   if (!stats) return;
   const target = captureTrackedVideoIdentity();
   if (!target?.eventId) return;
-  applyWatchStatsPatch(target, { ...stats, watchStatsSent: false });
+  applyWatchStatsPatch(target, {
+    ...stats,
+    watchStatsSent: false,
+    watchStatsSource: "final",
+  });
 });
 
 // 테스트(Vitest)에서만 내부 함수를 꺼낸다. 콘텐츠 스크립트에는 module이 없어 이 블록은 실행되지 않는다.

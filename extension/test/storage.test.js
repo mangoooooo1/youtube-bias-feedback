@@ -728,6 +728,7 @@ describe("시청시간 체크포인트", () => {
         watchedSeconds: 37,
         playbackRate: 1,
         wasBackgrounded: 0,
+        at: STALE,
         source: "checkpoint",
       },
     ]);
@@ -844,6 +845,136 @@ describe("시청시간 체크포인트", () => {
       .filter((k) => k.startsWith("watchcp__"))
       .sort();
     expect(keys).toEqual(["watchcp__orphan-new", "watchcp__watching"]);
+  });
+});
+
+// 탭이 얼었다 깨어나면 체크포인트로 대신 보낸 뒤에도 같은 영상의 더 큰 체크포인트가 다시 쓰인다
+describe("시청시간 체크포인트 — 체크포인트로 보낸 값은 확정값이 아니다", () => {
+  const NOW = Date.parse("2026-10-20T12:00:00Z");
+  const STALE = NOW - WATCH_CHECKPOINT_STALE_MS - 1000;
+  const sentByCheckpoint = (checkpointAt, watchedSeconds = 30) => ({
+    eventId: "e1",
+    sent: true,
+    watchedSeconds,
+    watchStatsSent: true,
+    watchStatsSource: "checkpoint",
+    checkpointAt,
+  });
+  const checkpoint = (at, watchedSeconds) => ({
+    watchcp__e1: {
+      sessionId: "s1",
+      eventId: "e1",
+      watchedSeconds,
+      playbackRate: 1,
+      wasBackgrounded: 0,
+      at,
+    },
+  });
+
+  it("체크포인트로 보낸 뒤 더 새로운 체크포인트가 쓰이면 그 값을 다시 보낸다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__e1: sentByCheckpoint(STALE - 60_000),
+      ...checkpoint(STALE, 90),
+    });
+
+    const items = await getUnsentWatchStats(NOW);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      watchedSeconds: 90,
+      at: STALE,
+      source: "checkpoint",
+    });
+  });
+
+  it("이미 보낸 체크포인트는 다시 보내지 않고 정리한다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__e1: sentByCheckpoint(STALE),
+      ...checkpoint(STALE, 30),
+    });
+
+    expect(await getUnsentWatchStats(NOW)).toEqual([]);
+    await pruneWatchCheckpoints(NOW);
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.watchcp__e1).toBeUndefined();
+  });
+
+  it("체크포인트로 보낸 기록에 최종값이 오면 최종값만 보내고, 더 새로운 체크포인트는 보내지 않는다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__e1: {
+        ...sentByCheckpoint(STALE - 60_000),
+        watchedSeconds: 120,
+        watchStatsSent: false,
+        watchStatsSource: "final",
+      },
+      ...checkpoint(STALE, 90),
+    });
+
+    const items = await getUnsentWatchStats(NOW);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ watchedSeconds: 120 });
+    expect(items[0].source).toBeUndefined();
+  });
+
+  it("보내는 동안 더 새로운 체크포인트 값이 기록됐으면 오래된 전송 결과로 덮지 않는다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__e1: sentByCheckpoint(STALE + 5000, 90),
+    });
+
+    await markWatchStatsSent({
+      location: "live",
+      key: "video__s1__e1",
+      sessionId: "s1",
+      eventId: "e1",
+      watchedSeconds: 30,
+      playbackRate: 1,
+      wasBackgrounded: 0,
+      at: STALE,
+      source: "checkpoint",
+    });
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.video__s1__e1).toMatchObject({
+      watchedSeconds: 90,
+      checkpointAt: STALE + 5000,
+    });
+  });
+
+  it("체크포인트로 보내면 출처와 체크포인트 시각을 기록에 남긴다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__e1: { eventId: "e1", sent: true },
+      ...checkpoint(STALE, 37),
+    });
+    const [item] = await getUnsentWatchStats(NOW);
+
+    await markWatchStatsSent(item);
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.video__s1__e1).toMatchObject({
+      watchedSeconds: 37,
+      watchStatsSent: true,
+      watchStatsSource: "checkpoint",
+      checkpointAt: STALE,
+    });
+  });
+
+  it("세션이 닫혀도 체크포인트 출처·시각을 sessions[]로 옮긴다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      video__s1__e1: {
+        videoId: "v1",
+        title: "제목-v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        ...sentByCheckpoint(STALE),
+      },
+    });
+
+    await endSession();
+
+    const [session] = await getAllSessions();
+    expect(session.videos[0]).toMatchObject({
+      watchStatsSource: "checkpoint",
+      checkpointAt: STALE,
+    });
   });
 });
 

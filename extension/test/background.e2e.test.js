@@ -944,6 +944,51 @@ describe("retryUnsentWatchStats — 시청시간 서버 장애 대비 재시도 
     expect(all.watchcp__uuid1).toBeUndefined();
   });
 
+  it("체크포인트로 보낸 뒤 탭이 깨어나 더 큰 체크포인트를 쓰면 다음 재시도에서 그 값을 다시 보낸다", async () => {
+    global.chrome = createChromeMock();
+    const patches = [];
+    global.fetch = vi.fn(async (url, options = {}) => {
+      if (options.method === "PATCH") {
+        patches.push(JSON.parse(options.body));
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${url}`);
+    });
+    const checkpoint = (watchedSeconds, minutesAgo) => ({
+      watchcp__uuid1: {
+        sessionId: "s1",
+        eventId: "uuid1",
+        watchedSeconds,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        at: Date.now() - minutesAgo * 60 * 1000,
+      },
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      video__s1__uuid1: { videoId: "v1", eventId: "uuid1", sent: true },
+      ...checkpoint(30, 5), // 탭이 얼어 오래된 체크포인트
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentWatchStats();
+
+    // 탭이 깨어나 같은 영상의 더 큰 값을 쓰고, 다시 멈춘 뒤 닫혔다
+    await global.chrome.storage.local.set(checkpoint(90, 3));
+    await mod.retryUnsentWatchStats();
+
+    expect(patches.map((p) => p.watchedSeconds)).toEqual([30, 90]);
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.video__s1__uuid1).toMatchObject({
+      watchedSeconds: 90,
+      watchStatsSource: "checkpoint",
+    });
+  });
+
   it("세션 종료 후(sessions[].videos)에 남은 미반영 시청시간도 재전송한다", async () => {
     global.chrome = createChromeMock();
     const calls = { patches: [] };

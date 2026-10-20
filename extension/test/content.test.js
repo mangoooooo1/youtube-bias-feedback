@@ -1506,6 +1506,7 @@ describe("content.js recordVideo — previousWatchStats로 직전 영상의 시�
       playbackRate: 1.25,
       wasBackgrounded: 1,
       watchStatsSent: true,
+      watchStatsSource: "final",
     });
     expect(oldSession.videos[1]).toEqual(archivedSession.videos[1]);
     expect(untouchedSession).toEqual(otherSession);

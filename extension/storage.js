@@ -123,6 +123,8 @@ function buildClosedSession(sessionId, videos, startTime, endTime) {
         playbackRate,
         wasBackgrounded,
         watchStatsSent,
+        watchStatsSource,
+        checkpointAt,
       }) => ({
         videoId,
         title,
@@ -140,6 +142,9 @@ function buildClosedSession(sessionId, videos, startTime, endTime) {
         playbackRate,
         wasBackgrounded,
         watchStatsSent,
+        // 체크포인트로 대신 보낸 값인지 — 세션이 닫힌 뒤에도 더 새로운 체크포인트를 보낼 수 있게 함께 옮긴다
+        watchStatsSource,
+        checkpointAt,
       }),
     ),
   };
@@ -309,8 +314,21 @@ function indexVideoEntries(all) {
 }
 
 /**
- * 더 쓸 일이 없는 체크포인트를 지운다 — 영상 기록에 시청시간이 확정됐거나 영구 실패한 것,
- * 영상 기록을 찾지 못한 채 하루가 지난 것.
+ * 영상을 떠날 때·탭을 닫을 때 남긴 최종 시청시간인가. 체크포인트로 대신 보낸 값은 탭이 다시
+ * 살아나 더 큰 체크포인트를 쓸 수 있어 확정값으로 보지 않는다. 출처가 없는 예전 기록은 최종값이다.
+ */
+function hasFinalWatchStats(v) {
+  return v.watchedSeconds != null && v.watchStatsSource !== "checkpoint";
+}
+
+/** 이 체크포인트가 영상 기록에 이미 반영한 체크포인트보다 새로운가. */
+function isNewerCheckpoint(cp, v) {
+  return v.checkpointAt == null || (cp.at ?? 0) > v.checkpointAt;
+}
+
+/**
+ * 더 쓸 일이 없는 체크포인트를 지운다 — 영상 기록에 최종값이 있거나 영구 실패한 것,
+ * 이미 보낸 것, 영상 기록을 찾지 못한 채 하루가 지난 것.
  * @param {number} [now]
  * @returns {Promise<void>}
  */
@@ -323,7 +341,9 @@ export async function pruneWatchCheckpoints(now = Date.now()) {
       const entry = entries.get(cp?.eventId);
       if (!entry) return now - (cp?.at ?? 0) > ORPHAN_CHECKPOINT_MS;
       return (
-        entry.v.watchedSeconds != null || entry.v.watchStatsSent === "invalid"
+        hasFinalWatchStats(entry.v) ||
+        entry.v.watchStatsSent === "invalid" ||
+        !isNewerCheckpoint(cp, entry.v)
       );
     })
     .map(([key]) => key);
@@ -370,8 +390,9 @@ export async function getUnsentWatchStats(now = Date.now()) {
       const entry = entries.get(cp?.eventId);
       if (!entry || now - (cp.at ?? 0) <= WATCH_CHECKPOINT_STALE_MS) return [];
       const { v } = entry;
-      // 최종값이 있거나 영구 실패했거나 영상 POST가 아직이면(PATCH가 404) 보내지 않는다
-      if (v.watchedSeconds != null || v.watchStatsSent === "invalid") return [];
+      // 최종값이 있거나 영구 실패했거나 이미 보낸 체크포인트거나 영상 POST가 아직이면(PATCH가 404) 보내지 않는다
+      if (hasFinalWatchStats(v) || v.watchStatsSent === "invalid") return [];
+      if (!isNewerCheckpoint(cp, v)) return [];
       if (v.sent === false || v.sent === "invalid") return [];
       return [
         {
@@ -382,6 +403,7 @@ export async function getUnsentWatchStats(now = Date.now()) {
           watchedSeconds: cp.watchedSeconds,
           playbackRate: cp.playbackRate,
           wasBackgrounded: cp.wasBackgrounded,
+          at: cp.at,
           source: "checkpoint",
         },
       ];
@@ -413,11 +435,11 @@ export function markWatchStatsInvalid(item) {
 /**
  * 전송한 값이 아직 그 영상 기록의 최신 상태일 때만 갱신한 기록을 돌려준다(아니면 null).
  * 전송 중에 content.js가 더 새로운 시청시간을 썼다면 그 값이 다음 재시도에서 나가도록 둔다.
- * 체크포인트 값으로 보냈으면 최종값이 없을 때만 그 값을 기록에 함께 남긴다.
+ * 체크포인트 값으로 보냈으면 최종값이나 더 새로운 체크포인트 값이 없을 때만 그 값을 출처·시각과 함께 남긴다.
  */
 function withWatchStatsSent(v, item, value) {
   if (item.source === "checkpoint") {
-    if (v.watchedSeconds != null) return null;
+    if (hasFinalWatchStats(v) || !isNewerCheckpoint(item, v)) return null;
     if (value !== true) return { ...v, watchStatsSent: value };
     return {
       ...v,
@@ -425,6 +447,8 @@ function withWatchStatsSent(v, item, value) {
       playbackRate: item.playbackRate,
       wasBackgrounded: item.wasBackgrounded,
       watchStatsSent: value,
+      watchStatsSource: "checkpoint",
+      checkpointAt: item.at,
     };
   }
   if (v.watchedSeconds !== item.watchedSeconds) return null;
