@@ -276,4 +276,10 @@ if (require.main === module) {
   }
 }
 
-module.exports = { classifyInput, findParticipants, lookup, formatDetail };
+module.exports = {
+  classifyInput,
+  findParticipants,
+  lookup,
+  formatDetail,
+  printResult,
+};

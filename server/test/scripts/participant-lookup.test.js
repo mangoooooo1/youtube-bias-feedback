@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Database from "better-sqlite3-multiple-ciphers";
 import crypto from "crypto";
 import {
   classifyInput,
   lookup,
   formatDetail,
+  printResult,
 } from "../../scripts/participant-lookup.js";
 
 const UUID = "3f1c2b9a-7d4e-4c1a-9b2f-1e2d3c4b5a6f";
@@ -224,4 +225,71 @@ describe("lookup — 참여자 찾기와 상태 모으기", () => {
     expect(apm).toContain("보존 필터");
     expect(apm).not.toContain("마스킹");
   });
+});
+
+// 운영자가 참여자 문의를 처리할 때 터미널에서 보는 출력
+describe("formatDetail·printResult — 터미널 출력", () => {
+  let db;
+  let logs;
+
+  beforeEach(() => {
+    db = createTestDb();
+    logs = [];
+    vi.spyOn(console, "log").mockImplementation((line) => logs.push(line));
+  });
+
+  afterEach(() => {
+    db.close();
+    vi.restoreAllMocks();
+  });
+
+  it("참여 코드가 없으면 (없음), 연구 기간이 지났으면 연구 종료를 표시한다", () => {
+    insertParticipant(db, { code: null });
+    const [d] = lookup(db, UUID, {
+      now: new Date("2026-07-01T03:00:00Z"),
+    }).matches;
+
+    const text = formatDetail(d);
+    expect(text).toContain("참여 코드     : (없음)");
+    expect(text).toContain("(연구 종료)");
+  });
+
+  it("최근 오늘 리뷰가 있으면 날짜·상태·출처·생성 시각을 한 줄로 보인다", () => {
+    insertParticipant(db);
+    db.prepare(
+      "INSERT INTO today_reviews (anonymousId, reviewDate, llmStatus, source, generatedAt) VALUES (?, ?, ?, ?, ?)",
+    ).run(UUID, "2026-06-04", "success", "llm", "2026-06-04T12:00:00.000Z");
+    const [d] = lookup(db, UUID, { now: NOW }).matches;
+
+    expect(formatDetail(d)).toContain(
+      "오늘 리뷰(최근): 2026-06-04 success (llm) 2026-06-04T12:00:00.000Z",
+    );
+  });
+
+  it("찾은 참여자가 없으면 입력 종류와 함께 알린다", () => {
+    printResult(lookup(db, UUID, { now: NOW }));
+
+    expect(logs).toEqual([
+      "[participant-lookup] anonymousId로 찾은 참여자가 없습니다.",
+    ]);
+  });
+
+  it("여러 명이 매칭되면 인원을 먼저 알리고 참여자 사이에 구분선을 넣는다", () => {
+    const d = { ...lookupOne(db) };
+    const input = { type: "fingerprint" };
+
+    printResult({ input, matches: [d, d] });
+
+    expect(logs[0]).toBe(
+      "[participant-lookup] 2명이 매칭됐습니다(지문 충돌 가능).",
+    );
+    expect(logs[1]).toBe(formatDetail(d));
+    expect(logs[2]).toBe(`\n${"-".repeat(40)}`);
+    expect(logs[3]).toBe(formatDetail(d));
+  });
+
+  function lookupOne(database) {
+    insertParticipant(database);
+    return lookup(database, UUID, { now: NOW }).matches[0];
+  }
 });
