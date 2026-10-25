@@ -1350,6 +1350,67 @@ describe("알람 핸들러 — 시청시간 PATCH는 영상 POST 재시도가 �
   });
 });
 
+// 브라우저를 다시 켠 직후 옛 세션과 새 세션이 함께 닫히면, 둘 다 서버로 보내야 한다.
+// 현재 세션만 보내면 옛 세션은 syncedToServer가 비어 재시도 큐에서도 빠진다.
+describe("알람 핸들러 — 한 번에 닫힌 세션은 모두 서버로 보낸다", () => {
+  it("옛 세션과 현재 세션이 함께 닫히면 먼저 끝난 옛 세션부터 둘 다 보내고, 각자 종료 시각을 쓴다", async () => {
+    global.chrome = createChromeMock();
+    const sessionPosts = [];
+    global.fetch = vi.fn(async (url, options = {}) => {
+      if (new URL(String(url)).pathname === "/api/sessions") {
+        sessionPosts.push(JSON.parse(options.body));
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          data: { categoryDistribution: { 음악: 1 }, entropy: 0 },
+        }),
+      };
+    });
+
+    const minutesAgo = (m) =>
+      new Date(FIXED_NOW.getTime() - m * 60000).toISOString();
+    const oldWatchedAt = "2026-01-08T10:00:00.000Z";
+    const newWatchedAt = minutesAgo(11);
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      participantSynced: true,
+      participantToken: "tok",
+      currentSession: { sessionId: "new", startTime: newWatchedAt },
+      lastWatchedAt: newWatchedAt,
+      video__old__e1: {
+        videoId: "v1",
+        watchedAt: oldWatchedAt,
+        eventId: "e1",
+        sent: true,
+      },
+      video__new__e2: {
+        videoId: "v2",
+        watchedAt: newWatchedAt,
+        eventId: "e2",
+        sent: true,
+      },
+    });
+
+    vi.resetModules();
+    await import("../background.js");
+    const onAlarm = global.chrome.alarms.onAlarm.addListener.mock.calls[0][0];
+    onAlarm({ name: "SESSION_TIMEOUT_CHECK" });
+    await vi.waitFor(() => expect(sessionPosts).toHaveLength(2));
+
+    expect(sessionPosts.map((b) => b.sessionId)).toEqual(["old", "new"]);
+    expect(sessionPosts[0].endTime).toBe("2026-01-08T10:10:00.000Z");
+    expect(sessionPosts[1].endTime).toBe(minutesAgo(1));
+
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    expect(sessions.map((s) => s.syncedToServer)).toEqual([true, true]);
+  });
+});
+
 describe("재시도 큐 fail-fast — 큐 전체에 공통된 실패면 한 틱에 1건만 보낸다", () => {
   const BASE = {
     anonymousId: "a1",
