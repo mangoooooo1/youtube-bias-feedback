@@ -18,6 +18,10 @@ function maxTitlesForPeriod(days) {
   return days * MAX_TITLES_PER_DAY;
 }
 
+// 기간 리뷰가 fallback이면 구간 끝난 날로부터 이 일수 안에서 매일 다시 만든다.
+// 팝업(viewlens-data.js)이 같은 값으로 캐시를 다시 조회할지 판단한다
+const FALLBACK_RETRY_WINDOW_DAYS = 3;
+
 module.exports = {
   TOTAL_DAYS,
   DAYS_PER_PERIOD,
@@ -26,4 +30,5 @@ module.exports = {
   minValidVideosForPeriod,
   MAX_TITLES_PER_DAY,
   maxTitlesForPeriod,
+  FALLBACK_RETRY_WINDOW_DAYS,
 };
