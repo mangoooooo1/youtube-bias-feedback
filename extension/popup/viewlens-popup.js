@@ -562,39 +562,12 @@ async function fetchTodayReviews(serverUrl, anonymousId, participantToken) {
   }
 }
 
-// 캐시에 "오늘" 날짜 행이 없거나, 그 행의 sessionCount가 로컬에서 알고 있는 오늘 세션
-// 개수보다 적으면(아직 반영 안 된 최신 세션이 있다는 뜻) 오래된 것으로 본다.
-function isTodayReviewsCacheStale(
-  cache,
-  anonymousId,
-  todayStr,
-  todaySessionCount,
-) {
-  if (!cache || cache.anonymousId !== anonymousId) return true;
-  const todayRow = (cache.reviews || []).find((r) => r.reviewDate === todayStr);
-  return todaySessionCount > (todayRow?.sessionCount ?? 0);
-}
-
-async function getTodayReviewsCached(
-  serverUrl,
-  anonymousId,
-  todaySessionCount,
-  participantToken,
-) {
+// 리뷰 이력은 열 때마다 서버에서 받는다. 세션 응답으로 오지 않는 리뷰(베이스라인 동안 만든 리뷰,
+// 자정 크론이 마무리한 전날 리뷰)가 있어 로컬 세션 수로는 최신인지 알 수 없다.
+// 캐시는 조회가 실패했을 때만 쓴다.
+async function loadTodayReviews(serverUrl, anonymousId, participantToken) {
   const { todayReviewsCache } =
     await chrome.storage.local.get("todayReviewsCache");
-  const todayStr = dateStr(new Date());
-
-  if (
-    !isTodayReviewsCacheStale(
-      todayReviewsCache,
-      anonymousId,
-      todayStr,
-      todaySessionCount,
-    )
-  ) {
-    return todayReviewsCache.reviews;
-  }
 
   const fetched = await fetchTodayReviews(
     serverUrl,
@@ -1145,15 +1118,15 @@ async function boot() {
     VL.isConGroup(stored.group) &&
     _isStudyEndTimeReached(installDate) &&
     !!stored.studyEndCodeVerified;
+  // 지난 날짜 리뷰는 오늘 세션이 없어도 보여야 해서, 이력 조회는 오늘 세션 수와 따로 판정한다.
+  const reviewHistoryEligible = feedbackActive || studyEndTodayEligible;
   let todayCumulativeEligible =
-    (feedbackActive || studyEndTodayEligible) &&
-    realToday.sessionIds.length > 0;
+    reviewHistoryEligible && realToday.sessionIds.length > 0;
   // 대상이 아니면 조회 자체를 하지 않는다.
-  const todayReviewsList = todayCumulativeEligible
-    ? await getTodayReviewsCached(
+  const todayReviewsList = reviewHistoryEligible
+    ? await loadTodayReviews(
         stored.serverUrl,
         stored.anonymousId,
-        realToday.sessionIds.length,
         stored.participantToken,
       )
     : [];
