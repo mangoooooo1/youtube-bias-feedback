@@ -72,10 +72,18 @@ function buildDataForDate(allSessions, targetDate) {
   );
 
   if (todaySess.length === 0) {
+    // 지난 날짜는 로컬 세션이 없어도(저장소 초기화·재설치) 서버 이력의 리뷰를 보여 준다.
+    // 화면은 서버 시청 집계에 그날 기록이 있을 때만 그려진다. 오늘 카드는 세션 기준으로 따로 판정한다
+    const pastRow =
+      todayStr !== dateStr(new Date())
+        ? VL._todayReviewsByDate?.[todayStr]
+        : null;
     return {
       isEmpty: true,
       dateLabel: koreanDateLabel(targetDate),
-      review: "",
+      review: pastRow?.review || "",
+      reviewTopic: pastRow?.reviewTopic || "",
+      reviewGeneratedAt: pastRow?.generatedAt ?? null,
       sessionIds: [],
     };
   }
@@ -296,6 +304,29 @@ function _hasEndedPeriodWithoutReview(installDate, reviews) {
   return false;
 }
 
+// 서버가 아직 다시 만드는 중인 fallback 리뷰가 있으면(구간 끝난 날로부터 재시도 일수 안) 다시 묻는다.
+// 새벽 재시도로 정상 리뷰가 되면 같은 날 다음 열 때 바로 보이게 하기 위함
+function _hasRetryableFallback(reviews) {
+  const today = dateStr(new Date());
+  return (reviews || []).some((r) => {
+    if (r.source !== "fallback" || !r.periodEnd) return false;
+    const endMs = Date.parse(`${r.periodEnd}T00:00:00+09:00`);
+    const deadline = dateStr(
+      new Date(endMs + VL.FALLBACK_RETRY_WINDOW_DAYS * 86400000),
+    );
+    return today <= deadline;
+  });
+}
+
+// 캐시 저장이 실패해도(저장 용량 초과 등) 서버에서 받은 결과로 팝업을 그리게 한다
+async function setCacheQuietly(items) {
+  try {
+    await chrome.storage.local.set(items);
+  } catch (error) {
+    console.warn("[popup] 캐시 저장 실패:", error.message);
+  }
+}
+
 // 기간 리뷰 로컬 캐싱
 // 팝업을 열 때마다 서버를 조회하지 않고, 캐시가 오늘 날짜 것이 아니거나 끝난 구간의 리뷰가 빠졌을 때만 재조회
 async function getPeriodReviewsCached(
@@ -314,7 +345,8 @@ async function getPeriodReviewsCached(
     periodReviewsCache.anonymousId === anonymousId &&
     periodReviewsCache.dateStr === todayStr &&
     !_isIncompleteForCon(group, periodReviewsCache.reviews) &&
-    !_hasEndedPeriodWithoutReview(installDate, periodReviewsCache.reviews)
+    !_hasEndedPeriodWithoutReview(installDate, periodReviewsCache.reviews) &&
+    !_hasRetryableFallback(periodReviewsCache.reviews)
   ) {
     return periodReviewsCache.reviews;
   }
@@ -326,7 +358,7 @@ async function getPeriodReviewsCached(
   );
   if (fetched) {
     if (!_isIncompleteForCon(group, fetched)) {
-      await chrome.storage.local.set({
+      await setCacheQuietly({
         periodReviewsCache: {
           anonymousId,
           dateStr: todayStr,
@@ -562,39 +594,12 @@ async function fetchTodayReviews(serverUrl, anonymousId, participantToken) {
   }
 }
 
-// 캐시에 "오늘" 날짜 행이 없거나, 그 행의 sessionCount가 로컬에서 알고 있는 오늘 세션
-// 개수보다 적으면(아직 반영 안 된 최신 세션이 있다는 뜻) 오래된 것으로 본다.
-function isTodayReviewsCacheStale(
-  cache,
-  anonymousId,
-  todayStr,
-  todaySessionCount,
-) {
-  if (!cache || cache.anonymousId !== anonymousId) return true;
-  const todayRow = (cache.reviews || []).find((r) => r.reviewDate === todayStr);
-  return todaySessionCount > (todayRow?.sessionCount ?? 0);
-}
-
-async function getTodayReviewsCached(
-  serverUrl,
-  anonymousId,
-  todaySessionCount,
-  participantToken,
-) {
+// 리뷰 이력은 열 때마다 서버에서 받는다. 세션 응답으로 오지 않는 리뷰(베이스라인 동안 만든 리뷰,
+// 자정 크론이 마무리한 전날 리뷰)가 있어 로컬 세션 수로는 최신인지 알 수 없다.
+// 캐시는 조회가 실패했을 때만 쓴다.
+async function loadTodayReviews(serverUrl, anonymousId, participantToken) {
   const { todayReviewsCache } =
     await chrome.storage.local.get("todayReviewsCache");
-  const todayStr = dateStr(new Date());
-
-  if (
-    !isTodayReviewsCacheStale(
-      todayReviewsCache,
-      anonymousId,
-      todayStr,
-      todaySessionCount,
-    )
-  ) {
-    return todayReviewsCache.reviews;
-  }
 
   const fetched = await fetchTodayReviews(
     serverUrl,
@@ -602,7 +607,7 @@ async function getTodayReviewsCached(
     participantToken,
   );
   if (fetched) {
-    await chrome.storage.local.set({
+    await setCacheQuietly({
       todayReviewsCache: { anonymousId, reviews: fetched },
     });
     return fetched;
@@ -1145,15 +1150,15 @@ async function boot() {
     VL.isConGroup(stored.group) &&
     _isStudyEndTimeReached(installDate) &&
     !!stored.studyEndCodeVerified;
+  // 지난 날짜 리뷰는 오늘 세션이 없어도 보여야 해서, 이력 조회는 오늘 세션 수와 따로 판정한다.
+  const reviewHistoryEligible = feedbackActive || studyEndTodayEligible;
   let todayCumulativeEligible =
-    (feedbackActive || studyEndTodayEligible) &&
-    realToday.sessionIds.length > 0;
+    reviewHistoryEligible && realToday.sessionIds.length > 0;
   // 대상이 아니면 조회 자체를 하지 않는다.
-  const todayReviewsList = todayCumulativeEligible
-    ? await getTodayReviewsCached(
+  const todayReviewsList = reviewHistoryEligible
+    ? await loadTodayReviews(
         stored.serverUrl,
         stored.anonymousId,
-        realToday.sessionIds.length,
         stored.participantToken,
       )
     : [];

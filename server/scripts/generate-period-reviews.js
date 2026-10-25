@@ -37,6 +37,7 @@ const {
   DAYS_PER_PERIOD,
   BASELINE_DAYS,
   maxTitlesForPeriod,
+  FALLBACK_RETRY_WINDOW_DAYS,
 } = require("../pipeline/study-constants");
 const { recordLlmCall, closeLlmMetrics } = require("../monitoring/llm-metrics");
 const { aggregateViewing } = require("../pipeline/viewing-aggregate");
@@ -49,7 +50,6 @@ const {
 
 // 대조군(CON, TEST-CON)도 실험군과 동일한 주기·동일한 코드 경로로 사전 생성한다
 const ELIGIBLE_GROUPS = ["EXP", "TEST-EXP", "CON", "TEST-CON"];
-const FALLBACK_RETRY_WINDOW_DAYS = 3;
 
 /** 해당 참여자의 세션/영상 제목을 기간 범위(KST 날짜 문자열 기준)로 좁힌다 */
 function inRange(dateStr, periodStart, periodEnd) {
