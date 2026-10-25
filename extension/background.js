@@ -16,6 +16,7 @@ import {
   markParticipantSynced,
   recordParticipantSyncFailure,
   invalidateParticipantSync,
+  SESSION_TIMEOUT_MS,
 } from "./storage.js";
 import { isBaselinePeriod } from "./pipeline/baseline.js";
 import {
@@ -27,7 +28,6 @@ import { SERVER_URL } from "./config.js";
 import "./study-schedule.js";
 
 const ALARM_NAME = "SESSION_TIMEOUT_CHECK";
-const TIMEOUT_MS = 10 * 60 * 1000;
 
 const REQUEST_TIMEOUT_MS = 5000;
 const SESSION_REQUEST_TIMEOUT_MS = 60000;
@@ -262,7 +262,9 @@ async function markFeedbackViewed(sessionId) {
 }
 
 /**
- * 마지막 시청 후 TIMEOUT_MS 이상 지났으면 현재 세션을 종료하고 분석을 시작한다.
+ * 마지막 시청 후 SESSION_TIMEOUT_MS 이상 지났으면 세션을 종료하고 분석을 시작한다.
+ * 브라우저를 다시 켠 직후처럼 옛 세션과 새 세션이 함께 닫힐 수 있어, 이번에 닫은 세션을 모두 보낸다.
+ * 현재 세션만 보내면 나머지는 syncedToServer가 비어 재시도 큐에서도 빠진다.
  * @returns {Promise<void>}
  */
 async function checkSessionTimeout() {
@@ -270,19 +272,22 @@ async function checkSessionTimeout() {
   if (!lastWatchedAt) return;
 
   const elapsed = Date.now() - new Date(lastWatchedAt).getTime();
-  if (elapsed < TIMEOUT_MS) return;
+  if (elapsed < SESSION_TIMEOUT_MS) return;
 
   const currentSession = await getCurrentSession();
   if (!currentSession) return;
-  const sessionId = currentSession.sessionId;
 
   console.log("[background] 10분 비활성 감지, 세션 종료");
-  await endSession();
+  const closedSessions = await endSession();
 
-  const sessions = await getAllSessions();
-  const session = sessions.find((s) => s.sessionId === sessionId);
-  if (!session || session.videos.length === 0) return;
-  await analyzeSession(session);
+  // 먼저 끝난 세션부터 보낸다
+  const ordered = [...closedSessions].sort(
+    (a, b) => Date.parse(a.endTime) - Date.parse(b.endTime),
+  );
+  for (const session of ordered) {
+    if (session.videos.length === 0) continue;
+    await analyzeSession(session);
+  }
 }
 
 /**

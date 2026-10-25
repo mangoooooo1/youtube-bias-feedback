@@ -186,6 +186,9 @@ function waitForTitle(
 // 서비스 워커 수면과 무관하게 storage에 직접 기록
 let writeQueue = Promise.resolve();
 
+// 마지막 영상 기록 후 이 시간이 지난 세션에는 새 영상을 넣지 않는다.
+const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
+
 /**
  * 이 탭의 실행 컨텍스트 안에서만 사는 값이다. storage의 lastRecordedVideo는
  * background.js의 세션 타임아웃(endSession)이 전혀 다른 실행 컨텍스트에서
@@ -349,6 +352,7 @@ function recordVideo(
       const {
         currentSession,
         lastRecordedVideo,
+        lastWatchedAt,
         anonymousId,
         serverUrl,
         participantToken,
@@ -356,17 +360,32 @@ function recordVideo(
       } = await chrome.storage.local.get([
         "currentSession",
         "lastRecordedVideo",
+        "lastWatchedAt",
         "anonymousId",
         "serverUrl",
         "participantToken",
         "installDate",
       ]);
 
+      // 브라우저가 꺼져 있어 알람이 아직 닫지 못한 세션은 이어 쓰지 않고 새 세션을 시작한다.
+      // 새 세션 ID를 "옛 세션 마지막 영상 + 10분"으로 정해, 같은 옛 세션을 본 탭들이 같은 세션으로 모인다.
+      // 옛 세션은 background 알람이 닫는다
+      const lastMs = Date.parse(lastWatchedAt);
+      const isStale =
+        !!currentSession &&
+        Number.isFinite(lastMs) &&
+        Date.parse(now) - lastMs >= SESSION_TIMEOUT_MS;
+      const session =
+        currentSession && !isStale
+          ? currentSession
+          : {
+              sessionId: String(
+                isStale ? lastMs + SESSION_TIMEOUT_MS : Date.now(),
+              ),
+              startTime: now,
+            };
+
       // 새로고침(F5)으로 같은 영상이 다시 감지되는 경우를 막는다.
-      const session = currentSession ?? {
-        sessionId: String(Date.now()),
-        startTime: now,
-      };
       if (
         lastRecordedVideo?.videoId === videoId &&
         lastRecordedVideo?.sessionId === session.sessionId
@@ -826,5 +845,6 @@ if (typeof module !== "undefined" && module.exports) {
     writeWatchCheckpoint,
     WATCH_CHECKPOINT_PREFIX,
     WATCH_CHECKPOINT_INTERVAL_MS,
+    SESSION_TIMEOUT_MS,
   };
 }

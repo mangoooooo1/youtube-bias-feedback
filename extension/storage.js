@@ -1,5 +1,9 @@
 let queue = Promise.resolve();
 
+// 마지막 영상 기록 후 이 시간 동안 새 영상이 없으면 세션이 끝난 것으로 본다.
+// background.js의 종료 판정과 content.js의 새 세션 판정이 같은 값을 쓴다
+export const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
+
 // 같은 영상이 이 값 안에 다시 감지되면 "같은 시청"으로 보고 합친다.
 // 10초는 비동기 storage 왕복 시간차보다는 넉넉하고, 사람이 같은 영상을 일부러 다시 재생하는 데 걸리는 시간보다는 짧게 잡은 값이다.
 const NEAR_SIMULTANEOUS_MS = 10000;
@@ -56,7 +60,7 @@ export async function clearCurrentSession() {
 
 /**
  * 세션 종료를 큐에 직렬화해 실행한다(동시 호출 시 경합 방지).
- * @returns {Promise<void>}
+ * @returns {Promise<object[]>} 이번에 닫은 세션들(없으면 빈 배열)
  */
 export function endSession() {
   queue = queue.then(() => _endSession());
@@ -151,22 +155,41 @@ function buildClosedSession(sessionId, videos, startTime, endTime) {
 }
 
 /**
+ * 세션 종료 시각 = 그 세션 마지막 영상 기록 + SESSION_TIMEOUT_MS. 지금보다 늦지 않고 시작보다 이르지 않다.
+ * 닫는 순간을 쓰면 브라우저가 꺼져 알람이 늦게 돈 세션이 다시 연 날짜로 기록된다.
+ * @param {object[]} videos - 그 세션의 영상 기록
+ * @param {string|undefined} startTime
+ * @param {number} nowMs
+ * @returns {string} ISO 시각
+ */
+function sessionEndTime(videos, startTime, nowMs) {
+  const times = videos
+    .map((v) => Date.parse(v.watchedAt))
+    .filter(Number.isFinite);
+  if (times.length === 0) return new Date(nowMs).toISOString();
+  let endMs = Math.min(nowMs, Math.max(...times) + SESSION_TIMEOUT_MS);
+  const startMs = Date.parse(startTime);
+  if (Number.isFinite(startMs)) endMs = Math.max(endMs, startMs);
+  return new Date(endMs).toISOString();
+}
+
+/**
  * content.js가 video__ 키로 흩어 기록한 영상들을 세션 단위로 모아 sessions[]로 옮긴다.
  * 이후 늦게 도착한 같은 세션의 video__ 키가 있으면 재확인해 병합까지 처리한다.
- * @returns {Promise<void>}
+ * @returns {Promise<object[]>} 이번에 닫은 세션들(없으면 빈 배열)
  */
 async function _endSession() {
   const all = await chrome.storage.local.get(null);
   const { currentSession, sessions } = all;
-  if (!currentSession) return;
+  if (!currentSession) return [];
 
   const videoEntries = Object.entries(all).filter(([key]) =>
     key.startsWith("video__"),
   );
-  if (videoEntries.length === 0) return;
+  if (videoEntries.length === 0) return [];
 
   const bySession = groupVideosBySession(videoEntries);
-  const endTime = new Date().toISOString();
+  const nowMs = Date.now();
   const closedSessions = [];
   for (const [sessionId, videos] of bySession) {
     const startTime =
@@ -174,7 +197,12 @@ async function _endSession() {
         ? currentSession.startTime
         : undefined;
     closedSessions.push(
-      buildClosedSession(sessionId, videos, startTime, endTime),
+      buildClosedSession(
+        sessionId,
+        videos,
+        startTime,
+        sessionEndTime(videos, startTime, nowMs),
+      ),
     );
   }
 
@@ -197,22 +225,24 @@ async function _endSession() {
     ([key]) =>
       key.startsWith("video__") && closedSessionIds.has(sessionIdOf(key)),
   );
-  if (lateEntries.length === 0) return;
+  if (lateEntries.length === 0) return closedSessions;
 
   const lateBySession = groupVideosBySession(lateEntries);
   const mergedSessions = updatedSessions.map((session) => {
     const lateVideos = lateBySession.get(session.sessionId);
     if (!lateVideos) return session;
+    const videos = [...session.videos, ...lateVideos];
     return buildClosedSession(
       session.sessionId,
-      [...session.videos, ...lateVideos],
+      videos,
       session.startTime,
-      session.endTime,
+      sessionEndTime(videos, session.startTime, nowMs),
     );
   });
 
   await chrome.storage.local.set({ sessions: mergedSessions });
   await chrome.storage.local.remove(lateEntries.map(([key]) => key));
+  return mergedSessions.filter((s) => closedSessionIds.has(s.sessionId));
 }
 
 /**
