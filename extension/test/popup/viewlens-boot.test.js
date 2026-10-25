@@ -130,6 +130,33 @@ describe("boot — 저장소 상태별 화면과 서버 요청", () => {
     const reg = server.calls.find((c) => c.path === "/api/participants");
     expect(reg.body.anonymousId).toBe(data.anonymousId);
   });
+
+  it("베이스라인이 끝난 실험군은 오늘 끝난 세션이 없어도 하루 리뷰 이력을 받는다", async () => {
+    const { server } = await bootPopup(
+      participant({
+        group: "EXP",
+        installDate: daysAgo(BASELINE_DAYS + 1),
+        sessions: [],
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(server.paths()).toContain("/api/today-reviews"),
+    );
+  });
+
+  it("베이스라인 중인 실험군은 오늘 세션이 있어도 하루 리뷰 이력을 요청하지 않는다", async () => {
+    const { server } = await bootPopup(
+      participant({
+        group: "EXP",
+        installDate: daysAgo(1),
+        sessions: [session("s1")],
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(server.paths()).toContain("/api/viewing-summary"),
+    );
+    expect(server.paths()).not.toContain("/api/today-reviews");
+  });
 });
 
 // 서버는 끝난 구간의 리뷰를 매일 04:00 KST에 만든다. 그 전에 연 팝업이 "리뷰 없음"을 오늘 캐시로

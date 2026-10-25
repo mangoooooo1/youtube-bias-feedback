@@ -71,6 +71,99 @@ describe("날짜 이동", () => {
   });
 });
 
+// 베이스라인 동안 만든 리뷰와 자정 크론이 마무리한 전날 리뷰는 세션 응답으로 오지 않아
+// 로컬 세션에 없다. 팝업은 열 때마다 서버 이력을 받아 지난 날짜에 보여 줘야 한다.
+describe("지난 날짜 리뷰 — 서버 이력", () => {
+  const YESTERDAY = () => kst(daysAgo(1));
+  const yesterdayReview = (review) => ({
+    reviewDate: YESTERDAY(),
+    review,
+    sessionCount: 1,
+  });
+  // 어제 로컬 세션은 있지만 리뷰가 없다(베이스라인 날짜). 지난 날짜 슬라이드는 이미 본 것으로 둔다
+  const stored = (over) =>
+    participant({
+      group: "EXP",
+      installDate: daysAgo(BASELINE_DAYS + 1),
+      sessions: [session("s0", { endTime: daysAgo(1) })],
+      todayCumulativeRevealedDate: YESTERDAY(),
+      ...over,
+    });
+
+  it("오늘 끝난 세션이 없어도 어제로 가면 서버에 저장된 리뷰가 보인다", async () => {
+    const { root } = await bootReady(stored(), {
+      responses: {
+        "/api/today-reviews": { data: [yesterdayReview("어제 리뷰 문장")] },
+      },
+    });
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("어제 리뷰 문장");
+  });
+
+  it("같은 날 받은 캐시가 있어도 다시 받아 서버의 새 리뷰를 보이고 캐시를 바꾼다", async () => {
+    const { root, data } = await bootReady(
+      stored({
+        sessions: [
+          session("s0", { endTime: daysAgo(1) }),
+          session("s1", { review: "오늘 리뷰 문장" }),
+        ],
+        todayReviewsCache: {
+          anonymousId: "anon-1",
+          reviews: [
+            yesterdayReview("세션 때 본 리뷰"),
+            {
+              reviewDate: kst(new Date().toISOString()),
+              review: "오늘 리뷰 문장",
+              sessionCount: 1,
+            },
+          ],
+        },
+      }),
+      {
+        responses: {
+          "/api/today-reviews": {
+            data: [yesterdayReview("자정에 마무리한 리뷰")],
+          },
+        },
+      },
+    );
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("자정에 마무리한 리뷰");
+    expect(root.textContent).not.toContain("세션 때 본 리뷰");
+    expect(data.todayReviewsCache.reviews).toEqual([
+      yesterdayReview("자정에 마무리한 리뷰"),
+    ]);
+  });
+
+  it("서버 조회가 실패하면 같은 참여자의 캐시로 보인다", async () => {
+    const { root } = await bootReady(
+      stored({
+        todayReviewsCache: {
+          anonymousId: "anon-1",
+          reviews: [yesterdayReview("캐시에 남은 리뷰")],
+        },
+      }),
+      { responses: { "/api/today-reviews": () => ({ status: 500 }) } },
+    );
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("캐시에 남은 리뷰");
+  });
+
+  it("서버 조회가 실패해도 다른 참여자의 캐시는 쓰지 않는다", async () => {
+    const { root } = await bootReady(
+      stored({
+        todayReviewsCache: {
+          anonymousId: "someone-else",
+          reviews: [yesterdayReview("다른 사람 리뷰")],
+        },
+      }),
+      { responses: { "/api/today-reviews": () => ({ status: 500 }) } },
+    );
+    click(root, "#vl-date-prev");
+    expect(root.textContent).not.toContain("다른 사람 리뷰");
+  });
+});
+
 describe("기간 탭", () => {
   // 1구간에 분야 4개 → 상위 3개 + "그 밖" 범례
   async function bootFeedbackTab() {
