@@ -304,6 +304,20 @@ function _hasEndedPeriodWithoutReview(installDate, reviews) {
   return false;
 }
 
+// 서버가 아직 다시 만드는 중인 fallback 리뷰가 있으면(구간 끝난 날로부터 재시도 일수 안) 다시 묻는다.
+// 새벽 재시도로 정상 리뷰가 되면 같은 날 다음 열 때 바로 보이게 하기 위함
+function _hasRetryableFallback(reviews) {
+  const today = dateStr(new Date());
+  return (reviews || []).some((r) => {
+    if (r.source !== "fallback" || !r.periodEnd) return false;
+    const endMs = Date.parse(`${r.periodEnd}T00:00:00+09:00`);
+    const deadline = dateStr(
+      new Date(endMs + VL.FALLBACK_RETRY_WINDOW_DAYS * 86400000),
+    );
+    return today <= deadline;
+  });
+}
+
 // 기간 리뷰 로컬 캐싱
 // 팝업을 열 때마다 서버를 조회하지 않고, 캐시가 오늘 날짜 것이 아니거나 끝난 구간의 리뷰가 빠졌을 때만 재조회
 async function getPeriodReviewsCached(
@@ -322,7 +336,8 @@ async function getPeriodReviewsCached(
     periodReviewsCache.anonymousId === anonymousId &&
     periodReviewsCache.dateStr === todayStr &&
     !_isIncompleteForCon(group, periodReviewsCache.reviews) &&
-    !_hasEndedPeriodWithoutReview(installDate, periodReviewsCache.reviews)
+    !_hasEndedPeriodWithoutReview(installDate, periodReviewsCache.reviews) &&
+    !_hasRetryableFallback(periodReviewsCache.reviews)
   ) {
     return periodReviewsCache.reviews;
   }

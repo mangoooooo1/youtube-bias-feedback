@@ -297,6 +297,9 @@ function periodLines(period, days, today) {
   return { lines, points };
 }
 
+// 서버가 fallback 기간 리뷰를 다시 만드는 일수(구간 끝난 날 기준). server/pipeline/study-constants.js와 같은 값
+const FALLBACK_RETRY_WINDOW_DAYS = 3;
+
 // 베이스라인 기간(설치 후 BASELINE_DAYS 미만) 판정
 // 팝업/Studio는 classic script라 ESM import를 쓸 수 없어(background.js는 type=module) 로직을 중복 정의한다.
 const BASELINE_DAYS = 4;
@@ -518,6 +521,7 @@ window.VL = {
   GROUPS,
   TONES,
   BASELINE_DAYS,
+  FALLBACK_RETRY_WINDOW_DAYS,
   isBaselinePeriod,
   isTestGroup,
   isConGroup,
