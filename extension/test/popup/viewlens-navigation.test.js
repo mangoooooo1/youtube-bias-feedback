@@ -80,13 +80,12 @@ describe("지난 날짜 리뷰 — 서버 이력", () => {
     review,
     sessionCount: 1,
   });
-  // 어제 로컬 세션은 있지만 리뷰가 없다(베이스라인 날짜). 지난 날짜 슬라이드는 이미 본 것으로 둔다
+  // 어제 로컬 세션은 있지만 리뷰가 없다(베이스라인 날짜)
   const stored = (over) =>
     participant({
       group: "EXP",
       installDate: daysAgo(BASELINE_DAYS + 1),
       sessions: [session("s0", { endTime: daysAgo(1) })],
-      todayCumulativeRevealedDate: YESTERDAY(),
       ...over,
     });
 
