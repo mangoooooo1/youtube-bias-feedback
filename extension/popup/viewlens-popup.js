@@ -318,6 +318,15 @@ function _hasRetryableFallback(reviews) {
   });
 }
 
+// 캐시 저장이 실패해도(저장 용량 초과 등) 서버에서 받은 결과로 팝업을 그리게 한다
+async function setCacheQuietly(items) {
+  try {
+    await chrome.storage.local.set(items);
+  } catch (error) {
+    console.warn("[popup] 캐시 저장 실패:", error.message);
+  }
+}
+
 // 기간 리뷰 로컬 캐싱
 // 팝업을 열 때마다 서버를 조회하지 않고, 캐시가 오늘 날짜 것이 아니거나 끝난 구간의 리뷰가 빠졌을 때만 재조회
 async function getPeriodReviewsCached(
@@ -349,7 +358,7 @@ async function getPeriodReviewsCached(
   );
   if (fetched) {
     if (!_isIncompleteForCon(group, fetched)) {
-      await chrome.storage.local.set({
+      await setCacheQuietly({
         periodReviewsCache: {
           anonymousId,
           dateStr: todayStr,
@@ -598,7 +607,7 @@ async function loadTodayReviews(serverUrl, anonymousId, participantToken) {
     participantToken,
   );
   if (fetched) {
-    await chrome.storage.local.set({
+    await setCacheQuietly({
       todayReviewsCache: { anonymousId, reviews: fetched },
     });
     return fetched;
