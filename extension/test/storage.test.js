@@ -14,6 +14,7 @@ import {
   getParticipantSyncState,
   markParticipantSynced,
   invalidateParticipantSync,
+  SESSION_TIMEOUT_MS,
 } from "../storage.js";
 
 // 프로젝트에 chrome.storage.local 목이 없어 이번에 처음 만든다.
@@ -289,6 +290,119 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     const all = await global.chrome.storage.local.get(null);
     expect(Object.keys(all).some((k) => k.startsWith("video__s2__"))).toBe(
       true,
+    );
+  });
+});
+
+// 세션은 1분 주기 알람이 닫는데, 브라우저가 꺼져 있으면 알람이 늦게 돈다. 종료 시각은 닫은 순간이 아니라
+// 그 세션의 마지막 영상 기록 + SESSION_TIMEOUT_MS여야 한다.
+describe("endSession — 세션 종료 시각", () => {
+  const at = (iso) => new Date(iso).toISOString();
+  const now = (iso) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(iso));
+  };
+  const start = (sessionId, startTime) =>
+    global.chrome.storage.local.set({
+      currentSession: { sessionId, startTime },
+    });
+
+  it("10분 기준은 10분이다", () => {
+    expect(SESSION_TIMEOUT_MS).toBe(10 * 60 * 1000);
+  });
+
+  it("브라우저를 닫았다가 이틀 뒤 닫혀도 종료 시각은 마지막 영상 + 10분이다", async () => {
+    await start("s1", "2026-10-23T13:50:49Z");
+    await setVideo("s1", "v1", "2026-10-23T13:50:49Z");
+    await setVideo("s1", "v2", "2026-10-23T13:55:00Z");
+    now("2026-10-25T10:56:34Z");
+
+    await endSession();
+
+    expect((await getAllSessions())[0].endTime).toBe(
+      at("2026-10-23T14:05:00Z"),
+    );
+  });
+
+  it("알람이 제때 돌아 11분 뒤 닫혀도 종료 시각은 마지막 영상 + 10분이다", async () => {
+    await start("s1", "2026-01-01T00:00:00Z");
+    await setVideo("s1", "v1", "2026-01-01T00:00:00Z");
+    now("2026-01-01T00:11:00Z");
+
+    await endSession();
+
+    expect((await getAllSessions())[0].endTime).toBe(
+      at("2026-01-01T00:10:00Z"),
+    );
+  });
+
+  it("10분이 지나기 전에 닫히면 지금을 넘지 않는다", async () => {
+    await start("s1", "2026-01-01T00:00:00Z");
+    await setVideo("s1", "v1", "2026-01-01T00:00:00Z");
+    now("2026-01-01T00:03:00Z");
+
+    await endSession();
+
+    expect((await getAllSessions())[0].endTime).toBe(
+      at("2026-01-01T00:03:00Z"),
+    );
+  });
+
+  it("시작 시각보다 이르지 않다", async () => {
+    await start("s1", "2026-01-01T01:00:00Z");
+    await setVideo("s1", "v1", "2026-01-01T00:00:00Z");
+    now("2026-01-02T00:00:00Z");
+
+    await endSession();
+
+    expect((await getAllSessions())[0].endTime).toBe(
+      at("2026-01-01T01:00:00Z"),
+    );
+  });
+
+  it("한 번에 여러 세션을 닫으면 각 세션이 자기 영상 기준으로 종료 시각을 갖고, 닫은 세션을 모두 돌려준다", async () => {
+    await start("new", "2026-10-25T10:56:00Z");
+    await setVideo("old", "v1", "2026-10-23T13:55:00Z");
+    await setVideo("new", "v2", "2026-10-25T10:56:00Z");
+    now("2026-10-25T11:07:00Z");
+
+    const closed = await endSession();
+
+    const endOf = (id) => closed.find((s) => s.sessionId === id).endTime;
+    expect(closed).toHaveLength(2);
+    expect(endOf("old")).toBe(at("2026-10-23T14:05:00Z"));
+    expect(endOf("new")).toBe(at("2026-10-25T11:06:00Z"));
+    expect(await getAllSessions()).toEqual(closed);
+  });
+
+  it("닫을 세션이 없으면 빈 배열을 돌려준다", async () => {
+    expect(await endSession()).toEqual([]);
+    await start("s1", "2026-01-01T00:00:00Z");
+    expect(await endSession()).toEqual([]);
+  });
+
+  it("종료 중 늦게 도착한 같은 세션 영상이 있으면 그 영상까지 포함해 종료 시각을 다시 정한다", async () => {
+    await start("s1", "2026-01-01T00:00:00Z");
+    await setVideo("s1", "v1", "2026-01-01T00:00:00Z");
+    now("2026-01-01T00:20:00Z");
+    const originalRemove = global.chrome.storage.local.remove;
+    global.chrome.storage.local.remove = vi.fn((keys) => {
+      global.chrome.storage.local.set({
+        video__s1__late: {
+          videoId: "v2",
+          title: "제목-v2",
+          watchedAt: "2026-01-01T00:05:00Z",
+        },
+      });
+      return originalRemove(keys);
+    });
+
+    const closed = await endSession();
+
+    expect(closed[0].videos.map((v) => v.videoId)).toEqual(["v1", "v2"]);
+    expect(closed[0].endTime).toBe(at("2026-01-01T00:15:00Z"));
+    expect((await getAllSessions())[0].endTime).toBe(
+      at("2026-01-01T00:15:00Z"),
     );
   });
 });
