@@ -1300,6 +1300,125 @@ describe("content.js trackedVideoIdentity — 세션 타임아웃에 영향받�
   });
 });
 
+// 브라우저가 꺼져 있으면 background 알람이 세션을 제때 닫지 못한다. 그 사이 기록되는 영상이
+// 며칠 전 세션에 붙지 않게, 마지막 영상 기록 후 10분이 지난 세션에는 넣지 않는다.
+describe("content.js recordVideo — 10분이 지난 세션에는 새 영상을 넣지 않는다", () => {
+  const MIN = 60 * 1000;
+  const ago = (ms) => new Date(Date.now() - ms).toISOString();
+  const nextSessionId = (lastWatchedAt) =>
+    String(Date.parse(lastWatchedAt) + 10 * MIN);
+
+  async function makeTab(sharedStorage) {
+    return loadRecordVideo(
+      {
+        runtime: { id: "fake-extension-id" },
+        storage: { local: sharedStorage },
+      },
+      () => Promise.resolve({ ok: true }),
+      { log: () => {}, warn: () => {} },
+    );
+  }
+
+  it("10분 기준은 storage.js(background 종료 판정)와 같다", async () => {
+    const { SESSION_TIMEOUT_MS } = await import("../storage.js");
+    const { api } = await loadContent();
+    expect(api.SESSION_TIMEOUT_MS).toBe(SESSION_TIMEOUT_MS);
+  });
+
+  it("마지막 영상 후 10분이 안 지났으면 지금 세션에 이어 넣는다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: ago(20 * MIN) },
+      lastWatchedAt: ago(5 * MIN),
+    });
+    await (
+      await makeTab(storage)
+    )("v1", "영상1");
+
+    expect(collectVideos(storage.dump(), "s1")).toHaveLength(1);
+    expect(storage.dump().currentSession.sessionId).toBe("s1");
+  });
+
+  it("10분이 지난 세션이 남아 있으면 새 세션(ID = 옛 세션 마지막 영상 + 10분)을 시작하고 옛 세션 영상은 그대로 둔다", async () => {
+    const lastWatchedAt = ago(2 * 24 * 60 * MIN);
+    const storage = createSharedStorage({
+      currentSession: {
+        sessionId: "old",
+        startTime: lastWatchedAt,
+        videoCount: 2,
+      },
+      lastWatchedAt,
+      video__old__e1: { videoId: "v0", watchedAt: lastWatchedAt },
+    });
+    await (
+      await makeTab(storage)
+    )("v1", "영상1");
+
+    const newId = nextSessionId(lastWatchedAt);
+    const dump = storage.dump();
+    expect(dump.currentSession).toMatchObject({
+      sessionId: newId,
+      videoCount: 1,
+    });
+    expect(collectVideos(dump, newId).map((v) => v.videoId)).toEqual(["v1"]);
+    expect(collectVideos(dump, "old").map((v) => v.videoId)).toEqual(["v0"]);
+  });
+
+  it("정확히 10분이 지났으면 새 세션이다(background가 닫는 기준과 같음)", async () => {
+    const lastWatchedAt = ago(10 * MIN);
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "old", startTime: lastWatchedAt },
+      lastWatchedAt,
+    });
+    await (
+      await makeTab(storage)
+    )("v1", "영상1");
+
+    expect(storage.dump().currentSession.sessionId).not.toBe("old");
+  });
+
+  it("마지막 시청 시각을 모르면 지금 세션에 이어 넣는다(기존 동작)", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+    });
+    await (
+      await makeTab(storage)
+    )("v1", "영상1");
+
+    expect(storage.dump().currentSession.sessionId).toBe("s1");
+  });
+
+  it("브라우저를 켠 직후 두 탭이 동시에 기록해도 같은 새 세션 하나로 모인다", async () => {
+    const lastWatchedAt = ago(2 * 24 * 60 * MIN);
+    const storage = createControllableStorage({
+      currentSession: { sessionId: "old", startTime: lastWatchedAt },
+      lastWatchedAt,
+    });
+    const tabA = await makeTab(storage);
+    const tabB = await makeTab(storage);
+
+    const pA = tabA("vA", "탭A 영상");
+    const pB = tabB("vB", "탭B 영상");
+    await flushMicrotasks();
+    // 두 탭 모두 서로의 쓰기 전에 옛 세션을 읽는다
+    storage.release();
+    storage.release();
+    await flushMicrotasks();
+    storage.release();
+    await flushMicrotasks();
+    storage.release();
+    await Promise.all([pA, pB]);
+
+    const newId = nextSessionId(lastWatchedAt);
+    const dump = storage.dump();
+    expect(dump.currentSession.sessionId).toBe(newId);
+    expect(
+      collectVideos(dump, newId)
+        .map((v) => v.videoId)
+        .sort(),
+    ).toEqual(["vA", "vB"]);
+  });
+});
+
 describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플래그로 남긴다", () => {
   async function makeTabWithFetch(sharedStorage, fetchMock) {
     const chromeMock = {
