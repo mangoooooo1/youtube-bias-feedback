@@ -163,6 +163,17 @@ describe("지난 날짜 리뷰 — 서버 이력", () => {
     expect(root.textContent).not.toContain("다른 사람 리뷰");
   });
 
+  it("캐시 저장이 실패해도(저장 용량 초과) 팝업이 열리고 서버에서 받은 리뷰가 보인다", async () => {
+    const { root } = await bootReady(stored(), {
+      responses: {
+        "/api/today-reviews": { data: [yesterdayReview("저장 못 한 리뷰")] },
+      },
+      failSet: (obj) => "todayReviewsCache" in obj,
+    });
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("저장 못 한 리뷰");
+  });
+
   // 저장소 초기화·재설치로 그날 로컬 세션이 없는 경우
   const viewingDay = (date) => ({
     date,

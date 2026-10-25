@@ -286,6 +286,23 @@ describe("boot — 기간 리뷰 캐시", () => {
     expect(data.periodReviewsCache).toEqual(cache([]));
   });
 
+  it("캐시 저장이 실패해도(저장 용량 초과) 팝업이 열리고 받은 리뷰를 쓴다", async () => {
+    const { root, data } = await bootPopup(
+      participant({
+        group: "EXP",
+        installDate: daysAgo(DAYS_PER_PERIOD + 1),
+        periodReviewsCache: cache([]),
+      }),
+      {
+        responses: { "/api/period-reviews": { data: [review1] } },
+        failSet: (obj) => "periodReviewsCache" in obj,
+      },
+    );
+
+    await vi.waitFor(() => expect(hasFeedbackTabs(root)).toBe(true));
+    expect(data.periodReviewsCache).toEqual(cache([]));
+  });
+
   it("대조군은 리뷰가 다 차지 않은 캐시를 쓰지 않고, 다 차지 않은 응답은 캐시에 저장하지 않는다(기존 동작)", async () => {
     const { root, data, server } = await bootWithCache(
       {

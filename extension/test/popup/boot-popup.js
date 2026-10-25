@@ -8,7 +8,8 @@ export const SERVER = "https://server.test";
 
 export const daysAgo = (n) => new Date(Date.now() - n * DAY).toISOString();
 
-function fakeChrome(initial) {
+// failSet(obj)이 true면 그 저장 호출은 저장 용량 초과처럼 거부한다
+function fakeChrome(initial, failSet = () => false) {
   const data = structuredClone(initial);
   const listeners = [];
   const pick = (keys) =>
@@ -33,7 +34,10 @@ function fakeChrome(initial) {
       storage: {
         local: {
           get: async (keys) => structuredClone(pick(keys)),
-          set: async (obj) => void Object.assign(data, structuredClone(obj)),
+          set: async (obj) => {
+            if (failSet(obj)) throw new Error("QUOTA_BYTES quota exceeded");
+            Object.assign(data, structuredClone(obj));
+          },
           remove: async (keys) =>
             [].concat(keys).forEach((k) => delete data[k]),
         },
@@ -70,13 +74,13 @@ function fakeFetch(responses) {
   };
 }
 
-export async function bootPopup(stored, { responses = {} } = {}) {
+export async function bootPopup(stored, { responses = {}, failSet } = {}) {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   vi.stubGlobal("requestAnimationFrame", () => 0);
   const root = document.createElement("div");
   root.id = "vl-popup-root";
   document.body.appendChild(root);
-  const { chrome, data, listeners } = fakeChrome(stored);
+  const { chrome, data, listeners } = fakeChrome(stored, failSet);
   const server = fakeFetch(responses);
   vi.spyOn(console, "warn").mockImplementation(() => {});
   trackListeners(globalThis);
