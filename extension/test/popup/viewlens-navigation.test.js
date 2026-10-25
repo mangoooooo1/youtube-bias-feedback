@@ -162,6 +162,61 @@ describe("지난 날짜 리뷰 — 서버 이력", () => {
     click(root, "#vl-date-prev");
     expect(root.textContent).not.toContain("다른 사람 리뷰");
   });
+
+  // 저장소 초기화·재설치로 그날 로컬 세션이 없는 경우
+  const viewingDay = (date) => ({
+    date,
+    confirmedCount: 1,
+    chartCount: 1,
+    chartSeconds: 120,
+    timeDistribution: { 음악: 1 },
+    countDistribution: { 음악: 1 },
+  });
+
+  it("그날 로컬 세션이 없어도 서버에 시청 기록과 리뷰가 있으면 리뷰가 보인다", async () => {
+    const { root } = await bootReady(stored({ sessions: [] }), {
+      responses: {
+        "/api/today-reviews": { data: [yesterdayReview("복구된 리뷰")] },
+        "/api/viewing-summary": {
+          data: { days: [viewingDay(YESTERDAY())], periods: [] },
+        },
+      },
+    });
+    click(root, "#vl-date-prev");
+    await vi.waitFor(() => expect(root.textContent).toContain("복구된 리뷰"));
+    expect(root.textContent).not.toContain("이 날 시청 기록이 없어요");
+  });
+
+  it("서버에 그날 시청 기록이 없으면 리뷰가 있어도 '시청 기록이 없어요' 화면이다", async () => {
+    const { root } = await bootReady(stored({ sessions: [] }), {
+      responses: {
+        "/api/today-reviews": { data: [yesterdayReview("기록 없는 날 리뷰")] },
+      },
+    });
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("이 날 시청 기록이 없어요");
+    expect(root.textContent).not.toContain("기록 없는 날 리뷰");
+  });
+
+  it("오늘은 로컬 세션이 없으면 서버 리뷰가 있어도 오늘 리뷰 카드를 띄우지 않는다", async () => {
+    const TODAY = kst(new Date().toISOString());
+    const { root } = await bootReady(stored({ sessions: [] }), {
+      responses: {
+        "/api/today-reviews": {
+          data: [
+            { reviewDate: TODAY, review: "오늘 서버 리뷰", sessionCount: 1 },
+          ],
+        },
+        "/api/viewing-summary": {
+          data: { days: [viewingDay(TODAY)], periods: [] },
+        },
+      },
+    });
+    await vi.waitFor(() =>
+      expect(root.querySelector("#vl-date-prev")).not.toBeNull(),
+    );
+    expect(root.textContent).not.toContain("오늘 서버 리뷰");
+  });
 });
 
 describe("기간 탭", () => {
