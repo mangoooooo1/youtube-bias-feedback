@@ -108,6 +108,12 @@ describe("연구 기간 상수 — 서버·팝업과 같은 값", () => {
     expect(PIPELINE_BASELINE_DAYS).toBe(serverConstants.BASELINE_DAYS);
   });
 
+  it("FALLBACK_RETRY_WINDOW_DAYS가 서버와 popup/viewlens-data.js에서 같다", () => {
+    expect(popupConstant("FALLBACK_RETRY_WINDOW_DAYS")).toBe(
+      serverConstants.FALLBACK_RETRY_WINDOW_DAYS,
+    );
+  });
+
   it("END_GRACE_DAYS는 3일이다", () => {
     expect(ViewLensStudy.END_GRACE_DAYS).toBe(3);
   });

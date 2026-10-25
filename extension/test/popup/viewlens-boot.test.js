@@ -208,6 +208,59 @@ describe("boot — 기간 리뷰 캐시", () => {
     expect(server.count("/api/period-reviews")).toBe(0);
   });
 
+  // 서버는 fallback 리뷰를 구간 끝난 날로부터 재시도 일수 안에서 매일 다시 만든다
+  const kstDaysAgo = (n) =>
+    new Date(Date.now() - n * 86400000).toLocaleDateString("sv", {
+      timeZone: "Asia/Seoul",
+    });
+  const fallback1 = (periodEnd) => ({
+    periodIndex: 1,
+    periodEnd,
+    review: "고정 문구",
+    source: "fallback",
+  });
+
+  it("재시도 중인 fallback 리뷰가 있는 오늘 캐시면 다시 묻고, 정상 리뷰로 바뀌었으면 캐시를 바꾼다", async () => {
+    const llm1 = {
+      ...fallback1(kstDaysAgo(2)),
+      review: "정상 리뷰",
+      source: "llm",
+    };
+    const { data, server } = await bootWithCache(
+      {
+        group: "EXP",
+        installDate: daysAgo(DAYS_PER_PERIOD + 1),
+        periodReviewsCache: cache([fallback1(kstDaysAgo(2))]),
+      },
+      { "/api/period-reviews": { data: [llm1] } },
+    );
+
+    await vi.waitFor(() =>
+      expect(data.periodReviewsCache.reviews).toEqual([llm1]),
+    );
+    expect(server.count("/api/period-reviews")).toBe(1);
+  });
+
+  it("구간이 끝난 지 재시도 일수째인 날까지는 다시 묻는다(서버도 그날까지 재시도)", async () => {
+    const { server } = await bootWithCache({
+      group: "EXP",
+      installDate: daysAgo(DAYS_PER_PERIOD + 1),
+      periodReviewsCache: cache([fallback1(kstDaysAgo(3))]),
+    });
+
+    await vi.waitFor(() => expect(server.count("/api/period-reviews")).toBe(1));
+  });
+
+  it("재시도 기간이 지난 fallback 리뷰만 있는 오늘 캐시면 다시 묻지 않는다", async () => {
+    const { server } = await bootWithCache({
+      group: "EXP",
+      installDate: daysAgo(DAYS_PER_PERIOD + 1),
+      periodReviewsCache: cache([fallback1(kstDaysAgo(4))]),
+    });
+
+    expect(server.count("/api/period-reviews")).toBe(0);
+  });
+
   it("아직 끝난 구간이 없으면 빈 오늘 캐시를 그대로 쓴다", async () => {
     const { server } = await bootWithCache({
       group: "EXP",
