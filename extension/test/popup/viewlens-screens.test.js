@@ -7,7 +7,6 @@ async function loadScreens() {
   return {
     screenToday: g.screenToday,
     screenFeedback: g.screenFeedback,
-    screenPastDayRevealModal: g.screenPastDayRevealModal,
     vlShareLines: g.vlShareLines,
     VL: g.VL,
     koreanDateLabel: g.koreanDateLabel,
@@ -465,19 +464,5 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
     );
     expect(empty).toContain("이 구간에는 그래프에 넣을 시청 기록이 없어요.");
     expect(empty).not.toContain("vl-share-lines");
-  });
-});
-
-describe("screenPastDayRevealModal — 어제 돌아보기 모달", () => {
-  it("제목은 요일을 뺀 날짜로 '○월 ○일엔 어떤 영상을 봤을까요?'", async () => {
-    const { screenPastDayRevealModal } = await loadScreens();
-    const html = screenPastDayRevealModal({
-      dateLabel: "10월 15일 수요일",
-      review: "어제 리뷰",
-      reviewTopic: "음악",
-      videos: [],
-    });
-    expect(html).toContain("10월 15일엔 어떤 영상을 봤을까요?");
-    expect(html).not.toContain("수요일");
   });
 });

@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
-/* global KeyboardEvent */
-import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
+/* global KeyboardEvent, Element */
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterEach,
+  vi,
+} from "vitest";
 import { loadPopup } from "./load-popup.js";
 import {
   bootPopup,
@@ -231,29 +239,69 @@ describe("연구 종료 안내 확인", () => {
   });
 });
 
-describe("어제 돌아보기", () => {
-  it("어제 리뷰를 보여 주고, 닫으면 그 날짜를 저장해 다시 띄우지 않는다", async () => {
-    const yesterday = daysAgo(1);
-    const stored = participant({
-      group: "EXP",
-      installDate: IN_PROGRESS(),
-      sessions: [session("y1", { endTime: yesterday, review: "어제 리뷰" })],
+describe("팝업을 열 때", () => {
+  // jsdom에는 scrollIntoView가 없어, 어느 요소로 스크롤했는지 기록하는 가짜를 둔다
+  let scrolledIds;
+  beforeEach(() => {
+    scrolledIds = [];
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value() {
+        scrolledIds.push(this.id);
+      },
     });
-    const { root, data } = await bootReady(stored);
-    expect(root.querySelector("#vl-reveal-review-card").textContent).toContain(
-      "어제 리뷰",
+  });
+  afterEach(() => {
+    delete Element.prototype.scrollIntoView;
+  });
+
+  const withTodayReview = (over) =>
+    bootReady(
+      participant({
+        group: "EXP",
+        installDate: IN_PROGRESS(),
+        sessions: [
+          session("y1", { endTime: daysAgo(1), review: "어제 리뷰" }),
+          session("s1", { review: "오늘 리뷰 문장" }),
+        ],
+        ...over,
+      }),
+      {
+        responses: {
+          "/api/today-reviews": {
+            data: [
+              {
+                reviewDate: kst(daysAgo(1)),
+                review: "어제 리뷰",
+                sessionCount: 1,
+              },
+              todayReview("오늘 리뷰 문장"),
+            ],
+          },
+        },
+      },
     );
 
-    click(root, "#vl-reveal-dismiss");
-    expect(root.querySelector("#vl-reveal-dismiss")).toBeNull();
-    expect(data.todayCumulativeRevealedDate).toBe(kst(yesterday));
+  it("어제 리뷰가 있어도 지난 날짜 슬라이드를 띄우지 않는다", async () => {
+    const { root } = await withTodayReview();
+    expect(root.querySelector("#vl-reveal-review-card")).toBeNull();
+    expect(root.textContent).not.toContain("확인했어요");
+    expect(root.textContent).not.toContain("어제 리뷰");
+  });
 
-    cleanupPopup();
-    const again = await bootReady({
-      ...stored,
-      todayCumulativeRevealedDate: kst(yesterday),
+  it("확인하지 않은 오늘 리뷰가 있으면 열자마자 그 리뷰 카드로 스크롤한다", async () => {
+    const { root, runFrames } = await withTodayReview();
+    expect(root.querySelector("#vl-feedback-confirm-btn")).not.toBeNull();
+    runFrames();
+    expect(scrolledIds).toEqual(["vl-review-card"]);
+  });
+
+  it("이미 확인한 오늘 리뷰면 스크롤하지 않는다", async () => {
+    const { runFrames } = await withTodayReview({
+      confirmedFeedbackSessionIds: ["s1"],
     });
-    expect(again.root.querySelector("#vl-reveal-dismiss")).toBeNull();
+    runFrames();
+    expect(scrolledIds).toEqual([]);
   });
 });
 

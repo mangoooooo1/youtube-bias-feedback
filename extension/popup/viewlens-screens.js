@@ -640,28 +640,6 @@ function screenParticipationEndedBanner() {
   </div>`;
 }
 
-// ── Past-day reveal modal (자정 경계 처리) ───────────────────────────────────────
-
-// 하루가 지나면 그 전날의 "봉인된" 마지막 리뷰를 1회 리빌 애니메이션과 함께 보여준다.
-// 별도 캡처 로직 없이 buildDataForDate가 이미 계산해 둔 그 날짜 데이터를 그대로 재사용한다.
-function screenPastDayRevealModal(pastDay) {
-  return `<div style="position:absolute;inset:0;z-index:20;display:flex;align-items:flex-end;justify-content:center;padding:16px;background:color-mix(in oklab,var(--vl-ink) 45%,transparent)">
-    <div style="width:100%;max-height:88%;overflow-y:auto;background:var(--vl-card);border-radius:18px;padding:18px 16px 16px;box-shadow:0 -12px 40px -8px rgba(0,0,0,.35);animation:vlSheet .35s ease-out">
-      ${vlReview({
-        title: _pastDayReviewTitle(pastDay.dateLabel),
-        text: pastDay.review,
-        topic: pastDay.reviewTopic,
-        videos: pastDay.videos,
-        videoListLabel: "이 날 재생한 영상",
-        locked: false,
-        id: "vl-reveal-review-card",
-        asOf: VL.reviewAsOfLabel(pastDay.reviewGeneratedAt, pastDay.dateKey),
-      })}
-      <button id="vl-reveal-dismiss" class="vl-press" style="margin-top:14px;width:100%;padding:13px;border:none;border-radius:13px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-4);font-weight:700;cursor:pointer;font-family:inherit">확인했어요</button>
-    </div>
-  </div>`;
-}
-
 // ── Recover confirm modal (Story 10-10, 이슈 4) ─────────────────────────────────
 
 // 온보딩 중 재설치 확인 모달 — 참여코드가 이미 등록된 이력이 있을 때만 노출된다
@@ -695,6 +673,5 @@ window.screenControlHome = screenControlHome;
 window.screenStudyEndCodeInput = screenStudyEndCodeInput;
 window.screenStudyEndNoticeModal = screenStudyEndNoticeModal;
 window.screenParticipationEndedBanner = screenParticipationEndedBanner;
-window.screenPastDayRevealModal = screenPastDayRevealModal;
 window.screenRecoverConfirmModal = screenRecoverConfirmModal;
 window.parseParticipantCode = parseParticipantCode;

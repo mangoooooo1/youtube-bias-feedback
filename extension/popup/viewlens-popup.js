@@ -1,6 +1,5 @@
 window.buildDataForDate = buildDataForDate;
 window.koreanDateLabel = koreanDateLabel;
-window.findUnrevealedPastDate = findUnrevealedPastDate;
 window.addDaysKst = addDaysKst;
 window.dateStr = dateStr;
 window.dayFromInstall = dayFromInstall;
@@ -129,30 +128,6 @@ async function loadLiveVideos() {
   return Object.entries(all)
     .filter(([key]) => key.startsWith("video__"))
     .map(([, video]) => video);
-}
-
-// "어제 돌아보기" 리빌 대상 날짜를 찾는다
-// 로컬 sessions를 스캔해 revealedDateStr보다 최근이고 오늘보다 이전인 날짜 중 세션이 있는 가장 최근 날짜 하나만 반환한다.
-function findUnrevealedPastDate(
-  allSessions,
-  revealedDateStr,
-  today = new Date(),
-) {
-  const todayStr = dateStr(today);
-  let mostRecent = null;
-  for (const s of allSessions) {
-    if (
-      !s.endTime ||
-      !s.categoryDistribution ||
-      Object.keys(s.categoryDistribution).length === 0
-    )
-      continue;
-    const d = dateStr(new Date(s.endTime));
-    if (d < todayStr && (!mostRecent || d > mostRecent)) mostRecent = d;
-  }
-  if (!mostRecent) return null;
-  if (revealedDateStr && mostRecent <= revealedDateStr) return null;
-  return mostRecent;
 }
 
 // ── Build VL.weeks ────────────────────────────────────────────────────────────
@@ -1069,7 +1044,6 @@ async function boot() {
     "participantCode",
     "studyEndNoticeShown",
     "studyEndCodeVerified",
-    "todayCumulativeRevealedDate",
   ]);
 
   // 이미 온보딩된 사용자 중 anonymousId가 없는 경우 생성
@@ -1170,40 +1144,6 @@ async function boot() {
     todayReviewsList,
     todaySessionsOf(sessions),
   );
-
-  // "어제 돌아보기" 리빌 (feedbackActive(EXP + 베이스라인 이후)일 때만 계산)
-  VL._revealPastDay = null;
-  if (feedbackActive) {
-    const revealPastDateStr = findUnrevealedPastDate(
-      sessions,
-      stored.todayCumulativeRevealedDate || null,
-    );
-    if (revealPastDateStr) {
-      const revealData = buildDataForDate(
-        sessions,
-        localDateFromDateStr(revealPastDateStr),
-      );
-      // 베이스라인 마지막 날처럼 실제 리뷰 없이 플레이스홀더만 있는 날은 리빌하지 않는다 —
-      // revealedDate를 갱신하지 않으므로, 다음에 실제 리뷰가 쌓인 날이 오면 그 날짜가
-      // 자연히 최신 후보로 대체된다(소급 리빌 금지 정책과 일관).
-      if (isRealReview(revealData.review)) {
-        // 오늘 탭 카드와 같은 영상 목록(그날 재생한 영상 전부 + 서버 사유)
-        revealData.dateKey = revealPastDateStr;
-        const revealView = _dayViewForDate(revealPastDateStr);
-        revealData.videos = VL.playedVideos(
-          sessions,
-          VL._liveVideos,
-          revealPastDateStr,
-          revealView.excludedReasons,
-          {
-            correctedTitles: revealView.correctedTitles,
-            fetchedTitles: VL._fetchedTitles,
-          },
-        );
-        VL._revealPastDay = { dateStr: revealPastDateStr, data: revealData };
-      }
-    }
-  }
 
   // 확인(블러) 상태는 VL._todayCumulative(누적 캐시 기준)에서 파생한다.
   const needsConfirm =
@@ -1415,15 +1355,6 @@ async function boot() {
         chrome.storage.local.set({ studyEndNoticeShown: true });
         if (VL.isConGroup(stored.group)) postStudyEndReviewEvent("modal_shown");
         return;
-      }
-
-      // "어제 돌아보기" 리빌 확인
-      const revealDismissBtn =
-        e.target.closest && e.target.closest("#vl-reveal-dismiss");
-      if (revealDismissBtn && VL._revealPastDay) {
-        chrome.storage.local.set({
-          todayCumulativeRevealedDate: VL._revealPastDay.dateStr,
-        });
       }
     });
 

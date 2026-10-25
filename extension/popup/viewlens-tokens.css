@@ -159,14 +159,6 @@ body {
 .vl-aperture-blade {
   animation: vlApertureBreathe 3.8s linear infinite;
 }
-@keyframes vlSheet {
-  from {
-    transform: translateY(100%);
-  }
-  to {
-    transform: translateY(0);
-  }
-}
 /* 추이 그래프 점에서 은은하게 퍼지는 핑 원. r·opacity를 SVG geometry 프로퍼티로 직접
    애니메이션한다(Chrome은 r을 stylable property로 지원). */
 @keyframes vlDotPing {

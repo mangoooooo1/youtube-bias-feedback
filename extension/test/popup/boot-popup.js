@@ -76,7 +76,10 @@ function fakeFetch(responses) {
 
 export async function bootPopup(stored, { responses = {}, failSet } = {}) {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-  vi.stubGlobal("requestAnimationFrame", () => 0);
+  // 스크롤 등 다음 프레임 작업은 모아 두었다가 테스트가 runFrames()로 실행한다
+  const frames = [];
+  vi.stubGlobal("requestAnimationFrame", (cb) => frames.push(cb));
+  const runFrames = () => frames.splice(0).forEach((cb) => cb(0));
   const root = document.createElement("div");
   root.id = "vl-popup-root";
   document.body.appendChild(root);
@@ -89,7 +92,7 @@ export async function bootPopup(stored, { responses = {}, failSet } = {}) {
   // 다른 확장 화면이 저장소를 바꾼 것처럼 onChanged 리스너를 부른다
   const emitChange = (changes, area = "local") =>
     Promise.all(listeners.map((fn) => fn(changes, area)));
-  return { root, data, server, chrome, emitChange };
+  return { root, data, server, chrome, emitChange, runFrames };
 }
 
 // jsdom의 location.reload는 가로챌 수 없어 window만 바꾼다(나머지는 원래 전역을 그대로 본다)
