@@ -72,10 +72,18 @@ function buildDataForDate(allSessions, targetDate) {
   );
 
   if (todaySess.length === 0) {
+    // 지난 날짜는 로컬 세션이 없어도(저장소 초기화·재설치) 서버 이력의 리뷰를 보여 준다.
+    // 화면은 서버 시청 집계에 그날 기록이 있을 때만 그려진다. 오늘 카드는 세션 기준으로 따로 판정한다
+    const pastRow =
+      todayStr !== dateStr(new Date())
+        ? VL._todayReviewsByDate?.[todayStr]
+        : null;
     return {
       isEmpty: true,
       dateLabel: koreanDateLabel(targetDate),
-      review: "",
+      review: pastRow?.review || "",
+      reviewTopic: pastRow?.reviewTopic || "",
+      reviewGeneratedAt: pastRow?.generatedAt ?? null,
       sessionIds: [],
     };
   }
