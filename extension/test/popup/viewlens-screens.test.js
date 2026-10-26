@@ -85,6 +85,59 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
     );
   });
 
+  // 태그를 지운 글자만 남긴다(분야명의 <b>는 글자 사이라 공백 없이 지운다)
+  const textOf = (html) =>
+    html
+      .replace(/<\/?b[^>]*>/g, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  it("수집 중·스크롤 안내가 없으면 제목 아래 빈 줄 없이 영상 수를 제목 오른쪽에 붙인다", () => {
+    const html = render();
+    // 왼쪽 자리가 빈 줄(<div></div>)이 생기지 않는다
+    expect(html).not.toContain("<div></div>");
+    expect(html).toContain("align-items:baseline");
+    // 영상 수는 큰 제목 줄 옆, 보조 줄은 그 아래 전체 폭
+    expect(textOf(html)).toContain(
+      "음악에 시간을 가장 많이 썼어요 영상 13개 스포츠 영상을 가장 많이 봤어요 (9개)",
+    );
+  });
+
+  it("제목·보조 줄은 띄어쓰기에서만 줄바꿈한다('(1개씩)'이 중간에서 끊기지 않게)", () => {
+    const html = render({
+      timeDistribution: { "인물 & 블로그": 0.7, 엔터테인먼트: 0.3 },
+      countDistribution: { 엔터테인먼트: 0.5, "인물 & 블로그": 0.5 },
+      chartCount: 2,
+    });
+    const sub = html.match(
+      /<div style="([^"]*)">[^<]*<b[^>]*>엔터테인먼트·인물/,
+    );
+    expect(sub[1]).toContain("word-break:keep-all");
+    expect(html).toContain("영상을 가장 많이 봤어요 (1개씩)");
+  });
+
+  it("제목이 없어도 수집 중·스크롤 안내가 없으면 영상 수만 그 자리에 보인다", () => {
+    const html = render({
+      timeDistribution: {},
+      countDistribution: {},
+      chartCount: 0,
+    });
+    expect(html).not.toContain("<div></div>");
+    expect(html).toContain("영상 13개");
+  });
+
+  it("수집 중이면 지금처럼 제목 아래 줄 왼쪽에 수집 표시, 오른쪽에 영상 수", () => {
+    const html = render({}, "ok", {
+      dateLabel: koreanDateLabel(new Date()),
+      collectingCount: 2,
+    });
+    expect(html).not.toContain("align-items:baseline");
+    expect(textOf(html)).toContain(
+      "음악에 시간을 가장 많이 썼어요 스포츠 영상을 가장 많이 봤어요 (9개) 영상 2개 수집 중 영상 13개",
+    );
+  });
+
   it("확인 중인 영상이 없으면 그 줄을 숨긴다", () => {
     expect(render({ unconfirmedCount: 0 })).not.toContain("시청 시간 확인 중");
   });
