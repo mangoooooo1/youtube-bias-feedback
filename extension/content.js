@@ -117,7 +117,7 @@ let trackedVideoIdentity = null;
  * @type {number|null}
  */
 let currentTabId = null;
-requestTabId();
+const tabIdReady = requestTabId();
 
 /**
  * background에 이 탭의 번호를 물어 currentTabId에 담는다.
@@ -231,6 +231,24 @@ function rememberTrackedVideo(sessionId, eventId, videoId = null) {
     // 탭별 마지막 기록에 영상 ID를 남기는 용도
     watchTracker.videoId = videoId;
   }
+}
+
+/**
+ * 같은 탭에서 다시 연 영상을 새로 기록하지 않고 이 탭의 마지막 기록에 이어 쓴다.
+ * 시청 시간은 다시 연 뒤 이미 잰 값에 저장된 값을 더하고, 백그라운드 여부는 하나라도 백그라운드였으면 백그라운드다.
+ * @param {{sessionId: string, eventId: string, watchedSeconds: number, wasBackgrounded: 0|1, endedAt: number}} saved - tabwatch__ 값
+ * @param {string} videoId
+ * @returns {void}
+ */
+function resumeTrackedVideo(saved, videoId) {
+  rememberTrackedVideo(saved.sessionId, saved.eventId, videoId);
+  if (typeof watchTracker === "undefined" || !watchTracker) return;
+  if (Number.isFinite(saved.watchedSeconds)) {
+    watchTracker.accumulatedMs += saved.watchedSeconds * 1000;
+  }
+  if (saved.wasBackgrounded) watchTracker.sawHidden = true;
+  // 다시 연 뒤 재생하지 않으면 마지막 재생 시각은 앞 시청의 것이다
+  watchTracker.lastPlayedAt ??= saved.endedAt;
 }
 
 /**
@@ -375,6 +393,18 @@ function recordVideo(
 
     try {
       const now = new Date().toISOString();
+      const tabId = await tabIdReady;
+      const tabWatchKey = tabId != null ? `${TAB_WATCH_PREFIX}${tabId}` : null;
+      const stored = await chrome.storage.local.get([
+        "currentSession",
+        "lastRecordedVideo",
+        "lastWatchedAt",
+        "anonymousId",
+        "serverUrl",
+        "participantToken",
+        "installDate",
+        ...(tabWatchKey ? [tabWatchKey] : []),
+      ]);
       const {
         currentSession,
         lastRecordedVideo,
@@ -383,15 +413,23 @@ function recordVideo(
         serverUrl,
         participantToken,
         installDate,
-      } = await chrome.storage.local.get([
-        "currentSession",
-        "lastRecordedVideo",
-        "lastWatchedAt",
-        "anonymousId",
-        "serverUrl",
-        "participantToken",
-        "installDate",
-      ]);
+      } = stored;
+
+      // 이 탭에서 마지막 재생 후 10분 안에 같은 영상을 다시 열었으면(새로고침, 홈에 갔다 돌아옴) 그 기록에 이어 쓴다.
+      // 세션이 이미 닫혔어도 이어 쓴다. 이 탭이 다른 기록을 재는 중이면 저장값이 그보다 오래된 것이라 쓰지 않는다
+      const saved = tabWatchKey ? stored[tabWatchKey] : null;
+      if (
+        !previousVideoIdentity?.eventId &&
+        saved?.videoId === videoId &&
+        saved.sessionId &&
+        saved.eventId &&
+        Number.isFinite(saved.endedAt) &&
+        Date.parse(now) - saved.endedAt < SESSION_TIMEOUT_MS &&
+        ViewLensStudy.getParticipationState(installDate) === "active"
+      ) {
+        resumeTrackedVideo(saved, videoId);
+        return;
+      }
 
       // 브라우저가 꺼져 있어 알람이 아직 닫지 못한 세션은 이어 쓰지 않고 새 세션을 시작한다.
       // 새 세션 ID를 "옛 세션 마지막 영상 + 10분"으로 정해, 같은 옛 세션을 본 탭들이 같은 세션으로 모인다.
