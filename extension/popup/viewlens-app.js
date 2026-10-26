@@ -456,6 +456,7 @@ class ViewLensPopup {
     bindOnboarding(this.container, ({ group, code, recovered }) => {
       this._onboarded = true;
       this._group = group;
+      this._participantCode = code;
       this._onChange({
         onboarded: true,
         group,
