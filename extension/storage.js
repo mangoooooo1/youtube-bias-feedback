@@ -1,5 +1,18 @@
 let queue = Promise.resolve();
 
+/**
+ * 저장 작업을 한 줄로 세운다. 실패는 부른 쪽에만 돌려주고 다음 작업은 그대로 실행한다.
+ * @template T
+ * @param {() => Promise<T>} task
+ * @returns {Promise<T>}
+ */
+function enqueue(task) {
+  const run = queue.then(task);
+  // 앞 작업이 실패해도 다음 작업은 실행되도록 실패를 삼킨 Promise를 줄 끝으로 둔다
+  queue = run.catch(() => {});
+  return run;
+}
+
 // 마지막 영상 기록 후 이 시간 동안 새 영상이 없으면 세션이 끝난 것으로 본다.
 // background.js의 종료 판정과 content.js의 새 세션 판정이 같은 값을 쓴다
 export const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
@@ -63,8 +76,7 @@ export async function clearCurrentSession() {
  * @returns {Promise<object[]>} 이번에 닫은 세션들(없으면 빈 배열)
  */
 export function endSession() {
-  queue = queue.then(() => _endSession());
-  return queue;
+  return enqueue(() => _endSession());
 }
 
 /**
@@ -492,8 +504,7 @@ function checkpointItem(entry, cp) {
  * @returns {Promise<void>}
  */
 export function markWatchStatsSent(item) {
-  queue = queue.then(() => _setWatchStatsSent(item, true));
-  return queue;
+  return enqueue(() => _setWatchStatsSent(item, true));
 }
 
 /**
@@ -502,8 +513,7 @@ export function markWatchStatsSent(item) {
  * @returns {Promise<void>}
  */
 export function markWatchStatsInvalid(item) {
-  queue = queue.then(() => _setWatchStatsSent(item, "invalid"));
-  return queue;
+  return enqueue(() => _setWatchStatsSent(item, "invalid"));
 }
 
 /**
@@ -570,8 +580,7 @@ async function _setWatchStatsSent(item, value) {
  * @returns {Promise<void>}
  */
 export function markVideoEventSent(event) {
-  queue = queue.then(() => _setVideoEventSent(event, true));
-  return queue;
+  return enqueue(() => _setVideoEventSent(event, true));
 }
 
 /**
@@ -581,8 +590,7 @@ export function markVideoEventSent(event) {
  * @returns {Promise<void>}
  */
 export function markVideoEventInvalid(event) {
-  queue = queue.then(() => _setVideoEventSent(event, "invalid"));
-  return queue;
+  return enqueue(() => _setVideoEventSent(event, "invalid"));
 }
 
 /**
@@ -773,8 +781,7 @@ export async function saveOnboarding(group) {
  * @returns {Promise<void>}
  */
 export function saveAnalysis(sessionId, analysisResult) {
-  queue = queue.then(() => _saveAnalysis(sessionId, analysisResult));
-  return queue;
+  return enqueue(() => _saveAnalysis(sessionId, analysisResult));
 }
 
 /**
