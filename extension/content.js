@@ -428,6 +428,12 @@ function recordVideo(
         ViewLensStudy.getParticipationState(installDate) === "active"
       ) {
         resumeTrackedVideo(saved, videoId);
+        // 앞 구간을 떠날 때 남긴 최종값은 이어 쓰는 동안 더 커진다. 체크포인트로 대신 보낸 값처럼
+        // 확정값으로 보지 않아야, 탭이 갑자기 닫혀도 이어 쓴 시간까지 담긴 체크포인트가 전송된다.
+        // 실패하면 앞 구간 값만 남을 뿐이라 보고하지 않는다
+        await applyWatchStatsPatch(saved, {
+          watchStatsSource: "checkpoint",
+        }).catch(() => {});
         return;
       }
 
