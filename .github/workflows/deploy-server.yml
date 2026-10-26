@@ -80,12 +80,17 @@ jobs:
 
       - name: Health check
         run: |
-          for i in $(seq 1 12); do
-            if curl -fsS --max-time 10 https://viewlens.site/health | grep -q '"db":"ok"'; then
+          deadline=$((SECONDS + 60))
+          while :; do
+            left=$((deadline - SECONDS))
+            [ "$left" -gt 0 ] || break
+            if curl -fsS --max-time $((left < 10 ? left : 10)) https://viewlens.site/health | grep -q '"db":"ok"'; then
               echo "health ok"
               exit 0
             fi
-            sleep 5
+            left=$((deadline - SECONDS))
+            [ "$left" -gt 0 ] || break
+            sleep $((left < 5 ? left : 5))
           done
           echo "배포 후 /health가 1분 안에 정상으로 돌아오지 않았습니다." >&2
           exit 1
