@@ -561,9 +561,9 @@ function screenControlHome(day, stats = {}) {
     )
     .join("");
 
-  return `<div style="padding:20px 18px 24px;display:flex;flex-direction:column;gap:22px">
+  return `<div style="padding:20px 18px 20px;display:flex;flex-direction:column;gap:20px">
     ${vlCard({
-      pad: 24,
+      pad: 22,
       style: "text-align:center",
       children: `
       <div style="position:relative;width:76px;height:76px;margin:6px auto 0">
