@@ -10,6 +10,7 @@ import {
   getUnsentWatchStats,
   markWatchStatsSent,
   pruneWatchCheckpoints,
+  pruneTabWatches,
   WATCH_CHECKPOINT_STALE_MS,
   getParticipantSyncState,
   markParticipantSynced,
@@ -1089,6 +1090,35 @@ describe("시청시간 체크포인트 — 체크포인트로 보낸 값은 확�
       watchStatsSource: "checkpoint",
       checkpointAt: STALE,
     });
+  });
+});
+
+describe("pruneTabWatches — 이어 쓸 수 없게 된 탭별 마지막 기록을 지운다", () => {
+  const NOW = Date.parse("2026-01-01T12:00:00Z");
+
+  it("마지막 재생 후 10분이 된 기록부터 지우고, 10분 안의 기록과 다른 키는 남긴다", async () => {
+    await global.chrome.storage.local.set({
+      tabwatch__1: { videoId: "v1", endedAt: NOW - SESSION_TIMEOUT_MS },
+      tabwatch__2: { videoId: "v2", endedAt: NOW - SESSION_TIMEOUT_MS + 1 },
+      watchcp__e1: { eventId: "e1", at: NOW - SESSION_TIMEOUT_MS * 2 },
+    });
+
+    await pruneTabWatches(NOW);
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(Object.keys(all).sort()).toEqual(["tabwatch__2", "watchcp__e1"]);
+  });
+
+  it("endedAt을 읽을 수 없는 기록은 지운다", async () => {
+    await global.chrome.storage.local.set({
+      tabwatch__1: null,
+      tabwatch__2: { videoId: "v2" },
+      tabwatch__3: { videoId: "v3", endedAt: "2026-01-01T12:00:00Z" },
+    });
+
+    await pruneTabWatches(NOW);
+
+    expect(await global.chrome.storage.local.get(null)).toEqual({});
   });
 });
 

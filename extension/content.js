@@ -112,6 +112,30 @@ function captureWatchStatsSnapshot() {
 let trackedVideoIdentity = null;
 
 /**
+ * 이 탭의 번호. 콘텐츠 스크립트는 자기 탭 번호를 몰라 페이지를 열 때 background에 한 번 묻는다.
+ * 최초 handleVideoChange() 호출보다 먼저 선언해야 한다(watchTracker와 같은 이유). 못 받으면 null.
+ * @type {number|null}
+ */
+let currentTabId = null;
+const tabIdReady = requestTabId();
+
+/**
+ * background에 이 탭의 번호를 물어 currentTabId에 담는다.
+ * @returns {Promise<number|null>}
+ */
+function requestTabId() {
+  try {
+    return chrome.runtime
+      .sendMessage({ type: "get-tab-id" })
+      .then((id) => (currentTabId = Number.isInteger(id) ? id : null))
+      .catch(() => null);
+  } catch {
+    // 컨텍스트가 무효화됐으면 탭 기록 없이 지금처럼 동작한다
+    return Promise.resolve(null);
+  }
+}
+
+/**
  * 지금 추적 중인 영상의 식별자를 반환한다. handleVideoChange가 이동 감지 직후(동기
  * 구간, resetWatchTracker가 다음 영상용으로 리셋하기 전)에 호출해야 정확하다.
  * typeof 가드는 이 함수만 격리 테스트할 때 예외 대신 null을 반환하게 한다.
@@ -197,14 +221,34 @@ const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
  * 이 값에 우선 의존하면 그 클로버링에 영향받지 않는다.
  * @type {{sessionId: string, eventId: string}|null}
  */
-function rememberTrackedVideo(sessionId, eventId) {
+function rememberTrackedVideo(sessionId, eventId, videoId = null) {
   if (typeof trackedVideoIdentity === "undefined") return;
   trackedVideoIdentity = { sessionId, eventId };
   // 체크포인트는 지금 재는 값(watchTracker)과 같은 영상에만 쓴다. 다음 영상으로 넘어가며
   // watchTracker가 리셋된 뒤 이 함수가 불리기 전까지는 대상이 없어 이전 영상 체크포인트를 덮지 않는다.
   if (typeof watchTracker !== "undefined" && watchTracker) {
     watchTracker.checkpointTarget = { sessionId, eventId };
+    // 탭별 마지막 기록에 영상 ID를 남기는 용도
+    watchTracker.videoId = videoId;
   }
+}
+
+/**
+ * 같은 탭에서 다시 연 영상을 새로 기록하지 않고 이 탭의 마지막 기록에 이어 쓴다.
+ * 시청 시간은 다시 연 뒤 이미 잰 값에 저장된 값을 더하고, 백그라운드 여부는 하나라도 백그라운드였으면 백그라운드다.
+ * @param {{sessionId: string, eventId: string, watchedSeconds: number, wasBackgrounded: 0|1, endedAt: number}} saved - tabwatch__ 값
+ * @param {string} videoId
+ * @returns {void}
+ */
+function resumeTrackedVideo(saved, videoId) {
+  rememberTrackedVideo(saved.sessionId, saved.eventId, videoId);
+  if (typeof watchTracker === "undefined" || !watchTracker) return;
+  if (Number.isFinite(saved.watchedSeconds)) {
+    watchTracker.accumulatedMs += saved.watchedSeconds * 1000;
+  }
+  if (saved.wasBackgrounded) watchTracker.sawHidden = true;
+  // 다시 연 뒤 재생하지 않으면 마지막 재생 시각은 앞 시청의 것이다
+  watchTracker.lastPlayedAt ??= saved.endedAt;
 }
 
 /**
@@ -349,6 +393,18 @@ function recordVideo(
 
     try {
       const now = new Date().toISOString();
+      const tabId = await tabIdReady;
+      const tabWatchKey = tabId != null ? `${TAB_WATCH_PREFIX}${tabId}` : null;
+      const stored = await chrome.storage.local.get([
+        "currentSession",
+        "lastRecordedVideo",
+        "lastWatchedAt",
+        "anonymousId",
+        "serverUrl",
+        "participantToken",
+        "installDate",
+        ...(tabWatchKey ? [tabWatchKey] : []),
+      ]);
       const {
         currentSession,
         lastRecordedVideo,
@@ -357,15 +413,29 @@ function recordVideo(
         serverUrl,
         participantToken,
         installDate,
-      } = await chrome.storage.local.get([
-        "currentSession",
-        "lastRecordedVideo",
-        "lastWatchedAt",
-        "anonymousId",
-        "serverUrl",
-        "participantToken",
-        "installDate",
-      ]);
+      } = stored;
+
+      // 이 탭에서 마지막 재생 후 10분 안에 같은 영상을 다시 열었으면(새로고침, 홈에 갔다 돌아옴) 그 기록에 이어 쓴다.
+      // 세션이 이미 닫혔어도 이어 쓴다. 이 탭이 다른 기록을 재는 중이면 저장값이 그보다 오래된 것이라 쓰지 않는다
+      const saved = tabWatchKey ? stored[tabWatchKey] : null;
+      if (
+        !previousVideoIdentity?.eventId &&
+        saved?.videoId === videoId &&
+        saved.sessionId &&
+        saved.eventId &&
+        Number.isFinite(saved.endedAt) &&
+        Date.parse(now) - saved.endedAt < SESSION_TIMEOUT_MS &&
+        ViewLensStudy.getParticipationState(installDate) === "active"
+      ) {
+        resumeTrackedVideo(saved, videoId);
+        // 앞 구간을 떠날 때 남긴 최종값은 이어 쓰는 동안 더 커진다. 체크포인트로 대신 보낸 값처럼
+        // 확정값으로 보지 않아야, 탭이 갑자기 닫혀도 이어 쓴 시간까지 담긴 체크포인트가 전송된다.
+        // 실패하면 앞 구간 값만 남을 뿐이라 보고하지 않는다
+        await applyWatchStatsPatch(saved, {
+          watchStatsSource: "checkpoint",
+        }).catch(() => {});
+        return;
+      }
 
       // 브라우저가 꺼져 있어 알람이 아직 닫지 못한 세션은 이어 쓰지 않고 새 세션을 시작한다.
       // 새 세션 ID를 "옛 세션 마지막 영상 + 10분"으로 정해, 같은 옛 세션을 본 탭들이 같은 세션으로 모인다.
@@ -410,7 +480,7 @@ function recordVideo(
 
       // uuid를 videoKey와 eventId 양쪽에 재사용한다.
       const eventId = crypto.randomUUID();
-      rememberTrackedVideo(session.sessionId, eventId);
+      rememberTrackedVideo(session.sessionId, eventId, videoId);
       const videoKey = `video__${session.sessionId}__${eventId}`;
       // sent:false로 시작 — 전송 실패 시 이 값이 남아 background.js의 재시도 큐가 찾아낸다.
       await chrome.storage.local.set({
@@ -551,6 +621,8 @@ async function handleVideoChange() {
     // 잘못 기록됐다.
     const stats = captureWatchStatsSnapshot();
     const identity = captureTrackedVideoIdentity();
+    // 리셋 전에 이 탭의 마지막 기록을 남긴다(typeof 가드 이유는 아래 resetWatchTracker와 동일)
+    if (typeof writeWatchCheckpoint === "function") writeWatchCheckpoint();
     if (stats && identity?.eventId) {
       finalizePreviousWatchStats(identity, stats);
     }
@@ -573,6 +645,7 @@ async function handleVideoChange() {
   // resetWatchTracker보다 먼저 캡처해야 "막 떠나는 영상"의 스냅샷을 얻는다.
   const previousWatchStats = captureWatchStatsSnapshot();
   const previousVideoIdentity = captureTrackedVideoIdentity();
+  if (typeof writeWatchCheckpoint === "function") writeWatchCheckpoint();
 
   // 덮어쓰기 전에 먼저 읽어야 "이 영상 직전 페이지"를 알 수 있다.
   const { entryHost, entryPath } = parseEntryLocation(previousLocationHref);
@@ -649,8 +722,20 @@ function currentWatchedMs(tracker) {
  */
 function closeWatchSegment() {
   if (!watchTracker || watchTracker.segmentStartAt == null) return;
-  watchTracker.accumulatedMs += Date.now() - watchTracker.segmentStartAt;
+  const now = Date.now();
+  watchTracker.accumulatedMs += now - watchTracker.segmentStartAt;
   watchTracker.segmentStartAt = null;
+  watchTracker.lastPlayedAt = now;
+}
+
+/**
+ * 마지막으로 재생 중이던 시각. 재생 중이면 지금, 한 번도 재생하지 않았으면 영상에 들어온 시각이다.
+ * @param {{segmentStartAt: number|null, lastPlayedAt: number|null, startedAt: number}} tracker - watchTracker
+ * @returns {number}
+ */
+function lastPlayingAt(tracker) {
+  if (tracker.segmentStartAt != null) return Date.now();
+  return tracker.lastPlayedAt ?? tracker.startedAt;
 }
 
 /**
@@ -753,6 +838,8 @@ function resetWatchTracker() {
     segmentStartAt: null,
     lastPlaybackRate: 1,
     sawHidden: document.hidden,
+    startedAt: Date.now(),
+    lastPlayedAt: null,
   };
   attachVideoTracking();
 }
@@ -784,21 +871,33 @@ resetWatchTracker();
 // WATCH_CHECKPOINT_PREFIX와, 간격은 WATCH_CHECKPOINT_STALE_MS보다 짧게 맞춘다(classic script라 import 불가).
 const WATCH_CHECKPOINT_PREFIX = "watchcp__";
 const WATCH_CHECKPOINT_INTERVAL_MS = 15 * 1000;
+// 같은 탭에서 같은 영상을 다시 열 때 이어 쓰려고 남기는 이 탭의 마지막 기록. storage.js의 TAB_WATCH_PREFIX와 맞춘다.
+// 체크포인트와 같은 시점(15초마다·영상을 떠날 때·탭을 닫을 때)에 한 번의 쓰기로 함께 남긴다.
+const TAB_WATCH_PREFIX = "tabwatch__";
 
 function writeWatchCheckpoint() {
   const target = watchTracker?.checkpointTarget;
   const stats = captureWatchStatsSnapshot();
   if (!target?.eventId || !stats) return;
+  const entries = {
+    [`${WATCH_CHECKPOINT_PREFIX}${target.eventId}`]: {
+      ...target,
+      ...stats,
+      at: Date.now(),
+    },
+  };
+  if (currentTabId != null && watchTracker.videoId) {
+    entries[`${TAB_WATCH_PREFIX}${currentTabId}`] = {
+      videoId: watchTracker.videoId,
+      sessionId: target.sessionId,
+      eventId: target.eventId,
+      watchedSeconds: stats.watchedSeconds,
+      wasBackgrounded: stats.wasBackgrounded,
+      endedAt: lastPlayingAt(watchTracker),
+    };
+  }
   try {
-    chrome.storage.local
-      .set({
-        [`${WATCH_CHECKPOINT_PREFIX}${target.eventId}`]: {
-          ...target,
-          ...stats,
-          at: Date.now(),
-        },
-      })
-      .catch(() => {});
+    chrome.storage.local.set(entries).catch(() => {});
   } catch {
     // 확장 리로드·업데이트로 컨텍스트가 무효화되면 storage 접근 자체가 예외를 던진다
   }
@@ -845,6 +944,7 @@ if (typeof module !== "undefined" && module.exports) {
     writeWatchCheckpoint,
     WATCH_CHECKPOINT_PREFIX,
     WATCH_CHECKPOINT_INTERVAL_MS,
+    TAB_WATCH_PREFIX,
     SESSION_TIMEOUT_MS,
   };
 }

@@ -10,6 +10,8 @@ import {
   markVideoEventInvalid,
   getUnsentWatchStats,
   pruneWatchCheckpoints,
+  pruneTabWatches,
+  TAB_WATCH_PREFIX,
   markWatchStatsSent,
   markWatchStatsInvalid,
   getParticipantSyncState,
@@ -136,9 +138,20 @@ chrome.storage.local.set({ serverUrl: SERVER_URL }).catch((error) => {
 });
 
 // content·팝업은 모듈이 아니라 error-report를 import하지 못해 메시지로 넘긴다
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // content는 자기 탭 번호를 알 수 없어 페이지를 열 때 한 번 묻는다
+  if (message?.type === "get-tab-id") {
+    sendResponse(sender?.tab?.id ?? null);
+    return;
+  }
   if (message?.type !== "client-error") return;
   reportClientError(message.code, message.where);
+});
+
+// 닫힌 탭의 마지막 기록은 더 이어 쓸 일이 없다.
+// 못 지워도 1분 알람이 10분 뒤 지우므로 보고하지 않는다
+chrome.tabs.onRemoved.addListener((tabId) => {
+  chrome.storage.local.remove(`${TAB_WATCH_PREFIX}${tabId}`).catch(() => {});
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -157,6 +170,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     );
     reportClientError("TASK_CRASHED", "background.sessionTimeout");
   });
+  // 실패해도 다음 틱에 다시 지우므로 보고하지 않는다
+  pruneTabWatches().catch(() => {});
 });
 
 /**
