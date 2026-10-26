@@ -380,6 +380,28 @@ export async function pruneWatchCheckpoints(now = Date.now()) {
   if (done.length > 0) await chrome.storage.local.remove(done);
 }
 
+// content.js가 탭마다 남기는 마지막 기록 키 접두사.
+// 같은 탭에서 같은 영상을 다시 열면 이 값으로 기존 기록에 이어 쓴다.
+export const TAB_WATCH_PREFIX = "tabwatch__";
+
+/**
+ * 마지막 재생 후 SESSION_TIMEOUT_MS가 지나 더는 이어 쓰지 않을 탭 기록을 지운다.
+ * endedAt을 읽을 수 없는 값도 지운다.
+ * @param {number} [now]
+ * @returns {Promise<void>}
+ */
+export async function pruneTabWatches(now = Date.now()) {
+  const all = await chrome.storage.local.get(null);
+  const expired = Object.entries(all)
+    .filter(([key, value]) => {
+      if (!key.startsWith(TAB_WATCH_PREFIX)) return false;
+      const endedAt = value?.endedAt;
+      return !Number.isFinite(endedAt) || now - endedAt >= SESSION_TIMEOUT_MS;
+    })
+    .map(([key]) => key);
+  if (expired.length > 0) await chrome.storage.local.remove(expired);
+}
+
 /**
  * 로컬엔 있지만 아직 서버에 확정 반영 못한 시청시간 원시값을 live/sessions[] 양쪽에서
  * 모은다. content.js는 live 키만 갱신할 수 있어, 세션이 그 사이 닫힌 경우의 안전망이다.
