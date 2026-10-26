@@ -9,6 +9,7 @@ import {
   markVideoEventSent,
   markVideoEventInvalid,
   getUnsentWatchStats,
+  getSessionCheckpointStats,
   pruneWatchCheckpoints,
   pruneTabWatches,
   TAB_WATCH_PREFIX,
@@ -301,8 +302,44 @@ async function checkSessionTimeout() {
   );
   for (const session of ordered) {
     if (session.videos.length === 0) continue;
-    await analyzeSession(session);
+    // 세션 전송은 반드시 해야 재시도 큐에 오른다. 체크포인트는 2분 뒤 재시도 큐가 다시 보낸다
+    const withCheckpoints = await sendSessionCheckpoints(session).catch(
+      () => session,
+    );
+    await analyzeSession(withCheckpoints);
   }
+}
+
+/**
+ * 세션은 영상을 재생하는 중에도 닫혀, 그 영상의 시청 시간이 서버에 아직 없다.
+ * 체크포인트 값을 세션 POST보다 먼저 보내 오늘 리뷰에 그 영상이 들어가게 한다.
+ * @param {object} session - 방금 닫은 세션
+ * @returns {Promise<object>} 보낸 값이 반영된 세션(하나도 못 보냈으면 그대로)
+ */
+async function sendSessionCheckpoints(session) {
+  const onboarding = await getOnboarding();
+  if (!onboarding?.anonymousId) return session;
+  if (ViewLensStudy.getParticipationState(onboarding.installDate) === "ended") {
+    return session;
+  }
+
+  let sent = 0;
+  for (const item of await getSessionCheckpointStats(session.sessionId)) {
+    const result = await postWatchStatsToServer(
+      onboarding.anonymousId,
+      onboarding.participantToken,
+      item,
+    );
+    if (!result.ok) continue;
+    await markWatchStatsSent(item);
+    sent += 1;
+  }
+  if (sent === 0) return session;
+  // 보낸 사이 최종값이 들어왔으면 그 값이 실린다. 재전송도 같은 저장값을 읽는다
+  const stored = (await getAllSessions()).find(
+    (s) => s.sessionId === session.sessionId,
+  );
+  return stored ?? session;
 }
 
 /**
