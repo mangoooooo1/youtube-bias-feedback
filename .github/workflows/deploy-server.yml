@@ -47,8 +47,8 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ubuntu
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script_stop: true
           script: |
+            set -e
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             cd ~/youtube-bias-feedback
@@ -77,3 +77,15 @@ jobs:
             echo "HEALTH_URL=https://viewlens.site/health" >> server/.env
             echo "ERROR_LOG_PATH=/home/ubuntu/.pm2/logs/youtube-bias-server-error.log" >> server/.env
             pm2 restart youtube-bias-server
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 12); do
+            if curl -fsS --max-time 10 https://viewlens.site/health | grep -q '"db":"ok"'; then
+              echo "health ok"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "배포 후 /health가 1분 안에 정상으로 돌아오지 않았습니다." >&2
+          exit 1
