@@ -259,7 +259,7 @@ function _titleBlock(title) {
       )
       .join("");
   return `<div style="display:flex;flex-direction:column;gap:4px">
-      <div style="font-size:var(--vl-fs-5);font-weight:600;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${pieces(title.title)}</div>
+      <div style="font-size:var(--vl-fs-5);font-weight:500;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${pieces(title.title)}</div>
       ${title.sub ? `<div style="font-size:var(--vl-fs-3);line-height:1.4;color:var(--vl-ink-2);text-wrap:pretty">${pieces(title.sub)}</div>` : ""}
     </div>`;
 }
