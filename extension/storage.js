@@ -441,27 +441,49 @@ export async function getUnsentWatchStats(now = Date.now()) {
     .flatMap(([, cp]) => {
       const entry = entries.get(cp?.eventId);
       if (!entry || now - (cp.at ?? 0) <= WATCH_CHECKPOINT_STALE_MS) return [];
-      const { v } = entry;
-      // 최종값이 있거나 영구 실패했거나 이미 보낸 체크포인트거나 영상 POST가 아직이면(PATCH가 404) 보내지 않는다
-      if (hasFinalWatchStats(v) || v.watchStatsSent === "invalid") return [];
-      if (!isNewerCheckpoint(cp, v)) return [];
-      if (v.sent === false || v.sent === "invalid") return [];
-      return [
-        {
-          location: entry.location,
-          ...(entry.key ? { key: entry.key } : {}),
-          sessionId: entry.sessionId,
-          eventId: cp.eventId,
-          watchedSeconds: cp.watchedSeconds,
-          playbackRate: cp.playbackRate,
-          wasBackgrounded: cp.wasBackgrounded,
-          at: cp.at,
-          source: "checkpoint",
-        },
-      ];
+      return canSendCheckpoint(cp, entry.v) ? [checkpointItem(entry, cp)] : [];
     });
 
   return [...fromLive, ...fromSessions, ...fromCheckpoints];
+}
+
+/**
+ * 방금 닫은 세션의 영상 중 최종값이 없고 체크포인트가 있는 것을 고른다.
+ * 닫히는 순간에도 재생 중일 수 있어, 재시도 큐와 달리 막 갱신된 체크포인트도 넣는다.
+ * @param {string} sessionId
+ * @returns {Promise<object[]>} getUnsentWatchStats의 체크포인트 항목과 같은 형태
+ */
+export async function getSessionCheckpointStats(sessionId) {
+  const all = await chrome.storage.local.get(null);
+  const entries = indexVideoEntries(all);
+  return Object.entries(all)
+    .filter(([key]) => key.startsWith(WATCH_CHECKPOINT_PREFIX))
+    .flatMap(([, cp]) => {
+      const entry = entries.get(cp?.eventId);
+      if (entry?.sessionId !== sessionId) return [];
+      return canSendCheckpoint(cp, entry.v) ? [checkpointItem(entry, cp)] : [];
+    });
+}
+
+// 최종값이 있거나 영구 실패했거나 이미 보낸 체크포인트거나 영상 POST가 아직이면(PATCH가 404) 보내지 않는다
+function canSendCheckpoint(cp, v) {
+  if (hasFinalWatchStats(v) || v.watchStatsSent === "invalid") return false;
+  if (!isNewerCheckpoint(cp, v)) return false;
+  return v.sent !== false && v.sent !== "invalid";
+}
+
+function checkpointItem(entry, cp) {
+  return {
+    location: entry.location,
+    ...(entry.key ? { key: entry.key } : {}),
+    sessionId: entry.sessionId,
+    eventId: cp.eventId,
+    watchedSeconds: cp.watchedSeconds,
+    playbackRate: cp.playbackRate,
+    wasBackgrounded: cp.wasBackgrounded,
+    at: cp.at,
+    source: "checkpoint",
+  };
 }
 
 /**
