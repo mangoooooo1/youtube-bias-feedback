@@ -282,7 +282,7 @@ function datesInRange(start, end) {
 
 /**
  * 기간 탭 꺾은선 데이터 — 선은 구간 시청 시간 상위 3개 분야(+ 분야가 더 있으면 "그 밖").
- * 기록 없는 날은 모든 선 0%. 오늘 이후 날짜는 그리지 않는다.
+ * 기록 없는 날은 모든 선 0%. 오늘 이후 날짜도 구간 날짜로 넣되 isFuture로 표시한다(눈금만 그림).
  * @param {object} period - viewing-summary periods[] 항목 { start, end, timeDistribution, ... }
  * @param {Array<object>} days - viewing-summary days[]
  * @param {string} today - 오늘 KST 날짜(YYYY-MM-DD)
@@ -295,30 +295,31 @@ function periodLines(period, days, today) {
     ...(ranked.length > 3 ? [OTHERS_LINE] : []),
   ];
   const byDate = new Map((days || []).map((d) => [d.date, d]));
-  const points = datesInRange(period.start, period.end)
-    .filter((date) => date <= today)
-    .map((date) => {
-      const day = byDate.get(date);
-      const shares = day?.timeDistribution || {};
-      const hasChart = Object.keys(shares).length > 0;
-      const values = Object.fromEntries(
-        top.map(({ key }) => [key, percentOf(shares[key] ?? 0)]),
-      );
-      if (ranked.length > 3) {
-        const othersShare = Object.entries(shares)
-          .filter(([name]) => !top.some((t) => t.key === name))
-          .reduce((sum, [, p]) => sum + p, 0);
-        values[OTHERS_LINE.key] = percentOf(othersShare);
-      }
-      return {
-        date,
-        values,
-        // 그래프에 그릴 비중이 없는 날
-        noRecord: !hasChart,
-        // 오늘 — 점선 + "집계 중"
-        isToday: date === today,
-      };
-    });
+  const points = datesInRange(period.start, period.end).map((date) => {
+    const day = byDate.get(date);
+    const shares = day?.timeDistribution || {};
+    const hasChart = Object.keys(shares).length > 0;
+    const values = Object.fromEntries(
+      top.map(({ key }) => [key, percentOf(shares[key] ?? 0)]),
+    );
+    if (ranked.length > 3) {
+      const othersShare = Object.entries(shares)
+        .filter(([name]) => !top.some((t) => t.key === name))
+        .reduce((sum, [, p]) => sum + p, 0);
+      values[OTHERS_LINE.key] = percentOf(othersShare);
+    }
+    const isFuture = date > today;
+    return {
+      date,
+      values,
+      // 지나간 날 중 그래프에 그릴 비중이 없는 날
+      noRecord: !hasChart && !isFuture,
+      // 오늘 — 점선 + "집계 중"
+      isToday: date === today,
+      // 아직 오지 않은 날 — 날짜 눈금만
+      isFuture,
+    };
+  });
   return { lines, points };
 }
 
