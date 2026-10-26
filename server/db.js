@@ -32,11 +32,13 @@ db.pragma("foreign_keys = ON");
 function initializeDB() {
   try {
     execSchema();
+    // 테스트·본 연구 중 추가한 열은 기존 행을 지킬 수 있도록 기존 DB에 소급 추가한다
+    addColumn("today_reviews", "timeSharePercents", "TEXT");
     assertLatestColumns();
     backfillPeriodReviewVersions();
   } catch (err) {
-    // 이 저장소는 addColumn()으로 기존 DB를 소급 마이그레이션하는 대신, 스키마 변경마다
-    // DB 파일을 백업 후 삭제하고 재기동해 새로 만드는 것을 전제로 한다. 그 사전 절차를 잊고 예전
+    // 데이터 수집 전에는 addColumn()으로 기존 DB를 소급 마이그레이션하는 대신, 스키마 변경마다
+    // DB 파일을 백업 후 삭제하고 재기동해 새로 만드는 것을 전제로 했다. 그 사전 절차를 잊고 예전
     // 스키마 그대로인 DB 위에 새 코드를 올리면 "no such column" 같은 낯선 에러로 여기서
     // 죽는다 — 원인과 해야 할 일을 바로 알 수 있도록 메시지를 덧붙여 다시 던진다.
     if (/no such column|no such table/i.test(err.message)) {
@@ -297,6 +299,7 @@ function execSchema() {
       sessionCount         INTEGER,
       videoCount           INTEGER,
       validVideoCount      INTEGER,           -- 이 최신본 생성 시점의 유효 시청 영상 수(재생성 판단용)
+      timeSharePercents    TEXT,              -- 프롬프트에 들어간 분야별 시청 시간 정수 % JSON(재생성 판단용)
       categoryDistribution TEXT,              -- JSON 문자열 (sessions와 동일 포맷)
       entropy              REAL,
       review               TEXT,              -- 참여자에게 노출된 누적 리뷰 문장(최신본)

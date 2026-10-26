@@ -30,6 +30,7 @@ function createTestDb() {
       sessionCount INTEGER,
       videoCount INTEGER,
       validVideoCount INTEGER,
+      timeSharePercents TEXT,
       categoryDistribution TEXT,
       entropy REAL,
       review TEXT,

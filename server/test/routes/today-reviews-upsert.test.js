@@ -12,6 +12,7 @@ function createTestDb() {
       sessionCount INTEGER,
       videoCount INTEGER,
       validVideoCount INTEGER,
+      timeSharePercents TEXT,
       categoryDistribution TEXT,
       entropy REAL,
       review TEXT,
@@ -189,6 +190,27 @@ describe("upsertTodayReview", () => {
 
     const row = db.prepare("SELECT * FROM today_reviews").get();
     expect(row.validVideoCount).toBe(5);
+  });
+
+  it("분야별 시청 시간 정수 %를 JSON으로 저장하고, 재생성 시 최신 값으로 갱신한다", () => {
+    upsertTodayReview(
+      db,
+      basePayload({ genCount: 1, timeSharePercents: { 음악: 100 } }),
+    );
+    upsertTodayReview(
+      db,
+      basePayload({ genCount: 2, timeSharePercents: { 음악: 62, 게임: 38 } }),
+    );
+
+    const row = db.prepare("SELECT * FROM today_reviews").get();
+    expect(JSON.parse(row.timeSharePercents)).toEqual({ 음악: 62, 게임: 38 });
+  });
+
+  it("분야별 시청 시간 정수 %가 없으면 null로 저장한다", () => {
+    upsertTodayReview(db, basePayload());
+
+    const row = db.prepare("SELECT * FROM today_reviews").get();
+    expect(row.timeSharePercents).toBeNull();
   });
 
   it("갱신 시 updatedAt이 채워진다", () => {

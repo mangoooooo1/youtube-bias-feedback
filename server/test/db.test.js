@@ -152,6 +152,54 @@ describe("video_events 인덱스", () => {
   });
 });
 
+// 2차 테스트·본 연구 중에는 DB를 다시 만들 수 없어, 새 열은 기존 행을 지킨 채 추가돼야 한다
+describe("initializeDB — today_reviews.timeSharePercents 소급 추가", () => {
+  it("열이 없는 기존 today_reviews에 열을 추가하고, 기존 행은 값 없이 그대로 남긴다", () => {
+    db.exec("DROP TABLE today_reviews");
+    db.exec(`CREATE TABLE today_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      anonymousId TEXT NOT NULL,
+      reviewDate TEXT NOT NULL,
+      validVideoCount INTEGER,
+      review TEXT,
+      generatedAt TEXT NOT NULL
+    )`);
+    db.prepare(
+      `INSERT INTO today_reviews (anonymousId, reviewDate, validVideoCount, review, generatedAt)
+       VALUES ('a1', '2026-10-25', 1, '기존 리뷰', '2026-10-25T21:07:00Z')`,
+    ).run();
+    try {
+      initializeDB();
+
+      const columns = db
+        .prepare("PRAGMA table_info(today_reviews)")
+        .all()
+        .map((c) => c.name);
+      expect(columns).toContain("timeSharePercents");
+      expect(db.prepare("SELECT * FROM today_reviews").all()).toEqual([
+        expect.objectContaining({
+          anonymousId: "a1",
+          reviewDate: "2026-10-25",
+          validVideoCount: 1,
+          review: "기존 리뷰",
+          timeSharePercents: null,
+        }),
+      ]);
+    } finally {
+      db.exec("DROP TABLE today_reviews");
+      initializeDB();
+    }
+  });
+
+  it("새로 만든 DB의 today_reviews에도 열이 있다", () => {
+    const columns = db
+      .prepare("PRAGMA table_info(today_reviews)")
+      .all()
+      .map((c) => c.name);
+    expect(columns).toContain("timeSharePercents");
+  });
+});
+
 describe("initializeDB — 예전 스키마 DB 감지", () => {
   // 인덱스가 없는 새 열은 CREATE TABLE IF NOT EXISTS로 추가되지 않고 오류도 나지 않는다.
   // 재생성을 잊고 배포하면 서버는 뜨고 오늘 리뷰만 조용히 실패하므로, 시작 단계에서 막는다.
