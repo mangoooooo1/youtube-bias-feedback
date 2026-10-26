@@ -462,6 +462,143 @@ describe("저장 큐 — 한 작업이 실패해도 다음 작업은 실행된�
   });
 });
 
+// 세션 종료는 저장과 삭제를 한 번에 할 수 없어 중간에 끊길 수 있다. 다시 닫으면 같은 결과가 돼야 한다
+describe("endSession — 중간에 끊겨도 다시 닫으면 같은 세션으로 합친다", () => {
+  const T1 = "2026-01-01T10:00:00.000Z";
+  const T2 = "2026-01-01T12:00:00.000Z";
+  const video = (eventId, watchedAt, extra = {}) => ({
+    videoId: `v-${eventId}`,
+    watchedAt,
+    eventId,
+    sent: true,
+    ...extra,
+  });
+
+  // 다음 한 번의 set/remove만 실패시킨다
+  function failNext(method) {
+    const original = global.chrome.storage.local[method];
+    global.chrome.storage.local[method] = async () => {
+      global.chrome.storage.local[method] = original;
+      throw new Error("QUOTA_BYTES quota exceeded");
+    };
+  }
+
+  async function startNextSession() {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s2", startTime: T2 },
+      video__s2__e2: video("e2", T2),
+    });
+  }
+
+  const videoKeys = async () =>
+    Object.keys(await global.chrome.storage.local.get(null)).filter((k) =>
+      k.startsWith("video__"),
+    );
+
+  it("영상 키 삭제가 끊겨도 세션은 전송 대기로 남고, 다음 종료 때 중복 없이 하나로 정리된다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: T1 },
+      video__s1__e1: video("e1", T1),
+    });
+    failNext("remove");
+    await expect(endSession()).rejects.toThrow("QUOTA_BYTES");
+
+    expect(await getAllSessions()).toEqual([
+      expect.objectContaining({ sessionId: "s1", syncedToServer: false }),
+    ]);
+
+    await startNextSession();
+    const closed = await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions.map((s) => s.sessionId)).toEqual(["s1", "s2"]);
+    expect(sessions[0].videos.map((v) => v.eventId)).toEqual(["e1"]);
+    expect(closed.map((s) => s.sessionId).sort()).toEqual(["s1", "s2"]);
+    expect(await videoKeys()).toEqual([]);
+  });
+
+  it("늦게 온 영상을 합치는 저장이 끊겨도, 다음 종료 때 그 영상이 기존 세션에 합쳐진다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: T1 },
+      video__s1__e1: video("e1", T1),
+    });
+    // 첫 삭제 직후 content.js가 닫힌 세션으로 영상을 쓰고, 그 영상을 합치는 저장이 실패한다
+    const { remove } = global.chrome.storage.local;
+    global.chrome.storage.local.remove = async (keys) => {
+      global.chrome.storage.local.remove = remove;
+      await remove(keys);
+      await global.chrome.storage.local.set({
+        video__s1__late: video("late", "2026-01-01T10:05:00.000Z"),
+      });
+      failNext("set");
+    };
+    await expect(endSession()).rejects.toThrow("QUOTA_BYTES");
+    expect((await getAllSessions())[0].videos.map((v) => v.eventId)).toEqual([
+      "e1",
+    ]);
+
+    await startNextSession();
+    await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions.map((s) => s.sessionId)).toEqual(["s1", "s2"]);
+    expect(sessions[0].videos.map((v) => v.eventId)).toEqual(["e1", "late"]);
+    expect(sessions[0].syncedToServer).toBe(false);
+  });
+
+  it("이미 보낸 세션이 다시 살아나 영상이 생기면 기존 세션에 합치고, 전송 완료와 리뷰를 유지하며 다시 돌려주지 않는다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: T1,
+          endTime: "2026-01-01T10:10:00.000Z",
+          videos: [video("e1", T1)],
+          syncedToServer: true,
+          review: "오늘 리뷰",
+        },
+      ],
+      currentSession: { sessionId: "s1", startTime: T1 },
+      video__s1__e2: video("e2", "2026-01-01T10:09:00.000Z"),
+    });
+
+    const closed = await endSession();
+
+    expect(closed).toEqual([]);
+    const sessions = await getAllSessions();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      syncedToServer: true,
+      review: "오늘 리뷰",
+      startTime: T1,
+    });
+    expect(sessions[0].videos.map((v) => v.eventId)).toEqual(["e1", "e2"]);
+  });
+
+  it("같은 영상이 양쪽에 있으면 남아 있던 영상 키의 값을 쓴다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [{ sessionId: "s1", startTime: T1, videos: [video("e1", T1)] }],
+      currentSession: { sessionId: "s1", startTime: T1 },
+      video__s1__e1: video("e1", T1, {
+        watchedSeconds: 300,
+        watchStatsSent: false,
+        watchStatsSource: "final",
+      }),
+    });
+
+    const [closed] = await endSession();
+
+    expect(closed.videos).toEqual([
+      expect.objectContaining({
+        eventId: "e1",
+        watchedSeconds: 300,
+        watchStatsSource: "final",
+      }),
+    ]);
+    expect(closed.syncedToServer).toBe(false);
+  });
+});
+
 describe("saveAnalysis", () => {
   it("sessions 자체가 없으면 아무것도 하지 않는다", async () => {
     await saveAnalysis("s1", { entropy: 1 });
