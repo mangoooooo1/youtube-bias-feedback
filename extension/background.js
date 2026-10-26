@@ -332,7 +332,7 @@ async function sendSessionCheckpoints(session) {
     return session;
   }
 
-  let sent = 0;
+  const sent = new Map();
   for (const item of await getSessionCheckpointStats(session.sessionId)) {
     const result = await postWatchStatsToServer(
       onboarding.anonymousId,
@@ -340,15 +340,30 @@ async function sendSessionCheckpoints(session) {
       item,
     );
     if (!result.ok) continue;
-    await markWatchStatsSent(item);
-    sent += 1;
+    sent.set(item.eventId, item);
+    // 표시를 못 남겨도 2분 뒤 재시도 큐가 같은 값을 다시 보낸다
+    await markWatchStatsSent(item).catch(() => {});
   }
-  if (sent === 0) return session;
+  if (sent.size === 0) return session;
   // 보낸 사이 최종값이 들어왔으면 그 값이 실린다. 재전송도 같은 저장값을 읽는다
-  const stored = (await getAllSessions()).find(
+  const stored = (await getAllSessions().catch(() => [])).find(
     (s) => s.sessionId === session.sessionId,
   );
-  return stored ?? session;
+  const base = stored ?? session;
+  // 표시를 못 남긴 영상도 서버에 반영한 값으로 보낸다
+  return {
+    ...base,
+    videos: base.videos.map((v) => {
+      const item = sent.get(v.eventId);
+      if (!item || v.watchedSeconds != null) return v;
+      return {
+        ...v,
+        watchedSeconds: item.watchedSeconds,
+        playbackRate: item.playbackRate,
+        wasBackgrounded: item.wasBackgrounded,
+      };
+    }),
+  };
 }
 
 /**
