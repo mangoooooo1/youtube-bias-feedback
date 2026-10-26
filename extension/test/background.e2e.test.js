@@ -1551,6 +1551,29 @@ describe("알람 핸들러 — 세션을 닫을 때 체크포인트를 세션보
     expect([...sessionPosts[0].watchedSecondsList].sort()).toEqual([30, null]);
   });
 
+  it("체크포인트를 보낸 뒤 그 표시를 저장하지 못해도 세션을 보내고 전송 완료를 기록한다", async () => {
+    const { order, sessionPosts } = mockServer();
+    await closeSession({ ...playing("e1"), ...checkpoint("e1") });
+    // 체크포인트 값을 세션 영상에 쓰는 저장만 한 번 실패시킨다
+    const { set } = global.chrome.storage.local;
+    global.chrome.storage.local.set = (obj) => {
+      const marking = obj.sessions?.some((s) =>
+        s.videos?.some((v) => v.watchStatsSource === "checkpoint"),
+      );
+      if (!marking) return set(obj);
+      global.chrome.storage.local.set = set;
+      return Promise.reject(new Error("QUOTA_BYTES quota exceeded"));
+    };
+    await vi.waitFor(() => expect(sessionPosts).toHaveLength(1));
+
+    expect(order).toContain("PATCH /api/video-events/e1");
+    expect(sessionPosts[0].watchedSecondsList).toEqual([null]);
+    await vi.waitFor(async () => {
+      const { sessions } = await global.chrome.storage.local.get("sessions");
+      expect(sessions[0].syncedToServer).toBe(true);
+    });
+  });
+
   it("체크포인트를 고르다 저장값을 읽지 못해도 세션은 보낸다", async () => {
     const { order, sessionPosts } = mockServer();
     // 영상 목록이 배열이 아닌 망가진 옛 세션 — 체크포인트 조회가 예외를 던진다

@@ -409,6 +409,59 @@ describe("endSession — 세션 종료 시각", () => {
   });
 });
 
+// 저장 작업은 한 줄로 실행된다. 한 번의 실패로 줄 전체가 막히면 서비스워커가 다시 뜰 때까지 세션 종료·분석 저장이 모두 실패한다
+describe("저장 큐 — 한 작업이 실패해도 다음 작업은 실행된다", () => {
+  // 다음 한 번의 쓰기만 실패시킨다
+  function failNextSet() {
+    const { set } = global.chrome.storage.local;
+    global.chrome.storage.local.set = () => {
+      global.chrome.storage.local.set = set;
+      return Promise.reject(new Error("QUOTA_BYTES quota exceeded"));
+    };
+  }
+
+  it("실패한 저장은 부른 쪽에 실패를 돌려주고, 다음 저장은 그대로 반영한다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [{ sessionId: "s1", videos: [] }],
+    });
+
+    failNextSet();
+    await expect(saveAnalysis("s1", { videoCount: 1 })).rejects.toThrow(
+      "QUOTA_BYTES",
+    );
+    await saveAnalysis("s1", { videoCount: 2 });
+
+    const [session] = await getAllSessions();
+    expect(session.videoCount).toBe(2);
+  });
+
+  it("전송 표시 저장이 실패해도 다음 세션 종료는 세션을 닫아 돌려준다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [{ sessionId: "old", videos: [{ eventId: "e0", sent: true }] }],
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    await setVideo("s1", "v1", "2026-01-01T00:00:00Z");
+
+    failNextSet();
+    await expect(
+      markWatchStatsSent({
+        location: "session",
+        sessionId: "old",
+        eventId: "e0",
+        watchedSeconds: 30,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        at: 1,
+        source: "checkpoint",
+      }),
+    ).rejects.toThrow("QUOTA_BYTES");
+    const closed = await endSession();
+
+    expect(closed.map((session) => session.sessionId)).toEqual(["s1"]);
+    expect(await getCurrentSession()).toBeNull();
+  });
+});
+
 describe("saveAnalysis", () => {
   it("sessions 자체가 없으면 아무것도 하지 않는다", async () => {
     await saveAnalysis("s1", { entropy: 1 });
