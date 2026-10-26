@@ -39,7 +39,10 @@ function getCategoryName(categoryId) {
   return CATEGORY_NAMES[String(categoryId)] ?? "기타";
 }
 
-function calculateDistribution(categoryIds) {
+// 분포 비율은 화면·저장용으로 소수 셋째 자리까지 반올림한다. 엔트로피 계산은 round: false로 원래 비율을 쓴다
+const roundShare = (x) => Math.round(x * 1000) / 1000;
+
+function calculateDistribution(categoryIds, { round = true } = {}) {
   const validIds = categoryIds.filter((id) => id !== null && id !== undefined);
   if (validIds.length === 0) return {};
 
@@ -52,7 +55,7 @@ function calculateDistribution(categoryIds) {
   const total = validIds.length;
   const distribution = {};
   for (const [name, count] of Object.entries(counts)) {
-    distribution[name] = Math.round((count / total) * 1000) / 1000;
+    distribution[name] = round ? roundShare(count / total) : count / total;
   }
 
   return distribution;
@@ -68,15 +71,21 @@ const MIN_RELATIVE_WATCH_RATIO = 0.25;
 
 /**
  * @param {{watchedSeconds: number|null|undefined, durationSeconds: number|null|undefined}} entry
+ * @param {{minRelativeRatio?: number}} [options] - 민감도 분석용 상대 기준. 숫자가 아니면 기본값
+ *   (filter(isValidWatch)처럼 배열 인덱스가 들어와도 기본값을 쓴다)
  * @returns {boolean} true면 "실제 시청"으로 인정. watchedSeconds를 모르면(계측 실패·구버전
  *   확장 등) 보수적으로 true를 반환한다. 데이터가 없다고 없는 셈 치면(무효 처리) 기존
  *   집계 방식(모든 영상 포함)보다 오히려 더 많은 영상을 부당하게 탈락시키게 된다.
  */
-function isValidWatch({ watchedSeconds, durationSeconds }) {
+function isValidWatch({ watchedSeconds, durationSeconds }, options) {
+  const minRelativeRatio =
+    typeof options?.minRelativeRatio === "number"
+      ? options.minRelativeRatio
+      : MIN_RELATIVE_WATCH_RATIO;
   if (watchedSeconds === null || watchedSeconds === undefined) return true;
   if (watchedSeconds >= MIN_ABSOLUTE_WATCH_SECONDS) return true;
   if (durationSeconds && durationSeconds > 0) {
-    return watchedSeconds / durationSeconds >= MIN_RELATIVE_WATCH_RATIO;
+    return watchedSeconds / durationSeconds >= minRelativeRatio;
   }
   return false;
 }
@@ -85,7 +94,7 @@ function isValidWatch({ watchedSeconds, durationSeconds }) {
 // calculateDistribution(영상 개수 가중)과 동일한 출력 형태를 유지하되,
 // 가중치를 1(영상 1개)이 아니라 실제 시청 시간(초)으로 준다.
 // weight가 없거나 0 이하인 항목은 전체 합에 기여하지 않도록 제외한다.
-function calculateWeightedDistribution(entries) {
+function calculateWeightedDistribution(entries, { round = true } = {}) {
   const valid = entries.filter(
     (e) =>
       e.categoryId !== null &&
@@ -112,12 +121,13 @@ function calculateWeightedDistribution(entries) {
 
   const distribution = {};
   for (const [name, weight] of Object.entries(weightByName)) {
-    distribution[name] =
-      Math.round((weight / totalNormalizedWeight) * 1000) / 1000;
+    const share = weight / totalNormalizedWeight;
+    distribution[name] = round ? roundShare(share) : share;
   }
   return distribution;
 }
 
+// H2 결과 변수라 반올림하지 않는다(통계 분석 입력의 정밀도 유지). 화면에는 보이지 않는다
 function calculateEntropy(distribution) {
   const proportions = Object.values(distribution);
   if (proportions.length === 0) return 0;
@@ -127,7 +137,8 @@ function calculateEntropy(distribution) {
     return sum + p * Math.log2(p);
   }, 0);
 
-  return Math.round(H * 100) / 100 || 0;
+  // 한 분야뿐이면 -0이 나와 0으로 맞춘다
+  return H || 0;
 }
 
 module.exports = {

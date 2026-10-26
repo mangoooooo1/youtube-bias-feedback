@@ -50,8 +50,40 @@ describe("calculateEntropy", () => {
     expect(calculateEntropy({ a: 0.25, b: 0.25, c: 0.25, d: 0.25 })).toBe(2);
   });
 
-  it("비균등 분포(0.25/0.75)의 entropy를 소수점 2자리로 반올림한다", () => {
-    expect(calculateEntropy({ 음악: 0.25, 게임: 0.75 })).toBe(0.81);
+  it("비균등 분포(0.25/0.75)의 entropy를 반올림하지 않는다", () => {
+    const expected = -(0.25 * Math.log2(0.25) + 0.75 * Math.log2(0.75));
+    expect(calculateEntropy({ 음악: 0.25, 게임: 0.75 })).toBe(expected);
+    expect(expected).not.toBe(0.81);
+  });
+
+  it("단일 카테고리에서 -0이 아니라 0을 돌려준다", () => {
+    expect(Object.is(calculateEntropy({ 음악: 1 }), 0)).toBe(true);
+  });
+});
+
+describe("분포 함수 — round 옵션", () => {
+  it("기본은 소수 셋째 자리로 반올림하고, round: false면 원래 비율이다", () => {
+    const ids = [10, 17, 20];
+    expect(calculateDistribution(ids)).toEqual({
+      음악: 0.333,
+      스포츠: 0.333,
+      게임: 0.333,
+    });
+    expect(calculateDistribution(ids, { round: false }).음악).toBe(1 / 3);
+  });
+
+  it("가중 분포도 같은 규칙을 따른다", () => {
+    const entries = [
+      { categoryId: 10, weight: 1 },
+      { categoryId: 20, weight: 2 },
+    ];
+    expect(calculateWeightedDistribution(entries)).toEqual({
+      음악: 0.333,
+      게임: 0.667,
+    });
+    expect(calculateWeightedDistribution(entries, { round: false }).음악).toBe(
+      1 / 3,
+    );
   });
 });
 
@@ -186,5 +218,45 @@ describe("getCategoryName", () => {
 
   it("알 수 없는 categoryId는 '기타'를 반환한다", () => {
     expect(getCategoryName(9999)).toBe("기타");
+  });
+});
+
+describe("isValidWatch — 민감도 분석용 상대 기준 옵션", () => {
+  // 30초 미만이라 상대 기준만으로 판정되는 영상(길이 100초)
+  const watch = (watchedSeconds) => ({ watchedSeconds, durationSeconds: 100 });
+
+  it("옵션이 없으면 25% 기준 그대로다", () => {
+    expect(isValidWatch(watch(24))).toBe(false);
+    expect(isValidWatch(watch(25))).toBe(true);
+  });
+
+  it("상대 기준을 10%·50%로 바꿀 수 있다(경계값 포함)", () => {
+    expect(isValidWatch(watch(9), { minRelativeRatio: 0.1 })).toBe(false);
+    expect(isValidWatch(watch(10), { minRelativeRatio: 0.1 })).toBe(true);
+    expect(isValidWatch(watch(25), { minRelativeRatio: 0.5 })).toBe(false);
+    // 50% 경계는 30초 미만 영상으로 본다(길이 50초)
+    const half = { minRelativeRatio: 0.5 };
+    expect(
+      isValidWatch({ watchedSeconds: 24, durationSeconds: 50 }, half),
+    ).toBe(false);
+    expect(
+      isValidWatch({ watchedSeconds: 25, durationSeconds: 50 }, half),
+    ).toBe(true);
+  });
+
+  it("상대 기준을 바꿔도 절대 기준 30초와 시청 시간 모름 처리는 그대로다", () => {
+    const opt = { minRelativeRatio: 0.5 };
+    expect(
+      isValidWatch({ watchedSeconds: 30, durationSeconds: 3600 }, opt),
+    ).toBe(true);
+    expect(
+      isValidWatch({ watchedSeconds: null, durationSeconds: 100 }, opt),
+    ).toBe(true);
+  });
+
+  it("filter(isValidWatch)처럼 인덱스가 두 번째 인자로 와도 기본 기준을 쓴다", () => {
+    const entries = [watch(5), watch(25), watch(10)];
+    expect(entries.filter(isValidWatch)).toEqual([watch(25)]);
+    expect(isValidWatch(watch(25), { minRelativeRatio: "0.5" })).toBe(true);
   });
 });
