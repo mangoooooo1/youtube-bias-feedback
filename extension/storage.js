@@ -186,9 +186,43 @@ function sessionEndTime(videos, startTime, nowMs) {
 }
 
 /**
+ * 같은 eventId면 뒤(남아 있던 video__ 키) 값을 쓴다. 키가 남아 있는 동안에는 모든 쓰기가 그 키로 가서 그쪽이 최신이다.
+ * eventId가 없는 옛 기록은 모두 남긴다.
+ */
+function mergeVideos(existing, incoming) {
+  const byEventId = new Map();
+  const withoutEventId = [];
+  for (const v of [...existing, ...incoming]) {
+    if (v.eventId) byEventId.set(v.eventId, v);
+    else withoutEventId.push(v);
+  }
+  return [...byEventId.values(), ...withoutEventId];
+}
+
+/**
+ * 이미 sessions[]에 있는 세션에 영상을 합친다. 시작 시각과 분석 결과 필드는 그대로 둔다.
+ * 아직 보내지 않은 세션은 재시도 큐가 찾도록 전송 대기로 둔다.
+ */
+function mergeIntoSession(session, videos, nowMs) {
+  const merged = mergeVideos(session.videos ?? [], videos);
+  return {
+    ...session,
+    ...buildClosedSession(
+      session.sessionId,
+      merged,
+      session.startTime,
+      sessionEndTime(merged, session.startTime, nowMs),
+    ),
+    syncedToServer: session.syncedToServer ?? false,
+  };
+}
+
+/**
  * content.js가 video__ 키로 흩어 기록한 영상들을 세션 단위로 모아 sessions[]로 옮긴다.
  * 이후 늦게 도착한 같은 세션의 video__ 키가 있으면 재확인해 병합까지 처리한다.
- * @returns {Promise<object[]>} 이번에 닫은 세션들(없으면 빈 배열)
+ * 저장과 삭제를 한 번에 할 수 없어, 중간에 끊겨도 다시 실행하면 같은 결과가 되게 한다 —
+ * 이미 있는 세션이면 새로 붙이지 않고 합치고, 새로 닫은 세션은 옮기는 저장에서 바로 전송 대기로 둔다.
+ * @returns {Promise<object[]>} 이번에 닫거나 합친 세션 중 아직 서버에 보내지 않은 것(없으면 빈 배열)
  */
 async function _endSession() {
   const all = await chrome.storage.local.get(null);
@@ -202,23 +236,37 @@ async function _endSession() {
 
   const bySession = groupVideosBySession(videoEntries);
   const nowMs = Date.now();
-  const closedSessions = [];
+  const updatedSessions = [...(sessions ?? [])];
   for (const [sessionId, videos] of bySession) {
+    const index = updatedSessions.findIndex((s) => s.sessionId === sessionId);
+    if (index >= 0) {
+      updatedSessions[index] = mergeIntoSession(
+        updatedSessions[index],
+        videos,
+        nowMs,
+      );
+      continue;
+    }
     const startTime =
       sessionId === currentSession.sessionId
         ? currentSession.startTime
         : undefined;
-    closedSessions.push(
-      buildClosedSession(
+    updatedSessions.push({
+      ...buildClosedSession(
         sessionId,
         videos,
         startTime,
         sessionEndTime(videos, startTime, nowMs),
       ),
-    );
+      syncedToServer: false,
+    });
   }
 
-  const updatedSessions = [...(sessions ?? []), ...closedSessions];
+  const closedSessionIds = new Set(bySession.keys());
+  const unsent = (list) =>
+    list.filter(
+      (s) => closedSessionIds.has(s.sessionId) && s.syncedToServer !== true,
+    );
   const keysToRemove = videoEntries.map(([key]) => key);
 
   await chrome.storage.local.set({
@@ -231,30 +279,22 @@ async function _endSession() {
   // content.js는 별개 컨텍스트라 위 스냅샷과 remove() 사이에 방금 닫은 sessionId로
   // video__ 키를 새로 썼을 수 있다 — 그대로 두면 영원히 미반영되므로 즉시 재확인해
   // 병합한다. 이미 새로 시작된 *다른* sessionId의 키는 건드리지 않는다.
-  const closedSessionIds = new Set(closedSessions.map((s) => s.sessionId));
   const late = await chrome.storage.local.get(null);
   const lateEntries = Object.entries(late).filter(
     ([key]) =>
       key.startsWith("video__") && closedSessionIds.has(sessionIdOf(key)),
   );
-  if (lateEntries.length === 0) return closedSessions;
+  if (lateEntries.length === 0) return unsent(updatedSessions);
 
   const lateBySession = groupVideosBySession(lateEntries);
   const mergedSessions = updatedSessions.map((session) => {
     const lateVideos = lateBySession.get(session.sessionId);
-    if (!lateVideos) return session;
-    const videos = [...session.videos, ...lateVideos];
-    return buildClosedSession(
-      session.sessionId,
-      videos,
-      session.startTime,
-      sessionEndTime(videos, session.startTime, nowMs),
-    );
+    return lateVideos ? mergeIntoSession(session, lateVideos, nowMs) : session;
   });
 
   await chrome.storage.local.set({ sessions: mergedSessions });
   await chrome.storage.local.remove(lateEntries.map(([key]) => key));
-  return mergedSessions.filter((s) => closedSessionIds.has(s.sessionId));
+  return unsent(mergedSessions);
 }
 
 /**
