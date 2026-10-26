@@ -275,13 +275,23 @@ class ViewLensPopup {
    * @param {string} tabId - 전환할 탭 id
    */
   _switchTab(tabId) {
-    const oldIndicator = this.container.querySelector("#vl-tab-indicator");
+    this._renderSlidingIndicator("#vl-tab-indicator", () => {
+      this._tab = tabId;
+    });
+  }
+
+  /**
+   * change를 적용해 다시 그린 뒤, selector 인디케이터를 이전 위치에서 새 위치로 미끄러뜨린다(FLIP).
+   * 탭 바와 기간 버튼 밑줄이 함께 쓴다.
+   */
+  _renderSlidingIndicator(selector, change) {
+    const oldIndicator = this.container.querySelector(selector);
     const oldRect = oldIndicator ? oldIndicator.getBoundingClientRect() : null;
 
-    this._tab = tabId;
+    change();
     this.render();
 
-    const newIndicator = this.container.querySelector("#vl-tab-indicator");
+    const newIndicator = this.container.querySelector(selector);
     if (!oldRect || !newIndicator) return;
     const newRect = newIndicator.getBoundingClientRect();
     const deltaX = oldRect.left - newRect.left;
@@ -504,9 +514,10 @@ class ViewLensPopup {
         btn.addEventListener("click", () => {
           const w = parseInt(btn.dataset.week, 10);
           if (w <= currentWeek) {
-            this._selWeek = w;
-            this._periodFocus = null;
-            this.render();
+            this._renderSlidingIndicator("#vl-period-indicator", () => {
+              this._selWeek = w;
+              this._periodFocus = null;
+            });
           }
         });
       });

@@ -285,6 +285,30 @@ describe("기간 탭", () => {
     );
     expect(future.disabled).toBe(true);
   });
+
+  it("기간 버튼을 누르면 밑줄이 이전 기간 위치에서 새 기간으로 미끄러진다", async () => {
+    const { root, runFrames } = await bootFeedbackTab();
+    // jsdom은 위치를 재지 않아, 밑줄의 위치를 그 버튼 번호 × 60px로 돌려준다
+    const rect = vi
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockImplementation(function () {
+        const week = Number(this.closest("[data-week]")?.dataset.week ?? 0);
+        return { left: week * 60 };
+      });
+    try {
+      click(root, '#vl-week-btns [data-week="2"]');
+      const indicator = root.querySelector("#vl-period-indicator");
+      expect(indicator.closest("[data-week]").dataset.week).toBe("2");
+      // 2구간 밑줄을 1구간 자리(-60px)에 두었다가
+      expect(indicator.style.transform).toContain("translateX(-60px)");
+      // 다음 프레임에 제자리로 옮긴다
+      runFrames();
+      expect(indicator.style.transform).not.toContain("translateX");
+      expect(indicator.style.transition).toContain("transform");
+    } finally {
+      rect.mockRestore();
+    }
+  });
 });
 
 describe("영상 목록 넘기기", () => {

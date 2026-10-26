@@ -128,11 +128,11 @@ function vlLegend({ items = [], focus, id = "" } = {}) {
 /**
  * 기간 탭 꺾은선
  * 날마다 분야별 시청 시간 비중(%). 선마다 한 분야(상위 3개 + 그 밖).
- * 기록 없는 날은 모든 선 0%와 날짜 아래 "기록 없음", 오늘은 점선과 "집계 중".
+ * 기록 없는 날은 모든 선 0%와 날짜 아래 "기록 없음", 오늘은 점선과 "집계 중", 아직 오지 않은 날은 날짜 눈금만.
  * 점에 마우스를 올리면 그날 그 분야 비중(SVG title)이 보인다.
  * @param {object} opts
  * @param {Array<{key: string, name: string, color: string}>} opts.lines
- * @param {Array<{date: string, values: Record<string, number>, noRecord: boolean, isToday: boolean}>} opts.points
+ * @param {Array<{date: string, values: Record<string, number>, noRecord: boolean, isToday: boolean, isFuture?: boolean}>} opts.points
  * @param {string|null} [opts.focus] - 강조할 분야 key(공통 범례를 눌렀을 때). 나머지 선은 흐리게, 고른 선의 점엔 핑
  * @returns {string} SVG HTML
  */
@@ -190,12 +190,15 @@ function vlShareLines({ lines = [], points = [], focus = null } = {}) {
     const opacity = dim ? 0.18 : 1;
     const width = focus && !dim ? 3 : 2;
     for (let i = 0; i < points.length - 1; i++) {
+      // 아직 오지 않은 날로는 잇지 않는다
+      if (points[i + 1].isFuture) break;
       const a = points[i].values[line.key] ?? 0;
       const b = points[i + 1].values[line.key] ?? 0;
       const dash = points[i + 1].isToday ? ' stroke-dasharray="4 3"' : "";
       plot += `<line x1="${x(i)}" y1="${y(a)}" x2="${x(i + 1)}" y2="${y(b)}" stroke="${line.color}" stroke-width="${width}" stroke-linecap="round" opacity="${opacity}"${dash}/>`;
     }
     points.forEach((p, i) => {
+      if (p.isFuture) return;
       const v = p.values[line.key] ?? 0;
       const tip = p.noRecord
         ? `${dayLabel(p.date)}(${weekday(p.date)}) · 기록 없음`
@@ -210,7 +213,7 @@ function vlShareLines({ lines = [], points = [], focus = null } = {}) {
 
   points.forEach((p, i) => {
     if (p.isToday) {
-      plot += `<text x="${x(i)}" y="${PAD.t - 4}" text-anchor="${i === points.length - 1 ? "end" : "middle"}" font-size="9" fill="var(--vl-accent)">집계 중</text>`;
+      plot += `<text x="${x(i)}" y="${PAD.t - 4}" text-anchor="${edgeAnchor(i)}" font-size="9" fill="var(--vl-accent)">집계 중</text>`;
     }
   });
 

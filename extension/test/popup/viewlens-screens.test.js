@@ -58,7 +58,11 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
     // "확인 중"은 오늘만 보인다
     const html = render({}, "ok", { dateLabel: koreanDateLabel(new Date()) });
     expect(html).toContain(
-      "시청 시간이 가장 긴 분야는 음악이었지만, 영상을 가장 많이 본 분야는 스포츠였어요.",
+      '<b style="font-weight:800">음악</b>에 시간을 가장 많이 썼어요',
+    );
+    // 12개 × 75%
+    expect(html).toContain(
+      '<b style="font-weight:800">스포츠</b> 영상을 가장 많이 봤어요 (9개)',
     );
     expect(html.indexOf(">음악</span>")).toBeLessThan(
       html.indexOf(">스포츠</span>"),
@@ -71,13 +75,66 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
 
   it("제목 문장이 영상 수 줄보다 위, 범례는 도넛 카드 안 도넛 아래", () => {
     const html = render();
-    const title = html.indexOf("시청 시간이 가장 긴 분야는");
+    const title = html.indexOf("에 시간을 가장 많이 썼어요");
     const card = html.indexOf("유튜브 시청 분야별 비중");
     expect(title).toBeLessThan(html.indexOf("영상 13개"));
     expect(html.indexOf("영상 13개")).toBeLessThan(card);
     expect(html.indexOf(">음악</span>")).toBeGreaterThan(card);
     expect(html.indexOf(">음악</span>")).toBeGreaterThan(
       html.lastIndexOf("영상 개수"),
+    );
+  });
+
+  // 태그를 지운 글자만 남긴다(분야명의 <b>는 글자 사이라 공백 없이 지운다)
+  const textOf = (html) =>
+    html
+      .replace(/<\/?b[^>]*>/g, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+  it("수집 중·스크롤 안내가 없으면 제목 아래 빈 줄 없이 영상 수를 제목 오른쪽에 붙인다", () => {
+    const html = render();
+    // 왼쪽 자리가 빈 줄(<div></div>)이 생기지 않는다
+    expect(html).not.toContain("<div></div>");
+    expect(html).toContain("align-items:baseline");
+    // 영상 수는 큰 제목 줄 옆, 보조 줄은 그 아래 전체 폭
+    expect(textOf(html)).toContain(
+      "음악에 시간을 가장 많이 썼어요 영상 13개 스포츠 영상을 가장 많이 봤어요 (9개)",
+    );
+  });
+
+  it("제목·보조 줄은 띄어쓰기에서만 줄바꿈한다('(1개씩)'이 중간에서 끊기지 않게)", () => {
+    const html = render({
+      timeDistribution: { "인물 & 블로그": 0.7, 엔터테인먼트: 0.3 },
+      countDistribution: { 엔터테인먼트: 0.5, "인물 & 블로그": 0.5 },
+      chartCount: 2,
+    });
+    const sub = html.match(
+      /<div style="([^"]*)">[^<]*<b[^>]*>엔터테인먼트·인물/,
+    );
+    expect(sub[1]).toContain("word-break:keep-all");
+    expect(html).toContain("영상을 가장 많이 봤어요 (1개씩)");
+  });
+
+  it("제목이 없어도 수집 중·스크롤 안내가 없으면 영상 수만 그 자리에 보인다", () => {
+    const html = render({
+      timeDistribution: {},
+      countDistribution: {},
+      chartCount: 0,
+    });
+    expect(html).not.toContain("<div></div>");
+    expect(html).toContain("영상 13개");
+  });
+
+  it("수집 중이면 지금처럼 제목 아래 줄 왼쪽에 수집 표시, 오른쪽에 영상 수", () => {
+    const html = render({}, "ok", {
+      dateLabel: koreanDateLabel(new Date()),
+      collectingCount: 2,
+    });
+    expect(html).not.toContain("align-items:baseline");
+    expect(textOf(html)).toContain(
+      "음악에 시간을 가장 많이 썼어요 스포츠 영상을 가장 많이 봤어요 (9개) 영상 2개 수집 중 영상 13개",
     );
   });
 
@@ -91,12 +148,25 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
     expect(html).not.toContain("시청 시간 확인 중");
   });
 
+  it("시간과 개수 1위가 같으면 보조 줄 없이, 분야명만 굵고 &가 든 이름도 그대로 보인다", () => {
+    const html = render({
+      timeDistribution: { "인물 & 블로그": 0.6, 게임: 0.4 },
+      countDistribution: { "인물 & 블로그": 0.75, 게임: 0.25 },
+    });
+    expect(html).toContain(
+      '<b style="font-weight:800">인물 &amp; 블로그</b> 영상을 가장 많이 봤어요',
+    );
+    expect(html.match(/<b style="font-weight:800">/g)).toHaveLength(1);
+    expect(html).not.toContain("시간을 가장 많이 썼어요");
+  });
+
   it("제목이 없으면 영상 수 줄이 날짜 바로 다음에 온다", () => {
     const html = render({
       timeDistribution: {},
       countDistribution: {},
       chartCount: 0,
     });
+    expect(html).not.toContain("가장 많이");
     expect(html).toContain("영상 13개");
     expect(html.indexOf("3월 5일")).toBeLessThan(html.indexOf("영상 13개"));
   });
@@ -323,6 +393,26 @@ describe("vlShareLines — 날마다 분야별 비중 꺾은선", () => {
     expect(svg).toContain('stroke-dasharray="4 3"');
   });
 
+  it("구간 첫날은 날짜 눈금을 구간 일수만큼 깔고, 점은 첫 날짜에만, 미래 날짜엔 선·'기록 없음'이 없다", () => {
+    const svg = vlShareLines(
+      VL.periodLines(
+        { ...PERIOD, start: "2026-06-05", end: "2026-06-11" },
+        [PERIOD_DAYS[0]],
+        "2026-06-05",
+      ),
+    );
+    for (const d of [5, 6, 7, 8, 9, 10, 11])
+      expect(svg).toContain(`>6/${d}</text>`);
+    expect(svg).not.toContain("기록 없음");
+    // 분야 선(상위 3개 + 그 밖) 4개 × 첫 날짜 하나
+    expect(svg.match(/<circle /g)).toHaveLength(4);
+    expect(svg.match(/<title>6\/5\(금\)/g)).toHaveLength(4);
+    // 이어 그은 선분이 없다(가로 눈금선만 있음)
+    expect(svg).not.toContain('stroke-linecap="round"');
+    // 왼쪽 끝 "집계 중"은 잘리지 않게 왼쪽 정렬
+    expect(svg).toMatch(/text-anchor="start"[^>]*>집계 중</);
+  });
+
   it("오늘이 구간 밖이면 점선·'집계 중'이 없다", () => {
     const svg = draw(null, "2026-06-20");
     expect(svg).not.toContain("집계 중");
@@ -389,7 +479,11 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
     const html = render();
     expect(html).toContain("6/5 ~ 6/8");
     expect(html).toContain(
-      "시청 시간이 가장 긴 분야는 게임이었지만, 영상을 가장 많이 본 분야는 음악이었어요.",
+      '<b style="font-weight:800">게임</b>에 시간을 가장 많이 썼어요',
+    );
+    // 구간 chartCount 8개 × 40%
+    expect(html).toContain(
+      '<b style="font-weight:800">음악</b> 영상을 가장 많이 봤어요 (3개)',
     );
     const keys = [...html.matchAll(/data-legend-key="([^"]+)"/g)].map(
       (m) => m[1],
@@ -414,6 +508,7 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
       chartCount: 0,
     });
     expect(html).toContain("6/5 ~ 6/8");
+    expect(html).not.toContain("가장 많이");
     expect(html).not.toContain("분야 0개");
     expect(html).not.toMatch(/분야 \d+개 · 영상/);
   });

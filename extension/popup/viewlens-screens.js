@@ -246,6 +246,29 @@ function _footNote(text, tip) {
   return `<div style="position:relative;display:flex;align-items:center;gap:4px;margin-top:8px;font-size:var(--vl-fs-2);color:var(--vl-ink-3)">${vlEscapeHtml(text)}${_infoTip(tip)}</div>`;
 }
 
+// 하루·기간 탭 맨 위 제목
+// 분야명만 굵게, 조각마다 이스케이프
+// aside는 큰 제목 줄 오른쪽에 붙인다(보조 줄은 그 아래 전체 폭). 줄바꿈은 띄어쓰기에서만
+function _titleBlock(title, aside = "") {
+  if (!title)
+    return aside
+      ? `<div style="display:flex;justify-content:flex-end">${aside}</div>`
+      : "";
+  const pieces = (line) =>
+    line
+      .map((p) =>
+        p.strong
+          ? `<b style="font-weight:800">${vlEscapeHtml(p.text)}</b>`
+          : vlEscapeHtml(p.text),
+      )
+      .join("");
+  const main = `<div style="flex:1;min-width:0;font-size:var(--vl-fs-5);font-weight:500;line-height:1.4;color:var(--vl-ink);text-wrap:pretty;word-break:keep-all">${pieces(title.title)}</div>`;
+  return `<div style="display:flex;flex-direction:column;gap:4px">
+      ${aside ? `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px">${main}${aside}</div>` : main}
+      ${title.sub ? `<div style="font-size:var(--vl-fs-3);line-height:1.4;color:var(--vl-ink-2);text-wrap:pretty;word-break:keep-all">${pieces(title.sub)}</div>` : ""}
+    </div>`;
+}
+
 // 오늘 탭 그래프 영역
 function _todayChartCard(view, isToday) {
   if (view.timeDist.length === 0) {
@@ -320,6 +343,8 @@ function screenToday() {
       <span>영상 ${view.confirmedCount}개</span>
       ${isToday && view.unconfirmedCount > 0 ? `<span style="color:var(--vl-ink-3);font-weight:500">시청 시간 확인 중 ${view.unconfirmedCount}개</span>` : ""}
     </div>`;
+  // 수집 중·스크롤 안내가 없으면 제목 아래 줄을 두지 않고 영상 수를 제목 오른쪽에 붙인다
+  const statusRow = isCollecting ? collectingRow : scrollNudgeRow;
 
   return `<div style="display:flex;flex-direction:column">
     <div style="padding:12px 16px 22px;display:flex;flex-direction:column;gap:14px">
@@ -331,14 +356,14 @@ function screenToday() {
       ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
     </div>
     ${
-      view.title
-        ? `<div style="font-size:var(--vl-fs-5);font-weight:800;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(view.title)}</div>`
-        : ""
-    }
+      statusRow
+        ? `${_titleBlock(view.title)}
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
-      <div>${isCollecting ? collectingRow : scrollNudgeRow}</div>
+      <div>${statusRow}</div>
       ${countBlock}
-    </div>
+    </div>`
+        : _titleBlock(view.title, countBlock)
+    }
 
     ${_todayChartCard(view, isToday)}
 
@@ -433,7 +458,7 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
       <span style="display:flex;align-items:center;gap:4px;white-space:nowrap">
         ${locked ? _lockIcon(10) : ""}${wk.label}
       </span>
-      <span style="width:${active ? 16 : 0}px;height:3px;border-radius:999px;background:var(--vl-accent)"></span>
+      <span ${active ? 'id="vl-period-indicator" ' : ""}style="width:${active ? 16 : 0}px;height:3px;border-radius:999px;background:var(--vl-accent)"></span>
     </button>`;
     })
     .join("");
@@ -441,7 +466,7 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
 
   const timeDist = VL.serverDist(period?.timeDistribution);
   const countDist = VL.serverDist(period?.countDistribution);
-  const title = VL.titleSentence(timeDist, countDist);
+  const title = VL.titleSentence(timeDist, countDist, period?.chartCount ?? 0);
   const chart = period ? VL.periodLines(period, days, today) : null;
 
   const emptyText =
@@ -502,11 +527,7 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
       </div>
     </div>
 
-    ${
-      title
-        ? `<div style="font-size:var(--vl-fs-5);font-weight:800;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(title)}</div>`
-        : ""
-    }
+    ${_titleBlock(title)}
 
     ${chartCards}
 
