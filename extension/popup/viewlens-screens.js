@@ -574,8 +574,8 @@ function screenControlHome(day, stats = {}) {
         </span>
       </div>
       <div style="margin-top:16px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink)">시청 기록을 수집하고 있어요</div>
-      <p style="margin:9px auto 0;max-width:250px;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;word-break:keep-all">
-        평소처럼 유튜브를 시청해 주세요.<br>시청 기록은 연구 목적으로 안전하게 수집·보관돼요.
+      <p style="margin:9px auto 0;max-width:280px;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;word-break:keep-all">
+        평소처럼 유튜브를 시청해 주세요.<br>시청 기록은 연구 목적으로 안전하게 <span style="white-space:nowrap">수집·보관돼요.</span>
       </p>
       ${
         // 베이스라인 중인 EXP에게만 보여주는 한 줄 — CON은 종료 후 일괄 제공(10-10)이라
