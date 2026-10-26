@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   shareBasis,
+  sharePercents,
   sharesSentence,
 } from "../../pipeline/review-prompt-format.js";
 
@@ -29,5 +30,21 @@ describe("sharesSentence — 대체 문구의 비중 문장", () => {
     expect(sentence({ 스포츠: 0.4, 게임: 0.4, 교육: 0.2 })).toBe(
       "전체 시청 시간 중 스포츠와 게임이 각각 40%로 가장 많았어요. 그다음은 교육 20%였어요.",
     );
+  });
+});
+
+describe("sharePercents — 오늘 리뷰 재생성 판단에 저장하는 정수 %", () => {
+  it("분야마다 프롬프트와 같은 반올림으로 정수 %를 만든다", () => {
+    expect(
+      sharePercents({ timeDistribution: { 음악: 0.614, 게임: 0.386 } }),
+    ).toEqual({ 음악: 61, 게임: 39 });
+    expect(
+      sharePercents({ timeDistribution: { 음악: 0.616, 게임: 0.384 } }),
+    ).toEqual({ 음악: 62, 게임: 38 });
+  });
+
+  it("분포가 비어 있으면 빈 객체를 돌려준다", () => {
+    expect(sharePercents({ timeDistribution: {} })).toEqual({});
+    expect(sharePercents({})).toEqual({});
   });
 });

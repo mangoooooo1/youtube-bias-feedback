@@ -19,6 +19,19 @@ function shareBasis({ timeDistribution }) {
   };
 }
 
+/**
+ * 프롬프트에 들어가는 분야별 정수 %. 오늘 리뷰는 이 값이 바뀌면 다시 만든다.
+ * @returns {Record<string, number>}
+ */
+function sharePercents({ timeDistribution }) {
+  return Object.fromEntries(
+    Object.entries(timeDistribution ?? {}).map(([name, ratio]) => [
+      name,
+      percent(ratio),
+    ]),
+  );
+}
+
 /** 프롬프트의 "- 분야별 … 비중:" 항목 */
 function formatShares(basis) {
   const lines = basis.entries
@@ -74,6 +87,7 @@ function sharesSentence(basis) {
 
 module.exports = {
   shareBasis,
+  sharePercents,
   formatShares,
   formatTitleGroups,
   sharesSentence,

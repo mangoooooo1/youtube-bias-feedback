@@ -732,3 +732,161 @@ describe("generateAndStoreTodayReview — LLM 호출 메트릭", () => {
     expect(recordMetric).not.toHaveBeenCalled();
   });
 });
+
+// 영상 수는 그대로이고 시청 시간만 늘어도, 리뷰가 말하는 정수 %가 바뀌면 그래프와 어긋나지 않게 다시 만든다
+describe("generateAndStoreTodayReview — 정수 %가 바뀌면 다시 생성", () => {
+  const NOW = new Date("2026-03-10T20:00:00+09:00");
+
+  function geminiOk() {
+    return vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":"관찰 문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+  }
+
+  const generate = (db, anonymousId) =>
+    generateAndStoreTodayReview(db, {
+      anonymousId,
+      apiKey: "fake-key",
+      now: NOW,
+      recordMetric: vi.fn(),
+    });
+
+  const storedRow = (db, anonymousId) =>
+    db
+      .prepare("SELECT * FROM today_reviews WHERE anonymousId = ?")
+      .get(anonymousId);
+
+  // 길이 600초 영상을 seconds만큼 본 기록. categoryId가 null이면 분야를 못 가져온 영상이다
+  function addVideo(db, anonymousId, eventId, categoryId, seconds) {
+    if (categoryId !== null) {
+      db.prepare(
+        "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, 600)",
+      ).run(`vid-${eventId}`, categoryId);
+    }
+    db.prepare(
+      `INSERT INTO video_events (eventId, anonymousId, videoId, sessionId, title, watchedAt, watchedSeconds)
+       VALUES (?, ?, ?, 's1', '영상', '2026-03-10T10:00:00+09:00', ?)`,
+    ).run(eventId, anonymousId, `vid-${eventId}`, seconds);
+  }
+
+  const setSeconds = (db, eventId, seconds) =>
+    db
+      .prepare("UPDATE video_events SET watchedSeconds = ? WHERE eventId = ?")
+      .run(seconds, eventId);
+
+  it("프롬프트에 들어간 정수 %를 저장한다", async () => {
+    const db = createTestDb();
+    addVideo(db, "saved", "saved-music", "10", 300);
+    addVideo(db, "saved", "saved-game", "20", 100);
+    global.fetch = geminiOk();
+
+    await generate(db, "saved");
+
+    const prompt = JSON.parse(global.fetch.mock.calls[0][1].body).contents[0]
+      .parts[0].text;
+    expect(prompt).toContain("음악: 75%");
+    expect(prompt).toContain("게임: 25%");
+    expect(JSON.parse(storedRow(db, "saved").timeSharePercents)).toEqual({
+      음악: 75,
+      게임: 25,
+    });
+  });
+
+  it("시청 시간만 늘어 정수 %가 바뀌면(61%→62%) 다시 만들고, 바뀌지 않으면(61%→61%) 건너뛴다", async () => {
+    const db = createTestDb();
+    // 음악 305초 : 게임 193초 = 61.2%
+    addVideo(db, "pct", "pct-music", "10", 305);
+    addVideo(db, "pct", "pct-game", "20", 193);
+    global.fetch = geminiOk();
+    await generate(db, "pct");
+    expect(JSON.parse(storedRow(db, "pct").timeSharePercents)).toEqual({
+      음악: 61,
+      게임: 39,
+    });
+
+    // 307초 = 61.4% → 정수는 그대로
+    setSeconds(db, "pct-music", 307);
+    expect(await generate(db, "pct")).toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    // 310초 = 61.6% → 62%
+    setSeconds(db, "pct-music", 310);
+    const result = await generate(db, "pct");
+
+    expect(result.genCount).toBe(2);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(storedRow(db, "pct")).toMatchObject({ validVideoCount: 2 });
+    expect(JSON.parse(storedRow(db, "pct").timeSharePercents)).toEqual({
+      음악: 62,
+      게임: 38,
+    });
+  });
+
+  it("영상 수가 같아도 분야가 새로 생기면 다시 만든다", async () => {
+    const db = createTestDb();
+    addVideo(db, "new-cat", "new-cat-music", "10", 300);
+    // 시청 시간은 확인됐지만 분야를 아직 못 가져온 영상
+    addVideo(db, "new-cat", "new-cat-game", null, 300);
+    global.fetch = geminiOk();
+    await generate(db, "new-cat");
+    expect(JSON.parse(storedRow(db, "new-cat").timeSharePercents)).toEqual({
+      음악: 100,
+    });
+
+    db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES ('vid-new-cat-game', '20', 600)",
+    ).run();
+    const result = await generate(db, "new-cat");
+
+    expect(result.genCount).toBe(2);
+    expect(JSON.parse(storedRow(db, "new-cat").timeSharePercents)).toEqual({
+      음악: 50,
+      게임: 50,
+    });
+  });
+
+  it("영상 수가 같아도 분야가 사라지면 다시 만든다", async () => {
+    const db = createTestDb();
+    addVideo(db, "gone-cat", "gone-cat-music", "10", 300);
+    addVideo(db, "gone-cat", "gone-cat-game", "20", 300);
+    global.fetch = geminiOk();
+    await generate(db, "gone-cat");
+
+    db.prepare(
+      "DELETE FROM video_metadata WHERE videoId = 'vid-gone-cat-game'",
+    ).run();
+    const result = await generate(db, "gone-cat");
+
+    expect(result.genCount).toBe(2);
+    expect(JSON.parse(storedRow(db, "gone-cat").timeSharePercents)).toEqual({
+      음악: 100,
+    });
+  });
+
+  it("%를 저장하기 전에 만든 리뷰는 %가 바뀌어도 영상 수가 같으면 건너뛴다", async () => {
+    const db = createTestDb();
+    addVideo(db, "legacy", "legacy-music", "10", 300);
+    addVideo(db, "legacy", "legacy-game", "20", 100);
+    global.fetch = geminiOk();
+    await generate(db, "legacy");
+    db.prepare(
+      "UPDATE today_reviews SET timeSharePercents = NULL WHERE anonymousId = 'legacy'",
+    ).run();
+
+    setSeconds(db, "legacy-game", 300);
+    const result = await generate(db, "legacy");
+
+    expect(result).toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(storedRow(db, "legacy").genCount).toBe(1);
+  });
+});
