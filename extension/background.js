@@ -381,9 +381,14 @@ export async function analyzeSession(session) {
  * syncedToServer가 false로 남아 다음 알람 틱에 다시 시도된다.
  * @param {object} session - 전송할 세션
  * @param {{totalMs?: number}} [metrics] - 소요 시간 등 부가 지표
+ * @param {{yieldToSessionClose?: boolean}} [options] - 재시도 큐는 세션 종료가 진행 중이면 보내지 않고 다음 틱으로 미룬다
  * @returns {ReturnType<typeof sendToServer>} 재시도 큐가 계속·중단을 판단할 전송 결과
  */
-async function syncSessionToServer(session, metrics = {}) {
+async function syncSessionToServer(
+  session,
+  metrics = {},
+  { yieldToSessionClose = false } = {},
+) {
   // 알림 자격은 리뷰 생성 결과와 무관하게(그룹·베이스라인만으로) 미리 정해진다.
   // 이 값을 그대로 서버에 함께 보내 sessions.feedbackNotifiedAt에 기록한다.
   const onboarding = await getOnboarding();
@@ -401,6 +406,10 @@ async function syncSessionToServer(session, metrics = {}) {
     ? new Date().toISOString()
     : null;
 
+  // 목록을 읽은 뒤 종료가 시작됐을 수 있어 POST 직전에 다시 본다. 이미 나간 POST는 막지 못한다
+  if (yieldToSessionClose && sessionClosesInFlight > 0) {
+    return failure(null, "session_close_in_flight");
+  }
   const result = await postSessionToServer(
     session,
     session.videoCount,
@@ -535,7 +544,11 @@ export function retryUnsyncedSessions() {
       unsynced,
       async (session) => {
         // 재시도라 최초 지연시간(totalMs)은 더 이상 의미가 없어 보내지 않는다.
-        const result = await syncSessionToServer(session);
+        const result = await syncSessionToServer(
+          session,
+          {},
+          { yieldToSessionClose: true },
+        );
         // 409는 서버에 이미 저장된 세션이라 이 큐에서는 성공이다
         return result.status === 409
           ? { ...result, ok: true, kind: "success" }

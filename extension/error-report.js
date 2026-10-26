@@ -135,8 +135,12 @@ const STALL_KEY = "syncStalls";
 export const STALL_MIN_MS = 6 * 60 * 60 * 1000;
 // 오프라인으로 잠든 PC가 깨어난 직후 한 번 실패한 것만으로 6시간이 찬 것처럼 보이지 않게, 실제 실패 횟수도 본다
 export const STALL_MIN_FAILURES = 30;
-// 재시도 큐 오류가 아니라 이 기기 설정·온보딩 상태라 전송 정체로 세지 않는다
-const NOT_A_STALL_CODES = new Set(["no_server_url", "no_anonymous_id"]);
+// 재시도 큐 오류가 아니라 이 기기 설정·온보딩 상태이거나, 세션 종료가 끝나길 기다리며 일부러 미룬 것이라 전송 정체로 세지 않는다
+const NOT_A_STALL_CODES = new Set([
+  "no_server_url",
+  "no_anonymous_id",
+  "session_close_in_flight",
+]);
 
 // 여러 큐가 같은 틱에 나란히 결과를 남기므로 따로 줄 세운다
 let stallChain = Promise.resolve();
