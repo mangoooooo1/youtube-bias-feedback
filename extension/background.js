@@ -294,21 +294,30 @@ async function checkSessionTimeout() {
   if (!currentSession) return;
 
   console.log("[background] 10분 비활성 감지, 세션 종료");
-  const closedSessions = await endSession();
+  // 세션을 옮기는 저장보다 먼저 올려야 재시도 큐가 체크포인트보다 먼저 세션을 보내지 않는다
+  sessionClosesInFlight += 1;
+  try {
+    const closedSessions = await endSession();
 
-  // 먼저 끝난 세션부터 보낸다
-  const ordered = [...closedSessions].sort(
-    (a, b) => Date.parse(a.endTime) - Date.parse(b.endTime),
-  );
-  for (const session of ordered) {
-    if (session.videos.length === 0) continue;
-    // 세션 전송은 반드시 해야 재시도 큐에 오른다. 체크포인트는 2분 뒤 재시도 큐가 다시 보낸다
-    const withCheckpoints = await sendSessionCheckpoints(session).catch(
-      () => session,
+    // 먼저 끝난 세션부터 보낸다
+    const ordered = [...closedSessions].sort(
+      (a, b) => Date.parse(a.endTime) - Date.parse(b.endTime),
     );
-    await analyzeSession(withCheckpoints);
+    for (const session of ordered) {
+      if (session.videos.length === 0) continue;
+      // 세션 전송은 반드시 해야 재시도 큐에 오른다. 체크포인트는 2분 뒤 재시도 큐가 다시 보낸다
+      const withCheckpoints = await sendSessionCheckpoints(session).catch(
+        () => session,
+      );
+      await analyzeSession(withCheckpoints);
+    }
+  } finally {
+    sessionClosesInFlight -= 1;
   }
 }
+
+// 세션을 닫아 보내는 중인 checkSessionTimeout 수. 0보다 크면 재시도 큐가 세션을 보내지 않는다
+let sessionClosesInFlight = 0;
 
 /**
  * 세션은 영상을 재생하는 중에도 닫혀, 그 영상의 시청 시간이 서버에 아직 없다.
@@ -512,6 +521,11 @@ export function ensureParticipantSynced() {
  */
 export function retryUnsyncedSessions() {
   return withQueueLock("sessions", async () => {
+    // 다음 틱에 다시 돈다
+    if (sessionClosesInFlight > 0) {
+      console.log("[background] queue=sessions result=deferred_session_close");
+      return;
+    }
     const sessions = await getAllSessions();
     // categoryDistribution 유무는 이제 필터 기준이 아니다 — 그 값은 서버 응답으로만
     // 채워지므로, syncedToServer:false만이 "전송 대기"를 나타내는 유일한 신호다.
