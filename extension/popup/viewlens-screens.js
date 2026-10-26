@@ -246,6 +246,24 @@ function _footNote(text, tip) {
   return `<div style="position:relative;display:flex;align-items:center;gap:4px;margin-top:8px;font-size:var(--vl-fs-2);color:var(--vl-ink-3)">${vlEscapeHtml(text)}${_infoTip(tip)}</div>`;
 }
 
+// 하루·기간 탭 맨 위 제목
+// 분야명만 굵게, 조각마다 이스케이프
+function _titleBlock(title) {
+  if (!title) return "";
+  const pieces = (line) =>
+    line
+      .map((p) =>
+        p.strong
+          ? `<b style="font-weight:800">${vlEscapeHtml(p.text)}</b>`
+          : vlEscapeHtml(p.text),
+      )
+      .join("");
+  return `<div style="display:flex;flex-direction:column;gap:4px">
+      <div style="font-size:var(--vl-fs-5);font-weight:600;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${pieces(title.title)}</div>
+      ${title.sub ? `<div style="font-size:var(--vl-fs-3);line-height:1.4;color:var(--vl-ink-2);text-wrap:pretty">${pieces(title.sub)}</div>` : ""}
+    </div>`;
+}
+
 // 오늘 탭 그래프 영역
 function _todayChartCard(view, isToday) {
   if (view.timeDist.length === 0) {
@@ -330,11 +348,7 @@ function screenToday() {
       </div>
       ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
     </div>
-    ${
-      view.title
-        ? `<div style="font-size:var(--vl-fs-5);font-weight:800;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(view.title)}</div>`
-        : ""
-    }
+    ${_titleBlock(view.title)}
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
       <div>${isCollecting ? collectingRow : scrollNudgeRow}</div>
       ${countBlock}
@@ -441,7 +455,7 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
 
   const timeDist = VL.serverDist(period?.timeDistribution);
   const countDist = VL.serverDist(period?.countDistribution);
-  const title = VL.titleSentence(timeDist, countDist);
+  const title = VL.titleSentence(timeDist, countDist, period?.chartCount ?? 0);
   const chart = period ? VL.periodLines(period, days, today) : null;
 
   const emptyText =
@@ -502,11 +516,7 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
       </div>
     </div>
 
-    ${
-      title
-        ? `<div style="font-size:var(--vl-fs-5);font-weight:800;line-height:1.4;color:var(--vl-ink);text-wrap:pretty">${vlEscapeHtml(title)}</div>`
-        : ""
-    }
+    ${_titleBlock(title)}
 
     ${chartCards}
 

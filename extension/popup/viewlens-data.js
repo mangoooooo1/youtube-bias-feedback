@@ -53,27 +53,52 @@ function serverDist(distribution) {
     .sort((a, b) => b.p - a.p);
 }
 
-/** 반올림한 퍼센트로 1위인 분야 이름들(동점이면 여럿, 이름 순) */
-function topCategoryNames(distArr) {
+/** measure 값이 가장 큰 분야 이름들(동점이면 여럿, 이름 순) */
+function topCategoryNames(distArr, measure = (d) => percentOf(d.p)) {
   if (distArr.length === 0) return [];
-  const max = percentOf(distArr[0].p);
+  const max = Math.max(...distArr.map(measure));
   return distArr
-    .filter((d) => percentOf(d.p) === max)
+    .filter((d) => measure(d) === max)
     .map((d) => d.name)
     .sort((a, b) => a.localeCompare(b));
 }
 
 /**
- * 탭 맨 위 제목 문장
- * @returns {string|null} 분포가 비어 있으면 null
+ * 탭 맨 위 제목과 보조 줄. 줄마다 [{ text, strong }] 조각(분야명만 strong).
+ * 시간 1위는 반올림 퍼센트로, 영상 수 1위는 실제 개수(비율 × chartCount 반올림)로 정한다.
+ * 보조 줄은 두 1위 묶음이 다를 때만.
+ * @returns {{title: Array<{text: string, strong: boolean}>, sub: Array<{text: string, strong: boolean}>|null}|null}
+ *   분포가 비어 있으면 null
  */
-function titleSentence(timeDist, countDist) {
+function titleSentence(timeDist, countDist, chartCount = 0) {
   const time = topCategoryNames(timeDist).join("·");
-  const count = topCategoryNames(countDist).join("·");
+  // chartCount가 없으면 개수를 되살릴 수 없어 반올림 퍼센트로 정한다
+  const countOf = (d) => Math.round(d.p * chartCount);
+  const countNames = topCategoryNames(
+    countDist,
+    chartCount > 0 ? countOf : undefined,
+  );
+  const count = countNames.join("·");
   if (!time || !count) return null;
-  if (time === count)
-    return `시청 시간과 영상 개수 모두 ${time} 분야가 가장 많았어요.`;
-  return `시청 시간이 가장 긴 분야는 ${josa(time, "이었지만", "였지만")}, 영상을 가장 많이 본 분야는 ${josa(count, "이었어요", "였어요")}.`;
+  const watched = (names) => [
+    { text: names, strong: true },
+    { text: " 영상을 가장 많이 봤어요", strong: false },
+  ];
+  if (time === count) return { title: watched(count), sub: null };
+  const sub = watched(count);
+  const n = chartCount > 0 ? countOf(countDist[0]) : 0;
+  if (n > 0)
+    sub.push({
+      text: ` (${n}개${countNames.length > 1 ? "씩" : ""})`,
+      strong: false,
+    });
+  return {
+    title: [
+      { text: time, strong: true },
+      { text: "에 시간을 가장 많이 썼어요", strong: false },
+    ],
+    sub,
+  };
 }
 
 /**
@@ -98,7 +123,7 @@ function dayView(day) {
     ),
     timeDist,
     countDist,
-    title: titleSentence(timeDist, countDist),
+    title: titleSentence(timeDist, countDist, day?.chartCount ?? 0),
     // 영상 목록에 거의 안 봄·확인 중·분야 미확인을 붙이는 데 쓴다
     excludedReasons: Object.fromEntries(
       (day?.excluded || []).map((e) => [e.eventId, e.reason]),
@@ -315,13 +340,6 @@ function isBaselinePeriod(installDate, now = new Date()) {
 // background.js의 isTestGroup()과 동일 규칙 — 모듈 경계 때문에 중복 정의한다.
 function isTestGroup(group) {
   return typeof group === "string" && group.startsWith("TEST");
-}
-
-// 받침 유무로 조사를 고른다(한글이 아니면 받침 없음으로 본다)
-function josa(word, withBatchim, withoutBatchim) {
-  const code = word.charCodeAt(word.length - 1) - 0xac00;
-  const hasBatchim = code >= 0 && code <= 11171 && code % 28 !== 0;
-  return `${word}${hasBatchim ? withBatchim : withoutBatchim}`;
 }
 
 const today = {
