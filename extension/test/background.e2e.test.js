@@ -1432,7 +1432,7 @@ describe("알람 핸들러 — 세션을 닫을 때 체크포인트를 세션보
     };
   }
 
-  // patch가 Error면 PATCH 요청에서 던지고, 아니면 그 응답을 돌려준다
+  // patch가 Error면 PATCH 요청에서 던지고, 함수면 그 결과를 기다려 돌려주고, 아니면 그 응답을 돌려준다
   function mockServer({ patch = { ok: true, status: 200 } } = {}) {
     const order = [];
     const sessionPosts = [];
@@ -1452,7 +1452,8 @@ describe("알람 핸들러 — 세션을 닫을 때 체크포인트를 세션보
       }
       if (options.method === "PATCH") {
         if (patch instanceof Error) throw patch;
-        return { ...patch, json: async () => ({}) };
+        const response = typeof patch === "function" ? await patch() : patch;
+        return { ...response, json: async () => ({}) };
       }
       // 영상 POST 재시도는 실패시켜 sent:false인 영상이 그대로 남게 한다
       return { ok: false, status: 500, json: async () => ({}) };
@@ -1473,9 +1474,10 @@ describe("알람 핸들러 — 세션을 닫을 때 체크포인트를 세션보
       ...videos,
     });
     vi.resetModules();
-    await import("../background.js");
+    const background = await import("../background.js");
     const onAlarm = global.chrome.alarms.onAlarm.addListener.mock.calls[0][0];
     onAlarm({ name: "SESSION_TIMEOUT_CHECK" });
+    return background;
   }
 
   const playing = (eventId) => ({
@@ -1572,6 +1574,112 @@ describe("알람 핸들러 — 세션을 닫을 때 체크포인트를 세션보
       const { sessions } = await global.chrome.storage.local.get("sessions");
       expect(sessions[0].syncedToServer).toBe(true);
     });
+  });
+
+  // 닫힌 세션이 전송 대기로 보이는 순간 재시도 큐가 먼저 보내면, 체크포인트가 반영되기 전 기준으로 리뷰가 만들어진다
+  const unsyncedOld = {
+    sessionId: "old",
+    startTime: "2026-01-09T10:00:00.000Z",
+    endTime: "2026-01-09T10:10:00.000Z",
+    videos: [
+      {
+        videoId: "v-old",
+        watchedAt: "2026-01-09T10:00:00.000Z",
+        eventId: "e-old",
+        sent: true,
+      },
+    ],
+    syncedToServer: false,
+  };
+
+  async function markClosedSessionsUnsynced() {
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    await global.chrome.storage.local.set({
+      sessions: [
+        ...sessions.map((s) => ({ ...s, syncedToServer: false })),
+        unsyncedOld,
+      ],
+    });
+  }
+
+  it("세션을 닫아 보내는 동안에는 재시도 큐가 세션을 보내지 않고, 끝난 뒤 남은 세션을 보낸다", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      let releasePatch;
+      const patchGate = new Promise((resolve) => {
+        releasePatch = resolve;
+      });
+      const { order, sessionPosts } = mockServer({
+        patch: () => patchGate.then(() => ({ ok: true, status: 200 })),
+      });
+      const background = await closeSession({
+        ...playing("e1"),
+        ...checkpoint("e1"),
+      });
+      await vi.waitFor(() =>
+        expect(order).toContain("PATCH /api/video-events/e1"),
+      );
+
+      await markClosedSessionsUnsynced();
+      await background.retryUnsyncedSessions();
+
+      expect(sessionPosts).toEqual([]);
+      expect(log).toHaveBeenCalledWith(
+        "[background] queue=sessions result=deferred_session_close",
+      );
+
+      releasePatch();
+      await vi.waitFor(() => expect(sessionPosts).toHaveLength(1));
+      expect(sessionPosts[0]).toMatchObject({
+        sessionId: "s1",
+        watchedSecondsList: [600],
+      });
+
+      await background.retryUnsyncedSessions();
+      expect(sessionPosts.map((b) => b.sessionId)).toEqual(["s1", "old"]);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("세션 종료가 예외로 끝나도 재시도 큐는 다시 세션을 보낸다", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { sessionPosts } = mockServer();
+      global.chrome = createChromeMock();
+      // 세션을 옮기는 저장만 실패시킨다
+      const { set } = global.chrome.storage.local;
+      global.chrome.storage.local.set = (obj) =>
+        "currentSession" in obj && obj.currentSession === null
+          ? Promise.reject(new Error("QUOTA_BYTES quota exceeded"))
+          : set(obj);
+      await global.chrome.storage.local.set({
+        anonymousId: "a1",
+        group: "EXP",
+        installDate: ACTIVE_INSTALL_DATE,
+        participantSynced: true,
+        participantToken: "tok",
+        currentSession: { sessionId: "s1", startTime: watchedAt() },
+        lastWatchedAt: watchedAt(),
+        ...playing("e1"),
+      });
+      vi.resetModules();
+      const background = await import("../background.js");
+      const onAlarm = global.chrome.alarms.onAlarm.addListener.mock.calls[0][0];
+      onAlarm({ name: "SESSION_TIMEOUT_CHECK" });
+      await vi.waitFor(() =>
+        expect(error).toHaveBeenCalledWith(
+          expect.stringContaining("task=session_timeout result=crashed"),
+        ),
+      );
+
+      await global.chrome.storage.local.set({ sessions: [unsyncedOld] });
+      await background.retryUnsyncedSessions();
+
+      expect(sessionPosts.map((b) => b.sessionId)).toEqual(["old"]);
+    } finally {
+      error.mockRestore();
+    }
   });
 
   it("체크포인트를 고르다 저장값을 읽지 못해도 세션은 보낸다", async () => {
