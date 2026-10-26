@@ -2261,6 +2261,8 @@ describe("content.js recordVideo — 기록 실패를 오류 보고로 넘긴다
       () => Promise.resolve({ ok: true }),
       consoleMock,
     );
+    // 로드 때 보낸 탭 번호 요청은 오류 보고가 아니다
+    chromeMock.runtime.sendMessage.mockClear();
     return { recordVideo, sendMessage: chromeMock.runtime.sendMessage };
   }
 
