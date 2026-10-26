@@ -49,6 +49,9 @@ function createChromeMock() {
       create: vi.fn(),
       onAlarm: { addListener: vi.fn() },
     },
+    tabs: {
+      onRemoved: { addListener: vi.fn() },
+    },
     runtime: {
       onMessage: { addListener: vi.fn() },
       getURL: (p) => `chrome-extension://fake/${p}`,
@@ -2417,7 +2420,7 @@ describe("참여 기간 종료 — 전송 기간이 끝나면 서버 요청을 �
 
   async function loadBackground(storage) {
     global.chrome = createChromeMock();
-    global.chrome.tabs = { create: vi.fn() };
+    global.chrome.tabs.create = vi.fn();
     await global.chrome.storage.local.set(storage);
     vi.resetModules();
     return import("../background.js");
@@ -2653,7 +2656,7 @@ describe("오류 원격 보고 — 서버에서 안 보이는 확장 오류를 �
   it("참여 기간이 끝났으면 모인 오류도 보내지 않는다", async () => {
     const ended = new Date(FIXED_NOW - 20 * 86400000).toISOString();
     global.chrome = createChromeMock();
-    global.chrome.tabs = { create: vi.fn() };
+    global.chrome.tabs.create = vi.fn();
     await global.chrome.storage.local.set({
       ...BASE,
       installDate: ended,
@@ -2741,5 +2744,76 @@ describe("전송 정체 보고 — 재시도 큐가 오래 막히면 SYNC_STALLE
 
     const { syncStalls } = await global.chrome.storage.local.get("syncStalls");
     expect(syncStalls).toEqual({});
+  });
+});
+
+// 같은 탭에서 같은 영상을 다시 열 때 이어 쓰려고 content가 탭마다 남기는 tabwatch__<탭 번호>
+describe("탭별 마지막 기록 — 탭 번호 응답과 정리", () => {
+  const TEN_MINUTES = 10 * 60 * 1000;
+
+  async function loadBackground(storage = {}) {
+    global.chrome = createChromeMock();
+    global.fetch = vi.fn();
+    await global.chrome.storage.local.set(storage);
+    vi.resetModules();
+    return import("../background.js");
+  }
+
+  function messageListener() {
+    return global.chrome.runtime.onMessage.addListener.mock.calls[0][0];
+  }
+
+  it("content가 물으면 보낸 탭의 번호를 돌려준다", async () => {
+    await loadBackground();
+    const sendResponse = vi.fn();
+
+    messageListener()(
+      { type: "get-tab-id" },
+      { tab: { id: 42 } },
+      sendResponse,
+    );
+
+    expect(sendResponse).toHaveBeenCalledWith(42);
+  });
+
+  it("탭이 아닌 곳(팝업 등)에서 물으면 null을 돌려준다", async () => {
+    await loadBackground();
+    const sendResponse = vi.fn();
+
+    messageListener()({ type: "get-tab-id" }, {}, sendResponse);
+
+    expect(sendResponse).toHaveBeenCalledWith(null);
+  });
+
+  it("탭이 닫히면 그 탭의 기록만 지운다", async () => {
+    await loadBackground({
+      tabwatch__1: { videoId: "v1", endedAt: Date.now() },
+      tabwatch__2: { videoId: "v2", endedAt: Date.now() },
+    });
+    const onRemoved = global.chrome.tabs.onRemoved.addListener.mock.calls[0][0];
+
+    onRemoved(1);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.tabwatch__1).toBeUndefined();
+    expect(all.tabwatch__2).toEqual(expect.objectContaining({ videoId: "v2" }));
+  });
+
+  it("1분 알람에서 마지막 재생 후 10분이 지난 기록을 지운다", async () => {
+    await loadBackground({
+      tabwatch__1: { videoId: "old", endedAt: Date.now() - TEN_MINUTES },
+      tabwatch__2: { videoId: "recent", endedAt: Date.now() - TEN_MINUTES + 1 },
+    });
+    const onAlarm = global.chrome.alarms.onAlarm.addListener.mock.calls[0][0];
+
+    onAlarm({ name: "SESSION_TIMEOUT_CHECK" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.tabwatch__1).toBeUndefined();
+    expect(all.tabwatch__2).toEqual(
+      expect.objectContaining({ videoId: "recent" }),
+    );
   });
 });
