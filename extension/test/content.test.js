@@ -2670,6 +2670,51 @@ describe("content.js 같은 탭에서 다시 연 영상 — 마지막 재생 후
     });
   });
 
+  it("이어 쓰다가 탭이 갑자기 닫혀도(pagehide 없음) 재시도 큐가 이어 쓴 시간까지 담긴 체크포인트를 보낸다", async () => {
+    let page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(180);
+    // 영상 기록 POST는 성공했다(체크포인트는 서버에 행이 있어야 보낸다)
+    const [key] = Object.keys(browser.storage.dump()).filter((k) =>
+      k.startsWith("video__"),
+    );
+    await browser.storage.set({
+      [key]: { ...browser.storage.dump()[key], sent: true },
+    });
+
+    page = await page.reload(); // 앞 구간 180초가 최종값으로 남는다
+    await page.play(60);
+    browser.stopTimers(); // 브라우저 강제 종료
+
+    const { getUnsentWatchStats, pruneWatchCheckpoints } =
+      await import("../storage.js");
+    const later = Date.now() + 3 * MINUTE;
+    await pruneWatchCheckpoints(later);
+    const items = await getUnsentWatchStats(later);
+
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        eventId: browser.recordsOf("AAAA")[0].eventId,
+        source: "checkpoint",
+        watchedSeconds: 240,
+      }),
+    );
+  });
+
+  it("이어 쓴 뒤 정상적으로 떠나면 합친 시간이 다시 최종값이 된다", async () => {
+    let page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(180);
+
+    page = await page.reload();
+    expect(browser.recordsOf("AAAA")[0].watchStatsSource).toBe("checkpoint");
+    await page.play(60);
+    await page.goTo("BBBB");
+
+    expect(browser.recordsOf("AAAA")[0]).toMatchObject({
+      watchedSeconds: 240,
+      watchStatsSource: "final",
+    });
+  });
+
   it("다른 영상을 재는 중에 앞서 본 영상으로 돌아오면 이어 쓰지 않는다(다시 본 영상은 별도 기록)", async () => {
     const page = await browser.openPage({ videoId: "AAAA" });
     await page.play(30);
