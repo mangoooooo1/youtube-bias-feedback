@@ -38,6 +38,7 @@ function createTestDb() {
       sessionCount INTEGER,
       videoCount INTEGER,
       validVideoCount INTEGER,
+      timeSharePercents TEXT,
       categoryDistribution TEXT,
       entropy REAL,
       review TEXT,
@@ -64,11 +65,17 @@ function addParticipant(db, anonymousId, group) {
 }
 
 let seq = 0;
-function addVideo(db, anonymousId, watchedAt, watchedSeconds = 300) {
+function addVideo(
+  db,
+  anonymousId,
+  watchedAt,
+  watchedSeconds = 300,
+  categoryId = "10",
+) {
   seq += 1;
   db.prepare(
-    "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, '10', 600)",
-  ).run(`vid-${seq}`);
+    "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, 600)",
+  ).run(`vid-${seq}`, categoryId);
   db.prepare(
     `INSERT INTO video_events (eventId, anonymousId, videoId, sessionId, title, watchedAt, watchedSeconds)
      VALUES (?, ?, ?, 's1', '영상', ?, ?)`,
@@ -188,6 +195,37 @@ describe("generate-daily-today-reviews run", () => {
       genCount: 2,
       validVideoCount: 2,
     });
+  });
+
+  // 세션이 끝날 때 보던 영상은 체크포인트 값으로 들어가고, 최종 시청 시간은 그 뒤에 온다
+  it("실험군은 영상 수가 같아도 마지막 영상의 시청 시간이 늘어 정수 %가 바뀌었으면 마감 생성한다", async () => {
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const db = createTestDb();
+    addParticipant(db, "exp-time", "EXP");
+    addVideo(db, "exp-time", "2026-03-10T20:00:00+09:00", 300);
+    addVideo(db, "exp-time", "2026-03-10T20:05:00+09:00", 100, "20");
+    const lastEventId = `e-${seq}`;
+    global.fetch = vi.fn().mockResolvedValue(geminiOk());
+    await generateAndStoreTodayReview(db, {
+      anonymousId: "exp-time",
+      apiKey: "fake-key",
+      now: new Date("2026-03-10T21:00:00+09:00"),
+      recordMetric: vi.fn(),
+    });
+    expect(
+      JSON.parse(reviewRow(db, "exp-time", "2026-03-10").timeSharePercents),
+    ).toEqual({ 음악: 75, 게임: 25 });
+
+    db.prepare(
+      "UPDATE video_events SET watchedSeconds = 300 WHERE eventId = ?",
+    ).run(lastEventId);
+    const summary = await runAt(db);
+
+    expect(summary.created).toBe(1);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const row = reviewRow(db, "exp-time", "2026-03-10");
+    expect(row).toMatchObject({ genCount: 2, validVideoCount: 2 });
+    expect(JSON.parse(row.timeSharePercents)).toEqual({ 음악: 50, 게임: 50 });
   });
 
   it("폴백인 날은 3일 동안 하루 한 번 재시도하고, 그보다 오래된 날은 건드리지 않는다", async () => {

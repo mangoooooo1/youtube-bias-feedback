@@ -8,21 +8,41 @@ const {
 const { upsertTodayReview } = require("./today-reviews-upsert");
 const { recordLlmCall } = require("../monitoring/llm-metrics");
 const { PREFERRED_TITLE_SQL } = require("./video-metadata-store");
+const { sharePercents } = require("../pipeline/review-prompt-format");
 
 /**
  * 저장된 최신본을 다시 만들 필요가 있는지 판단한다.
- * 유효 시청 영상이 늘지 않았으면 근거가 같아 건너뛴다.
- * 단 지난 결과가 폴백(Gemini 실패·카테고리 없음)이면 정상 리뷰로 바꿀 기회를 주기 위해 다시 만든다.
+ * 유효 시청 영상이 늘었거나, 리뷰가 말하는 정수 %가 바뀌었으면(분야가 생기거나 사라진 경우 포함) 다시 만든다.
+ * 지난 결과가 폴백(Gemini 실패·카테고리 없음)이면 정상 리뷰로 바꿀 기회를 주기 위해 다시 만든다.
+ * %를 저장하기 전에 만든 리뷰는 % 비교를 건너뛴다(배포 직후 지난 날짜를 한꺼번에 다시 만들지 않도록).
  */
-function needsRegeneration(db, anonymousId, reviewDate, validVideoCount) {
+function needsRegeneration(
+  db,
+  anonymousId,
+  reviewDate,
+  { validVideoCount, timeSharePercents },
+) {
   const existing = db
     .prepare(
-      "SELECT validVideoCount, llmStatus FROM today_reviews WHERE anonymousId = ? AND reviewDate = ?",
+      "SELECT validVideoCount, timeSharePercents, llmStatus FROM today_reviews WHERE anonymousId = ? AND reviewDate = ?",
     )
     .get(anonymousId, reviewDate);
   if (!existing || existing.validVideoCount == null) return true;
   if (existing.llmStatus === "fallback") return true;
-  return validVideoCount > existing.validVideoCount;
+  if (validVideoCount > existing.validVideoCount) return true;
+  if (existing.timeSharePercents == null) return false;
+  return !samePercents(
+    JSON.parse(existing.timeSharePercents),
+    timeSharePercents,
+  );
+}
+
+function samePercents(a, b) {
+  const names = Object.keys(a);
+  return (
+    names.length === Object.keys(b).length &&
+    names.every((name) => a[name] === b[name])
+  );
 }
 
 /** 같은 (anonymousId, reviewDate)의 기존 genCount보다 1 큰 값을 계산한다(없으면 1). */
@@ -79,13 +99,12 @@ async function generateOnce(
 
   const aggregate = aggregateTodayCumulative({ events, now });
   if (!aggregate) return null;
+  const timeSharePercents = sharePercents(aggregate);
   if (
-    !needsRegeneration(
-      db,
-      anonymousId,
-      aggregate.reviewDate,
-      aggregate.validVideoCount,
-    )
+    !needsRegeneration(db, anonymousId, aggregate.reviewDate, {
+      validVideoCount: aggregate.validVideoCount,
+      timeSharePercents,
+    })
   ) {
     return null;
   }
@@ -136,6 +155,7 @@ async function generateOnce(
     sessionCount: aggregate.sessionCount,
     videoCount: aggregate.videoCount,
     validVideoCount: aggregate.validVideoCount,
+    timeSharePercents,
     categoryDistribution: aggregate.categoryDistribution,
     entropy: aggregate.entropy,
     review: result.feedback,

@@ -10,6 +10,7 @@ function upsertTodayReview(db, payload) {
     sessionCount,
     videoCount,
     validVideoCount,
+    timeSharePercents,
     categoryDistribution,
     entropy,
     review,
@@ -25,17 +26,18 @@ function upsertTodayReview(db, payload) {
 
   db.prepare(
     `INSERT INTO today_reviews
-      (anonymousId, reviewDate, sessionCount, videoCount, validVideoCount, categoryDistribution,
-       entropy, review, reviewTopic, source, promptVersion, llmStatus, failureReason, geminiMs,
+      (anonymousId, reviewDate, sessionCount, videoCount, validVideoCount, timeSharePercents,
+       categoryDistribution, entropy, review, reviewTopic, source, promptVersion, llmStatus, failureReason, geminiMs,
        genCount, generatedAt, updatedAt)
      VALUES
-      (@anonymousId, @reviewDate, @sessionCount, @videoCount, @validVideoCount, @categoryDistribution,
-       @entropy, @review, @reviewTopic, @source, @promptVersion, @llmStatus, @failureReason, @geminiMs,
+      (@anonymousId, @reviewDate, @sessionCount, @videoCount, @validVideoCount, @timeSharePercents,
+       @categoryDistribution, @entropy, @review, @reviewTopic, @source, @promptVersion, @llmStatus, @failureReason, @geminiMs,
        @genCount, @generatedAt, @updatedAt)
      ON CONFLICT(anonymousId, reviewDate) DO UPDATE SET
        sessionCount         = excluded.sessionCount,
        videoCount           = excluded.videoCount,
        validVideoCount      = excluded.validVideoCount,
+       timeSharePercents    = excluded.timeSharePercents,
        categoryDistribution = excluded.categoryDistribution,
        entropy              = excluded.entropy,
        review               = excluded.review,
@@ -57,6 +59,8 @@ function upsertTodayReview(db, payload) {
     sessionCount: sessionCount ?? null,
     videoCount: videoCount ?? null,
     validVideoCount: validVideoCount ?? null,
+    timeSharePercents:
+      timeSharePercents != null ? JSON.stringify(timeSharePercents) : null,
     categoryDistribution:
       categoryDistribution != null
         ? JSON.stringify(categoryDistribution)

@@ -9,6 +9,7 @@ import {
   markVideoEventSent,
   markVideoEventInvalid,
   getUnsentWatchStats,
+  getSessionCheckpointStats,
   pruneWatchCheckpoints,
   pruneTabWatches,
   TAB_WATCH_PREFIX,
@@ -293,16 +294,76 @@ async function checkSessionTimeout() {
   if (!currentSession) return;
 
   console.log("[background] 10분 비활성 감지, 세션 종료");
-  const closedSessions = await endSession();
+  // 세션을 옮기는 저장보다 먼저 올려야 재시도 큐가 체크포인트보다 먼저 세션을 보내지 않는다
+  sessionClosesInFlight += 1;
+  try {
+    const closedSessions = await endSession();
 
-  // 먼저 끝난 세션부터 보낸다
-  const ordered = [...closedSessions].sort(
-    (a, b) => Date.parse(a.endTime) - Date.parse(b.endTime),
-  );
-  for (const session of ordered) {
-    if (session.videos.length === 0) continue;
-    await analyzeSession(session);
+    // 먼저 끝난 세션부터 보낸다
+    const ordered = [...closedSessions].sort(
+      (a, b) => Date.parse(a.endTime) - Date.parse(b.endTime),
+    );
+    for (const session of ordered) {
+      if (session.videos.length === 0) continue;
+      // 세션 전송은 반드시 해야 재시도 큐에 오른다. 체크포인트는 2분 뒤 재시도 큐가 다시 보낸다
+      const withCheckpoints = await sendSessionCheckpoints(session).catch(
+        () => session,
+      );
+      await analyzeSession(withCheckpoints);
+    }
+  } finally {
+    sessionClosesInFlight -= 1;
   }
+}
+
+// 세션을 닫아 보내는 중인 checkSessionTimeout 수. 0보다 크면 재시도 큐가 세션을 보내지 않는다
+let sessionClosesInFlight = 0;
+
+/**
+ * 세션은 영상을 재생하는 중에도 닫혀, 그 영상의 시청 시간이 서버에 아직 없다.
+ * 체크포인트 값을 세션 POST보다 먼저 보내 오늘 리뷰에 그 영상이 들어가게 한다.
+ * @param {object} session - 방금 닫은 세션
+ * @returns {Promise<object>} 보낸 값이 반영된 세션(하나도 못 보냈으면 그대로)
+ */
+async function sendSessionCheckpoints(session) {
+  const onboarding = await getOnboarding();
+  if (!onboarding?.anonymousId) return session;
+  if (ViewLensStudy.getParticipationState(onboarding.installDate) === "ended") {
+    return session;
+  }
+
+  const sent = new Map();
+  for (const item of await getSessionCheckpointStats(session.sessionId)) {
+    const result = await postWatchStatsToServer(
+      onboarding.anonymousId,
+      onboarding.participantToken,
+      item,
+    );
+    if (!result.ok) continue;
+    sent.set(item.eventId, item);
+    // 표시를 못 남겨도 2분 뒤 재시도 큐가 같은 값을 다시 보낸다
+    await markWatchStatsSent(item).catch(() => {});
+  }
+  if (sent.size === 0) return session;
+  // 보낸 사이 최종값이 들어왔으면 그 값이 실린다. 재전송도 같은 저장값을 읽는다
+  const stored = (await getAllSessions().catch(() => [])).find(
+    (s) => s.sessionId === session.sessionId,
+  );
+  const base = stored ?? session;
+  // 표시를 못 남긴 영상도 서버에 반영한 값으로 보낸다
+  return {
+    ...base,
+    videos: base.videos.map((v) => {
+      const item = sent.get(v.eventId);
+      if (!item || v.watchedSeconds != null) return v;
+      return {
+        ...v,
+        watchedSeconds: item.watchedSeconds,
+        playbackRate: item.playbackRate,
+        wasBackgrounded: item.wasBackgrounded,
+      };
+    }),
+  };
 }
 
 /**
@@ -335,9 +396,14 @@ export async function analyzeSession(session) {
  * syncedToServer가 false로 남아 다음 알람 틱에 다시 시도된다.
  * @param {object} session - 전송할 세션
  * @param {{totalMs?: number}} [metrics] - 소요 시간 등 부가 지표
+ * @param {{yieldToSessionClose?: boolean}} [options] - 재시도 큐는 세션 종료가 진행 중이면 보내지 않고 다음 틱으로 미룬다
  * @returns {ReturnType<typeof sendToServer>} 재시도 큐가 계속·중단을 판단할 전송 결과
  */
-async function syncSessionToServer(session, metrics = {}) {
+async function syncSessionToServer(
+  session,
+  metrics = {},
+  { yieldToSessionClose = false } = {},
+) {
   // 알림 자격은 리뷰 생성 결과와 무관하게(그룹·베이스라인만으로) 미리 정해진다.
   // 이 값을 그대로 서버에 함께 보내 sessions.feedbackNotifiedAt에 기록한다.
   const onboarding = await getOnboarding();
@@ -355,6 +421,10 @@ async function syncSessionToServer(session, metrics = {}) {
     ? new Date().toISOString()
     : null;
 
+  // 목록을 읽은 뒤 종료가 시작됐을 수 있어 POST 직전에 다시 본다. 이미 나간 POST는 막지 못한다
+  if (yieldToSessionClose && sessionClosesInFlight > 0) {
+    return failure(null, "session_close_in_flight");
+  }
   const result = await postSessionToServer(
     session,
     session.videoCount,
@@ -475,6 +545,11 @@ export function ensureParticipantSynced() {
  */
 export function retryUnsyncedSessions() {
   return withQueueLock("sessions", async () => {
+    // 다음 틱에 다시 돈다
+    if (sessionClosesInFlight > 0) {
+      console.log("[background] queue=sessions result=deferred_session_close");
+      return;
+    }
     const sessions = await getAllSessions();
     // categoryDistribution 유무는 이제 필터 기준이 아니다 — 그 값은 서버 응답으로만
     // 채워지므로, syncedToServer:false만이 "전송 대기"를 나타내는 유일한 신호다.
@@ -484,7 +559,11 @@ export function retryUnsyncedSessions() {
       unsynced,
       async (session) => {
         // 재시도라 최초 지연시간(totalMs)은 더 이상 의미가 없어 보내지 않는다.
-        const result = await syncSessionToServer(session);
+        const result = await syncSessionToServer(
+          session,
+          {},
+          { yieldToSessionClose: true },
+        );
         // 409는 서버에 이미 저장된 세션이라 이 큐에서는 성공이다
         return result.status === 409
           ? { ...result, ok: true, kind: "success" }

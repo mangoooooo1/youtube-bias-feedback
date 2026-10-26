@@ -357,7 +357,7 @@ describe("recordSyncOutcome — 오래 막힌 전송을 한 번만 보고한다"
     ).toBeUndefined();
   });
 
-  it.each(["no_server_url", "no_anonymous_id"])(
+  it.each(["no_server_url", "no_anonymous_id", "session_close_in_flight"])(
     "%s는 전송 정체로 세지 않는다",
     async (code) => {
       await mod.recordSyncOutcome("sessions", { ok: false, code }, T0);

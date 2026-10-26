@@ -1,5 +1,18 @@
 let queue = Promise.resolve();
 
+/**
+ * 저장 작업을 한 줄로 세운다. 실패는 부른 쪽에만 돌려주고 다음 작업은 그대로 실행한다.
+ * @template T
+ * @param {() => Promise<T>} task
+ * @returns {Promise<T>}
+ */
+function enqueue(task) {
+  const run = queue.then(task);
+  // 앞 작업이 실패해도 다음 작업은 실행되도록 실패를 삼킨 Promise를 줄 끝으로 둔다
+  queue = run.catch(() => {});
+  return run;
+}
+
 // 마지막 영상 기록 후 이 시간 동안 새 영상이 없으면 세션이 끝난 것으로 본다.
 // background.js의 종료 판정과 content.js의 새 세션 판정이 같은 값을 쓴다
 export const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
@@ -63,8 +76,7 @@ export async function clearCurrentSession() {
  * @returns {Promise<object[]>} 이번에 닫은 세션들(없으면 빈 배열)
  */
 export function endSession() {
-  queue = queue.then(() => _endSession());
-  return queue;
+  return enqueue(() => _endSession());
 }
 
 /**
@@ -174,9 +186,43 @@ function sessionEndTime(videos, startTime, nowMs) {
 }
 
 /**
+ * 같은 eventId면 뒤(남아 있던 video__ 키) 값을 쓴다. 키가 남아 있는 동안에는 모든 쓰기가 그 키로 가서 그쪽이 최신이다.
+ * eventId가 없는 옛 기록은 모두 남긴다.
+ */
+function mergeVideos(existing, incoming) {
+  const byEventId = new Map();
+  const withoutEventId = [];
+  for (const v of [...existing, ...incoming]) {
+    if (v.eventId) byEventId.set(v.eventId, v);
+    else withoutEventId.push(v);
+  }
+  return [...byEventId.values(), ...withoutEventId];
+}
+
+/**
+ * 이미 sessions[]에 있는 세션에 영상을 합친다. 시작 시각과 분석 결과 필드는 그대로 둔다.
+ * 아직 보내지 않은 세션은 재시도 큐가 찾도록 전송 대기로 둔다.
+ */
+function mergeIntoSession(session, videos, nowMs) {
+  const merged = mergeVideos(session.videos ?? [], videos);
+  return {
+    ...session,
+    ...buildClosedSession(
+      session.sessionId,
+      merged,
+      session.startTime,
+      sessionEndTime(merged, session.startTime, nowMs),
+    ),
+    syncedToServer: session.syncedToServer ?? false,
+  };
+}
+
+/**
  * content.js가 video__ 키로 흩어 기록한 영상들을 세션 단위로 모아 sessions[]로 옮긴다.
  * 이후 늦게 도착한 같은 세션의 video__ 키가 있으면 재확인해 병합까지 처리한다.
- * @returns {Promise<object[]>} 이번에 닫은 세션들(없으면 빈 배열)
+ * 저장과 삭제를 한 번에 할 수 없어, 중간에 끊겨도 다시 실행하면 같은 결과가 되게 한다 —
+ * 이미 있는 세션이면 새로 붙이지 않고 합치고, 새로 닫은 세션은 옮기는 저장에서 바로 전송 대기로 둔다.
+ * @returns {Promise<object[]>} 이번에 닫거나 합친 세션 중 아직 서버에 보내지 않은 것(없으면 빈 배열)
  */
 async function _endSession() {
   const all = await chrome.storage.local.get(null);
@@ -190,23 +236,37 @@ async function _endSession() {
 
   const bySession = groupVideosBySession(videoEntries);
   const nowMs = Date.now();
-  const closedSessions = [];
+  const updatedSessions = [...(sessions ?? [])];
   for (const [sessionId, videos] of bySession) {
+    const index = updatedSessions.findIndex((s) => s.sessionId === sessionId);
+    if (index >= 0) {
+      updatedSessions[index] = mergeIntoSession(
+        updatedSessions[index],
+        videos,
+        nowMs,
+      );
+      continue;
+    }
     const startTime =
       sessionId === currentSession.sessionId
         ? currentSession.startTime
         : undefined;
-    closedSessions.push(
-      buildClosedSession(
+    updatedSessions.push({
+      ...buildClosedSession(
         sessionId,
         videos,
         startTime,
         sessionEndTime(videos, startTime, nowMs),
       ),
-    );
+      syncedToServer: false,
+    });
   }
 
-  const updatedSessions = [...(sessions ?? []), ...closedSessions];
+  const closedSessionIds = new Set(bySession.keys());
+  const unsent = (list) =>
+    list.filter(
+      (s) => closedSessionIds.has(s.sessionId) && s.syncedToServer !== true,
+    );
   const keysToRemove = videoEntries.map(([key]) => key);
 
   await chrome.storage.local.set({
@@ -219,30 +279,22 @@ async function _endSession() {
   // content.js는 별개 컨텍스트라 위 스냅샷과 remove() 사이에 방금 닫은 sessionId로
   // video__ 키를 새로 썼을 수 있다 — 그대로 두면 영원히 미반영되므로 즉시 재확인해
   // 병합한다. 이미 새로 시작된 *다른* sessionId의 키는 건드리지 않는다.
-  const closedSessionIds = new Set(closedSessions.map((s) => s.sessionId));
   const late = await chrome.storage.local.get(null);
   const lateEntries = Object.entries(late).filter(
     ([key]) =>
       key.startsWith("video__") && closedSessionIds.has(sessionIdOf(key)),
   );
-  if (lateEntries.length === 0) return closedSessions;
+  if (lateEntries.length === 0) return unsent(updatedSessions);
 
   const lateBySession = groupVideosBySession(lateEntries);
   const mergedSessions = updatedSessions.map((session) => {
     const lateVideos = lateBySession.get(session.sessionId);
-    if (!lateVideos) return session;
-    const videos = [...session.videos, ...lateVideos];
-    return buildClosedSession(
-      session.sessionId,
-      videos,
-      session.startTime,
-      sessionEndTime(videos, session.startTime, nowMs),
-    );
+    return lateVideos ? mergeIntoSession(session, lateVideos, nowMs) : session;
   });
 
   await chrome.storage.local.set({ sessions: mergedSessions });
   await chrome.storage.local.remove(lateEntries.map(([key]) => key));
-  return mergedSessions.filter((s) => closedSessionIds.has(s.sessionId));
+  return unsent(mergedSessions);
 }
 
 /**
@@ -441,27 +493,49 @@ export async function getUnsentWatchStats(now = Date.now()) {
     .flatMap(([, cp]) => {
       const entry = entries.get(cp?.eventId);
       if (!entry || now - (cp.at ?? 0) <= WATCH_CHECKPOINT_STALE_MS) return [];
-      const { v } = entry;
-      // 최종값이 있거나 영구 실패했거나 이미 보낸 체크포인트거나 영상 POST가 아직이면(PATCH가 404) 보내지 않는다
-      if (hasFinalWatchStats(v) || v.watchStatsSent === "invalid") return [];
-      if (!isNewerCheckpoint(cp, v)) return [];
-      if (v.sent === false || v.sent === "invalid") return [];
-      return [
-        {
-          location: entry.location,
-          ...(entry.key ? { key: entry.key } : {}),
-          sessionId: entry.sessionId,
-          eventId: cp.eventId,
-          watchedSeconds: cp.watchedSeconds,
-          playbackRate: cp.playbackRate,
-          wasBackgrounded: cp.wasBackgrounded,
-          at: cp.at,
-          source: "checkpoint",
-        },
-      ];
+      return canSendCheckpoint(cp, entry.v) ? [checkpointItem(entry, cp)] : [];
     });
 
   return [...fromLive, ...fromSessions, ...fromCheckpoints];
+}
+
+/**
+ * 방금 닫은 세션의 영상 중 최종값이 없고 체크포인트가 있는 것을 고른다.
+ * 닫히는 순간에도 재생 중일 수 있어, 재시도 큐와 달리 막 갱신된 체크포인트도 넣는다.
+ * @param {string} sessionId
+ * @returns {Promise<object[]>} getUnsentWatchStats의 체크포인트 항목과 같은 형태
+ */
+export async function getSessionCheckpointStats(sessionId) {
+  const all = await chrome.storage.local.get(null);
+  const entries = indexVideoEntries(all);
+  return Object.entries(all)
+    .filter(([key]) => key.startsWith(WATCH_CHECKPOINT_PREFIX))
+    .flatMap(([, cp]) => {
+      const entry = entries.get(cp?.eventId);
+      if (entry?.sessionId !== sessionId) return [];
+      return canSendCheckpoint(cp, entry.v) ? [checkpointItem(entry, cp)] : [];
+    });
+}
+
+// 최종값이 있거나 영구 실패했거나 이미 보낸 체크포인트거나 영상 POST가 아직이면(PATCH가 404) 보내지 않는다
+function canSendCheckpoint(cp, v) {
+  if (hasFinalWatchStats(v) || v.watchStatsSent === "invalid") return false;
+  if (!isNewerCheckpoint(cp, v)) return false;
+  return v.sent !== false && v.sent !== "invalid";
+}
+
+function checkpointItem(entry, cp) {
+  return {
+    location: entry.location,
+    ...(entry.key ? { key: entry.key } : {}),
+    sessionId: entry.sessionId,
+    eventId: cp.eventId,
+    watchedSeconds: cp.watchedSeconds,
+    playbackRate: cp.playbackRate,
+    wasBackgrounded: cp.wasBackgrounded,
+    at: cp.at,
+    source: "checkpoint",
+  };
 }
 
 /**
@@ -470,8 +544,7 @@ export async function getUnsentWatchStats(now = Date.now()) {
  * @returns {Promise<void>}
  */
 export function markWatchStatsSent(item) {
-  queue = queue.then(() => _setWatchStatsSent(item, true));
-  return queue;
+  return enqueue(() => _setWatchStatsSent(item, true));
 }
 
 /**
@@ -480,8 +553,7 @@ export function markWatchStatsSent(item) {
  * @returns {Promise<void>}
  */
 export function markWatchStatsInvalid(item) {
-  queue = queue.then(() => _setWatchStatsSent(item, "invalid"));
-  return queue;
+  return enqueue(() => _setWatchStatsSent(item, "invalid"));
 }
 
 /**
@@ -548,8 +620,7 @@ async function _setWatchStatsSent(item, value) {
  * @returns {Promise<void>}
  */
 export function markVideoEventSent(event) {
-  queue = queue.then(() => _setVideoEventSent(event, true));
-  return queue;
+  return enqueue(() => _setVideoEventSent(event, true));
 }
 
 /**
@@ -559,8 +630,7 @@ export function markVideoEventSent(event) {
  * @returns {Promise<void>}
  */
 export function markVideoEventInvalid(event) {
-  queue = queue.then(() => _setVideoEventSent(event, "invalid"));
-  return queue;
+  return enqueue(() => _setVideoEventSent(event, "invalid"));
 }
 
 /**
@@ -751,8 +821,7 @@ export async function saveOnboarding(group) {
  * @returns {Promise<void>}
  */
 export function saveAnalysis(sessionId, analysisResult) {
-  queue = queue.then(() => _saveAnalysis(sessionId, analysisResult));
-  return queue;
+  return enqueue(() => _saveAnalysis(sessionId, analysisResult));
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   getUnsentVideoEvents,
   markVideoEventSent,
   getUnsentWatchStats,
+  getSessionCheckpointStats,
   markWatchStatsSent,
   pruneWatchCheckpoints,
   pruneTabWatches,
@@ -405,6 +406,196 @@ describe("endSession — 세션 종료 시각", () => {
     expect((await getAllSessions())[0].endTime).toBe(
       at("2026-01-01T00:15:00Z"),
     );
+  });
+});
+
+// 저장 작업은 한 줄로 실행된다. 한 번의 실패로 줄 전체가 막히면 서비스워커가 다시 뜰 때까지 세션 종료·분석 저장이 모두 실패한다
+describe("저장 큐 — 한 작업이 실패해도 다음 작업은 실행된다", () => {
+  // 다음 한 번의 쓰기만 실패시킨다
+  function failNextSet() {
+    const { set } = global.chrome.storage.local;
+    global.chrome.storage.local.set = () => {
+      global.chrome.storage.local.set = set;
+      return Promise.reject(new Error("QUOTA_BYTES quota exceeded"));
+    };
+  }
+
+  it("실패한 저장은 부른 쪽에 실패를 돌려주고, 다음 저장은 그대로 반영한다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [{ sessionId: "s1", videos: [] }],
+    });
+
+    failNextSet();
+    await expect(saveAnalysis("s1", { videoCount: 1 })).rejects.toThrow(
+      "QUOTA_BYTES",
+    );
+    await saveAnalysis("s1", { videoCount: 2 });
+
+    const [session] = await getAllSessions();
+    expect(session.videoCount).toBe(2);
+  });
+
+  it("전송 표시 저장이 실패해도 다음 세션 종료는 세션을 닫아 돌려준다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [{ sessionId: "old", videos: [{ eventId: "e0", sent: true }] }],
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+    });
+    await setVideo("s1", "v1", "2026-01-01T00:00:00Z");
+
+    failNextSet();
+    await expect(
+      markWatchStatsSent({
+        location: "session",
+        sessionId: "old",
+        eventId: "e0",
+        watchedSeconds: 30,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        at: 1,
+        source: "checkpoint",
+      }),
+    ).rejects.toThrow("QUOTA_BYTES");
+    const closed = await endSession();
+
+    expect(closed.map((session) => session.sessionId)).toEqual(["s1"]);
+    expect(await getCurrentSession()).toBeNull();
+  });
+});
+
+// 세션 종료는 저장과 삭제를 한 번에 할 수 없어 중간에 끊길 수 있다. 다시 닫으면 같은 결과가 돼야 한다
+describe("endSession — 중간에 끊겨도 다시 닫으면 같은 세션으로 합친다", () => {
+  const T1 = "2026-01-01T10:00:00.000Z";
+  const T2 = "2026-01-01T12:00:00.000Z";
+  const video = (eventId, watchedAt, extra = {}) => ({
+    videoId: `v-${eventId}`,
+    watchedAt,
+    eventId,
+    sent: true,
+    ...extra,
+  });
+
+  // 다음 한 번의 set/remove만 실패시킨다
+  function failNext(method) {
+    const original = global.chrome.storage.local[method];
+    global.chrome.storage.local[method] = async () => {
+      global.chrome.storage.local[method] = original;
+      throw new Error("QUOTA_BYTES quota exceeded");
+    };
+  }
+
+  async function startNextSession() {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s2", startTime: T2 },
+      video__s2__e2: video("e2", T2),
+    });
+  }
+
+  const videoKeys = async () =>
+    Object.keys(await global.chrome.storage.local.get(null)).filter((k) =>
+      k.startsWith("video__"),
+    );
+
+  it("영상 키 삭제가 끊겨도 세션은 전송 대기로 남고, 다음 종료 때 중복 없이 하나로 정리된다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: T1 },
+      video__s1__e1: video("e1", T1),
+    });
+    failNext("remove");
+    await expect(endSession()).rejects.toThrow("QUOTA_BYTES");
+
+    expect(await getAllSessions()).toEqual([
+      expect.objectContaining({ sessionId: "s1", syncedToServer: false }),
+    ]);
+
+    await startNextSession();
+    const closed = await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions.map((s) => s.sessionId)).toEqual(["s1", "s2"]);
+    expect(sessions[0].videos.map((v) => v.eventId)).toEqual(["e1"]);
+    expect(closed.map((s) => s.sessionId).sort()).toEqual(["s1", "s2"]);
+    expect(await videoKeys()).toEqual([]);
+  });
+
+  it("늦게 온 영상을 합치는 저장이 끊겨도, 다음 종료 때 그 영상이 기존 세션에 합쳐진다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: T1 },
+      video__s1__e1: video("e1", T1),
+    });
+    // 첫 삭제 직후 content.js가 닫힌 세션으로 영상을 쓰고, 그 영상을 합치는 저장이 실패한다
+    const { remove } = global.chrome.storage.local;
+    global.chrome.storage.local.remove = async (keys) => {
+      global.chrome.storage.local.remove = remove;
+      await remove(keys);
+      await global.chrome.storage.local.set({
+        video__s1__late: video("late", "2026-01-01T10:05:00.000Z"),
+      });
+      failNext("set");
+    };
+    await expect(endSession()).rejects.toThrow("QUOTA_BYTES");
+    expect((await getAllSessions())[0].videos.map((v) => v.eventId)).toEqual([
+      "e1",
+    ]);
+
+    await startNextSession();
+    await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions.map((s) => s.sessionId)).toEqual(["s1", "s2"]);
+    expect(sessions[0].videos.map((v) => v.eventId)).toEqual(["e1", "late"]);
+    expect(sessions[0].syncedToServer).toBe(false);
+  });
+
+  it("이미 보낸 세션이 다시 살아나 영상이 생기면 기존 세션에 합치고, 전송 완료와 리뷰를 유지하며 다시 돌려주지 않는다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: T1,
+          endTime: "2026-01-01T10:10:00.000Z",
+          videos: [video("e1", T1)],
+          syncedToServer: true,
+          review: "오늘 리뷰",
+        },
+      ],
+      currentSession: { sessionId: "s1", startTime: T1 },
+      video__s1__e2: video("e2", "2026-01-01T10:09:00.000Z"),
+    });
+
+    const closed = await endSession();
+
+    expect(closed).toEqual([]);
+    const sessions = await getAllSessions();
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      syncedToServer: true,
+      review: "오늘 리뷰",
+      startTime: T1,
+    });
+    expect(sessions[0].videos.map((v) => v.eventId)).toEqual(["e1", "e2"]);
+  });
+
+  it("같은 영상이 양쪽에 있으면 남아 있던 영상 키의 값을 쓴다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [{ sessionId: "s1", startTime: T1, videos: [video("e1", T1)] }],
+      currentSession: { sessionId: "s1", startTime: T1 },
+      video__s1__e1: video("e1", T1, {
+        watchedSeconds: 300,
+        watchStatsSent: false,
+        watchStatsSource: "final",
+      }),
+    });
+
+    const [closed] = await endSession();
+
+    expect(closed.videos).toEqual([
+      expect.objectContaining({
+        eventId: "e1",
+        watchedSeconds: 300,
+        watchStatsSource: "final",
+      }),
+    ]);
+    expect(closed.syncedToServer).toBe(false);
   });
 });
 
@@ -1089,6 +1280,126 @@ describe("시청시간 체크포인트 — 체크포인트로 보낸 값은 확�
     expect(session.videos[0]).toMatchObject({
       watchStatsSource: "checkpoint",
       checkpointAt: STALE,
+    });
+  });
+});
+
+// 세션은 영상을 재생하는 중에도 닫혀, 닫는 순간의 체크포인트는 대개 막 갱신된 상태다
+describe("getSessionCheckpointStats — 방금 닫은 세션의 체크포인트", () => {
+  const NOW = Date.parse("2026-10-20T12:00:00Z");
+  const checkpoint = (eventId, at, watchedSeconds = 600) => ({
+    [`watchcp__${eventId}`]: {
+      sessionId: "s1",
+      eventId,
+      watchedSeconds,
+      playbackRate: 1,
+      wasBackgrounded: 0,
+      at,
+    },
+  });
+
+  it("막 갱신된 체크포인트도 그 세션 영상의 체크포인트 항목으로 고른다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [{ sessionId: "s1", videos: [{ eventId: "e1", sent: true }] }],
+      ...checkpoint("e1", NOW - 5_000),
+    });
+
+    expect(await getSessionCheckpointStats("s1")).toEqual([
+      {
+        location: "session",
+        sessionId: "s1",
+        eventId: "e1",
+        watchedSeconds: 600,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        at: NOW - 5_000,
+        source: "checkpoint",
+      },
+    ]);
+  });
+
+  it("최종값이 있거나, 영상 POST가 아직이거나 영구 실패했거나, 시청시간이 영구 실패한 영상은 고르지 않는다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [
+            {
+              eventId: "final",
+              sent: true,
+              watchedSeconds: 50,
+              watchStatsSent: false,
+              watchStatsSource: "final",
+            },
+            { eventId: "unposted", sent: false },
+            { eventId: "postInvalid", sent: "invalid" },
+            { eventId: "statsInvalid", sent: true, watchStatsSent: "invalid" },
+          ],
+        },
+      ],
+      ...checkpoint("final", NOW),
+      ...checkpoint("unposted", NOW),
+      ...checkpoint("postInvalid", NOW),
+      ...checkpoint("statsInvalid", NOW),
+    });
+
+    expect(await getSessionCheckpointStats("s1")).toEqual([]);
+  });
+
+  it("이미 보낸 체크포인트는 고르지 않고, 그보다 새로운 체크포인트는 고른다", async () => {
+    const sentAt = NOW - 60_000;
+    await global.chrome.storage.local.set({
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [
+            {
+              eventId: "e1",
+              sent: true,
+              watchedSeconds: 300,
+              watchStatsSent: true,
+              watchStatsSource: "checkpoint",
+              checkpointAt: sentAt,
+            },
+          ],
+        },
+      ],
+      ...checkpoint("e1", sentAt),
+    });
+    expect(await getSessionCheckpointStats("s1")).toEqual([]);
+
+    await global.chrome.storage.local.set(checkpoint("e1", NOW, 360));
+    const items = await getSessionCheckpointStats("s1");
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ watchedSeconds: 360, at: NOW });
+  });
+
+  it("다른 세션 영상과 영상 기록이 없는 체크포인트는 고르지 않는다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [{ sessionId: "s1", videos: [{ eventId: "e1", sent: true }] }],
+      video__s2__e2: { eventId: "e2", sent: true },
+      ...checkpoint("e2", NOW),
+      ...checkpoint("orphan", NOW),
+    });
+
+    expect(await getSessionCheckpointStats("s1")).toEqual([]);
+  });
+
+  it("고른 항목을 보낸 것으로 표시하면 세션 영상에 값·출처·체크포인트 시각이 남는다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [{ sessionId: "s1", videos: [{ eventId: "e1", sent: true }] }],
+      ...checkpoint("e1", NOW),
+    });
+    const [item] = await getSessionCheckpointStats("s1");
+
+    await markWatchStatsSent(item);
+
+    const [session] = await getAllSessions();
+    expect(session.videos[0]).toMatchObject({
+      watchedSeconds: 600,
+      watchStatsSent: true,
+      watchStatsSource: "checkpoint",
+      checkpointAt: NOW,
     });
   });
 });
