@@ -7,6 +7,8 @@ async function loadScreens() {
   return {
     screenToday: g.screenToday,
     screenFeedback: g.screenFeedback,
+    screenControlHome: g.screenControlHome,
+    vlReview: g.vlReview,
     vlShareLines: g.vlShareLines,
     VL: g.VL,
     koreanDateLabel: g.koreanDateLabel,
@@ -559,5 +561,27 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
     );
     expect(empty).toContain("이 구간에는 그래프에 넣을 시청 기록이 없어요.");
     expect(empty).not.toContain("vl-share-lines");
+  });
+});
+
+describe("screenControlHome — 홈 안내 카드", () => {
+  it("안내 문단은 띄어쓰기에서만 줄바꿈한다('연구'가 중간에서 끊기지 않게)", async () => {
+    const { screenControlHome } = await loadScreens();
+    const p = screenControlHome(1).match(
+      /<p style="([^"]*)">\s*평소처럼 유튜브를 시청해 주세요/,
+    );
+    expect(p[1]).toContain("word-break:keep-all");
+  });
+});
+
+describe("vlReview — 관심 분야 헤드라인", () => {
+  it("분야명만 굵고, 띄어쓰기에서만 줄바꿈한다", async () => {
+    const { vlReview } = await loadScreens();
+    const m = vlReview({ text: "리뷰", topic: "인물과 일상 루틴" }).match(
+      /<p style="([^"]*)">\s*당신은 '<span style="([^"]*)">인물과 일상 루틴<\/span>'에 관심이 많습니다!/,
+    );
+    expect(m[1]).toContain("font-weight:500");
+    expect(m[1]).toContain("word-break:keep-all");
+    expect(m[2]).toContain("font-weight:800");
   });
 });

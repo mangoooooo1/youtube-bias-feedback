@@ -230,14 +230,14 @@ describe("지난 날짜 리뷰 — 서버 이력", () => {
 });
 
 describe("기간 탭", () => {
-  // 1구간에 분야 4개 → 상위 3개 + "그 밖" 범례
+  // 2구간 진행 중, 2구간에 분야 4개 → 상위 3개 + "그 밖" 범례
   async function bootFeedbackTab() {
     const installDate = daysAgo(BASELINE_DAYS + 1);
-    const lastDay = Date.parse(installDate) + (DAYS_PER_PERIOD - 1) * DAY;
+    const firstDay = Date.parse(installDate) + DAYS_PER_PERIOD * DAY;
     const period = {
-      periodIndex: 1,
-      start: kst(installDate),
-      end: kst(lastDay),
+      periodIndex: 2,
+      start: kst(firstDay),
+      end: kst(firstDay + (DAYS_PER_PERIOD - 1) * DAY),
       timeDistribution: { 뉴스: 0.4, 게임: 0.3, 음악: 0.2, 교육: 0.1 },
     };
     const p = await bootReady(participant({ group: "EXP", installDate }), {
@@ -268,16 +268,55 @@ describe("기간 탭", () => {
     expect(pressed(root)).toEqual([]);
   });
 
+  const selectedWeek = (root) =>
+    root.querySelector("#vl-period-indicator").closest("[data-week]").dataset
+      .week;
+
+  async function openFeedbackTab(stored) {
+    const { root } = await bootReady(stored);
+    click(root, '[data-tab="feedback"]');
+    return root;
+  }
+
+  it("2구간 진행 중이면 2구간으로 열리고, 1구간 버튼을 누르면 1구간을 보여 준다", async () => {
+    const { root } = await bootFeedbackTab();
+    const { VL } = globalThis;
+    expect(selectedWeek(root)).toBe("2");
+
+    click(root, '#vl-week-btns [data-week="1"]');
+    expect(selectedWeek(root)).toBe("1");
+    expect(root.textContent).toContain(VL.weeks[0].range);
+  });
+
+  it("1구간 진행 중이면 1구간으로 열린다", async () => {
+    const root = await openFeedbackTab(
+      participant({
+        group: "TEST-EXP",
+        participantCode: "TEST-EXP",
+        installDate: new Date().toISOString(),
+      }),
+    );
+    expect(selectedWeek(root)).toBe("1");
+  });
+
+  it("마지막 구간이 지난 뒤에는 마지막 구간으로 열린다", async () => {
+    const { VL } = globalThis;
+    const root = await openFeedbackTab(
+      participant({ group: "EXP", installDate: daysAgo(TOTAL_DAYS + 1) }),
+    );
+    expect(selectedWeek(root)).toBe(String(VL.TOTAL_WEEKS));
+  });
+
   it("지난 기간 버튼을 누르면 그 기간을 보여 주고 강조를 푼다. 아직 안 온 기간은 누를 수 없다", async () => {
     const { root } = await bootFeedbackTab();
     const { VL } = globalThis;
     click(root, '[data-legend-key="뉴스"]');
 
-    click(root, '#vl-week-btns [data-week="2"]');
-    expect(root.textContent).toContain(VL.weeks[1].range);
+    click(root, '#vl-week-btns [data-week="1"]');
+    expect(root.textContent).toContain(VL.weeks[0].range);
     expect(root.querySelector("#vl-period-legend")).toBeNull();
 
-    click(root, '#vl-week-btns [data-week="1"]');
+    click(root, '#vl-week-btns [data-week="2"]');
     expect(pressed(root)).toEqual([]);
 
     const future = root.querySelector(
@@ -296,11 +335,11 @@ describe("기간 탭", () => {
         return { left: week * 60 };
       });
     try {
-      click(root, '#vl-week-btns [data-week="2"]');
+      click(root, '#vl-week-btns [data-week="1"]');
       const indicator = root.querySelector("#vl-period-indicator");
-      expect(indicator.closest("[data-week]").dataset.week).toBe("2");
-      // 2구간 밑줄을 1구간 자리(-60px)에 두었다가
-      expect(indicator.style.transform).toContain("translateX(-60px)");
+      expect(indicator.closest("[data-week]").dataset.week).toBe("1");
+      // 1구간 밑줄을 2구간 자리(+60px)에 두었다가
+      expect(indicator.style.transform).toContain("translateX(60px)");
       // 다음 프레임에 제자리로 옮긴다
       runFrames();
       expect(indicator.style.transform).not.toContain("translateX");

@@ -65,6 +65,22 @@ describe("온보딩 완료 후", () => {
     expect(hasHome(root)).toBe(true);
   });
 
+  it("코드를 입력한 직후 첫 화면부터 머리말에 참여 코드가 보인다", async () => {
+    const { root } = await bootPopup(
+      { serverUrl: SERVER },
+      {
+        responses: {
+          "/api/participants/validate": {
+            data: { valid: true, group_code: "CON" },
+          },
+        },
+      },
+    );
+    await submitCode(root, "ab-cdef");
+    await vi.waitFor(() => expect(hasHome(root)).toBe(true));
+    expect(root.textContent).toContain("참여 중 · AB-CDEF");
+  });
+
   it("재설치 복구를 고르면 서버가 돌려준 기존 값을 저장하고 새로 등록하지 않고 다시 연다", async () => {
     const oldInstall = daysAgo(3);
     const { root, data, server } = await bootPopup(

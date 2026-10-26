@@ -192,7 +192,8 @@ class ViewLensPopup {
   constructor(container) {
     this.container = container;
     this._tab = "today";
-    this._selWeek = 1;
+    // 버튼으로 고르기 전엔 비워 두고 현재 구간을 쓴다
+    this._selWeek = null;
     // 기간 탭 공통 범례에서 강조한 분야(다시 누르면 해제)
     this._periodFocus = null;
     this._selectedDate = new Date();
@@ -320,7 +321,7 @@ class ViewLensPopup {
       totalWeeks,
       Math.max(1, Math.ceil(day / VL.DAYS_PER_PERIOD)),
     );
-    const selWeek = Math.min(this._selWeek, currentWeek);
+    const selWeek = Math.min(this._selWeek ?? currentWeek, currentWeek);
 
     // 실제 세션이 없는 Studio에서는 예시 데이터(VL.today)를 그대로 쓴다
     if (this._tab === "today" && VL._allSessions) {
@@ -456,6 +457,7 @@ class ViewLensPopup {
     bindOnboarding(this.container, ({ group, code, recovered }) => {
       this._onboarded = true;
       this._group = group;
+      this._participantCode = code;
       this._onChange({
         onboarded: true,
         group,
