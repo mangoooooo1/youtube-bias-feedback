@@ -354,7 +354,7 @@ describe("VL.periodLines — 기간 탭 꺾은선", () => {
     });
   });
 
-  it("오늘은 표시하고 오늘 이후는 그리지 않는다", () => {
+  it("오늘은 표시하고, 오늘 이후 날짜도 넣되 아직 오지 않은 날로 표시한다(기록 없음 아님)", () => {
     const { points } = VL.periodLines(
       period,
       [
@@ -372,9 +372,13 @@ describe("VL.periodLines — 기간 탭 꺾은선", () => {
       "2026-03-06",
     );
 
-    expect(points.map((p) => [p.date, p.isToday])).toEqual([
-      ["2026-03-05", false],
-      ["2026-03-06", true],
+    expect(
+      points.map((p) => [p.date, p.isToday, p.isFuture, p.noRecord]),
+    ).toEqual([
+      ["2026-03-05", false, false, false],
+      ["2026-03-06", true, false, false],
+      ["2026-03-07", false, true, false],
+      ["2026-03-08", false, true, false],
     ]);
   });
 });

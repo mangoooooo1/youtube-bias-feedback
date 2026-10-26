@@ -393,6 +393,26 @@ describe("vlShareLines — 날마다 분야별 비중 꺾은선", () => {
     expect(svg).toContain('stroke-dasharray="4 3"');
   });
 
+  it("구간 첫날은 날짜 눈금을 구간 일수만큼 깔고, 점은 첫 날짜에만, 미래 날짜엔 선·'기록 없음'이 없다", () => {
+    const svg = vlShareLines(
+      VL.periodLines(
+        { ...PERIOD, start: "2026-06-05", end: "2026-06-11" },
+        [PERIOD_DAYS[0]],
+        "2026-06-05",
+      ),
+    );
+    for (const d of [5, 6, 7, 8, 9, 10, 11])
+      expect(svg).toContain(`>6/${d}</text>`);
+    expect(svg).not.toContain("기록 없음");
+    // 분야 선(상위 3개 + 그 밖) 4개 × 첫 날짜 하나
+    expect(svg.match(/<circle /g)).toHaveLength(4);
+    expect(svg.match(/<title>6\/5\(금\)/g)).toHaveLength(4);
+    // 이어 그은 선분이 없다(가로 눈금선만 있음)
+    expect(svg).not.toContain('stroke-linecap="round"');
+    // 왼쪽 끝 "집계 중"은 잘리지 않게 왼쪽 정렬
+    expect(svg).toMatch(/text-anchor="start"[^>]*>집계 중</);
+  });
+
   it("오늘이 구간 밖이면 점선·'집계 중'이 없다", () => {
     const svg = draw(null, "2026-06-20");
     expect(svg).not.toContain("집계 중");
