@@ -561,9 +561,9 @@ function screenControlHome(day, stats = {}) {
     )
     .join("");
 
-  return `<div style="padding:20px 18px 24px;display:flex;flex-direction:column;gap:16px">
+  return `<div style="padding:20px 18px 24px;display:flex;flex-direction:column;gap:22px">
     ${vlCard({
-      pad: 20,
+      pad: 24,
       style: "text-align:center",
       children: `
       <div style="position:relative;width:76px;height:76px;margin:6px auto 0">
@@ -598,7 +598,7 @@ function screenControlHome(day, stats = {}) {
         <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">${VL.studyDurationLabel()}의 시청 리뷰가 준비됐어요</span>
         <span style="font-size:var(--vl-fs-4);color:var(--vl-accent);flex-shrink:0">→</span>
       </button>`
-        : `<div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card-2);border-radius:13px;box-shadow:var(--vl-shadow-card)">
+        : `<div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card);border-radius:13px;box-shadow:var(--vl-shadow-card)">
       <div style="width:25px;height:25px;border-radius:7px;background:var(--vl-accent-soft);color:var(--vl-accent);display:grid;place-items:center;flex-shrink:0;margin-top:1px">
         ${_lockIcon(15)}
       </div>
