@@ -458,7 +458,7 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
       <span style="display:flex;align-items:center;gap:4px;white-space:nowrap">
         ${locked ? _lockIcon(10) : ""}${wk.label}
       </span>
-      <span style="width:${active ? 16 : 0}px;height:3px;border-radius:999px;background:var(--vl-accent)"></span>
+      <span ${active ? 'id="vl-period-indicator" ' : ""}style="width:${active ? 16 : 0}px;height:3px;border-radius:999px;background:var(--vl-accent)"></span>
     </button>`;
     })
     .join("");
