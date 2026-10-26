@@ -56,7 +56,7 @@ function initializeDB() {
 /**
  * 예전 스키마 DB를 시작 단계에서 걸러낸다. CREATE TABLE IF NOT EXISTS는 기존 테이블에 새 열을
  * 추가하지 않고, 인덱스가 없는 새 열은 execSchema에서 오류가 나지 않아 서버가 정상으로 뜬 뒤
- * 요청마다 실패한다. 새 열을 추가하면 여기에도 적는다.
+ * 요청마다 실패한다. addColumn으로 소급 추가하지 않는 새 열은 여기에도 적는다.
  */
 function assertLatestColumns() {
   db.prepare("SELECT validVideoCount FROM today_reviews LIMIT 0");
