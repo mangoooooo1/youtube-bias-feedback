@@ -58,7 +58,11 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
     // "확인 중"은 오늘만 보인다
     const html = render({}, "ok", { dateLabel: koreanDateLabel(new Date()) });
     expect(html).toContain(
-      "시청 시간이 가장 긴 분야는 음악이었지만, 영상을 가장 많이 본 분야는 스포츠였어요.",
+      '<b style="font-weight:800">음악</b>에 시간을 가장 많이 썼어요',
+    );
+    // 12개 × 75%
+    expect(html).toContain(
+      '<b style="font-weight:800">스포츠</b> 영상을 가장 많이 봤어요 (9개)',
     );
     expect(html.indexOf(">음악</span>")).toBeLessThan(
       html.indexOf(">스포츠</span>"),
@@ -71,7 +75,7 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
 
   it("제목 문장이 영상 수 줄보다 위, 범례는 도넛 카드 안 도넛 아래", () => {
     const html = render();
-    const title = html.indexOf("시청 시간이 가장 긴 분야는");
+    const title = html.indexOf("에 시간을 가장 많이 썼어요");
     const card = html.indexOf("유튜브 시청 분야별 비중");
     expect(title).toBeLessThan(html.indexOf("영상 13개"));
     expect(html.indexOf("영상 13개")).toBeLessThan(card);
@@ -91,12 +95,25 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
     expect(html).not.toContain("시청 시간 확인 중");
   });
 
+  it("시간과 개수 1위가 같으면 보조 줄 없이, 분야명만 굵고 &가 든 이름도 그대로 보인다", () => {
+    const html = render({
+      timeDistribution: { "인물 & 블로그": 0.6, 게임: 0.4 },
+      countDistribution: { "인물 & 블로그": 0.75, 게임: 0.25 },
+    });
+    expect(html).toContain(
+      '<b style="font-weight:800">인물 &amp; 블로그</b> 영상을 가장 많이 봤어요',
+    );
+    expect(html.match(/<b style="font-weight:800">/g)).toHaveLength(1);
+    expect(html).not.toContain("시간을 가장 많이 썼어요");
+  });
+
   it("제목이 없으면 영상 수 줄이 날짜 바로 다음에 온다", () => {
     const html = render({
       timeDistribution: {},
       countDistribution: {},
       chartCount: 0,
     });
+    expect(html).not.toContain("가장 많이");
     expect(html).toContain("영상 13개");
     expect(html.indexOf("3월 5일")).toBeLessThan(html.indexOf("영상 13개"));
   });
@@ -389,7 +406,11 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
     const html = render();
     expect(html).toContain("6/5 ~ 6/8");
     expect(html).toContain(
-      "시청 시간이 가장 긴 분야는 게임이었지만, 영상을 가장 많이 본 분야는 음악이었어요.",
+      '<b style="font-weight:800">게임</b>에 시간을 가장 많이 썼어요',
+    );
+    // 구간 chartCount 8개 × 40%
+    expect(html).toContain(
+      '<b style="font-weight:800">음악</b> 영상을 가장 많이 봤어요 (3개)',
     );
     const keys = [...html.matchAll(/data-legend-key="([^"]+)"/g)].map(
       (m) => m[1],
@@ -414,6 +435,7 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
       chartCount: 0,
     });
     expect(html).toContain("6/5 ~ 6/8");
+    expect(html).not.toContain("가장 많이");
     expect(html).not.toContain("분야 0개");
     expect(html).not.toMatch(/분야 \d+개 · 영상/);
   });

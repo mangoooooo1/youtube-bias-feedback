@@ -145,44 +145,98 @@ describe("VL.serverDist — 유튜브 분야 15종 + 기타", () => {
   });
 });
 
-describe("VL.titleSentence — 탭 맨 위 제목 문장", () => {
+describe("VL.titleSentence — 탭 맨 위 제목과 보조 줄", () => {
   let VL;
   beforeAll(async () => {
     VL = await loadVL();
   });
-  const sentence = (time, count) =>
-    VL.titleSentence(VL.serverDist(time), VL.serverDist(count));
-
-  it("시간 1위와 개수 1위가 같으면 한 번에 말한다", () => {
-    expect(sentence({ 음악: 0.6, 게임: 0.4 }, { 음악: 0.5, 게임: 0.3 })).toBe(
-      "시청 시간과 영상 개수 모두 음악 분야가 가장 많았어요.",
+  // 조각을 글자로 합치고, 굵은 조각만 따로 모은다
+  const lines = (time, count, chartCount) => {
+    const t = VL.titleSentence(
+      VL.serverDist(time),
+      VL.serverDist(count),
+      chartCount,
     );
-  });
+    if (!t) return null;
+    const text = (line) => line?.map((p) => p.text).join("") ?? null;
+    const strong = (line) =>
+      line?.filter((p) => p.strong).map((p) => p.text) ?? [];
+    return {
+      title: text(t.title),
+      sub: text(t.sub),
+      strong: [...strong(t.title), ...strong(t.sub)],
+    };
+  };
 
-  it("갈리면 둘 다 말하고, 받침에 맞춰 조사를 붙인다", () => {
-    expect(sentence({ 음악: 0.6, 게임: 0.4 }, { 게임: 0.7, 음악: 0.3 })).toBe(
-      "시청 시간이 가장 긴 분야는 음악이었지만, 영상을 가장 많이 본 분야는 게임이었어요.",
-    );
+  it("시간과 개수에서 가장 많은 분야가 같으면 제목 한 줄만", () => {
     expect(
-      sentence({ 스포츠: 0.6, 게임: 0.4 }, { 코미디: 0.7, 스포츠: 0.3 }),
-    ).toBe(
-      "시청 시간이 가장 긴 분야는 스포츠였지만, 영상을 가장 많이 본 분야는 코미디였어요.",
-    );
+      lines({ 음악: 0.6, 게임: 0.4 }, { 음악: 0.6, 게임: 0.4 }, 10),
+    ).toEqual({
+      title: "음악 영상을 가장 많이 봤어요",
+      sub: null,
+      strong: ["음악"],
+    });
   });
 
-  it("1위가 동점이면 함께 말한다(반올림한 퍼센트 기준)", () => {
+  it("다르면 제목은 시간, 보조 줄은 영상 수와 실제 개수", () => {
     expect(
-      sentence({ 음악: 0.4, 게임: 0.4, 교육: 0.2 }, { 교육: 0.6, 음악: 0.4 }),
-    ).toBe(
-      "시청 시간이 가장 긴 분야는 게임·음악이었지만, 영상을 가장 많이 본 분야는 교육이었어요.",
-    );
-    expect(sentence({ 음악: 0.5, 게임: 0.5 }, { 게임: 0.5, 음악: 0.5 })).toBe(
-      "시청 시간과 영상 개수 모두 게임·음악 분야가 가장 많았어요.",
-    );
+      lines(
+        { "인물 & 블로그": 0.6, 엔터테인먼트: 0.4 },
+        { 엔터테인먼트: 0.6, "인물 & 블로그": 0.4 },
+        5,
+      ),
+    ).toEqual({
+      title: "인물 & 블로그에 시간을 가장 많이 썼어요",
+      sub: "엔터테인먼트 영상을 가장 많이 봤어요 (3개)",
+      strong: ["인물 & 블로그", "엔터테인먼트"],
+    });
   });
 
-  it("분포가 비어 있으면 문장을 만들지 않는다", () => {
-    expect(sentence({}, {})).toBeNull();
+  it("영상 수가 동점이면 함께 말하고 'N개씩', 시간 쪽 분야가 섞여 있어도 보조 줄을 붙인다", () => {
+    expect(
+      lines(
+        { "인물 & 블로그": 0.7, 엔터테인먼트: 0.3 },
+        { 엔터테인먼트: 0.5, "인물 & 블로그": 0.5 },
+        2,
+      ),
+    ).toEqual({
+      title: "인물 & 블로그에 시간을 가장 많이 썼어요",
+      sub: "엔터테인먼트·인물 & 블로그 영상을 가장 많이 봤어요 (1개씩)",
+      strong: ["인물 & 블로그", "엔터테인먼트·인물 & 블로그"],
+    });
+  });
+
+  it("시간이 동점이면 반올림한 퍼센트 기준으로 함께 말한다", () => {
+    expect(
+      lines({ 음악: 0.4, 게임: 0.4, 교육: 0.2 }, { 교육: 0.6, 음악: 0.4 }, 5),
+    ).toMatchObject({
+      title: "게임·음악에 시간을 가장 많이 썼어요",
+      sub: "교육 영상을 가장 많이 봤어요 (3개)",
+    });
+    expect(
+      lines({ 음악: 0.5, 게임: 0.5 }, { 게임: 0.5, 음악: 0.5 }, 4),
+    ).toMatchObject({ title: "게임·음악 영상을 가장 많이 봤어요", sub: null });
+  });
+
+  it("영상 수 1위는 반올림 퍼센트가 아니라 실제 개수로 정한다", () => {
+    // 500개 중 102·100·98개 — 셋 다 반올림하면 20%
+    expect(
+      lines(
+        { 음악: 0.6, 게임: 0.4 },
+        { 게임: 0.204, 음악: 0.2, 교육: 0.196 },
+        500,
+      ),
+    ).toMatchObject({ sub: "게임 영상을 가장 많이 봤어요 (102개)" });
+  });
+
+  it("개수를 모르면(chartCount 없음) 반올림 퍼센트로 정하고 개수는 쓰지 않는다", () => {
+    expect(
+      lines({ 음악: 0.6, 게임: 0.4 }, { 게임: 0.7, 음악: 0.3 }),
+    ).toMatchObject({ sub: "게임 영상을 가장 많이 봤어요" });
+  });
+
+  it("분포가 비어 있으면 제목·보조 줄을 만들지 않는다", () => {
+    expect(lines({}, {}, 0)).toBeNull();
   });
 });
 
@@ -217,8 +271,11 @@ describe("VL.dayView — 하루치 화면 값", () => {
       correctedTitles: { e3: "실제 제목" },
     });
     expect(view.timeDist.map((d) => d.key)).toEqual(["음악", "게임"]);
-    expect(view.title).toBe(
-      "시청 시간이 가장 긴 분야는 음악이었지만, 영상을 가장 많이 본 분야는 게임·음악이었어요.",
+    // chartCount로 영상 수를 되살려 제목을 만든다
+    const text = (line) => line.map((p) => p.text).join("");
+    expect(text(view.title.title)).toBe("음악에 시간을 가장 많이 썼어요");
+    expect(text(view.title.sub)).toBe(
+      "게임·음악 영상을 가장 많이 봤어요 (1개씩)",
     );
   });
 
