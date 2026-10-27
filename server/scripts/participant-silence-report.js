@@ -3,7 +3,7 @@
  * 개별 참여자 결측(시청 활동 공백) 리포트
  *
  * "아직 연구 관찰 기간 중인" 참여자 중, 마지막 활동으로부터 임계값(기본 4일) 이상 지난 사람을 찾아 보고한다.
- * 연구 종료 시점(installDate + TOTAL_DAYS)이 지난 참여자는 조용해도 정상이므로 제외한다.
+ * 연구 종료 시점(확장이 수집을 멈추는 TOTAL_DAYS번째 날 다음 날 00:00 KST)이 지난 참여자는 조용해도 정상이므로 제외한다.
  *
  * 알림 역할:
  * - Healthchecks.io: 이 감지 자체가 매일 돌았는지만 본다. 실행이 끝나면 결측 유무와 무관하게
@@ -24,6 +24,7 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 const { fingerprint } = require("./fingerprint");
 const { TEST_CODES } = require("../routes/participant-recovery");
 const { TOTAL_DAYS } = require("../pipeline/study-constants");
+const { dayFromInstall } = require("../pipeline/period-boundaries");
 const { pingSuccess, pingFail } = require("../monitoring/healthchecks-ping");
 const { createDogStatsd } = require("../monitoring/dogstatsd");
 
@@ -48,7 +49,9 @@ function evaluateParticipantSilence({
   thresholdDays = DEFAULT_THRESHOLD_DAYS,
   runIntervalDays = RUN_INTERVAL_DAYS,
 }) {
-  const studyEndMs = installDateMs + totalDays * 86400000;
+  const studyEndMs = Date.parse(
+    `${dayFromInstall(installDateMs, totalDays)}T00:00:00+09:00`,
+  );
   if (now >= studyEndMs) {
     return {
       flagged: false,
