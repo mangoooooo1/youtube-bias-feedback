@@ -551,6 +551,67 @@ function hasNewDisplayTitle(before, after) {
   );
 }
 
+// ── 기기에 없는 그날 영상 목록(재설치·저장소 비움) ──────────────────────────────
+// 기기 기록이 그날 서버 기록 수보다 적을 때만 서버에서 받는다. 로컬 sessions에는 넣지 않는다
+// (블러·확인 기록·오늘 세션 판정은 기기 세션만 본다). 지난 날짜만 저장하고 오늘은 열 때마다 판정한다.
+
+const DAY_VIDEOS_CACHE_KEY = "dayVideosCache";
+const DAY_VIDEOS_TIMEOUT_MS = 5000;
+
+/**
+ * 날짜 하나에 재생한 영상 목록(/api/viewing-summary/videos)을 받는다. 실패하면 null.
+ * @returns {Promise<Array<object>|null>}
+ */
+async function fetchDayVideos(serverUrl, anonymousId, participantToken, date) {
+  if (!serverUrl || serverUrl.startsWith("YOUR_") || !anonymousId) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DAY_VIDEOS_TIMEOUT_MS);
+  try {
+    const res = await fetch(
+      `${serverUrl.replace(/\/$/, "")}/api/viewing-summary/videos`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anonymousId, participantToken, date }),
+        signal: controller.signal,
+      },
+    );
+    if (!res.ok) return null;
+    const json = await res.json();
+    const data = json.data;
+    return data?.date === date && Array.isArray(data.videos)
+      ? data.videos
+      : null;
+  } catch (error) {
+    console.warn("[popup] 날짜별 영상 목록 조회 오류:", error.message);
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * 받아 둔 지난 날짜 목록(날짜 → 목록). 다른 참여자의 저장본은 쓰지 않는다.
+ * @returns {Promise<Record<string, Array<object>>>}
+ */
+async function loadDayVideosCache(anonymousId) {
+  const { [DAY_VIDEOS_CACHE_KEY]: cache } =
+    await chrome.storage.local.get(DAY_VIDEOS_CACHE_KEY);
+  if (!cache || cache.anonymousId !== anonymousId) return {};
+  return { ...cache.byDate };
+}
+
+/** 지난 날짜 목록 하나를 저장본에 더한다 */
+async function saveDayVideos(anonymousId, date, videos) {
+  const byDate = await loadDayVideosCache(anonymousId);
+  await setCacheQuietly({
+    [DAY_VIDEOS_CACHE_KEY]: {
+      anonymousId,
+      byDate: { ...byDate, [date]: videos },
+    },
+  });
+}
+
 const TODAY_REVIEWS_TIMEOUT_MS = 5000;
 
 async function fetchTodayReviews(serverUrl, anonymousId, participantToken) {
@@ -1098,6 +1159,7 @@ async function boot() {
   VL._viewingSummary = await loadViewingSummaryCache(stored.anonymousId);
   VL._viewingSummaryStatus = "loading";
   VL._fetchedTitles = await loadFetchedTitles();
+  VL._dayVideos = await loadDayVideosCache(stored.anonymousId);
   // 새로 받아 오면 VL._viewingSummary를 바꾸고 true. 실패하면 저장본을 그대로 두고 false
   const reloadViewingSummary = () =>
     refreshViewingSummary(
@@ -1203,6 +1265,38 @@ async function boot() {
 
   // Mount popup
   const popup = new ViewLensPopup(popEl);
+  // 오늘 탭을 그릴 때마다 부른다. 기기 기록이 모자란 날만 팝업을 연 동안 날짜마다 한 번 받는다
+  const dayVideosRequested = new Set();
+  VL._requestDayVideos = (dateKey, serverCount) => {
+    if (dayVideosRequested.has(dateKey)) return;
+    if (
+      !VL.needsServerVideos(
+        VL._allSessions,
+        VL._liveVideos,
+        VL._dayVideos[dateKey],
+        dateKey,
+        serverCount,
+      )
+    )
+      return;
+    dayVideosRequested.add(dateKey);
+    fetchDayVideos(
+      stored.serverUrl,
+      stored.anonymousId,
+      stored.participantToken,
+      dateKey,
+    )
+      .then(async (videos) => {
+        if (!videos) return;
+        VL._dayVideos = { ...VL._dayVideos, [dateKey]: videos };
+        if (dateKey !== dateStr(new Date()))
+          await saveDayVideos(stored.anonymousId, dateKey, videos);
+        popup.render();
+      })
+      .catch((error) => {
+        console.warn("[popup] 날짜별 영상 목록 반영 오류:", error.message);
+      });
+  };
   // 서버 집계가 도착하면(또는 실패가 확정되면) 그래프·상태 문구를 다시 그린다
   initialSummaryLoad.then((changed) => {
     if (changed) popup.render();
