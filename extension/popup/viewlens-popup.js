@@ -2,6 +2,7 @@ window.buildDataForDate = buildDataForDate;
 window.koreanDateLabel = koreanDateLabel;
 window.addDaysKst = addDaysKst;
 window.dateStr = dateStr;
+window.sessionDateStr = sessionDateStr;
 window.dayFromInstall = dayFromInstall;
 window.shouldRetryParticipantSync = shouldRetryParticipantSync;
 window.flushPendingPopupEvents = flushPendingPopupEvents;
