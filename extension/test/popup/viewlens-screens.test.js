@@ -59,13 +59,9 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
   it("제목 문장, 공통 범례(시간 순), 영상 수(확인됨)와 확인 중 수를 보여 준다", () => {
     // "확인 중"은 오늘만 보인다
     const html = render({}, "ok", { dateLabel: koreanDateLabel(new Date()) });
-    expect(html).toContain(
-      '<b style="font-weight:800">음악</b>에 시간을 가장 많이 썼어요',
-    );
+    expect(html).toContain("<b>음악</b>에 시간을 가장 많이 썼어요");
     // 12개 × 75%
-    expect(html).toContain(
-      '<b style="font-weight:800">스포츠</b> 영상을 가장 많이 봤어요 (9개)',
-    );
+    expect(html).toContain("<b>스포츠</b> 영상을 가장 많이 봤어요 (9개)");
     expect(html.indexOf(">음악</span>")).toBeLessThan(
       html.indexOf(">스포츠</span>"),
     );
@@ -155,10 +151,8 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
       timeDistribution: { "인물 & 블로그": 0.6, 게임: 0.4 },
       countDistribution: { "인물 & 블로그": 0.75, 게임: 0.25 },
     });
-    expect(html).toContain(
-      '<b style="font-weight:800">인물 &amp; 블로그</b> 영상을 가장 많이 봤어요',
-    );
-    expect(html.match(/<b style="font-weight:800">/g)).toHaveLength(1);
+    expect(html).toContain("<b>인물 &amp; 블로그</b> 영상을 가장 많이 봤어요");
+    expect(html.match(/<b>/g)).toHaveLength(1);
     expect(html).not.toContain("시간을 가장 많이 썼어요");
   });
 
@@ -480,13 +474,9 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
   it("구간 줄 오른쪽에 날짜 범위, 제목 문장, 상위 3개 + 그 밖 범례", () => {
     const html = render();
     expect(html).toContain("6/5 ~ 6/8");
-    expect(html).toContain(
-      '<b style="font-weight:800">게임</b>에 시간을 가장 많이 썼어요',
-    );
+    expect(html).toContain("<b>게임</b>에 시간을 가장 많이 썼어요");
     // 구간 chartCount 8개 × 40%
-    expect(html).toContain(
-      '<b style="font-weight:800">음악</b> 영상을 가장 많이 봤어요 (3개)',
-    );
+    expect(html).toContain("<b>음악</b> 영상을 가장 많이 봤어요 (3개)");
     const keys = [...html.matchAll(/data-legend-key="([^"]+)"/g)].map(
       (m) => m[1],
     );
@@ -578,10 +568,11 @@ describe("vlReview — 관심 분야 헤드라인", () => {
   it("분야명만 굵고, 띄어쓰기에서만 줄바꿈한다", async () => {
     const { vlReview } = await loadScreens();
     const m = vlReview({ text: "리뷰", topic: "인물과 일상 루틴" }).match(
-      /<p style="([^"]*)">\s*당신은 '<span style="([^"]*)">인물과 일상 루틴<\/span>'에 관심이 많습니다!/,
+      /<p style="([^"]*)">\s*당신은 <span style="([^"]*)">인물과 일상 루틴<\/span>에 관심이 많습니다\./,
     );
+    expect(m[1]).toContain("font-size:var(--vl-fs-4)");
     expect(m[1]).toContain("font-weight:500");
     expect(m[1]).toContain("word-break:keep-all");
-    expect(m[2]).toContain("font-weight:800");
+    expect(m[2]).toContain("font-weight:700");
   });
 });

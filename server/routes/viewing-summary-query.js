@@ -118,4 +118,34 @@ function getViewingSummary(db, anonymousId, now = new Date()) {
   return { days, periods };
 }
 
-module.exports = { getViewingSummary };
+/**
+ * 날짜 하나에 재생한 영상 목록. 기기에 기록이 없는 날(재설치 등) 팝업 목록을 채우는 데 쓴다.
+ * 날짜는 시청 집계와 같은 KST 기준으로 나눠, 수가 그날 validCount + shortCount와 같다.
+ * 카테고리·점수는 넣지 않는다.
+ * @param {string} date - YYYY-MM-DD(KST)
+ * @returns {{date: string, videos: Array}} 자격이 없으면 빈 목록(시청 집계와 같은 규칙)
+ */
+function getDayVideos(db, anonymousId, date, now = new Date()) {
+  const participant = db
+    .prepare(
+      "SELECT group_code, installDate, studyEndCodeVerifiedAt FROM participants WHERE anonymousId = ?",
+    )
+    .get(anonymousId);
+  if (!isTodayReviewEligible(participant, now)) return { date, videos: [] };
+
+  const videos = db
+    .prepare(
+      `SELECT eventId, videoId, watchedAt, watchedSeconds, title
+       FROM video_events
+       WHERE anonymousId = ?
+       ORDER BY watchedAt ASC`,
+    )
+    .all(anonymousId)
+    .filter((e) => {
+      const ms = Date.parse(e.watchedAt);
+      return Number.isFinite(ms) && kstDateStr(new Date(ms)) === date;
+    });
+  return { date, videos };
+}
+
+module.exports = { getViewingSummary, getDayVideos };

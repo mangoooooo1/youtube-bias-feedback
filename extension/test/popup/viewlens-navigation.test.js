@@ -1,14 +1,6 @@
 // @vitest-environment jsdom
 /* global Element */
-import {
-  describe,
-  it,
-  expect,
-  beforeAll,
-  beforeEach,
-  afterEach,
-  vi,
-} from "vitest";
+import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
 import { loadPopup } from "./load-popup.js";
 import {
   DAY,
@@ -451,26 +443,21 @@ describe("기간 탭", () => {
 // 설치 시각을 자정 1ms 전으로 잡으면 24시간 기준은 n+1일째, 달력 기준은 n+2일째로 갈린다
 describe("설치 일차 — KST 달력 기준", () => {
   // 오늘 = 정오 KST로 고정
-  const NOW = Date.parse("2026-10-27T12:00:00+09:00");
-  const TODAY_START = Date.parse("2026-10-27T00:00:00+09:00");
+  const NOW = Date.parse("2026-03-05T12:00:00+09:00");
+  const TODAY_START = Date.parse("2026-03-05T00:00:00+09:00");
   const installBeforeMidnight = (n) =>
     new Date(TODAY_START - n * DAY - 1).toISOString();
-
-  beforeEach(() => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(NOW);
-  });
-  afterEach(() => vi.useRealTimers());
+  const boot = (stored) => bootReady(stored, { now: NOW });
 
   it("어제 자정 직전에 설치했으면 머리말이 2일째다", async () => {
-    const { root } = await bootReady(
+    const { root } = await boot(
       participant({ group: "CON", installDate: installBeforeMidnight(0) }),
     );
     expect(root.textContent).toContain("설치 2일째");
   });
 
   it("베이스라인 마지막 날이면 실험군 홈에 하루 뒤부터 분석을 받는다고 안내한다", async () => {
-    const { root } = await bootReady(
+    const { root } = await boot(
       participant({
         group: "EXP",
         installDate: installBeforeMidnight(BASELINE_DAYS - 2),
@@ -481,7 +468,7 @@ describe("설치 일차 — KST 달력 기준", () => {
   });
 
   it("2구간 첫날이면 기간 탭이 2구간으로 열린다", async () => {
-    const { root } = await bootReady(
+    const { root } = await boot(
       participant({
         group: "EXP",
         installDate: installBeforeMidnight(DAYS_PER_PERIOD - 1),

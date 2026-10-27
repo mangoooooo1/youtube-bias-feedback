@@ -335,7 +335,9 @@ class ViewLensPopup {
       const dateKey = dateStr(this._selectedDate);
       d.dateKey = dateKey;
       d.view = _dayViewForDate(dateKey);
-      // 그날 재생한 영상 전부(진행 중인 세션 포함) + 서버 사유 표시
+      // 기기 기록이 서버 기록 수보다 적으면 그날 목록을 서버에서 받아 다시 그린다
+      VL._requestDayVideos?.(dateKey, d.view.serverCount);
+      // 그날 재생한 영상 전부(진행 중인 세션 포함, 기기에 없는 서버 기록 덧붙임) + 서버 사유 표시
       d.videos = VL.playedVideos(
         VL._allSessions,
         VL._liveVideos,
@@ -345,6 +347,7 @@ class ViewLensPopup {
           correctedTitles: d.view.correctedTitles,
           fetchedTitles: VL._fetchedTitles,
         },
+        VL._dayVideos?.[dateKey],
       );
       VL.today = d;
     }

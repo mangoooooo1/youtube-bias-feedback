@@ -432,6 +432,20 @@ describe("videoIdsWithoutTitle — oEmbed로 물어볼 영상", () => {
       "blank",
     ]);
   });
+
+  it("서버에서 받아 둔 목록의 영상도 같은 기준으로 고른다", async () => {
+    const { videoIdsWithoutTitle } = await loadPopup();
+    const serverVideos = [
+      { eventId: "s1", videoId: "server-sent", title: "보낸 제목" },
+      { eventId: "s2", videoId: "server-meta", title: null },
+      { eventId: "s3", videoId: "server-none", title: null },
+    ];
+    const summary = { days: [{ correctedTitles: { s2: "메타데이터 제목" } }] };
+
+    expect(videoIdsWithoutTitle([], [], summary, serverVideos)).toEqual([
+      "server-none",
+    ]);
+  });
 });
 
 // 다시 그리면 스크롤·입력값이 사라져, 화면에 새로 보일 제목이 생겼을 때만 다시 그린다

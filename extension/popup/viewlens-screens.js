@@ -257,9 +257,7 @@ function _titleBlock(title, aside = "") {
   const pieces = (line) =>
     line
       .map((p) =>
-        p.strong
-          ? `<b style="font-weight:800">${vlEscapeHtml(p.text)}</b>`
-          : vlEscapeHtml(p.text),
+        p.strong ? `<b>${vlEscapeHtml(p.text)}</b>` : vlEscapeHtml(p.text),
       )
       .join("");
   const main = `<div style="flex:1;min-width:0;font-size:var(--vl-fs-5);font-weight:500;line-height:1.4;color:var(--vl-ink);text-wrap:pretty;word-break:keep-all">${pieces(title.title)}</div>`;

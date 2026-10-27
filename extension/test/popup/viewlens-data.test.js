@@ -262,7 +262,12 @@ describe("VL.dayView — 하루치 화면 값", () => {
       title: null,
       excludedReasons: {},
       correctedTitles: {},
+      serverCount: 0,
     });
+  });
+
+  it("그날 서버 기록 수는 유효 영상과 잠깐 본 영상을 더한 수다", () => {
+    expect(VL.dayView({ validCount: 4, shortCount: 2 }).serverCount).toBe(6);
   });
 });
 
@@ -521,6 +526,122 @@ describe("VL.playedVideos — 그날 재생한 영상 목록", () => {
       ["blank", VL.UNKNOWN_VIDEO_TITLE],
       ["none", VL.UNKNOWN_VIDEO_TITLE],
     ]);
+  });
+});
+
+describe("VL.playedVideos·VL.needsServerVideos — 서버에서 받은 그날 목록 합치기", () => {
+  let VL;
+  beforeAll(async () => {
+    VL = await loadVL();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const DATE = "2026-03-05";
+  const v = (eventId, watchedAt, extra = {}) => ({
+    eventId,
+    videoId: `vid-${eventId}`,
+    title: `영상 ${eventId}`,
+    watchedAt,
+    watchedSeconds: 300,
+    ...extra,
+  });
+
+  it("기기 기록을 기준으로 서버에만 있는 eventId를 덧붙여 본 시각 순으로 보여 준다", () => {
+    const sessions = [
+      {
+        videos: [
+          v("local", "2026-03-05T11:00:00+09:00", { title: "기기 제목" }),
+        ],
+      },
+    ];
+    const live = [v("live", "2026-03-05T12:00:00+09:00")];
+    const server = [
+      v("local", "2026-03-05T11:00:00+09:00", { title: "서버 제목" }),
+      v("server-only", "2026-03-05T10:00:00+09:00"),
+      v("other-day", "2026-03-04T10:00:00+09:00"),
+    ];
+
+    const list = VL.playedVideos(sessions, live, DATE, {}, {}, server);
+
+    expect(list.map((x) => [x.eventId, x.title])).toEqual([
+      ["server-only", "영상 server-only"],
+      ["local", "기기 제목"],
+      ["live", "영상 live"],
+    ]);
+  });
+
+  it("아직 서버에 안 보낸 기기 기록도 그대로 보인다", () => {
+    const sessions = [
+      {
+        videos: [v("unsent", "2026-03-05T11:00:00+09:00", { sent: false })],
+      },
+    ];
+    const server = [v("sent", "2026-03-05T10:00:00+09:00")];
+
+    expect(
+      VL.playedVideos(sessions, [], DATE, {}, {}, server).map((x) => x.eventId),
+    ).toEqual(["sent", "unsent"]);
+  });
+
+  it("서버에서 받은 영상에도 최신 집계의 제외 사유와 고친 제목을 붙인다", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-03-06T12:00:00+09:00"));
+    const server = [
+      v("short", "2026-03-05T10:00:00+09:00", { watchedSeconds: 1 }),
+      v("no-time", "2026-03-05T10:01:00+09:00", { watchedSeconds: null }),
+      v("fixed", "2026-03-05T10:02:00+09:00", { title: "보낸 제목" }),
+    ];
+
+    const list = VL.playedVideos(
+      [],
+      [],
+      DATE,
+      { short: "short", "no-time": "pending_time" },
+      { correctedTitles: { fixed: "메타데이터 제목" } },
+      server,
+    );
+
+    expect(list.map((x) => [x.eventId, x.title, x.mark])).toEqual([
+      ["short", "영상 short", "거의 안 봄"],
+      ["no-time", "영상 no-time", "시청 시간 미확인"],
+      ["fixed", "메타데이터 제목", null],
+    ]);
+  });
+
+  it("기기 기록과 받아 둔 서버 목록이 서버 기록 수보다 적을 때만 받아야 한다고 본다", () => {
+    const sessions = [{ videos: [v("e1", "2026-03-05T10:00:00+09:00")] }];
+    const live = [v("e2", "2026-03-05T11:00:00+09:00")];
+
+    expect(VL.needsServerVideos(sessions, live, [], DATE, 3)).toBe(true);
+    expect(VL.needsServerVideos(sessions, live, [], DATE, 2)).toBe(false);
+    // 받아 둔 목록에 기기와 겹치는 eventId는 한 번만 센다
+    const fetched = [
+      v("e1", "2026-03-05T10:00:00+09:00"),
+      v("e3", "2026-03-05T12:00:00+09:00"),
+    ];
+    expect(VL.needsServerVideos(sessions, live, fetched, DATE, 3)).toBe(false);
+    expect(VL.needsServerVideos(sessions, live, fetched, DATE, 4)).toBe(true);
+  });
+
+  it("다른 날 기록은 세지 않고, eventId가 없는 기록은 한 건씩 센다", () => {
+    const sessions = [
+      {
+        videos: [
+          v("prev", "2026-03-04T23:59:00+09:00"),
+          v(null, "2026-03-05T10:00:00+09:00"),
+        ],
+      },
+    ];
+    const fetched = [v(null, "2026-03-05T10:00:00+09:00")];
+
+    expect(VL.needsServerVideos(sessions, [], [], DATE, 1)).toBe(false);
+    expect(VL.needsServerVideos(sessions, [], [], DATE, 2)).toBe(true);
+    expect(VL.needsServerVideos(sessions, [], fetched, DATE, 2)).toBe(false);
+  });
+
+  it("서버 기록이 없는 날은 받지 않는다", () => {
+    expect(VL.needsServerVideos([], [], [], DATE, 0)).toBe(false);
   });
 });
 

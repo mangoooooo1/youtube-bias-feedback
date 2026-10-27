@@ -22,7 +22,10 @@ initializeDB();
 
 const { errorHandler } = require("../../middleware/responseHandler.js");
 const viewingSummaryRouter = require("../../routes/viewing-summary.js");
-const { getViewingSummary } = require("../../routes/viewing-summary-query.js");
+const {
+  getViewingSummary,
+  getDayVideos,
+} = require("../../routes/viewing-summary-query.js");
 
 function buildApp() {
   const app = express();
@@ -363,5 +366,191 @@ describe("getViewingSummary — 날짜·구간 나눔과 화면용 값", () => {
 
     expect(days[0].chartSeconds).toBeNull();
     expect(days[0].timeDistribution).toEqual({ 음악: 1 });
+  });
+});
+
+describe("POST /api/viewing-summary/videos — 배선·자격·입력 검증", () => {
+  const today = () =>
+    new Date().toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+  const post = (body) =>
+    request(app).post("/api/viewing-summary/videos").send(body);
+
+  it("자격 있는 참여자는 그날 영상 목록을 받는다", async () => {
+    addParticipant("vid-eligible", "TEST-EXP", "2026-01-01T00:00:00Z");
+    const eventId = addVideo("vid-eligible", {
+      watchedAt: new Date().toISOString(),
+    });
+
+    const res = await post({ anonymousId: "vid-eligible", date: today() });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.date).toBe(today());
+    expect(res.body.data.videos.map((v) => v.eventId)).toEqual([eventId]);
+  });
+
+  it("베이스라인 기간 중인 EXP와 종료 코드를 입력하기 전 CON은 빈 목록을 받는다", async () => {
+    addParticipant("vid-baseline", "EXP", new Date().toISOString());
+    addParticipant(
+      "vid-con",
+      "CON",
+      new Date(Date.now() - 6 * DAY_MS).toISOString(),
+    );
+    addVideo("vid-baseline", { watchedAt: new Date().toISOString() });
+    addVideo("vid-con", { watchedAt: new Date().toISOString() });
+
+    for (const anonymousId of ["vid-baseline", "vid-con"]) {
+      const res = await post({ anonymousId, date: today() });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({ date: today(), videos: [] });
+    }
+  });
+
+  it("등록되지 않은 참여자는 404", async () => {
+    const res = await post({ anonymousId: "nobody", date: today() });
+    expect(res.status).toBe(404);
+  });
+
+  it.each([
+    ["값 없음", undefined],
+    ["형식이 아님", "abc"],
+    ["없는 달", "2026-13-01"],
+    ["없는 날", "2026-02-30"],
+    ["시각이 붙음", "2026-03-05T00:00:00Z"],
+  ])("date가 %s이면 400", async (_label, date) => {
+    addParticipant("vid-bad-date", "TEST-EXP", "2026-01-01T00:00:00Z");
+
+    const res = await post({ anonymousId: "vid-bad-date", date });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({
+      code: "INVALID_FIELD_VALUE",
+      detail: "date",
+    });
+  });
+
+  describe("PARTICIPANT_TOKEN_SECRET 설정 시", () => {
+    const originalSecret = process.env.PARTICIPANT_TOKEN_SECRET;
+    const SECRET = "wiring-test-secret";
+    const tokenFor = (id) =>
+      crypto.createHmac("sha256", SECRET).update(id).digest("hex");
+
+    beforeEach(() => {
+      process.env.PARTICIPANT_TOKEN_SECRET = SECRET;
+      addParticipant("vid-owner", "TEST-EXP", "2026-01-01T00:00:00Z");
+    });
+
+    afterEach(() => {
+      if (originalSecret === undefined)
+        delete process.env.PARTICIPANT_TOKEN_SECRET;
+      else process.env.PARTICIPANT_TOKEN_SECRET = originalSecret;
+    });
+
+    it("다른 참여자의 토큰이면 403 — 남의 영상 목록을 조회할 수 없다", async () => {
+      const res = await post({
+        anonymousId: "vid-owner",
+        participantToken: tokenFor("someone-else"),
+        date: today(),
+      });
+      expect(res.status).toBe(403);
+    });
+
+    it("토큰이 맞아도 날짜가 틀리면 400", async () => {
+      const res = await post({
+        anonymousId: "vid-owner",
+        participantToken: tokenFor("vid-owner"),
+        date: "abc",
+      });
+      expect(res.status).toBe(400);
+    });
+  });
+});
+
+describe("getDayVideos — 날짜 하나의 영상 목록", () => {
+  const INSTALL = "2026-03-01T00:00:00+09:00";
+  const NOW = new Date("2026-03-06T12:00:00+09:00");
+
+  it("영상을 본 시각(KST) 기준으로 그날 영상만 본 시각 순으로 돌려준다", () => {
+    addParticipant("day", "TEST-EXP", INSTALL);
+    const late = addVideo("day", { watchedAt: "2026-03-05T23:50:00+09:00" });
+    const early = addVideo("day", { watchedAt: "2026-03-04T15:10:00Z" }); // KST 3/5 00:10
+    addVideo("day", { watchedAt: "2026-03-04T23:50:00+09:00" }); // 전날
+    addVideo("day", { watchedAt: "2026-03-05T15:10:00Z" }); // KST 3/6 00:10
+
+    const { date, videos } = getDayVideos(db, "day", "2026-03-05", NOW);
+
+    expect(date).toBe("2026-03-05");
+    expect(videos.map((v) => v.eventId)).toEqual([early, late]);
+  });
+
+  it("eventId·videoId·본 시각·시청 시간·보낸 제목만 돌려주고 카테고리·영상 길이는 넣지 않는다", () => {
+    addParticipant("fields", "TEST-EXP", INSTALL);
+    const eventId = addVideo("fields", {
+      watchedAt: "2026-03-05T10:00:00+09:00",
+      watchedSeconds: 120,
+    });
+
+    const { videos } = getDayVideos(db, "fields", "2026-03-05", NOW);
+
+    expect(videos).toEqual([
+      {
+        eventId,
+        videoId: `vs-${seq}`,
+        watchedAt: "2026-03-05T10:00:00+09:00",
+        watchedSeconds: 120,
+        title: `vs-${seq}`,
+      },
+    ]);
+  });
+
+  it("잠깐 본 영상과 eventId가 없는 기록도 넣어, 수가 그날 시청 집계의 validCount + shortCount와 같다", () => {
+    addParticipant("count", "TEST-EXP", INSTALL);
+    addVideo("count", { watchedAt: "2026-03-05T10:00:00+09:00" });
+    addVideo("count", {
+      watchedAt: "2026-03-05T10:05:00+09:00",
+      watchedSeconds: 1,
+    });
+    addVideo("count", {
+      watchedAt: "2026-03-05T10:10:00+09:00",
+      watchedSeconds: null,
+    });
+    db.prepare(
+      `INSERT INTO video_events (eventId, anonymousId, videoId, watchedAt)
+       VALUES (NULL, 'count', 'legacy', '2026-03-05T10:15:00+09:00')`,
+    ).run();
+    // 날짜를 정할 수 없는 기록은 집계처럼 뺀다
+    db.prepare(
+      `INSERT INTO video_events (eventId, anonymousId, videoId, watchedAt)
+       VALUES ('bad-time', 'count', 'bad', 'not-a-date')`,
+    ).run();
+
+    const { videos } = getDayVideos(db, "count", "2026-03-05", NOW);
+    const day = getViewingSummary(db, "count", NOW).days.find(
+      (d) => d.date === "2026-03-05",
+    );
+
+    expect(day.shortCount).toBe(1);
+    expect(videos).toHaveLength(day.validCount + day.shortCount);
+    expect(videos).toHaveLength(4);
+  });
+
+  it("다른 참여자의 기록은 섞이지 않는다", () => {
+    addParticipant("mine", "TEST-EXP", INSTALL);
+    addParticipant("other", "TEST-EXP", INSTALL);
+    const mine = addVideo("mine", { watchedAt: "2026-03-05T10:00:00+09:00" });
+    addVideo("other", { watchedAt: "2026-03-05T10:00:00+09:00" });
+
+    const { videos } = getDayVideos(db, "mine", "2026-03-05", NOW);
+
+    expect(videos.map((v) => v.eventId)).toEqual([mine]);
+  });
+
+  it("자격이 없으면 빈 목록", () => {
+    addParticipant("not-yet", "EXP", "2026-03-05T00:00:00+09:00");
+    addVideo("not-yet", { watchedAt: "2026-03-05T10:00:00+09:00" });
+
+    expect(getDayVideos(db, "not-yet", "2026-03-05", NOW)).toEqual({
+      date: "2026-03-05",
+      videos: [],
+    });
   });
 });

@@ -272,8 +272,8 @@ function vlReview({
   };
 
   const topicBlock = topic
-    ? `<p style="margin:0 0 10px;font-size:var(--vl-fs-5);font-weight:500;color:var(--vl-ink);line-height:1.4;letter-spacing:-0.02em;text-wrap:pretty;word-break:keep-all">
-        당신은 '<span style="font-weight:800;color:var(--vl-accent)">${vlEscapeHtml(topic)}</span>'에 관심이 많습니다!
+    ? `<p style="margin:0 0 10px;font-size:var(--vl-fs-4);font-weight:500;color:var(--vl-ink);line-height:1.4;letter-spacing:-0.02em;text-wrap:pretty;word-break:keep-all">
+        당신은 <span style="font-weight:700;color:var(--vl-accent)">${vlEscapeHtml(topic)}</span>에 관심이 많습니다.
       </p>`
     : "";
 
