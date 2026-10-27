@@ -11,6 +11,7 @@ window.fillMissingTitles = fillMissingTitles;
 window.videoIdsWithoutTitle = videoIdsWithoutTitle;
 window.hasNewDisplayTitle = hasNewDisplayTitle;
 window.resolveTodayCumulative = resolveTodayCumulative;
+window.todaySessionsOf = todaySessionsOf;
 const DEFAULT_TONE = "indigo";
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
@@ -19,6 +20,20 @@ function dateStr(d) {
   // KST(Asia/Seoul) 기준 YYYY-MM-DD
   // 서버와 동일 기준. 참여자 브라우저의 로컬 시간대에 따라 화면의 날짜/구간 판정이 서버가 실제로 생성하는 구간과 어긋나는 걸 막는다.
   return d.toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+}
+
+/**
+ * 끝난 세션이 어느 날(KST)의 것인지. 서버처럼 영상을 본 시각으로, 마지막 영상의 날짜를 쓴다.
+ * 종료 시각(마지막 영상 + 10분)으로 정하면 자정 직전에 본 세션이 다음 날로 넘어간다.
+ * 영상 시각이 없으면 종료 시각으로 정한다. 종료 시각이 없으면 null.
+ */
+function sessionDateStr(s) {
+  if (!s.endTime) return null;
+  const times = (s.videos ?? [])
+    .map((v) => Date.parse(v.watchedAt))
+    .filter(Number.isFinite);
+  const ms = times.length > 0 ? Math.max(...times) : Date.parse(s.endTime);
+  return dateStr(new Date(ms));
 }
 
 // "YYYY-MM-DD"(KST 날짜 문자열)를 Date로 만든다. KST 정오(=UTC 03:00)에 고정한다 —
@@ -64,8 +79,7 @@ function buildDataForDate(allSessions, targetDate) {
 
   const todaySess = allSessions.filter(
     (s) =>
-      s.endTime &&
-      dateStr(new Date(s.endTime)) === todayStr &&
+      sessionDateStr(s) === todayStr &&
       s.categoryDistribution &&
       Object.keys(s.categoryDistribution).length > 0,
   );
@@ -594,9 +608,7 @@ async function loadTodayReviews(serverUrl, anonymousId, participantToken) {
 /** 오늘(KST) 끝난 로컬 세션들 */
 function todaySessionsOf(allSessions) {
   const todayStr = dateStr(new Date());
-  return (allSessions || []).filter(
-    (s) => s.endTime && dateStr(new Date(s.endTime)) === todayStr,
-  );
+  return (allSessions || []).filter((s) => sessionDateStr(s) === todayStr);
 }
 
 // 오늘 누적 리뷰의 현재 표시 상태를 판정한다. 대상이 아니면 즉시 빈 상태를 반환하고,
