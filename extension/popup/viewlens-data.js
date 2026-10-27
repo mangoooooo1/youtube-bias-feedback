@@ -130,6 +130,8 @@ function dayView(day) {
     ),
     // 영상 목록 제목 — 기록한 제목과 다른 YouTube 메타데이터 제목(eventId → 제목)
     correctedTitles: day?.correctedTitles ?? {},
+    // 그날 서버 영상 기록 수(잠깐 본 영상 포함). 기기 목록이 모자란지 판정하는 데 쓴다
+    serverCount: (day?.validCount ?? 0) + (day?.shortCount ?? 0),
   };
 }
 
@@ -193,14 +195,56 @@ function videoTitle(v, { correctedTitles = {}, fetchedTitles = {} } = {}) {
 }
 
 /**
+ * 그날 영상 기록. 기기 기록(끝난 세션 → 진행 중인 세션) 뒤에 서버에서 받은 목록을 이어
+ * 같은 eventId는 앞의 것만 남긴다. eventId가 없는 기록은 한 건씩 둔다.
+ */
+function recordsOfDate(sessions, liveVideos, serverVideos, dateKey) {
+  const all = [
+    ...(sessions || []).flatMap((s) => s.videos || []),
+    ...(liveVideos || []),
+    ...(serverVideos || []),
+  ];
+  const seen = new Set();
+  return all.filter((v) => {
+    const ms = Date.parse(v.watchedAt);
+    if (!Number.isFinite(ms) || kstDate(new Date(ms)) !== dateKey) return false;
+    // 세션 종료 직전·직후에 같은 영상 기록이 두 곳에 잠깐 함께 있을 수 있다
+    if (v.eventId) {
+      if (seen.has(v.eventId)) return false;
+      seen.add(v.eventId);
+    }
+    return true;
+  });
+}
+
+/**
+ * 그날 목록을 서버에서 받아야 하는지. 기기 기록과 받아 둔 서버 목록이 서버 기록 수보다 적을 때만.
+ * @param {number} serverCount - 그날 서버 기록 수(VL.dayView().serverCount)
+ */
+function needsServerVideos(
+  sessions,
+  liveVideos,
+  serverVideos,
+  dateKey,
+  serverCount,
+) {
+  return (
+    recordsOfDate(sessions, liveVideos, serverVideos, dateKey).length <
+    serverCount
+  );
+}
+
+/**
  * 그날 재생한 영상 목록
  * 끝난 세션과 진행 중인 세션의 영상 기록을 모두 모아 본 시각 순으로.
+ * 서버에서 받은 목록이 있으면 기기에 없는 eventId만 덧붙인다.
  * @param {Array<{videos?: Array}>} sessions - 끝난 세션들
  * @param {Array<object>} liveVideos - 진행 중인 세션의 영상 기록(video__ 키)
  * @param {string} dateKey - YYYY-MM-DD(KST)
  * @param {Record<string, string>} reasons - eventId → 서버 사유(VL.dayView().excludedReasons)
  * @param {{correctedTitles?: Record<string, string>, fetchedTitles?: Record<string, string|null>}} [titles]
  *   서버 메타데이터 제목(eventId →, VL.dayView().correctedTitles)·oEmbed 제목(videoId →)
+ * @param {Array<object>} [serverVideos] - 서버에서 받은 그날 목록(/api/viewing-summary/videos)
  * @returns {Array<{title: string, videoId: string|null, eventId: string|null, mark: string|null}>}
  */
 function playedVideos(
@@ -209,28 +253,13 @@ function playedVideos(
   dateKey,
   reasons = {},
   titles = {},
+  serverVideos = [],
 ) {
-  const all = [
-    ...(sessions || []).flatMap((s) => s.videos || []),
-    ...(liveVideos || []),
-  ];
-  const seen = new Set();
   const noTimeMark =
     dateKey === kstDate(new Date())
       ? PLAYED_VIDEO_MARKS.pending_time
       : PLAYED_VIDEO_MARKS.unconfirmed;
-  return all
-    .filter((v) => {
-      const ms = Date.parse(v.watchedAt);
-      if (!Number.isFinite(ms) || kstDate(new Date(ms)) !== dateKey)
-        return false;
-      // 세션 종료 직전·직후에 같은 영상 기록이 두 곳에 잠깐 함께 있을 수 있다
-      if (v.eventId) {
-        if (seen.has(v.eventId)) return false;
-        seen.add(v.eventId);
-      }
-      return true;
-    })
+  return recordsOfDate(sessions, liveVideos, serverVideos, dateKey)
     .sort((a, b) => Date.parse(a.watchedAt) - Date.parse(b.watchedAt))
     .map((v) => {
       const reason = v.eventId ? reasons[v.eventId] : undefined;
@@ -517,6 +546,7 @@ window.VL = {
   formatDuration,
   donutPair,
   playedVideos,
+  needsServerVideos,
   UNKNOWN_VIDEO_TITLE,
   reviewAsOfLabel,
   today,
