@@ -56,6 +56,7 @@ const stored = (over) =>
 // days: 집계에 넣을 날짜 → 서버 기록 수, videosByDate: 날짜 → 서버 목록(함수면 응답 그대로)
 function responses({ days = {}, videosByDate = {}, reviews = [] }) {
   return {
+    "/oembed": { title: "oEmbed 제목" },
     "/api/viewing-summary": {
       data: {
         days: Object.entries(days).map(([date, n]) => summaryDay(date, n)),
@@ -268,5 +269,37 @@ describe("오늘 — 같은 날 재설치", () => {
       ),
     );
     expect(data.sessions).toEqual([]);
+  });
+});
+
+describe("서버에서 받은 영상의 제목", () => {
+  const opts = (videos) => ({
+    days: { [YESTERDAY]: videos.length },
+    videosByDate: { [YESTERDAY]: videos },
+    reviews: [review(YESTERDAY)],
+  });
+
+  it("보낸 제목도 메타데이터 제목도 없으면 oEmbed로 받아 보여 주고 기기에 둔다", async () => {
+    const { root, server, data } = await boot(
+      stored(),
+      opts([video("s1", "2026-03-04T10:00:00+09:00", null)]),
+    );
+    prevDay(root);
+    await vi.waitFor(() => expect(root.textContent).toContain("oEmbed 제목"));
+
+    expect(server.count("/oembed")).toBe(1);
+    expect(data.videoTitleCache).toEqual({ "vid-s1": "oEmbed 제목" });
+  });
+
+  it("보낸 제목이 있으면 oEmbed에 묻지 않는다", async () => {
+    const { root, server } = await boot(
+      stored(),
+      opts([video("s1", "2026-03-04T10:00:00+09:00", "보낸 제목")]),
+    );
+    prevDay(root);
+    await vi.waitFor(() => expect(root.textContent).toContain("보낸 제목"));
+    await settle();
+
+    expect(server.count("/oembed")).toBe(0);
   });
 });
