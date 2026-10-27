@@ -207,21 +207,98 @@ describe("지난 날짜 리뷰 — 서버 이력", () => {
     expect(root.textContent).toContain("이 날 시청 기록이 없어요");
     expect(root.textContent).not.toContain("기록 없는 날 리뷰");
   });
+});
 
-  it("오늘은 로컬 세션이 없으면 서버 리뷰가 있어도 오늘 리뷰 카드를 띄우지 않는다", async () => {
-    const TODAY = kst(new Date().toISOString());
-    const { root } = await bootReady(stored({ sessions: [] }), {
-      responses: {
-        "/api/today-reviews": {
-          data: [
-            { reviewDate: TODAY, review: "오늘 서버 리뷰", sessionCount: 1 },
-          ],
-        },
-        "/api/viewing-summary": {
-          data: { days: [viewingDay(TODAY)], periods: [] },
+// 재설치·저장소 초기화로 기기에 오늘 세션이 없어도 서버의 오늘 리뷰를 보여 주고,
+// 블러는 그 리뷰를 받은 세션의 서버 확인 기록으로 정한다.
+describe("오늘 리뷰 — 기기에 리뷰를 받은 세션이 없을 때", () => {
+  const TODAY = () => kst(new Date().toISOString());
+  const serverToday = (over) => ({
+    reviewDate: TODAY(),
+    review: "오늘 서버 리뷰",
+    sessionCount: 1,
+    reviewSessionId: "s-before",
+    reviewConfirmed: false,
+    ...over,
+  });
+  const viewingToday = () => ({
+    date: TODAY(),
+    confirmedCount: 1,
+    chartCount: 1,
+    chartSeconds: 120,
+    timeDistribution: { 음악: 1 },
+    countDistribution: { 음악: 1 },
+  });
+  const boot = (sessions, row) =>
+    bootReady(
+      participant({
+        group: "EXP",
+        installDate: daysAgo(BASELINE_DAYS + 1),
+        sessions,
+      }),
+      {
+        responses: {
+          "/api/today-reviews": { data: [row] },
+          "/api/viewing-summary": {
+            data: { days: [viewingToday()], periods: [] },
+          },
         },
       },
-    });
+    );
+  const confirmBtn = (root) => root.querySelector("#vl-feedback-confirm-btn");
+
+  it("확인 기록이 없으면 가려서 보이고, 확인하면 리뷰를 받은 세션으로 기록한다", async () => {
+    const { root, data, server } = await boot([], serverToday());
+    await vi.waitFor(() => expect(confirmBtn(root)).not.toBeNull());
+    expect(data.livePopupEvent.todayFeedbackViewed).toBe(0);
+
+    click(root, "#vl-feedback-confirm-btn");
+    await vi.waitFor(() =>
+      expect(server.paths()).toContain(
+        "/api/sessions/s-before/feedback-confirmed",
+      ),
+    );
+    expect(confirmBtn(root)).toBeNull();
+    expect(data.livePopupEvent.todayFeedbackViewed).toBe(1);
+  });
+
+  it("서버에 확인 기록이 있으면 가리지 않고 본 것으로 센다", async () => {
+    const { root, data } = await boot(
+      [],
+      serverToday({ reviewConfirmed: true }),
+    );
+    await vi.waitFor(() =>
+      expect(root.textContent).toContain("오늘 서버 리뷰"),
+    );
+    expect(confirmBtn(root)).toBeNull();
+    expect(data.livePopupEvent.todayFeedbackViewed).toBe(1);
+  });
+
+  it("재설치 뒤 리뷰가 바뀌지 않은 새 세션만 있으면 확인은 리뷰를 받은 세션으로 기록한다", async () => {
+    const { root, server } = await boot([session("s-after")], serverToday());
+    await vi.waitFor(() => expect(confirmBtn(root)).not.toBeNull());
+
+    click(root, "#vl-feedback-confirm-btn");
+    await vi.waitFor(() =>
+      expect(server.paths()).toContain(
+        "/api/sessions/s-before/feedback-confirmed",
+      ),
+    );
+    expect(server.paths()).not.toContain(
+      "/api/sessions/s-after/feedback-confirmed",
+    );
+  });
+
+  it("기기에 리뷰를 받은 세션이 있으면 서버 확인 기록이 다른 세션 것이어도 가린다", async () => {
+    const { root } = await boot(
+      [session("s-new", { review: "오늘 서버 리뷰" })],
+      serverToday({ reviewConfirmed: true }),
+    );
+    await vi.waitFor(() => expect(confirmBtn(root)).not.toBeNull());
+  });
+
+  it("서버가 리뷰를 받은 세션을 모르면 확인을 기록할 곳이 없어 카드를 띄우지 않는다", async () => {
+    const { root } = await boot([], serverToday({ reviewSessionId: null }));
     await vi.waitFor(() =>
       expect(root.querySelector("#vl-date-prev")).not.toBeNull(),
     );
