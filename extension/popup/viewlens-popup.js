@@ -632,13 +632,14 @@ async function resolveTodayCumulative(eligible, reviews, todaySessions) {
   // 모든 세션이 응답을 받았는데 리뷰가 없다.
   if (!todayRow) return { ...empty, noReview: true };
 
-  // 잠금·열람·확인은 지금 리뷰를 실제로 받은 세션 기준. 기기에 그 세션이 없으면(재설치 등) 서버가 알려 준 세션을 쓴다
+  // 잠금·열람·확인은 지금 리뷰를 실제로 받은 세션 기준. 서버가 알려 준 세션을 먼저 쓰고,
+  // 없으면(세션 응답으로 갈아 끼운 캐시) 기기에서 리뷰를 받은 세션을 쓴다
   const localReviewSession = [...todaySessions]
     .reverse()
     .find((s) => isRealReview(s.review));
   const sessionId =
-    localReviewSession?.sessionId ??
     todayRow.reviewSessionId ??
+    localReviewSession?.sessionId ??
     todaySessions.at(-1)?.sessionId ??
     null;
   // 기기 기록이나 서버 기록 중 하나라도 확인했으면 다시 가리지 않는다
