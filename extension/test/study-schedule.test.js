@@ -97,21 +97,61 @@ describe("isBaselinePeriod — 베이스라인 경계", () => {
     );
   });
 
-  it("경과 BASELINE_DAYS - 1일은 베이스라인이다", () => {
+  it("BASELINE_DAYS번째 날(설치일 포함)은 베이스라인이다", () => {
     const { BASELINE_DAYS, isBaselinePeriod } = ViewLensStudy;
     const install = new Date("2026-01-01T00:00:00Z");
     const now = new Date(install.getTime() + (BASELINE_DAYS - 1) * DAY_MS);
     expect(isBaselinePeriod(install.toISOString(), now)).toBe(true);
   });
 
-  it("경과 정확히 BASELINE_DAYS일이면 베이스라인이 종료된다(경계값)", () => {
+  it("BASELINE_DAYS + 1번째 날이면 베이스라인이 종료된다", () => {
     const { BASELINE_DAYS, isBaselinePeriod } = ViewLensStudy;
     const install = new Date("2026-01-01T00:00:00Z");
     const now = new Date(install.getTime() + BASELINE_DAYS * DAY_MS);
     expect(isBaselinePeriod(install.toISOString(), now)).toBe(false);
   });
 
-  it("경과 BASELINE_DAYS + 7일은 베이스라인이 아니다", () => {
+  it.each([
+    ["KST 자정 직전 설치(23:00)", "2026-01-01T14:00:00.000Z"],
+    ["KST 자정 직후 설치(00:01)", "2026-01-01T15:01:00.000Z"],
+  ])(
+    "%s: 설치 시각과 관계없이 1구간 다음 날 00:00 KST에 끝난다",
+    (_label, installDate) => {
+      const { BASELINE_DAYS, isBaselinePeriod } = ViewLensStudy;
+      const endsAt = Date.parse(
+        `${dayFromInstall(installDate, BASELINE_DAYS)}T00:00:00+09:00`,
+      );
+      expect(isBaselinePeriod(installDate, new Date(endsAt - 1))).toBe(true);
+      expect(isBaselinePeriod(installDate, new Date(endsAt))).toBe(false);
+    },
+  );
+
+  it.each(["UTC", "America/Los_Angeles"])(
+    "실행 환경 시간대가 %s여도 KST 기준으로 판정한다",
+    (tz) => {
+      const { isBaselinePeriod } = ViewLensStudy;
+      const original = process.env.TZ;
+      process.env.TZ = tz;
+      try {
+        const install = "2026-01-01T14:00:00.000Z"; // 23:00 KST
+        expect(
+          isBaselinePeriod(install, new Date("2026-01-04T14:59:59.999Z")),
+        ).toBe(true);
+        expect(
+          isBaselinePeriod(install, new Date("2026-01-04T15:00:00.000Z")),
+        ).toBe(false);
+      } finally {
+        if (original === undefined) delete process.env.TZ;
+        else process.env.TZ = original;
+      }
+    },
+  );
+
+  it("손상된 installDate는 예외 없이 베이스라인이 아닌 것으로 본다", () => {
+    expect(ViewLensStudy.isBaselinePeriod("not-a-date")).toBe(false);
+  });
+
+  it("BASELINE_DAYS + 7번째 날은 베이스라인이 아니다", () => {
     const { BASELINE_DAYS, isBaselinePeriod } = ViewLensStudy;
     const install = new Date("2026-01-01T00:00:00Z");
     const now = new Date(install.getTime() + (BASELINE_DAYS + 7) * DAY_MS);

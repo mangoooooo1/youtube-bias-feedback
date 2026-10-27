@@ -113,6 +113,16 @@ describe("isBaselinePeriod — extension/study-schedule.js와 동치성", () => 
       "2026-01-01T00:00:00+09:00",
       "2026-01-05T00:00:00+09:00",
     ],
+    [
+      "23:00 설치, 4일째 마지막 순간",
+      "2026-01-01T23:00:00+09:00",
+      "2026-01-04T23:59:59+09:00",
+    ],
+    [
+      "23:00 설치, 5일째 00:00",
+      "2026-01-01T23:00:00+09:00",
+      "2026-01-05T00:00:00+09:00",
+    ],
   ])("%s — 두 구현이 동일한 결과를 낸다", (_label, installDate, nowStr) => {
     const now = new Date(nowStr);
     // isTodayReviewEligible을 거치지 않고 직접 비교할 수 있도록, 같은 installDate/now로
