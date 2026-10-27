@@ -41,7 +41,25 @@ const SELECT_COLUMNS = `
   review, reviewTopic, source, promptVersion, generatedAt
 `;
 
-/** anonymousId의 "오늘 누적 리뷰" 전체 이력을 reviewDate 오름차순으로 반환한다. 자격 없으면 빈 배열. */
+/**
+ * 날짜별로 그 리뷰를 받은 세션을 찾는다. 같은 날(서버 기록 시각, KST) 리뷰 문장이 같은 마지막 세션.
+ * 폴백 문장은 날마다 같을 수 있어 날짜까지 맞춘다.
+ * @returns {Map<string, {sessionId: string, feedbackConfirmedAt: string|null}>} "날짜\n문장" → 세션
+ */
+function reviewSessionsByDate(db, anonymousId) {
+  const rows = db
+    .prepare(
+      `SELECT sessionId, review, feedbackConfirmedAt, date(createdAt, '+9 hours') AS kstDate
+       FROM sessions WHERE anonymousId = ? AND review IS NOT NULL ORDER BY id ASC`,
+    )
+    .all(anonymousId);
+  return new Map(rows.map((s) => [`${s.kstDate}\n${s.review}`, s]));
+}
+
+/**
+ * anonymousId의 "오늘 누적 리뷰" 전체 이력을 reviewDate 오름차순으로 반환한다. 자격 없으면 빈 배열.
+ * 재설치로 기기에 세션이 없어도 블러를 판정할 수 있게, 그 리뷰를 받은 세션 id와 확인 여부를 함께 싣는다.
+ */
 function getTodayReviews(db, anonymousId, now = new Date()) {
   const participant = db
     .prepare(
@@ -53,12 +71,21 @@ function getTodayReviews(db, anonymousId, now = new Date()) {
     return [];
   }
 
-  return db
+  const reviews = db
     .prepare(
       `SELECT ${SELECT_COLUMNS} FROM today_reviews
        WHERE anonymousId = ? ORDER BY reviewDate ASC`,
     )
     .all(anonymousId);
+  const sessions = reviewSessionsByDate(db, anonymousId);
+  return reviews.map((r) => {
+    const s = sessions.get(`${r.reviewDate}\n${r.review}`);
+    return {
+      ...r,
+      reviewSessionId: s?.sessionId ?? null,
+      reviewConfirmed: !!s?.feedbackConfirmedAt,
+    };
+  });
 }
 
 module.exports = {

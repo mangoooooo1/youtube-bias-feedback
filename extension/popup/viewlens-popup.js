@@ -72,7 +72,7 @@ function buildDataForDate(allSessions, targetDate) {
 
   if (todaySess.length === 0) {
     // 지난 날짜는 로컬 세션이 없어도(저장소 초기화·재설치) 서버 이력의 리뷰를 보여 준다.
-    // 화면은 서버 시청 집계에 그날 기록이 있을 때만 그려진다. 오늘 카드는 세션 기준으로 따로 판정한다
+    // 화면은 서버 시청 집계에 그날 기록이 있을 때만 그려진다. 오늘 카드는 VL._todayCumulative로 따로 그린다
     const pastRow =
       todayStr !== dateStr(new Date())
         ? VL._todayReviewsByDate?.[todayStr]
@@ -632,14 +632,21 @@ async function resolveTodayCumulative(eligible, reviews, todaySessions) {
   // 모든 세션이 응답을 받았는데 리뷰가 없다.
   if (!todayRow) return { ...empty, noReview: true };
 
-  // 잠금·열람·확인은 지금 리뷰를 실제로 받은 세션 기준
-  const reviewSession =
-    [...todaySessions].reverse().find((s) => isRealReview(s.review)) ??
-    todaySessions.at(-1);
-  const sessionId = reviewSession?.sessionId ?? null;
-  const locked = isRealReview(todayRow.review)
-    ? !(await isFeedbackConfirmed(sessionId))
-    : false;
+  // 잠금·열람·확인은 지금 리뷰를 실제로 받은 세션 기준. 서버가 알려 준 세션을 먼저 쓰고,
+  // 없으면(세션 응답으로 갈아 끼운 캐시) 기기에서 리뷰를 받은 세션을 쓴다
+  const localReviewSession = [...todaySessions]
+    .reverse()
+    .find((s) => isRealReview(s.review));
+  const sessionId =
+    todayRow.reviewSessionId ??
+    localReviewSession?.sessionId ??
+    todaySessions.at(-1)?.sessionId ??
+    null;
+  // 기기 기록이나 서버 기록 중 하나라도 확인했으면 다시 가리지 않는다
+  const confirmed =
+    (await isFeedbackConfirmed(sessionId)) ||
+    (sessionId === todayRow.reviewSessionId && !!todayRow.reviewConfirmed);
+  const locked = isRealReview(todayRow.review) ? !confirmed : false;
 
   return {
     ...empty,
@@ -1113,8 +1120,7 @@ async function boot() {
     !!VL.GROUPS[stored.group]?.feedback &&
     (VL.isTestGroup(stored.group) || !VL.isBaselinePeriod(installDate));
   // "오늘" 누적 리뷰 — 세션 리뷰와 같은 게이팅(feedbackActive)을 재사용하고,
-  // 오늘 세션이 하나도 없으면 대상에서 제외한다(§18 "베이스라인/대상 판별 규칙을 세션
-  // 리뷰와 동일하게 맞춘다"). VL.today가 아니라 별도 키(VL._todayCumulative)에 두는 이유는
+  // 오늘 세션도 서버의 오늘 리뷰도 없으면 대상에서 제외한다. VL.today가 아니라 별도 키(VL._todayCumulative)에 두는 이유는
   // VL._todayConfirmed와 같다 — ViewLensPopup.render()가 탭 렌더마다 VL.today를
   // buildDataForDate로 통째로 재생성해서, 거기 두면 날짜를 옮길 때 상태가 오염된다.
   // let인 이유: 팝업을 열어둔 채 오늘 첫 세션이 끝나면(boot 시점엔 세션 0개라 대상에서 제외됨) storage.onChanged에서
@@ -1126,8 +1132,6 @@ async function boot() {
     !!stored.studyEndCodeVerified;
   // 지난 날짜 리뷰는 오늘 세션이 없어도 보여야 해서, 이력 조회는 오늘 세션 수와 따로 판정한다.
   const reviewHistoryEligible = feedbackActive || studyEndTodayEligible;
-  let todayCumulativeEligible =
-    reviewHistoryEligible && realToday.sessionIds.length > 0;
   // 대상이 아니면 조회 자체를 하지 않는다.
   const todayReviewsList = reviewHistoryEligible
     ? await loadTodayReviews(
@@ -1139,6 +1143,12 @@ async function boot() {
   VL._todayReviewsByDate = Object.fromEntries(
     (todayReviewsList || []).map((r) => [r.reviewDate, r]),
   );
+  // 기기에 오늘 세션이 없어도(재설치 등) 서버가 오늘 리뷰를 받은 세션을 알려 주면 대상이다.
+  // 그 세션을 모르면 확인을 기록할 곳이 없어 이전처럼 띄우지 않는다
+  let todayCumulativeEligible =
+    reviewHistoryEligible &&
+    (realToday.sessionIds.length > 0 ||
+      !!VL._todayReviewsByDate[dateStr(new Date())]?.reviewSessionId);
   VL._todayCumulative = await resolveTodayCumulative(
     todayCumulativeEligible,
     todayReviewsList,

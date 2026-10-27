@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Database from "better-sqlite3-multiple-ciphers";
 import {
   getTodayReviews,
@@ -30,8 +30,31 @@ function createTestDb() {
       promptVersion TEXT,
       generatedAt TEXT NOT NULL
     );
+    CREATE TABLE sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      anonymousId TEXT NOT NULL,
+      sessionId TEXT NOT NULL UNIQUE,
+      review TEXT,
+      feedbackConfirmedAt TEXT,
+      createdAt TEXT DEFAULT (datetime('now'))
+    );
   `);
   return db;
+}
+
+// createdAt은 실제 테이블처럼 UTC "YYYY-MM-DD HH:MM:SS"
+function insertSession(db, anonymousId, sessionId, overrides = {}) {
+  db.prepare(
+    `INSERT INTO sessions (anonymousId, sessionId, review, feedbackConfirmedAt, createdAt)
+     VALUES (@anonymousId, @sessionId, @review, @feedbackConfirmedAt, @createdAt)`,
+  ).run({
+    anonymousId,
+    sessionId,
+    review: null,
+    feedbackConfirmedAt: null,
+    createdAt: "2026-03-05 03:00:00",
+    ...overrides,
+  });
 }
 
 function insertParticipant(
@@ -252,5 +275,87 @@ describe("getTodayReviews — DB 통합", () => {
     const rows = getTodayReviews(db, "con-verified");
     expect(rows).toHaveLength(1);
     expect(rows[0].reviewDate).toBe("2026-03-05");
+  });
+});
+
+describe("getTodayReviews — 리뷰를 받은 세션과 확인 여부", () => {
+  let db;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-10T00:00:00+09:00"));
+    db = createTestDb();
+    insertParticipant(db, "u1", "EXP", "2026-03-01T00:00:00+09:00");
+  });
+  afterEach(() => {
+    db.close();
+    vi.useRealTimers();
+  });
+
+  const rowFor = (date) =>
+    getTodayReviews(db, "u1").find((r) => r.reviewDate === date);
+
+  it("그날 같은 리뷰 문장을 받은 마지막 세션과 그 세션의 확인 여부를 싣는다", () => {
+    insertTodayReview(db, "u1", "2026-03-05", { review: "B" });
+    insertSession(db, "u1", "s1", {
+      review: "A",
+      feedbackConfirmedAt: "2026-03-05T03:10:00.000Z",
+    });
+    insertSession(db, "u1", "s2", { review: "B" });
+    insertSession(db, "u1", "s3");
+
+    expect(rowFor("2026-03-05")).toMatchObject({
+      reviewSessionId: "s2",
+      reviewConfirmed: false,
+    });
+  });
+
+  it("리뷰를 받은 세션을 확인했으면 확인됨으로 싣는다", () => {
+    insertTodayReview(db, "u1", "2026-03-05", { review: "A" });
+    insertSession(db, "u1", "s1", {
+      review: "A",
+      feedbackConfirmedAt: "2026-03-05T03:10:00.000Z",
+    });
+
+    expect(rowFor("2026-03-05")).toMatchObject({
+      reviewSessionId: "s1",
+      reviewConfirmed: true,
+    });
+  });
+
+  it("날짜는 KST 기준이다 — UTC로 전날 15시 이후에 기록된 세션은 다음 날 리뷰에 연결된다", () => {
+    insertTodayReview(db, "u1", "2026-03-05", { review: "A" });
+    insertSession(db, "u1", "s1", {
+      review: "A",
+      createdAt: "2026-03-04 15:30:00",
+    });
+
+    expect(rowFor("2026-03-05").reviewSessionId).toBe("s1");
+  });
+
+  it("다른 날 같은 문장을 받은 세션은 연결하지 않는다", () => {
+    insertTodayReview(db, "u1", "2026-03-05", { review: "분석 불가 문장" });
+    insertSession(db, "u1", "s1", {
+      review: "분석 불가 문장",
+      feedbackConfirmedAt: "2026-03-04T03:10:00.000Z",
+      createdAt: "2026-03-04 03:00:00",
+    });
+
+    expect(rowFor("2026-03-05")).toMatchObject({
+      reviewSessionId: null,
+      reviewConfirmed: false,
+    });
+  });
+
+  it("다른 참여자의 세션은 연결하지 않는다", () => {
+    insertTodayReview(db, "u1", "2026-03-05", { review: "A" });
+    insertSession(db, "u2", "other", {
+      review: "A",
+      feedbackConfirmedAt: "2026-03-05T03:10:00.000Z",
+    });
+
+    expect(rowFor("2026-03-05")).toMatchObject({
+      reviewSessionId: null,
+      reviewConfirmed: false,
+    });
   });
 });
