@@ -229,12 +229,13 @@ describe("오늘 리뷰 — 기기에 리뷰를 받은 세션이 없을 때", ()
     timeDistribution: { 음악: 1 },
     countDistribution: { 음악: 1 },
   });
-  const boot = (sessions, row) =>
+  const boot = (sessions, row, over = {}) =>
     bootReady(
       participant({
         group: "EXP",
         installDate: daysAgo(BASELINE_DAYS + 1),
         sessions,
+        ...over,
       }),
       {
         responses: {
@@ -289,12 +290,24 @@ describe("오늘 리뷰 — 기기에 리뷰를 받은 세션이 없을 때", ()
     );
   });
 
-  it("기기에 리뷰를 받은 세션이 있으면 서버 확인 기록이 다른 세션 것이어도 가린다", async () => {
-    const { root } = await boot(
-      [session("s-new", { review: "오늘 서버 리뷰" })],
-      serverToday({ reviewConfirmed: true }),
+  it("기기의 이전 리뷰 세션을 확인했어도 서버가 다른 세션에서 리뷰를 다시 만들었으면 가리고, 확인은 그 세션으로 기록한다", async () => {
+    // s-new는 서버엔 저장됐지만 응답을 못 받아(409 재시도) 기기에 리뷰가 없다
+    const { root, server } = await boot(
+      [session("s-old", { review: "이전 리뷰" }), session("s-new")],
+      serverToday({ reviewSessionId: "s-new" }),
+      { confirmedFeedbackSessionIds: ["s-old"] },
     );
     await vi.waitFor(() => expect(confirmBtn(root)).not.toBeNull());
+
+    click(root, "#vl-feedback-confirm-btn");
+    await vi.waitFor(() =>
+      expect(server.paths()).toContain(
+        "/api/sessions/s-new/feedback-confirmed",
+      ),
+    );
+    expect(server.paths()).not.toContain(
+      "/api/sessions/s-old/feedback-confirmed",
+    );
   });
 
   it("서버가 리뷰를 받은 세션을 모르면 확인을 기록할 곳이 없어 카드를 띄우지 않는다", async () => {
