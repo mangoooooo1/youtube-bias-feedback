@@ -597,3 +597,110 @@ describe("resolveTodayCumulative — 오늘 리뷰 카드 상태", () => {
     });
   });
 });
+
+// 세션 종료 시각은 마지막 영상 + 10분이라, 23:55에 본 세션은 다음 날 00:05에 끝난다.
+// 서버는 영상을 본 시각으로 날짜를 정하므로 이 세션은 전날 것이다.
+describe("세션 날짜 — 영상을 본 시각 기준", () => {
+  const kst = (time) => new Date(`${time}+09:00`).toISOString();
+  const NOW = kst("2026-03-06T00:30:00");
+  // 23:55 영상 하나, 00:05 종료
+  const lateNight = (over) => ({
+    sessionId: "late",
+    endTime: kst("2026-03-06T00:05:00"),
+    categoryDistribution: { 뉴스: 1 },
+    syncedToServer: true,
+    videos: [{ eventId: "e1", watchedAt: kst("2026-03-05T23:55:00") }],
+    ...over,
+  });
+  // 23:50·00:02 영상, 00:12 종료 — 자정을 걸쳤다
+  const acrossMidnight = (over) => ({
+    sessionId: "across",
+    endTime: kst("2026-03-06T00:12:00"),
+    categoryDistribution: { 뉴스: 1 },
+    syncedToServer: true,
+    videos: [
+      { eventId: "e2", watchedAt: kst("2026-03-05T23:50:00") },
+      { eventId: "e3", watchedAt: kst("2026-03-06T00:02:00") },
+    ],
+    ...over,
+  });
+  const todayRow = {
+    reviewDate: "2026-03-06",
+    review: "오늘 리뷰",
+    reviewTopic: "음악",
+    generatedAt: kst("2026-03-06T00:20:00"),
+    sessionCount: 1,
+  };
+
+  async function load() {
+    const popup = await loadPopup();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(NOW));
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: async () => ({ confirmedFeedbackSessionIds: [] }),
+          set: async () => {},
+        },
+      },
+    });
+    return popup;
+  }
+
+  it("자정 직전에 본 세션은 다음 날 오늘 세션·리뷰 대상에 들지 않고 전날 세션이 된다", async () => {
+    const { todaySessionsOf, buildDataForDate } = await load();
+    const sessions = [lateNight()];
+
+    expect(todaySessionsOf(sessions)).toEqual([]);
+    expect(buildDataForDate(sessions, new Date(NOW))).toMatchObject({
+      isEmpty: true,
+      sessionIds: [],
+    });
+    expect(
+      buildDataForDate(sessions, new Date(kst("2026-03-05T12:00:00")))
+        .sessionIds,
+    ).toEqual(["late"]);
+  });
+
+  it("자정 직전에 본 세션이 서버 응답을 기다려도 다음 날 오늘 탭은 생성 중이 아니다", async () => {
+    const { todaySessionsOf, resolveTodayCumulative } = await load();
+    const result = await resolveTodayCumulative(
+      true,
+      [],
+      todaySessionsOf([lateNight({ syncedToServer: false })]),
+    );
+    expect(result.generating).toBe(false);
+  });
+
+  it("자정 직전에 본 세션을 다음 날 리뷰의 잠금 세션으로 쓰지 않는다", async () => {
+    const { todaySessionsOf, resolveTodayCumulative } = await load();
+    const result = await resolveTodayCumulative(
+      true,
+      [todayRow],
+      todaySessionsOf([lateNight()]),
+    );
+    expect(result.sessionId).toBeNull();
+  });
+
+  it("자정을 걸친 세션은 마지막 영상을 본 다음 날의 오늘 세션이다", async () => {
+    const { todaySessionsOf, buildDataForDate, resolveTodayCumulative } =
+      await load();
+    const sessions = [lateNight(), acrossMidnight({ review: "오늘 리뷰" })];
+
+    expect(todaySessionsOf(sessions).map((s) => s.sessionId)).toEqual([
+      "across",
+    ]);
+    expect(buildDataForDate(sessions, new Date(NOW)).sessionIds).toEqual([
+      "across",
+    ]);
+    expect(
+      await resolveTodayCumulative(true, [todayRow], todaySessionsOf(sessions)),
+    ).toMatchObject({ sessionId: "across", locked: true });
+  });
+
+  it("영상 시각이 없는 세션은 종료 시각으로 날짜를 정한다", async () => {
+    const { todaySessionsOf } = await load();
+    const sessions = [lateNight({ videos: undefined })];
+    expect(todaySessionsOf(sessions).map((s) => s.sessionId)).toEqual(["late"]);
+  });
+});
