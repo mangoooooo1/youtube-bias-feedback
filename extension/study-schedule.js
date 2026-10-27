@@ -1,8 +1,18 @@
-// 참여 기간 종료 판정
+// 베이스라인·참여 기간 종료 판정
 (() => {
   const TOTAL_DAYS = 12;
+  // 실험 첫 4일은 그룹 무관하게 전원 피드백·알림을 받지 않는 베이스라인(첫 기간 전체)
+  const BASELINE_DAYS = 4;
   const END_GRACE_DAYS = 3;
   const DAY_MS = 86400000;
+
+  // installDate가 없으면(온보딩 직후 등 비정상 상태) 안전하게 베이스라인으로 취급한다
+  function isBaselinePeriod(installDate, now = new Date()) {
+    if (!installDate) return true;
+    const elapsedDays =
+      (now.getTime() - new Date(installDate).getTime()) / DAY_MS;
+    return elapsedDays < BASELINE_DAYS;
+  }
 
   function kstDayFromInstall(installDate, offsetDays) {
     const ms = new Date(installDate).getTime() + offsetDays * DAY_MS;
@@ -38,7 +48,9 @@
 
   globalThis.ViewLensStudy = Object.freeze({
     TOTAL_DAYS,
+    BASELINE_DAYS,
     END_GRACE_DAYS,
+    isBaselinePeriod,
     ENDED_NOTICE,
     getParticipationState,
   });

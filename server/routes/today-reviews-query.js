@@ -12,7 +12,7 @@ function isTestGroup(group) {
   return typeof group === "string" && group.startsWith("TEST");
 }
 
-// extension/pipeline/baseline.js의 isBaselinePeriod와 동일 규칙(위와 같은 이유의 중복).
+// extension/study-schedule.js의 isBaselinePeriod와 동일 규칙(위와 같은 이유의 중복).
 function isBaselinePeriod(installDate, now = new Date()) {
   if (!installDate) return true;
   const elapsedDays =

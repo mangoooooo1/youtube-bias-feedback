@@ -4,7 +4,6 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import vm from "node:vm";
-import { BASELINE_DAYS as PIPELINE_BASELINE_DAYS } from "../pipeline/baseline.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCHEDULE_PATH = path.join(__dirname, "../study-schedule.js");
@@ -85,6 +84,41 @@ function popupConstant(name) {
   return Number(match[1]);
 }
 
+describe("isBaselinePeriod — 베이스라인 경계", () => {
+  it("installDate가 없으면 베이스라인으로 취급한다", () => {
+    expect(ViewLensStudy.isBaselinePeriod(null)).toBe(true);
+    expect(ViewLensStudy.isBaselinePeriod(undefined)).toBe(true);
+  });
+
+  it("설치 당일(경과 0일)은 베이스라인이다", () => {
+    const now = new Date("2026-01-15T00:00:00Z");
+    expect(ViewLensStudy.isBaselinePeriod("2026-01-15T00:00:00Z", now)).toBe(
+      true,
+    );
+  });
+
+  it("경과 BASELINE_DAYS - 1일은 베이스라인이다", () => {
+    const { BASELINE_DAYS, isBaselinePeriod } = ViewLensStudy;
+    const install = new Date("2026-01-01T00:00:00Z");
+    const now = new Date(install.getTime() + (BASELINE_DAYS - 1) * DAY_MS);
+    expect(isBaselinePeriod(install.toISOString(), now)).toBe(true);
+  });
+
+  it("경과 정확히 BASELINE_DAYS일이면 베이스라인이 종료된다(경계값)", () => {
+    const { BASELINE_DAYS, isBaselinePeriod } = ViewLensStudy;
+    const install = new Date("2026-01-01T00:00:00Z");
+    const now = new Date(install.getTime() + BASELINE_DAYS * DAY_MS);
+    expect(isBaselinePeriod(install.toISOString(), now)).toBe(false);
+  });
+
+  it("경과 BASELINE_DAYS + 7일은 베이스라인이 아니다", () => {
+    const { BASELINE_DAYS, isBaselinePeriod } = ViewLensStudy;
+    const install = new Date("2026-01-01T00:00:00Z");
+    const now = new Date(install.getTime() + (BASELINE_DAYS + 7) * DAY_MS);
+    expect(isBaselinePeriod(install.toISOString(), now)).toBe(false);
+  });
+});
+
 describe("연구 기간 상수 — 서버·팝업과 같은 값", () => {
   it("TOTAL_DAYS가 server/pipeline/study-constants.js와 같다", () => {
     expect(ViewLensStudy.TOTAL_DAYS).toBe(serverConstants.TOTAL_DAYS);
@@ -103,9 +137,8 @@ describe("연구 기간 상수 — 서버·팝업과 같은 값", () => {
     );
   });
 
-  it("BASELINE_DAYS가 서버·popup/viewlens-data.js·pipeline/baseline.js에서 같다", () => {
-    expect(popupConstant("BASELINE_DAYS")).toBe(serverConstants.BASELINE_DAYS);
-    expect(PIPELINE_BASELINE_DAYS).toBe(serverConstants.BASELINE_DAYS);
+  it("BASELINE_DAYS가 server/pipeline/study-constants.js와 같다", () => {
+    expect(ViewLensStudy.BASELINE_DAYS).toBe(serverConstants.BASELINE_DAYS);
   });
 
   it("FALLBACK_RETRY_WINDOW_DAYS가 서버와 popup/viewlens-data.js에서 같다", () => {

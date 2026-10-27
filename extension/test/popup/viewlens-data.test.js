@@ -8,7 +8,6 @@ import {
   vi,
 } from "vitest";
 import { isConGroup as isConGroupShared } from "../../pipeline/study-period.js";
-import { isBaselinePeriod as isBaselinePeriodShared } from "../../pipeline/baseline.js";
 import { loadPopup } from "./load-popup.js";
 
 async function loadVL() {
@@ -19,36 +18,12 @@ afterAll(() => {
   vi.unstubAllGlobals();
 });
 
-// viewlens-data.js는 모듈 경계(classic script) 때문에 pipeline/baseline.js의
-// isBaselinePeriod를 그대로 import하지 못하고 동일 로직을 다시 정의한다 — 두 사본이
-// 갈라져도 아무 테스트도 실패하지 않던 사각지대라, 소스를 실행해 직접 대조한다.
-describe("VL.isBaselinePeriod — pipeline/baseline.js와 동치성", () => {
-  let VL;
-
-  beforeAll(async () => {
-    VL = await loadVL();
-  });
-
-  it("경과일이 BASELINE_DAYS 경계 전/당일/후에서 공유 구현과 동일한 결과를 낸다", () => {
-    const install = new Date("2026-01-01T00:00:00Z");
-    for (const elapsedDays of [
-      0,
-      VL.BASELINE_DAYS - 1,
-      VL.BASELINE_DAYS,
-      VL.BASELINE_DAYS + 7,
-    ]) {
-      const now = new Date(install.getTime() + elapsedDays * 86400000);
-      expect(VL.isBaselinePeriod(install.toISOString(), now)).toBe(
-        isBaselinePeriodShared(install.toISOString(), now),
-      );
-    }
-  });
-
-  it("installDate가 없으면 두 구현 모두 베이스라인으로 취급한다", () => {
-    expect(VL.isBaselinePeriod(null)).toBe(isBaselinePeriodShared(null));
-    expect(VL.isBaselinePeriod(undefined)).toBe(
-      isBaselinePeriodShared(undefined),
-    );
+// 팝업은 사본을 두지 않고 백그라운드와 같은 study-schedule.js 구현을 쓴다
+describe("VL.isBaselinePeriod — study-schedule.js 구현을 그대로 쓴다", () => {
+  it("VL의 판정 함수와 상수가 ViewLensStudy의 것과 같다", async () => {
+    const g = await loadPopup();
+    expect(g.VL.isBaselinePeriod).toBe(g.ViewLensStudy.isBaselinePeriod);
+    expect(g.VL.BASELINE_DAYS).toBe(g.ViewLensStudy.BASELINE_DAYS);
   });
 });
 

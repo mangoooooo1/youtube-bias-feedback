@@ -21,7 +21,6 @@ import {
   invalidateParticipantSync,
   SESSION_TIMEOUT_MS,
 } from "./storage.js";
-import { isBaselinePeriod } from "./pipeline/baseline.js";
 import {
   reportClientError,
   flushClientErrors,
@@ -58,7 +57,7 @@ function isTestGroup(group) {
  */
 function isFeedbackNotificationEligible(group, installDate) {
   if (!FEEDBACK_ELIGIBLE_GROUPS.has(group)) return false;
-  return isTestGroup(group) || !isBaselinePeriod(installDate);
+  return isTestGroup(group) || !ViewLensStudy.isBaselinePeriod(installDate);
 }
 
 const BASE_ICON_PATHS = {
