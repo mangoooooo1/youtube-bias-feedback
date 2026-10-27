@@ -6,12 +6,14 @@
   const END_GRACE_DAYS = 3;
   const DAY_MS = 86400000;
 
+  // 1구간과 같이 설치일(KST)부터 BASELINE_DAYS일째 24:00 KST까지가 베이스라인이다.
   // installDate가 없으면(온보딩 직후 등 비정상 상태) 안전하게 베이스라인으로 취급한다
   function isBaselinePeriod(installDate, now = new Date()) {
     if (!installDate) return true;
-    const elapsedDays =
-      (now.getTime() - new Date(installDate).getTime()) / DAY_MS;
-    return elapsedDays < BASELINE_DAYS;
+    // 손상된 설치일은 예전처럼 베이스라인이 아닌 것으로 본다(날짜 변환이 예외를 던지지 않게)
+    if (!Number.isFinite(new Date(installDate).getTime())) return false;
+    const today = now.toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+    return today < kstDayFromInstall(installDate, BASELINE_DAYS);
   }
 
   function kstDayFromInstall(installDate, offsetDays) {
