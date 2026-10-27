@@ -60,11 +60,11 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
     // "확인 중"은 오늘만 보인다
     const html = render({}, "ok", { dateLabel: koreanDateLabel(new Date()) });
     expect(html).toContain(
-      '<b style="font-weight:800">음악</b>에 시간을 가장 많이 썼어요',
+      '<b>음악</b>에 시간을 가장 많이 썼어요',
     );
     // 12개 × 75%
     expect(html).toContain(
-      '<b style="font-weight:800">스포츠</b> 영상을 가장 많이 봤어요 (9개)',
+      '<b>스포츠</b> 영상을 가장 많이 봤어요 (9개)',
     );
     expect(html.indexOf(">음악</span>")).toBeLessThan(
       html.indexOf(">스포츠</span>"),
@@ -156,9 +156,9 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
       countDistribution: { "인물 & 블로그": 0.75, 게임: 0.25 },
     });
     expect(html).toContain(
-      '<b style="font-weight:800">인물 &amp; 블로그</b> 영상을 가장 많이 봤어요',
+      '<b>인물 &amp; 블로그</b> 영상을 가장 많이 봤어요',
     );
-    expect(html.match(/<b style="font-weight:800">/g)).toHaveLength(1);
+    expect(html.match(/<b>/g)).toHaveLength(1);
     expect(html).not.toContain("시간을 가장 많이 썼어요");
   });
 
@@ -481,11 +481,11 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
     const html = render();
     expect(html).toContain("6/5 ~ 6/8");
     expect(html).toContain(
-      '<b style="font-weight:800">게임</b>에 시간을 가장 많이 썼어요',
+      '<b>게임</b>에 시간을 가장 많이 썼어요',
     );
     // 구간 chartCount 8개 × 40%
     expect(html).toContain(
-      '<b style="font-weight:800">음악</b> 영상을 가장 많이 봤어요 (3개)',
+      '<b>음악</b> 영상을 가장 많이 봤어요 (3개)',
     );
     const keys = [...html.matchAll(/data-legend-key="([^"]+)"/g)].map(
       (m) => m[1],
@@ -583,6 +583,6 @@ describe("vlReview — 관심 분야 헤드라인", () => {
     expect(m[1]).toContain("font-size:var(--vl-fs-4)");
     expect(m[1]).toContain("font-weight:500");
     expect(m[1]).toContain("word-break:keep-all");
-    expect(m[2]).toContain("font-weight:800");
+    expect(m[2]).toContain("font-weight:700");
   });
 });

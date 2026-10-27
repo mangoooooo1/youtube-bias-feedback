@@ -258,7 +258,7 @@ function _titleBlock(title, aside = "") {
     line
       .map((p) =>
         p.strong
-          ? `<b style="font-weight:800">${vlEscapeHtml(p.text)}</b>`
+          ? `<b>${vlEscapeHtml(p.text)}</b>`
           : vlEscapeHtml(p.text),
       )
       .join("");
