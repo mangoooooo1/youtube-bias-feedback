@@ -52,19 +52,23 @@ function _controlTotalCount() {
   return ended + (VL.today?.collectingCount ?? 0);
 }
 
-// 대조군 홈 — 오늘 시청한 영상 수 (오늘 종료된 세션 + 진행 중 세션).
+// 대조군 홈 — 오늘 시청한 영상 수 (끝난 세션 + 진행 중 세션).
+// 서버 오늘 집계처럼 영상을 본 시각(KST)으로 센다. 자정을 걸친 세션은 오늘 본 영상만 센다.
 function _controlTodayCount() {
   const sessions = VL._allSessions || [];
   const todayStr = dateStr(new Date());
-  const ended = sessions.reduce(
+  // 영상 기록이 없는 세션은 세션 날짜로 videoCount를 더한다
+  const withoutVideos = sessions.reduce(
     (sum, s) =>
       sum +
-      (s.endTime && dateStr(new Date(s.endTime)) === todayStr
-        ? (s.videoCount ?? s.videos?.length ?? 0)
+      (!s.videos?.length && sessionDateStr(s) === todayStr
+        ? (s.videoCount ?? 0)
         : 0),
     0,
   );
-  return ended + (VL.today?.collectingCount ?? 0);
+  return (
+    VL.playedVideos(sessions, VL._liveVideos, todayStr).length + withoutVideos
+  );
 }
 
 // 설치일(KST)을 1일째로 세는 일차. installDate가 없으면 목업 day로 폴백.
@@ -847,5 +851,6 @@ window.ViewLensPopup = ViewLensPopup;
 window.Studio = Studio;
 window._isStudyEndTimeReached = _isStudyEndTimeReached;
 window._dayViewForDate = _dayViewForDate;
+window._controlTodayCount = _controlTodayCount;
 window._isStudyEndReviewReady = _isStudyEndReviewReady;
 window._isParticipationEnded = _isParticipationEnded;

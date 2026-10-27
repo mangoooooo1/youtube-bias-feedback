@@ -301,3 +301,78 @@ describe("_dayViewForDate — 서버 집계 불러오기 상태", () => {
     expect(load(fakeVL(s, loadStatus))("2026-03-05").status).toBe(expected);
   });
 });
+
+// 서버 오늘 집계는 영상을 본 시각(KST)으로 센다. 세션 종료 시각(마지막 영상 + 10분)으로 세면
+// 23:55에 본 영상이 다음 날로 넘어간다.
+describe("_controlTodayCount — 대조군 홈 오늘 시청한 영상 수", () => {
+  const kst = (time) => new Date(`${time}+09:00`).toISOString();
+  const video = (eventId, time) => ({ eventId, watchedAt: kst(time) });
+  let g;
+  beforeAll(async () => {
+    g = await loadPopup();
+  });
+  function count({ sessions = [], live = [] }) {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(kst("2026-03-06T00:30:00")));
+    g.VL._allSessions = sessions;
+    g.VL._liveVideos = live;
+    return g._controlTodayCount();
+  }
+
+  it("자정 직전에 본 영상만 있는 세션은 다음 날 수에 넣지 않는다", () => {
+    const lateNight = {
+      sessionId: "late",
+      endTime: kst("2026-03-06T00:05:00"),
+      videoCount: 1,
+      videos: [video("e1", "2026-03-05T23:55:00")],
+    };
+    expect(count({ sessions: [lateNight] })).toBe(0);
+  });
+
+  it("자정을 걸친 세션은 오늘 본 영상만 센다", () => {
+    const across = {
+      sessionId: "across",
+      endTime: kst("2026-03-06T00:12:00"),
+      videoCount: 2,
+      videos: [
+        video("e1", "2026-03-05T23:50:00"),
+        video("e2", "2026-03-06T00:02:00"),
+      ],
+    };
+    expect(count({ sessions: [across] })).toBe(1);
+  });
+
+  it("자정을 넘겨 열려 있는 세션은 오늘 본 영상만 센다", () => {
+    const live = [
+      video("e1", "2026-03-05T23:58:00"),
+      video("e2", "2026-03-06T00:03:00"),
+    ];
+    expect(count({ live })).toBe(1);
+  });
+
+  it("자정과 무관한 끝난 세션과 진행 중 세션은 모두 센다", () => {
+    const morning = {
+      sessionId: "s1",
+      endTime: kst("2026-03-06T00:25:00"),
+      videoCount: 2,
+      videos: [
+        video("e1", "2026-03-06T00:10:00"),
+        video("e2", "2026-03-06T00:15:00"),
+      ],
+    };
+    // 세션 종료 직후 같은 영상 기록이 두 곳에 잠깐 함께 있어도 한 번만 센다
+    const live = [
+      video("e2", "2026-03-06T00:15:00"),
+      video("e3", "2026-03-06T00:28:00"),
+    ];
+    expect(count({ sessions: [morning], live })).toBe(3);
+  });
+
+  it("영상 기록이 없는 세션은 종료 시각의 날짜로 videoCount를 센다", () => {
+    const sessions = [
+      { sessionId: "s1", endTime: kst("2026-03-06T00:20:00"), videoCount: 2 },
+      { sessionId: "s0", endTime: kst("2026-03-05T22:00:00"), videoCount: 5 },
+    ];
+    expect(count({ sessions })).toBe(2);
+  });
+});
