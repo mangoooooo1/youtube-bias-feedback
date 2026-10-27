@@ -517,14 +517,21 @@ async function fillMissingTitles(videoIds) {
  * @param {Array<{videos?: Array}>} sessions - 끝난 세션들
  * @param {Array<object>} liveVideos - 진행 중인 세션의 영상 기록
  * @param {{days?: Array<{correctedTitles?: Record<string, string>}>}|null} summary - 서버 집계
+ * @param {Array<object>} [serverVideos] - 서버에서 받아 둔 날짜별 목록의 영상
  */
-function videoIdsWithoutTitle(sessions, liveVideos, summary) {
+function videoIdsWithoutTitle(
+  sessions,
+  liveVideos,
+  summary,
+  serverVideos = [],
+) {
   const corrected = new Set(
     (summary?.days ?? []).flatMap((d) => Object.keys(d.correctedTitles ?? {})),
   );
   return [
     ...(sessions ?? []).flatMap((s) => s.videos ?? []),
     ...(liveVideos ?? []),
+    ...serverVideos,
   ]
     .filter(
       (v) =>
@@ -1265,6 +1272,24 @@ async function boot() {
 
   // Mount popup
   const popup = new ViewLensPopup(popEl);
+  // 제목을 못 구한 영상(서버 제목이 있는 영상은 빼고)을 oEmbed로 채우고, 새로 보일 제목이 있으면 다시 그린다
+  const refreshFetchedTitles = () =>
+    fillMissingTitles(
+      videoIdsWithoutTitle(
+        VL._allSessions,
+        VL._liveVideos,
+        VL._viewingSummary?.data,
+        Object.values(VL._dayVideos).flat(),
+      ),
+    )
+      .then((titles) => {
+        const changed = hasNewDisplayTitle(VL._fetchedTitles, titles);
+        VL._fetchedTitles = titles;
+        if (changed) popup.render();
+      })
+      .catch((error) => {
+        console.warn("[popup] 영상 제목 조회 오류:", error.message);
+      });
   // 오늘 탭을 그릴 때마다 부른다. 기기 기록이 모자란 날만 팝업을 연 동안 날짜마다 한 번 받는다
   const dayVideosRequested = new Set();
   VL._requestDayVideos = (dateKey, serverCount) => {
@@ -1292,6 +1317,7 @@ async function boot() {
         if (dateKey !== dateStr(new Date()))
           await saveDayVideos(stored.anonymousId, dateKey, videos);
         popup.render();
+        refreshFetchedTitles();
       })
       .catch((error) => {
         console.warn("[popup] 날짜별 영상 목록 반영 오류:", error.message);
@@ -1301,25 +1327,8 @@ async function boot() {
   initialSummaryLoad.then((changed) => {
     if (changed) popup.render();
   });
-  // 제목을 못 구한 영상은 서버 집계를 받은 뒤(서버 제목이 있는 영상은 빼고) oEmbed로 채운다
-  initialSummaryLoad
-    .then(() =>
-      fillMissingTitles(
-        videoIdsWithoutTitle(
-          VL._allSessions,
-          VL._liveVideos,
-          VL._viewingSummary?.data,
-        ),
-      ),
-    )
-    .then((titles) => {
-      const changed = hasNewDisplayTitle(VL._fetchedTitles, titles);
-      VL._fetchedTitles = titles;
-      if (changed) popup.render();
-    })
-    .catch((error) => {
-      console.warn("[popup] 영상 제목 조회 오류:", error.message);
-    });
+  // 서버 제목을 알아야 하므로 서버 집계를 받은 뒤 채운다. 서버 목록을 받은 날은 받은 뒤 한 번 더 채운다
+  initialSummaryLoad.then(refreshFetchedTitles);
   popup.mount({
     onboarded: !!stored.group,
     group: stored.group || null,
