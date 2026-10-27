@@ -440,6 +440,47 @@ describe("기간 탭", () => {
   });
 });
 
+// 설치 시각을 "오늘 00:00 KST − n일 − 1ms"로 잡으면 언제 돌려도 설치 후 24시간 단위는 n+1일째,
+// 달력 날짜는 n+2일째가 되어 두 기준이 갈린다
+describe("설치 일차 — KST 달력 기준", () => {
+  const installBeforeMidnight = (n) => {
+    const todayStart = Date.parse(
+      `${kst(new Date().toISOString())}T00:00:00+09:00`,
+    );
+    return new Date(todayStart - n * DAY - 1).toISOString();
+  };
+
+  it("어제 자정 직전에 설치했으면 머리말이 2일째다", async () => {
+    const { root } = await bootReady(
+      participant({ group: "CON", installDate: installBeforeMidnight(0) }),
+    );
+    expect(root.textContent).toContain("설치 2일째");
+  });
+
+  it("베이스라인 마지막 날이면 실험군 홈에 하루 뒤부터 분석을 받는다고 안내한다", async () => {
+    const { root } = await bootReady(
+      participant({
+        group: "EXP",
+        installDate: installBeforeMidnight(BASELINE_DAYS - 2),
+      }),
+    );
+    expect(root.textContent).toContain(`설치 ${BASELINE_DAYS}일째`);
+    expect(root.textContent).toContain("1일 뒤부터 나만의 시청 분석");
+  });
+
+  it("2구간 첫날이면 기간 탭이 2구간으로 열린다", async () => {
+    const { root } = await bootReady(
+      participant({
+        group: "EXP",
+        installDate: installBeforeMidnight(DAYS_PER_PERIOD - 1),
+      }),
+    );
+    click(root, '[data-tab="feedback"]');
+    const indicator = root.querySelector("#vl-period-indicator");
+    expect(indicator.closest("[data-week]").dataset.week).toBe("2");
+  });
+});
+
 describe("영상 목록 넘기기", () => {
   it("10개가 넘으면 페이지로 나누고, 화살표로 한 페이지씩 앞뒤로 넘긴다", async () => {
     const now = new Date().toISOString();

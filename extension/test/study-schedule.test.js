@@ -159,6 +159,45 @@ describe("isBaselinePeriod — 베이스라인 경계", () => {
   });
 });
 
+describe("dayOfStudy — 설치일(KST)을 1일째로 세는 일차", () => {
+  it("23:00 KST에 설치하면 같은 날은 1일째, 다음 날 00:00 KST부터 2일째다", () => {
+    const { dayOfStudy } = ViewLensStudy;
+    const install = "2026-01-01T14:00:00.000Z"; // 23:00 KST
+    expect(dayOfStudy(install, new Date("2026-01-01T14:30:00.000Z"))).toBe(1);
+    expect(dayOfStudy(install, new Date("2026-01-01T14:59:59.999Z"))).toBe(1);
+    expect(dayOfStudy(install, new Date("2026-01-01T15:00:00.000Z"))).toBe(2);
+  });
+
+  it("마지막 기간 끝날(TOTAL_DAYS번째 날)까지 하루씩 늘어난다", () => {
+    const { dayOfStudy, TOTAL_DAYS } = ViewLensStudy;
+    const install = "2026-01-01T14:00:00.000Z";
+    const lastDayStart = Date.parse(
+      `${dayFromInstall(install, TOTAL_DAYS - 1)}T00:00:00+09:00`,
+    );
+    expect(dayOfStudy(install, new Date(lastDayStart))).toBe(TOTAL_DAYS);
+  });
+
+  it("손상된 installDate는 예외 없이 NaN이다", () => {
+    expect(ViewLensStudy.dayOfStudy("not-a-date")).toBeNaN();
+  });
+
+  it("실행 환경 시간대가 UTC여도 KST 기준으로 센다", () => {
+    const original = process.env.TZ;
+    process.env.TZ = "UTC";
+    try {
+      expect(
+        ViewLensStudy.dayOfStudy(
+          "2026-01-01T14:00:00.000Z",
+          new Date("2026-01-01T15:00:00.000Z"),
+        ),
+      ).toBe(2);
+    } finally {
+      if (original === undefined) delete process.env.TZ;
+      else process.env.TZ = original;
+    }
+  });
+});
+
 describe("연구 기간 상수 — 서버·팝업과 같은 값", () => {
   it("TOTAL_DAYS가 server/pipeline/study-constants.js와 같다", () => {
     expect(ViewLensStudy.TOTAL_DAYS).toBe(serverConstants.TOTAL_DAYS);
