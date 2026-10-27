@@ -1,7 +1,8 @@
 // today_reviews 조회 로직
 // "오늘 하루 돌아보기" 탭이 로컬 캐시가 없거나 오래됐을 때 다시 받아오는 경로
-// 실험군은 베이스라인 기간(설치 후 BASELINE_DAYS 미만) 여부, 대조군은 "연구종료 코드 검증을 통과했는가"로 판정한다.
+// 실험군은 베이스라인 기간(설치일 KST부터 BASELINE_DAYS일째 24:00까지) 여부, 대조군은 "연구종료 코드 검증을 통과했는가"로 판정한다.
 const { BASELINE_DAYS } = require("../pipeline/study-constants");
+const { kstDateStr, dayFromInstall } = require("../pipeline/period-boundaries");
 
 const FEEDBACK_GROUPS = new Set(["EXP", "TEST-EXP"]);
 const CONTROL_GROUPS = new Set(["CON", "TEST-CON"]);
@@ -12,12 +13,11 @@ function isTestGroup(group) {
   return typeof group === "string" && group.startsWith("TEST");
 }
 
-// extension/pipeline/baseline.js의 isBaselinePeriod와 동일 규칙(위와 같은 이유의 중복).
+// extension/study-schedule.js의 isBaselinePeriod와 동일 규칙(위와 같은 이유의 중복).
 function isBaselinePeriod(installDate, now = new Date()) {
   if (!installDate) return true;
-  const elapsedDays =
-    (now.getTime() - new Date(installDate).getTime()) / 86400000;
-  return elapsedDays < BASELINE_DAYS;
+  if (!Number.isFinite(new Date(installDate).getTime())) return false;
+  return kstDateStr(now) < dayFromInstall(installDate, BASELINE_DAYS);
 }
 
 /** 이 참여자가 지금 "오늘" 리뷰를 열람할 자격이 있는지 판정한다. */

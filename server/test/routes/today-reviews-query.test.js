@@ -4,7 +4,10 @@ import {
   getTodayReviews,
   isTodayReviewEligible,
 } from "../../routes/today-reviews-query.js";
-import { isBaselinePeriod as isBaselinePeriodClient } from "../../../extension/pipeline/baseline.js";
+// 확장 백그라운드와 같은 방식(side-effect import)으로 ViewLensStudy를 전역에 붙인다
+import "../../../extension/study-schedule.js";
+
+const { isBaselinePeriod: isBaselinePeriodClient } = globalThis.ViewLensStudy;
 
 function createTestDb() {
   const db = new Database(":memory:");
@@ -92,7 +95,7 @@ function insertTodayReview(db, anonymousId, reviewDate, overrides = {}) {
   });
 }
 
-describe("isBaselinePeriod — extension/pipeline/baseline.js와 동치성", () => {
+describe("isBaselinePeriod — extension/study-schedule.js와 동치성", () => {
   it.each([
     [
       "설치 직후(0일 경과)",
@@ -108,6 +111,16 @@ describe("isBaselinePeriod — extension/pipeline/baseline.js와 동치성", () 
     [
       "베이스라인 이후",
       "2026-01-01T00:00:00+09:00",
+      "2026-01-05T00:00:00+09:00",
+    ],
+    [
+      "23:00 설치, 4일째 마지막 순간",
+      "2026-01-01T23:00:00+09:00",
+      "2026-01-04T23:59:59+09:00",
+    ],
+    [
+      "23:00 설치, 5일째 00:00",
+      "2026-01-01T23:00:00+09:00",
       "2026-01-05T00:00:00+09:00",
     ],
   ])("%s — 두 구현이 동일한 결과를 낸다", (_label, installDate, nowStr) => {

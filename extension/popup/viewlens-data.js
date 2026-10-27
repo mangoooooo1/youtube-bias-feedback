@@ -326,16 +326,6 @@ function periodLines(period, days, today) {
 // 서버가 fallback 기간 리뷰를 다시 만드는 일수(구간 끝난 날 기준). server/pipeline/study-constants.js와 같은 값
 const FALLBACK_RETRY_WINDOW_DAYS = 3;
 
-// 베이스라인 기간(설치 후 BASELINE_DAYS 미만) 판정
-// 팝업/Studio는 classic script라 ESM import를 쓸 수 없어(background.js는 type=module) 로직을 중복 정의한다.
-const BASELINE_DAYS = 4;
-function isBaselinePeriod(installDate, now = new Date()) {
-  if (!installDate) return true;
-  return (
-    (now.getTime() - new Date(installDate).getTime()) / 86400000 < BASELINE_DAYS
-  );
-}
-
 // TEST-EXP/TEST-CON(연구자 모드)는 "모든 화면을 미리 볼 수 있다"는 설계 의도(GROUPS 주석 참고)가
 // 있어, 실제 참여자 온보딩과 무관하게 베이스라인 게이트를 적용하면 안 된다.
 // background.js의 isTestGroup()과 동일 규칙 — 모듈 경계 때문에 중복 정의한다.
@@ -539,9 +529,10 @@ window.VL = {
   studyDurationLabel,
   GROUPS,
   TONES,
-  BASELINE_DAYS,
+  // 베이스라인 판정은 백그라운드와 같은 study-schedule.js 구현을 쓴다
+  BASELINE_DAYS: ViewLensStudy.BASELINE_DAYS,
   FALLBACK_RETRY_WINDOW_DAYS,
-  isBaselinePeriod,
+  isBaselinePeriod: ViewLensStudy.isBaselinePeriod,
   isTestGroup,
   isConGroup,
   con: { todayCount: 12, totalCount: 47 },

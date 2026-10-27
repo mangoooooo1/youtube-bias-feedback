@@ -36,6 +36,17 @@ describe("computeGaps — 한 참여자의 활동 간격", () => {
     );
     expect(gaps).toEqual([2]);
   });
+
+  it("늦은 시각에 설치해도 확장이 수집을 멈춘 뒤(마지막 날 다음 날 00:00 KST)의 활동은 뺀다", () => {
+    const install = Date.parse("2026-09-01T22:00:00+09:00");
+    const collectionEndsAt = Date.parse("2026-09-13T00:00:00+09:00");
+    const gaps = computeGaps(
+      install,
+      [install + 1 * DAY, collectionEndsAt + 60 * 60 * 1000],
+      12,
+    );
+    expect(gaps).toEqual([1]);
+  });
 });
 
 describe("summarizeGaps — 분포 요약", () => {

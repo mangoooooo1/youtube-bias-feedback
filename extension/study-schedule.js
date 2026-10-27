@@ -1,8 +1,30 @@
-// 참여 기간 종료 판정
+// 베이스라인·참여 기간 종료 판정
 (() => {
   const TOTAL_DAYS = 12;
+  // 실험 첫 4일은 그룹 무관하게 전원 피드백·알림을 받지 않는 베이스라인(첫 기간 전체)
+  const BASELINE_DAYS = 4;
   const END_GRACE_DAYS = 3;
   const DAY_MS = 86400000;
+
+  // 1구간과 같이 설치일(KST)부터 BASELINE_DAYS일째 24:00 KST까지가 베이스라인이다.
+  // installDate가 없으면(온보딩 직후 등 비정상 상태) 안전하게 베이스라인으로 취급한다
+  function isBaselinePeriod(installDate, now = new Date()) {
+    if (!installDate) return true;
+    // 손상된 설치일은 예전처럼 베이스라인이 아닌 것으로 본다(날짜 변환이 예외를 던지지 않게)
+    if (!Number.isFinite(new Date(installDate).getTime())) return false;
+    const today = now.toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+    return today < kstDayFromInstall(installDate, BASELINE_DAYS);
+  }
+
+  // 설치일(KST)을 1일째로, 매일 00:00 KST에 하나씩 느는 일차
+  function dayOfStudy(installDate, now = new Date()) {
+    // 손상된 설치일은 날짜 변환이 예외를 던지므로 NaN으로 돌려 호출부의 기존 폴백을 따르게 한다
+    if (!Number.isFinite(new Date(installDate).getTime())) return NaN;
+    const kst = (d) => d.toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+    // YYYY-MM-DD는 UTC 자정으로 파싱돼 두 날짜의 차가 정확히 일수 배수다
+    const diff = Date.parse(kst(now)) - Date.parse(kst(new Date(installDate)));
+    return Math.round(diff / DAY_MS) + 1;
+  }
 
   function kstDayFromInstall(installDate, offsetDays) {
     const ms = new Date(installDate).getTime() + offsetDays * DAY_MS;
@@ -38,7 +60,10 @@
 
   globalThis.ViewLensStudy = Object.freeze({
     TOTAL_DAYS,
+    BASELINE_DAYS,
     END_GRACE_DAYS,
+    isBaselinePeriod,
+    dayOfStudy,
     ENDED_NOTICE,
     getParticipationState,
   });

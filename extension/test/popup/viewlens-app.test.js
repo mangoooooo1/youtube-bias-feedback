@@ -8,8 +8,10 @@ import {
   vi,
 } from "vitest";
 import { createRequire } from "node:module";
-import { BASELINE_DAYS } from "../../pipeline/baseline.js";
+import "../../study-schedule.js";
 import { loadPopup } from "./load-popup.js";
+
+const { BASELINE_DAYS } = globalThis.ViewLensStudy;
 
 // 대조군에게 실수로 피드백 화면(screenToday/screenFeedback)이 노출되는지를 가르는 실제 결정 로직을
 // 실제 팝업 파일을 불러와 검증한다. _isFeedbackActive는 ViewLensPopup의 메서드라 prototype에서 꺼내

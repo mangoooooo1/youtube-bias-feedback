@@ -2,7 +2,10 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { isBaselinePeriod, BASELINE_DAYS } from "../pipeline/baseline.js";
+// background.js와 같은 방식(side-effect import)으로 ViewLensStudy를 전역에 붙인다
+import "../study-schedule.js";
+
+const { BASELINE_DAYS } = globalThis.ViewLensStudy;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BACKGROUND_PATH = path.join(__dirname, "../background.js");
@@ -83,7 +86,7 @@ function loadIsFeedbackNotificationEligible() {
     ${eligibleDecl[0]}
     return isFeedbackNotificationEligible;
   `;
-  return new Function("isBaselinePeriod", src)(isBaselinePeriod);
+  return new Function("ViewLensStudy", src)(globalThis.ViewLensStudy);
 }
 
 describe("isFeedbackNotificationEligible — 대조군은 절대 분석 완료 알림 대상이 아니다", () => {

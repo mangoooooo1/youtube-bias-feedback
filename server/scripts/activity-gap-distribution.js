@@ -7,7 +7,7 @@
  * "정상 참여자가 얼마나 오래 쉬었다가 돌아오는지"를 본다.
  * - 설치일 → 첫 활동 간격은 포함한다(결측 판정도 활동이 없으면 설치일을 기준으로 삼는다).
  * - 마지막 활동 이후 공백은 넣지 않는다. 돌아왔는지 알 수 없어 중도 이탈과 구분되지 않는다.
- * - 연구 기간(installDate + TOTAL_DAYS) 밖의 활동은 뺀다. 결측 판정이 그 기간에만 돌기 때문이다.
+ * - 연구 기간(설치 ~ TOTAL_DAYS번째 날 다음 날 00:00 KST) 밖의 활동은 뺀다. 결측 판정이 그 기간에만 돌기 때문이다.
  * - 참여자 식별자는 출력하지 않고 집계 수치만 남긴다.
  *
  * 사용:
@@ -22,6 +22,7 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { TEST_CODES } = require("../routes/participant-recovery");
 const { TOTAL_DAYS } = require("../pipeline/study-constants");
+const { dayFromInstall } = require("../pipeline/period-boundaries");
 
 const DAY_MS = 86400000;
 const THRESHOLD_CANDIDATES = [1, 2, 3, 4, 5];
@@ -34,7 +35,9 @@ const THRESHOLD_CANDIDATES = [1, 2, 3, 4, 5];
  * @returns {number[]}
  */
 function computeGaps(installDateMs, activityMs, totalDays = TOTAL_DAYS) {
-  const studyEndMs = installDateMs + totalDays * DAY_MS;
+  const studyEndMs = Date.parse(
+    `${dayFromInstall(installDateMs, totalDays)}T00:00:00+09:00`,
+  );
   const inStudy = activityMs
     .filter((t) => t >= installDateMs && t < studyEndMs)
     .sort((a, b) => a - b);
