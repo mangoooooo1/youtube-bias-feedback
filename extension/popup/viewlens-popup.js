@@ -181,10 +181,7 @@ function applyTokens(el, toneName, dark) {
 // 이후 체크포인트가 더 늘어나도(예: 로드맵 변경) 이 함수를 다시 손볼 필요가 없게 한다.
 function calcTimelineKey(installDate) {
   if (!installDate) return "w1_mid";
-  const days = Math.max(
-    1,
-    Math.floor((Date.now() - new Date(installDate).getTime()) / 86400000) + 1,
-  );
+  const days = Math.max(1, ViewLensStudy.dayOfStudy(installDate));
   const reached = Object.entries(VL.TIMELINE)
     .filter(([, tl]) => days >= tl.day)
     .sort((a, b) => b[1].day - a[1].day)[0];

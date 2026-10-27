@@ -16,6 +16,16 @@
     return today < kstDayFromInstall(installDate, BASELINE_DAYS);
   }
 
+  // 설치일(KST)을 1일째로, 매일 00:00 KST에 하나씩 느는 일차
+  function dayOfStudy(installDate, now = new Date()) {
+    // 손상된 설치일은 날짜 변환이 예외를 던지므로 NaN으로 돌려 호출부의 기존 폴백을 따르게 한다
+    if (!Number.isFinite(new Date(installDate).getTime())) return NaN;
+    const kst = (d) => d.toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+    // YYYY-MM-DD는 UTC 자정으로 파싱돼 두 날짜의 차가 정확히 일수 배수다
+    const diff = Date.parse(kst(now)) - Date.parse(kst(new Date(installDate)));
+    return Math.round(diff / DAY_MS) + 1;
+  }
+
   function kstDayFromInstall(installDate, offsetDays) {
     const ms = new Date(installDate).getTime() + offsetDays * DAY_MS;
     return new Date(ms).toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
@@ -53,6 +63,7 @@
     BASELINE_DAYS,
     END_GRACE_DAYS,
     isBaselinePeriod,
+    dayOfStudy,
     ENDED_NOTICE,
     getParticipationState,
   });

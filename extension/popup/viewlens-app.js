@@ -67,13 +67,12 @@ function _controlTodayCount() {
   return ended + (VL.today?.collectingCount ?? 0);
 }
 
-// 설치일(installDate) 기준 실제 경과일(1일째부터). installDate가 없으면 목업 day로 폴백.
+// 설치일(KST)을 1일째로 세는 일차. installDate가 없으면 목업 day로 폴백.
 function _elapsedDay(fallback) {
   if (!VL._installDate) return fallback;
   const t = new Date(VL._installDate).getTime();
   if (!Number.isFinite(t)) return fallback; // 손상된 installDate → NaN 방지
-  const d = Math.floor((Date.now() - t) / 86400000) + 1;
-  return Math.max(1, d);
+  return Math.max(1, ViewLensStudy.dayOfStudy(VL._installDate));
 }
 
 // Studio 전용 — "설치 N일째"를 오늘 기준 installDate로 역산한다(_elapsedDay의 역함수).
