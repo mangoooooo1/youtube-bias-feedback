@@ -26,6 +26,33 @@ function sha10(value) {
     .slice(0, 10);
 }
 
+describe("evaluateParticipantSilence — 연구 종료는 확장의 수집 종료 시점", () => {
+  // 22:00 KST 설치 → 확장은 TOTAL_DAYS번째 날 다음 날 00:00 KST에 수집을 멈춘다
+  const installDateMs = Date.parse("2026-09-01T22:00:00+09:00");
+  const collectionEndsAt = Date.parse("2026-09-13T00:00:00+09:00");
+
+  it("수집이 멈춘 순간부터는 조용해도 정상(study_ended)으로 본다", () => {
+    const result = evaluateParticipantSilence({
+      now: collectionEndsAt,
+      installDateMs,
+      lastActivityMs: installDateMs,
+      totalDays: TOTAL_DAYS,
+    });
+    expect(result).toMatchObject({ flagged: false, reason: "study_ended" });
+  });
+
+  it("수집이 멈추기 직전까지는 결측 판정 대상이다", () => {
+    const result = evaluateParticipantSilence({
+      now: collectionEndsAt - 1,
+      installDateMs,
+      lastActivityMs: installDateMs,
+      totalDays: TOTAL_DAYS,
+    });
+    expect(result.reason).not.toBe("study_ended");
+    expect(result.flagged).toBe(true);
+  });
+});
+
 describe("evaluateParticipantSilence — 순수 판정 로직", () => {
   it("연구 기간이 이미 끝난 참여자는 조용해도 정상(study_ended)으로 본다", () => {
     const now = 100 * DAY;
