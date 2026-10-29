@@ -54,7 +54,7 @@ const RESPONSES = {
   "/api/participants": { data: { participantToken: "new-tok" } },
 };
 
-// responses: 경로 → 응답 본문, 또는 (요청 본문) => ({ status, body })
+// responses: 경로 → 응답 본문, 또는 (요청 본문) => ({ status, body }) 또는 그 Promise(응답을 늦출 때)
 function fakeFetch(responses) {
   const calls = [];
   const fn = async (url, init) => {
@@ -62,7 +62,7 @@ function fakeFetch(responses) {
     const body = init?.body ? JSON.parse(init.body) : null;
     calls.push({ path, method: init?.method ?? "GET", body });
     const r = responses[path] ?? RESPONSES[path] ?? {};
-    const res = typeof r === "function" ? r(body) : { body: r };
+    const res = typeof r === "function" ? await r(body) : { body: r };
     const status = res.status ?? 200;
     return { ok: status < 400, status, json: async () => res.body ?? {} };
   };

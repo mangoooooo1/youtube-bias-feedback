@@ -198,6 +198,126 @@ describe("대조군 연구 종료 코드 입력", () => {
       }),
     );
   });
+
+  // 실제 서버처럼 코드를 검증하기 전에는 빈 값, 검증한 뒤에는 리뷰·집계를 준다
+  const YESTERDAY = () => kst(new Date(Date.now() - 86400000).toISOString());
+  function verifyingServer({ holdSummary = false } = {}) {
+    const state = { verified: false };
+    let releaseSummary;
+    const summaryHeld = new Promise((r) => (releaseSummary = r));
+    const summary = () => ({
+      body: {
+        data: state.verified
+          ? {
+              days: [
+                {
+                  date: YESTERDAY(),
+                  confirmedCount: 1,
+                  chartCount: 1,
+                  chartSeconds: 120,
+                  timeDistribution: { 음악: 1 },
+                  countDistribution: { 음악: 1 },
+                },
+              ],
+              periods: [],
+            }
+          : { days: [], periods: [] },
+      },
+    });
+    const responses = {
+      "/api/study-end-code/validate": () => {
+        state.verified = true;
+        return { body: { data: { valid: true } } };
+      },
+      "/api/today-reviews": () => ({
+        body: {
+          data: state.verified
+            ? [{ reviewDate: YESTERDAY(), review: "연구 기간의 하루 리뷰" }]
+            : [],
+        },
+      }),
+      "/api/viewing-summary": () =>
+        state.verified && holdSummary ? summaryHeld.then(summary) : summary(),
+    };
+    return { responses, releaseSummary };
+  }
+  const REFETCHED = [
+    "/api/today-reviews",
+    "/api/period-reviews",
+    "/api/viewing-summary",
+  ];
+  const countsOf = (server) => REFETCHED.map((path) => server.count(path));
+  const submitCode = (input) => {
+    input.value = "CODE-1";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+  };
+
+  it("검증에 성공하면 같은 팝업에서 리뷰 이력·기간 리뷰·시청 집계를 다시 받아, 지난 날짜의 리뷰가 바로 보인다", async () => {
+    const { responses } = verifyingServer();
+    const { root, server, input } = await openCodeInput(responses);
+    const before = countsOf(server);
+    submitCode(input);
+    await vi.waitFor(() =>
+      expect(countsOf(server)).toEqual([
+        before[0] + 1,
+        before[1] + 1,
+        before[2] + 1,
+      ]),
+    );
+    expect(hasFeedbackTabs(root)).toBe(true);
+    click(root, "#vl-date-prev");
+    await vi.waitFor(() =>
+      expect(root.textContent).toContain("연구 기간의 하루 리뷰"),
+    );
+  });
+
+  it("다시 받는 동안에는 시청 기록을 불러오고 있다고 보이고, 받은 뒤에는 그 날 기록을 보여 준다", async () => {
+    const { responses, releaseSummary } = verifyingServer({
+      holdSummary: true,
+    });
+    // 같은 기기로 참여한 대조군은 연구 기간의 세션이 기기에 남아 있다
+    const yesterdaySession = session("s-yesterday", {
+      endTime: daysAgo(1),
+      videos: [{ eventId: "e-1", videoId: "v-1", watchedAt: daysAgo(1) }],
+    });
+    const { root } = await bootReady(
+      participant({
+        group: "CON",
+        installDate: STUDY_ENDED(),
+        sessions: [yesterdaySession],
+      }),
+      { responses },
+    );
+    click(root, "#vl-study-end-cta");
+    submitCode(root.querySelector("#vl-study-end-code-input"));
+    await vi.waitFor(() => expect(hasFeedbackTabs(root)).toBe(true));
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("시청 기록을 불러오고 있어요.");
+    releaseSummary();
+    await vi.waitFor(() =>
+      expect(root.textContent).not.toContain("시청 기록을 불러오고 있어요."),
+    );
+    expect(root.textContent).toContain("연구 기간의 하루 리뷰");
+    expect(root.textContent).toContain("음악");
+  });
+
+  it.each([
+    ["틀린 코드", { data: { valid: false } }],
+    ["서버 오류", () => ({ status: 500 })],
+  ])("%s면 리뷰·집계를 다시 받지 않는다", async (_label, validate) => {
+    const { root, server, input } = await openCodeInput({
+      "/api/study-end-code/validate": validate,
+    });
+    const before = countsOf(server);
+    submitCode(input);
+    await vi.waitFor(() =>
+      expect(root.querySelector("#vl-study-end-code-err").style.display).toBe(
+        "block",
+      ),
+    );
+    await settle();
+    expect(countsOf(server)).toEqual(before);
+  });
 });
 
 describe("연구 종료 안내 확인", () => {
