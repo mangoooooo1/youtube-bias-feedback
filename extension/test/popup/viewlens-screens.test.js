@@ -208,6 +208,46 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
     expect(html).not.toContain("<title>");
   });
 
+  // 기기에 그 날 세션이 없고 서버 집계에도 아직 기록이 보이지 않는 날(재설치 등)
+  const NO_RECORD = {
+    confirmedCount: 0,
+    unconfirmedCount: 0,
+    shortCount: 0,
+    chartCount: 0,
+    timeDistribution: {},
+    countDistribution: {},
+  };
+  it.each([
+    ["받는 중", "loading", "시청 기록을 불러오고 있어요."],
+    [
+      "받지 못함",
+      "failed",
+      "시청 기록을 불러오지 못했어요. 잠시 후 다시 열어 주세요.",
+    ],
+  ])(
+    "기록이 없어 보이는 지난 날짜도 집계를 %s이면 기록이 없다고 하지 않고 그 상태를 안내한다",
+    (_label, status, text) => {
+      const html = render(NO_RECORD, status, { isEmpty: true });
+      expect(html).toContain(text);
+      expect(html).not.toContain("이 날 시청 기록이 없어요");
+    },
+  );
+
+  it("집계를 받았는데 기록이 없는 지난 날짜는 이 날 시청 기록이 없다고 한다", () => {
+    const html = render(NO_RECORD, "ok", { isEmpty: true });
+    expect(html).toContain("이 날 시청 기록이 없어요");
+    expect(html).not.toContain("시청 기록을 불러오");
+  });
+
+  it("오늘은 집계를 받는 중이어도 지금처럼 아직 오늘 시청 기록이 없다고 한다", () => {
+    const html = render(NO_RECORD, "loading", {
+      isEmpty: true,
+      dateLabel: koreanDateLabel(new Date()),
+    });
+    expect(html).toContain("아직 오늘 시청 기록이 없어요");
+    expect(html).not.toContain("시청 기록을 불러오고 있어요.");
+  });
+
   it("지난 날짜는 '이 날'로 표시한다", () => {
     expect(render()).toContain("이 날 유튜브 시청 분야별 비중");
   });

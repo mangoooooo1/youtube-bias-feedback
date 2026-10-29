@@ -198,6 +198,202 @@ describe("대조군 연구 종료 코드 입력", () => {
       }),
     );
   });
+
+  // 실제 서버처럼 코드를 검증하기 전에는 빈 값, 검증한 뒤에는 리뷰·집계를 준다
+  const YESTERDAY = () => kst(new Date(Date.now() - 86400000).toISOString());
+  const viewingDay = (category) => ({
+    date: YESTERDAY(),
+    confirmedCount: 1,
+    chartCount: 1,
+    chartSeconds: 120,
+    timeDistribution: { [category]: 1 },
+    countDistribution: { [category]: 1 },
+  });
+  // failSummary: 검증 뒤 집계 요청이 실패한다
+  // daysBeforeVerify: 검증 전에도 집계에 날짜 기록이 있다(재설치 전에 이미 검증한 경우)
+  // holdSummaryBeforeVerify: 검증 전(팝업을 열 때)의 집계 응답을 붙잡아 두었다가 releaseEarlySummary로 늦게 보낸다
+  function verifyingServer({
+    holdSummary = false,
+    failSummary = false,
+    daysBeforeVerify = [],
+    holdSummaryBeforeVerify = false,
+  } = {}) {
+    const state = { verified: false };
+    let releaseSummary;
+    const summaryHeld = new Promise((r) => (releaseSummary = r));
+    let releaseEarlySummary;
+    const earlySummaryHeld = new Promise((r) => (releaseEarlySummary = r));
+    const summary = () =>
+      state.verified && failSummary
+        ? { status: 500 }
+        : {
+            body: {
+              data: {
+                days: state.verified ? [viewingDay("음악")] : daysBeforeVerify,
+                periods: [],
+              },
+            },
+          };
+    const responses = {
+      "/api/study-end-code/validate": () => {
+        state.verified = true;
+        return { body: { data: { valid: true } } };
+      },
+      "/api/today-reviews": () => ({
+        body: {
+          data: state.verified
+            ? [{ reviewDate: YESTERDAY(), review: "연구 기간의 하루 리뷰" }]
+            : [],
+        },
+      }),
+      "/api/viewing-summary": () => {
+        if (state.verified && holdSummary) return summaryHeld.then(summary);
+        if (!state.verified && holdSummaryBeforeVerify) {
+          // 응답 내용은 요청한 시점(검증 전)의 것이다
+          const early = summary();
+          return earlySummaryHeld.then(() => early);
+        }
+        return summary();
+      },
+    };
+    return { responses, releaseSummary, releaseEarlySummary };
+  }
+  const REFETCHED = [
+    "/api/today-reviews",
+    "/api/period-reviews",
+    "/api/viewing-summary",
+  ];
+  const countsOf = (server) => REFETCHED.map((path) => server.count(path));
+  const submitCode = (input) => {
+    input.value = "CODE-1";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+  };
+  // 같은 기기로 참여한 대조군은 연구 기간의 세션이 기기에 남아 있다. 어제 날짜를 띄운 채 코드를 검증한다
+  async function verifyOnYesterday(responses) {
+    const yesterdaySession = session("s-yesterday", {
+      endTime: daysAgo(1),
+      videos: [{ eventId: "e-1", videoId: "v-1", watchedAt: daysAgo(1) }],
+    });
+    const p = await bootReady(
+      participant({
+        group: "CON",
+        installDate: STUDY_ENDED(),
+        sessions: [yesterdaySession],
+      }),
+      { responses },
+    );
+    click(p.root, "#vl-study-end-cta");
+    submitCode(p.root.querySelector("#vl-study-end-code-input"));
+    await vi.waitFor(() => expect(hasFeedbackTabs(p.root)).toBe(true));
+    click(p.root, "#vl-date-prev");
+    return p;
+  }
+
+  it("검증에 성공하면 같은 팝업에서 리뷰 이력·기간 리뷰·시청 집계를 다시 받아, 지난 날짜의 리뷰가 바로 보인다", async () => {
+    const { responses } = verifyingServer();
+    const { root, server, input } = await openCodeInput(responses);
+    const before = countsOf(server);
+    submitCode(input);
+    await vi.waitFor(() =>
+      expect(countsOf(server)).toEqual([
+        before[0] + 1,
+        before[1] + 1,
+        before[2] + 1,
+      ]),
+    );
+    expect(hasFeedbackTabs(root)).toBe(true);
+    click(root, "#vl-date-prev");
+    await vi.waitFor(() =>
+      expect(root.textContent).toContain("연구 기간의 하루 리뷰"),
+    );
+  });
+
+  it("다시 받는 동안에는 시청 기록을 불러오고 있다고 보이고, 받은 뒤에는 그 날 기록을 보여 준다", async () => {
+    const { responses, releaseSummary } = verifyingServer({
+      holdSummary: true,
+    });
+    const { root } = await verifyOnYesterday(responses);
+    expect(root.textContent).toContain("시청 기록을 불러오고 있어요.");
+    releaseSummary();
+    await vi.waitFor(() =>
+      expect(root.textContent).not.toContain("시청 기록을 불러오고 있어요."),
+    );
+    expect(root.textContent).toContain("연구 기간의 하루 리뷰");
+    expect(root.textContent).toContain("음악");
+  });
+
+  it("재설치로 기기에 세션이 없어도, 다시 받는 동안 지난 날짜를 기록 없음이 아니라 불러오는 중으로 보이고 받은 뒤 리뷰를 보여 준다", async () => {
+    const { responses, releaseSummary } = verifyingServer({
+      holdSummary: true,
+    });
+    const { root, input } = await openCodeInput(responses);
+    submitCode(input);
+    await vi.waitFor(() => expect(hasFeedbackTabs(root)).toBe(true));
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("시청 기록을 불러오고 있어요.");
+    expect(root.textContent).not.toContain("이 날 시청 기록이 없어요");
+    releaseSummary();
+    await vi.waitFor(() =>
+      expect(root.textContent).toContain("연구 기간의 하루 리뷰"),
+    );
+    expect(root.textContent).not.toContain("시청 기록을 불러오고 있어요.");
+  });
+
+  it("팝업을 열 때 보낸 집계 요청의 빈 응답이 검증 뒤에 늦게 와도, 다시 받은 집계를 화면과 저장본에서 덮어쓰지 않는다", async () => {
+    const { responses, releaseEarlySummary } = verifyingServer({
+      holdSummaryBeforeVerify: true,
+    });
+    const { root, data } = await verifyOnYesterday(responses);
+    await vi.waitFor(() => expect(root.textContent).toContain("음악"));
+    releaseEarlySummary();
+    await settle();
+    expect(root.textContent).toContain("음악");
+    expect(root.textContent).not.toContain("시청 기록을 불러오");
+    expect(data.viewingSummaryCache.data.days.map((d) => d.date)).toEqual([
+      YESTERDAY(),
+    ]);
+  });
+
+  it("다시 받은 집계가 실패하면 리뷰 탭은 열린 채 불러오지 못했다고 안내한다(빈 집계로 되돌리지 않는다)", async () => {
+    const { responses } = verifyingServer({ failSummary: true });
+    const { root } = await verifyOnYesterday(responses);
+    await vi.waitFor(() =>
+      expect(root.textContent).toContain(
+        "시청 기록을 불러오지 못했어요. 잠시 후 다시 열어 주세요.",
+      ),
+    );
+    expect(hasFeedbackTabs(root)).toBe(true);
+    expect(root.textContent).toContain("연구 기간의 하루 리뷰");
+  });
+
+  it("검증 전에 받아 둔 집계에 기록이 있으면, 다시 받기가 실패해도 그 기록을 그대로 보여 준다", async () => {
+    const { responses } = verifyingServer({
+      failSummary: true,
+      daysBeforeVerify: [viewingDay("게임")],
+    });
+    const { root } = await verifyOnYesterday(responses);
+    await vi.waitFor(() => expect(root.textContent).toContain("게임"));
+    expect(root.textContent).not.toContain("시청 기록을 불러오지 못했어요");
+    expect(root.textContent).not.toContain("시청 기록을 불러오고 있어요");
+  });
+
+  it.each([
+    ["틀린 코드", { data: { valid: false } }],
+    ["서버 오류", () => ({ status: 500 })],
+  ])("%s면 리뷰·집계를 다시 받지 않는다", async (_label, validate) => {
+    const { root, server, input } = await openCodeInput({
+      "/api/study-end-code/validate": validate,
+    });
+    const before = countsOf(server);
+    submitCode(input);
+    await vi.waitFor(() =>
+      expect(root.querySelector("#vl-study-end-code-err").style.display).toBe(
+        "block",
+      ),
+    );
+    await settle();
+    expect(countsOf(server)).toEqual(before);
+  });
 });
 
 describe("연구 종료 안내 확인", () => {

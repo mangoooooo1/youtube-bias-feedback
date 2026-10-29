@@ -427,15 +427,21 @@ async function loadViewingSummaryCache(anonymousId) {
 
 /**
  * 서버 집계를 새로 받아 저장본을 덮어쓴다(쌓지 않음). 실패하면 저장본을 건드리지 않고 null.
+ * @param {() => boolean} [isLatest] - 응답이 왔을 때 아직 가장 최근 요청인지. 아니면 저장하지 않고 null
  * @returns {Promise<{fetchedAt: string, data: object}|null>}
  */
-async function refreshViewingSummary(serverUrl, anonymousId, participantToken) {
+async function refreshViewingSummary(
+  serverUrl,
+  anonymousId,
+  participantToken,
+  isLatest = () => true,
+) {
   const data = await fetchViewingSummary(
     serverUrl,
     anonymousId,
     participantToken,
   );
-  if (!data) return null;
+  if (!data || !isLatest()) return null;
   const fetchedAt = new Date().toISOString();
   await chrome.storage.local.set({
     viewingSummaryCache: { anonymousId, fetchedAt, data },
@@ -1167,24 +1173,35 @@ async function boot() {
   VL._viewingSummaryStatus = "loading";
   VL._fetchedTitles = await loadFetchedTitles();
   VL._dayVideos = await loadDayVideosCache(stored.anonymousId);
-  // 새로 받아 오면 VL._viewingSummary를 바꾸고 true. 실패하면 저장본을 그대로 두고 false
-  const reloadViewingSummary = () =>
-    refreshViewingSummary(
-      stored.serverUrl,
-      stored.anonymousId,
-      stored.participantToken,
-    )
-      .then((fresh) => {
-        VL._viewingSummaryStatus = fresh ? "ok" : "failed";
-        if (fresh) VL._viewingSummary = fresh;
-        return true;
-      })
-      // 저장 실패 등은 저장본·기존 화면을 그대로 두면 된다
-      .catch((error) => {
-        console.warn("[popup] 시청 집계 갱신 오류:", error.message);
-        VL._viewingSummaryStatus = "failed";
-        return true;
-      });
+  // 새로 받아 오면 VL._viewingSummary를 바꾸고, 실패하면 저장본을 그대로 둔 채 상태만 바꾼다(둘 다 다시 그리도록 true).
+  // 요청이 겹치면(팝업 열 때·종료 코드 검증 직후·세션 변경) 가장 최근에 시작한 요청의 응답만 쓴다.
+  // 검증 전에 시작한 요청의 빈 집계가 늦게 와서 검증 뒤 받은 집계를 덮어쓰지 않게 하기 위함이다. 버린 응답이면 false
+  let summaryRequestSeq = 0;
+  const reloadViewingSummary = () => {
+    const seq = ++summaryRequestSeq;
+    const isLatest = () => seq === summaryRequestSeq;
+    return (
+      refreshViewingSummary(
+        stored.serverUrl,
+        stored.anonymousId,
+        stored.participantToken,
+        isLatest,
+      )
+        .then((fresh) => {
+          if (!isLatest()) return false;
+          VL._viewingSummaryStatus = fresh ? "ok" : "failed";
+          if (fresh) VL._viewingSummary = fresh;
+          return true;
+        })
+        // 저장 실패 등은 저장본·기존 화면을 그대로 두면 된다
+        .catch((error) => {
+          if (!isLatest()) return false;
+          console.warn("[popup] 시청 집계 갱신 오류:", error.message);
+          VL._viewingSummaryStatus = "failed";
+          return true;
+        })
+    );
+  };
   const initialSummaryLoad = reloadViewingSummary();
 
   const realToday = buildDataForDate(sessions, new Date());
@@ -1204,67 +1221,76 @@ async function boot() {
   // buildDataForDate로 통째로 재생성해서, 거기 두면 날짜를 옮길 때 상태가 오염된다.
   // let인 이유: 팝업을 열어둔 채 오늘 첫 세션이 끝나면(boot 시점엔 세션 0개라 대상에서 제외됨) storage.onChanged에서
   // "대상 아님 → 대상"으로 한 번 갱신해야 함(생성은 background.js의 세션-종료 트리거가 이미 하고 있음)
-  // 대조군 종료 후(코드 검증 통과)에도 오늘 탭을 열어준다.
-  const studyEndTodayEligible =
-    VL.isConGroup(stored.group) &&
-    _isStudyEndTimeReached(installDate) &&
-    !!stored.studyEndCodeVerified;
-  // 지난 날짜 리뷰는 오늘 세션이 없어도 보여야 해서, 이력 조회는 오늘 세션 수와 따로 판정한다.
-  const reviewHistoryEligible = feedbackActive || studyEndTodayEligible;
-  // 대상이 아니면 조회 자체를 하지 않는다.
-  const todayReviewsList = reviewHistoryEligible
-    ? await loadTodayReviews(
-        stored.serverUrl,
-        stored.anonymousId,
-        stored.participantToken,
-      )
-    : [];
-  VL._todayReviewsByDate = Object.fromEntries(
-    (todayReviewsList || []).map((r) => [r.reviewDate, r]),
-  );
-  // 기기에 오늘 세션이 없어도(재설치 등) 서버가 오늘 리뷰를 받은 세션을 알려 주면 대상이다.
-  // 그 세션을 모르면 확인을 기록할 곳이 없어 이전처럼 띄우지 않는다
-  let todayCumulativeEligible =
-    reviewHistoryEligible &&
-    (realToday.sessionIds.length > 0 ||
-      !!VL._todayReviewsByDate[dateStr(new Date())]?.reviewSessionId);
-  VL._todayCumulative = await resolveTodayCumulative(
-    todayCumulativeEligible,
-    todayReviewsList,
-    todaySessionsOf(sessions),
-  );
+  let todayCumulativeEligible = false;
+  // 팝업을 열 때와 대조군이 종료 확인 코드를 검증한 직후에 같은 규칙으로 하루 리뷰 이력을 받는다
+  const loadReviewHistory = async (studyEndCodeVerified) => {
+    // 대조군 종료 후(코드 검증 통과)에도 오늘 탭을 열어준다.
+    const studyEndTodayEligible =
+      VL.isConGroup(stored.group) &&
+      _isStudyEndTimeReached(installDate) &&
+      studyEndCodeVerified;
+    // 지난 날짜 리뷰는 오늘 세션이 없어도 보여야 해서, 이력 조회는 오늘 세션 수와 따로 판정한다.
+    const reviewHistoryEligible = feedbackActive || studyEndTodayEligible;
+    // 대상이 아니면 조회 자체를 하지 않는다.
+    const todayReviewsList = reviewHistoryEligible
+      ? await loadTodayReviews(
+          stored.serverUrl,
+          stored.anonymousId,
+          stored.participantToken,
+        )
+      : [];
+    VL._todayReviewsByDate = Object.fromEntries(
+      (todayReviewsList || []).map((r) => [r.reviewDate, r]),
+    );
+    // 기기에 오늘 세션이 없어도(재설치 등) 서버가 오늘 리뷰를 받은 세션을 알려 주면 대상이다.
+    // 그 세션을 모르면 확인을 기록할 곳이 없어 이전처럼 띄우지 않는다
+    todayCumulativeEligible =
+      reviewHistoryEligible &&
+      (buildDataForDate(VL._allSessions, new Date()).sessionIds.length > 0 ||
+        !!VL._todayReviewsByDate[dateStr(new Date())]?.reviewSessionId);
+    VL._todayCumulative = await resolveTodayCumulative(
+      todayCumulativeEligible,
+      todayReviewsList,
+      todaySessionsOf(VL._allSessions),
+    );
 
-  // 확인(블러) 상태는 VL._todayCumulative(누적 캐시 기준)에서 파생한다.
-  const needsConfirm =
-    !VL._todayCumulative.generating && isRealReview(VL._todayCumulative.review);
-  // "피드백 확인하기" 블러 해제 버튼을 눌러야만 확인된 것으로 친다.
-  VL._todayConfirmed = needsConfirm ? !VL._todayCumulative.locked : true;
-  // 미열람 아이콘 표시도 "열기"가 아니라 "확인" 기준으로 지운다 — feedbackConfirmedAt과 의미를 맞춘다.
-  if (needsConfirm && VL._todayConfirmed) {
-    clearUnviewedIconDot();
-  }
+    // 확인(블러) 상태는 VL._todayCumulative(누적 캐시 기준)에서 파생한다.
+    const needsConfirm =
+      !VL._todayCumulative.generating &&
+      isRealReview(VL._todayCumulative.review);
+    // "피드백 확인하기" 블러 해제 버튼을 눌러야만 확인된 것으로 친다.
+    VL._todayConfirmed = needsConfirm ? !VL._todayCumulative.locked : true;
+    // 미열람 아이콘 표시도 "열기"가 아니라 "확인" 기준으로 지운다 — feedbackConfirmedAt과 의미를 맞춘다.
+    if (needsConfirm && VL._todayConfirmed) {
+      clearUnviewedIconDot();
+    }
+    return needsConfirm;
+  };
+  const needsConfirm = await loadReviewHistory(!!stored.studyEndCodeVerified);
 
   // 실험군(진행 중 주차별 피드백)뿐 아니라 대조군도 조회 대상
   let cachedPeriodReviews = [];
-  if (
-    installDate &&
-    stored.anonymousId &&
-    (VL.GROUPS[stored.group]?.feedback || VL.isConGroup(stored.group))
-  ) {
-    cachedPeriodReviews = await getPeriodReviewsCached(
-      stored.serverUrl,
-      stored.anonymousId,
-      stored.group,
-      stored.participantToken,
-      installDate,
-    );
-  }
+  const loadPeriodReviews = async () => {
+    if (
+      installDate &&
+      stored.anonymousId &&
+      (VL.GROUPS[stored.group]?.feedback || VL.isConGroup(stored.group))
+    ) {
+      cachedPeriodReviews = await getPeriodReviewsCached(
+        stored.serverUrl,
+        stored.anonymousId,
+        stored.group,
+        stored.participantToken,
+        installDate,
+      );
+    }
+    if (installDate) {
+      VL.weeks = buildWeeksData(installDate, cachedPeriodReviews);
+    }
+  };
+  await loadPeriodReviews();
   VL._studyEndNoticeShown = !!stored.studyEndNoticeShown;
   VL._studyEndCodeVerified = !!stored.studyEndCodeVerified;
-
-  if (installDate) {
-    VL.weeks = buildWeeksData(installDate, cachedPeriodReviews);
-  }
 
   // Apply theme tokens
   const popEl = document.getElementById("vl-popup-root");
@@ -1329,6 +1355,30 @@ async function boot() {
   });
   // 서버 제목을 알아야 하므로 서버 집계를 받은 뒤 채운다. 서버 목록을 받은 날은 받은 뒤 한 번 더 채운다
   initialSummaryLoad.then(refreshFetchedTitles);
+  // 대조군이 종료 확인 코드를 검증하면, 자격이 없을 때 받은 빈 집계·리뷰를 다시 받아 팝업을 다시 연 것과 같게 한다
+  const reloadAfterStudyEndCodeVerified = async () => {
+    // 받는 동안 "불러오고 있어요"가 보이도록 받아 둔 집계를 비우고, 받지 못하면 되돌린다
+    const previousSummary = VL._viewingSummary;
+    VL._viewingSummary = null;
+    VL._viewingSummaryStatus = "loading";
+    popup.render();
+    const results = await Promise.allSettled([
+      reloadViewingSummary(),
+      loadReviewHistory(true),
+      loadPeriodReviews(),
+    ]);
+    // 날짜 기록이 있던 저장본(재설치 등)만 되돌린다. 빈 집계로 되돌리면 받기 실패가 "기록 없음"으로 보인다
+    if (!VL._viewingSummary && previousSummary?.data?.days?.length) {
+      VL._viewingSummary = previousSummary;
+    }
+    for (const r of results) {
+      if (r.status === "rejected") {
+        console.warn("[popup] 종료 후 리뷰 다시 받기 오류:", r.reason?.message);
+      }
+    }
+    popup.render();
+    refreshFetchedTitles();
+  };
   popup.mount({
     onboarded: !!stored.group,
     group: stored.group || null,
@@ -1338,6 +1388,7 @@ async function boot() {
     onStudyEndCodeVerified: () => {
       chrome.storage.local.set({ studyEndCodeVerified: true });
       postStudyEndReviewEvent("review_viewed");
+      reloadAfterStudyEndCodeVerified();
     },
     onChange: async ({
       onboarded: ob,
