@@ -311,6 +311,23 @@ describe("대조군 연구 종료 코드 입력", () => {
     expect(root.textContent).toContain("음악");
   });
 
+  it("재설치로 기기에 세션이 없어도, 다시 받는 동안 지난 날짜를 기록 없음이 아니라 불러오는 중으로 보이고 받은 뒤 리뷰를 보여 준다", async () => {
+    const { responses, releaseSummary } = verifyingServer({
+      holdSummary: true,
+    });
+    const { root, input } = await openCodeInput(responses);
+    submitCode(input);
+    await vi.waitFor(() => expect(hasFeedbackTabs(root)).toBe(true));
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("시청 기록을 불러오고 있어요.");
+    expect(root.textContent).not.toContain("이 날 시청 기록이 없어요");
+    releaseSummary();
+    await vi.waitFor(() =>
+      expect(root.textContent).toContain("연구 기간의 하루 리뷰"),
+    );
+    expect(root.textContent).not.toContain("시청 기록을 불러오고 있어요.");
+  });
+
   it("다시 받은 집계가 실패하면 리뷰 탭은 열린 채 불러오지 못했다고 안내한다(빈 집계로 되돌리지 않는다)", async () => {
     const { responses } = verifyingServer({ failSummary: true });
     const { root } = await verifyOnYesterday(responses);

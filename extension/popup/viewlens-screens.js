@@ -202,7 +202,15 @@ function _collectingBanner(count) {
   </div>`;
 }
 
-function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
+// status: 그 날 서버 집계의 불러오기 상태(_dayViewForDate). 지난 날짜는 집계를 받기 전·받지 못했을 때
+// 기록이 없다고 단정하지 않는다. 오늘은 기기 기록으로 판단해 그대로 둔다
+function screenTodayEmpty(
+  dateLabel,
+  collectingCount,
+  isToday = true,
+  status = "ok",
+) {
+  const pastStatusText = isToday ? null : _summaryStatusText(status);
   return `<div style="display:flex;flex-direction:column;min-height:100%">
     ${_collectingBanner(collectingCount)}
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px 0">
@@ -219,7 +227,7 @@ function screenTodayEmpty(dateLabel, collectingCount, isToday = true) {
         </span>
       </div>
       <div>
-        <div style="font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${isToday ? "아직 오늘 시청 기록이 없어요" : "이 날 시청 기록이 없어요"}</div>
+        <div style="font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em;text-wrap:pretty;word-break:keep-all">${pastStatusText ?? (isToday ? "아직 오늘 시청 기록이 없어요" : "이 날 시청 기록이 없어요")}</div>
         ${
           isToday
             ? `<p style="margin:8px 0 0;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;max-width:240px">
@@ -267,15 +275,19 @@ function _titleBlock(title, aside = "") {
     </div>`;
 }
 
+// 서버 집계를 받는 중·받지 못했을 때의 안내. 받았으면 null
+function _summaryStatusText(status) {
+  if (status === "failed")
+    return "시청 기록을 불러오지 못했어요. 잠시 후 다시 열어 주세요.";
+  if (status === "loading") return "시청 기록을 불러오고 있어요.";
+  return null;
+}
+
 // 오늘 탭 그래프 영역
 function _todayChartCard(view, isToday) {
   if (view.timeDist.length === 0) {
     const text =
-      view.status === "failed"
-        ? "시청 기록을 불러오지 못했어요. 잠시 후 다시 열어 주세요."
-        : view.status === "loading"
-          ? "시청 기록을 불러오고 있어요."
-          : "분야를 확인한 영상이 아직 없어요.";
+      _summaryStatusText(view.status) ?? "분야를 확인한 영상이 아직 없어요.";
     return vlCard({
       pad: 16,
       children: `<div style="font-size:var(--vl-fs-3);color:var(--vl-ink-2);text-align:center">${text}</div>`,
@@ -310,7 +322,12 @@ function screenToday() {
   const hasRecord = view.confirmedCount + view.unconfirmedCount > 0;
   if (d.isEmpty && !hasRecord) {
     const isToday = d.dateLabel === koreanDateLabel(new Date());
-    return screenTodayEmpty(d.dateLabel, d.collectingCount, isToday);
+    return screenTodayEmpty(
+      d.dateLabel,
+      d.collectingCount,
+      isToday,
+      view.status,
+    );
   }
 
   const isToday = d.dateLabel === koreanDateLabel(new Date());
