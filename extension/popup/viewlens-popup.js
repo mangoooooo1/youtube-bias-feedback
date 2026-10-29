@@ -427,15 +427,21 @@ async function loadViewingSummaryCache(anonymousId) {
 
 /**
  * 서버 집계를 새로 받아 저장본을 덮어쓴다(쌓지 않음). 실패하면 저장본을 건드리지 않고 null.
+ * @param {() => boolean} [isLatest] - 응답이 왔을 때 아직 가장 최근 요청인지. 아니면 저장하지 않고 null
  * @returns {Promise<{fetchedAt: string, data: object}|null>}
  */
-async function refreshViewingSummary(serverUrl, anonymousId, participantToken) {
+async function refreshViewingSummary(
+  serverUrl,
+  anonymousId,
+  participantToken,
+  isLatest = () => true,
+) {
   const data = await fetchViewingSummary(
     serverUrl,
     anonymousId,
     participantToken,
   );
-  if (!data) return null;
+  if (!data || !isLatest()) return null;
   const fetchedAt = new Date().toISOString();
   await chrome.storage.local.set({
     viewingSummaryCache: { anonymousId, fetchedAt, data },
@@ -1167,24 +1173,35 @@ async function boot() {
   VL._viewingSummaryStatus = "loading";
   VL._fetchedTitles = await loadFetchedTitles();
   VL._dayVideos = await loadDayVideosCache(stored.anonymousId);
-  // 새로 받아 오면 VL._viewingSummary를 바꾸고 true. 실패하면 저장본을 그대로 두고 false
-  const reloadViewingSummary = () =>
-    refreshViewingSummary(
-      stored.serverUrl,
-      stored.anonymousId,
-      stored.participantToken,
-    )
-      .then((fresh) => {
-        VL._viewingSummaryStatus = fresh ? "ok" : "failed";
-        if (fresh) VL._viewingSummary = fresh;
-        return true;
-      })
-      // 저장 실패 등은 저장본·기존 화면을 그대로 두면 된다
-      .catch((error) => {
-        console.warn("[popup] 시청 집계 갱신 오류:", error.message);
-        VL._viewingSummaryStatus = "failed";
-        return true;
-      });
+  // 새로 받아 오면 VL._viewingSummary를 바꾸고, 실패하면 저장본을 그대로 둔 채 상태만 바꾼다(둘 다 다시 그리도록 true).
+  // 요청이 겹치면(팝업 열 때·종료 코드 검증 직후·세션 변경) 가장 최근에 시작한 요청의 응답만 쓴다.
+  // 검증 전에 시작한 요청의 빈 집계가 늦게 와서 검증 뒤 받은 집계를 덮어쓰지 않게 하기 위함이다. 버린 응답이면 false
+  let summaryRequestSeq = 0;
+  const reloadViewingSummary = () => {
+    const seq = ++summaryRequestSeq;
+    const isLatest = () => seq === summaryRequestSeq;
+    return (
+      refreshViewingSummary(
+        stored.serverUrl,
+        stored.anonymousId,
+        stored.participantToken,
+        isLatest,
+      )
+        .then((fresh) => {
+          if (!isLatest()) return false;
+          VL._viewingSummaryStatus = fresh ? "ok" : "failed";
+          if (fresh) VL._viewingSummary = fresh;
+          return true;
+        })
+        // 저장 실패 등은 저장본·기존 화면을 그대로 두면 된다
+        .catch((error) => {
+          if (!isLatest()) return false;
+          console.warn("[popup] 시청 집계 갱신 오류:", error.message);
+          VL._viewingSummaryStatus = "failed";
+          return true;
+        })
+    );
+  };
   const initialSummaryLoad = reloadViewingSummary();
 
   const realToday = buildDataForDate(sessions, new Date());

@@ -211,14 +211,18 @@ describe("대조군 연구 종료 코드 입력", () => {
   });
   // failSummary: 검증 뒤 집계 요청이 실패한다
   // daysBeforeVerify: 검증 전에도 집계에 날짜 기록이 있다(재설치 전에 이미 검증한 경우)
+  // holdSummaryBeforeVerify: 검증 전(팝업을 열 때)의 집계 응답을 붙잡아 두었다가 releaseEarlySummary로 늦게 보낸다
   function verifyingServer({
     holdSummary = false,
     failSummary = false,
     daysBeforeVerify = [],
+    holdSummaryBeforeVerify = false,
   } = {}) {
     const state = { verified: false };
     let releaseSummary;
     const summaryHeld = new Promise((r) => (releaseSummary = r));
+    let releaseEarlySummary;
+    const earlySummaryHeld = new Promise((r) => (releaseEarlySummary = r));
     const summary = () =>
       state.verified && failSummary
         ? { status: 500 }
@@ -242,10 +246,17 @@ describe("대조군 연구 종료 코드 입력", () => {
             : [],
         },
       }),
-      "/api/viewing-summary": () =>
-        state.verified && holdSummary ? summaryHeld.then(summary) : summary(),
+      "/api/viewing-summary": () => {
+        if (state.verified && holdSummary) return summaryHeld.then(summary);
+        if (!state.verified && holdSummaryBeforeVerify) {
+          // 응답 내용은 요청한 시점(검증 전)의 것이다
+          const early = summary();
+          return earlySummaryHeld.then(() => early);
+        }
+        return summary();
+      },
     };
-    return { responses, releaseSummary };
+    return { responses, releaseSummary, releaseEarlySummary };
   }
   const REFETCHED = [
     "/api/today-reviews",
@@ -326,6 +337,21 @@ describe("대조군 연구 종료 코드 입력", () => {
       expect(root.textContent).toContain("연구 기간의 하루 리뷰"),
     );
     expect(root.textContent).not.toContain("시청 기록을 불러오고 있어요.");
+  });
+
+  it("팝업을 열 때 보낸 집계 요청의 빈 응답이 검증 뒤에 늦게 와도, 다시 받은 집계를 화면과 저장본에서 덮어쓰지 않는다", async () => {
+    const { responses, releaseEarlySummary } = verifyingServer({
+      holdSummaryBeforeVerify: true,
+    });
+    const { root, data } = await verifyOnYesterday(responses);
+    await vi.waitFor(() => expect(root.textContent).toContain("음악"));
+    releaseEarlySummary();
+    await settle();
+    expect(root.textContent).toContain("음악");
+    expect(root.textContent).not.toContain("시청 기록을 불러오");
+    expect(data.viewingSummaryCache.data.days.map((d) => d.date)).toEqual([
+      YESTERDAY(),
+    ]);
   });
 
   it("다시 받은 집계가 실패하면 리뷰 탭은 열린 채 불러오지 못했다고 안내한다(빈 집계로 되돌리지 않는다)", async () => {
