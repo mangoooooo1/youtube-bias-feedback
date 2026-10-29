@@ -201,29 +201,35 @@ describe("대조군 연구 종료 코드 입력", () => {
 
   // 실제 서버처럼 코드를 검증하기 전에는 빈 값, 검증한 뒤에는 리뷰·집계를 준다
   const YESTERDAY = () => kst(new Date(Date.now() - 86400000).toISOString());
-  function verifyingServer({ holdSummary = false } = {}) {
+  const viewingDay = (category) => ({
+    date: YESTERDAY(),
+    confirmedCount: 1,
+    chartCount: 1,
+    chartSeconds: 120,
+    timeDistribution: { [category]: 1 },
+    countDistribution: { [category]: 1 },
+  });
+  // failSummary: 검증 뒤 집계 요청이 실패한다
+  // daysBeforeVerify: 검증 전에도 집계에 날짜 기록이 있다(재설치 전에 이미 검증한 경우)
+  function verifyingServer({
+    holdSummary = false,
+    failSummary = false,
+    daysBeforeVerify = [],
+  } = {}) {
     const state = { verified: false };
     let releaseSummary;
     const summaryHeld = new Promise((r) => (releaseSummary = r));
-    const summary = () => ({
-      body: {
-        data: state.verified
-          ? {
-              days: [
-                {
-                  date: YESTERDAY(),
-                  confirmedCount: 1,
-                  chartCount: 1,
-                  chartSeconds: 120,
-                  timeDistribution: { 음악: 1 },
-                  countDistribution: { 음악: 1 },
-                },
-              ],
-              periods: [],
-            }
-          : { days: [], periods: [] },
-      },
-    });
+    const summary = () =>
+      state.verified && failSummary
+        ? { status: 500 }
+        : {
+            body: {
+              data: {
+                days: state.verified ? [viewingDay("음악")] : daysBeforeVerify,
+                periods: [],
+              },
+            },
+          };
     const responses = {
       "/api/study-end-code/validate": () => {
         state.verified = true;
@@ -251,6 +257,26 @@ describe("대조군 연구 종료 코드 입력", () => {
     input.value = "CODE-1";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
   };
+  // 같은 기기로 참여한 대조군은 연구 기간의 세션이 기기에 남아 있다. 어제 날짜를 띄운 채 코드를 검증한다
+  async function verifyOnYesterday(responses) {
+    const yesterdaySession = session("s-yesterday", {
+      endTime: daysAgo(1),
+      videos: [{ eventId: "e-1", videoId: "v-1", watchedAt: daysAgo(1) }],
+    });
+    const p = await bootReady(
+      participant({
+        group: "CON",
+        installDate: STUDY_ENDED(),
+        sessions: [yesterdaySession],
+      }),
+      { responses },
+    );
+    click(p.root, "#vl-study-end-cta");
+    submitCode(p.root.querySelector("#vl-study-end-code-input"));
+    await vi.waitFor(() => expect(hasFeedbackTabs(p.root)).toBe(true));
+    click(p.root, "#vl-date-prev");
+    return p;
+  }
 
   it("검증에 성공하면 같은 팝업에서 리뷰 이력·기간 리뷰·시청 집계를 다시 받아, 지난 날짜의 리뷰가 바로 보인다", async () => {
     const { responses } = verifyingServer();
@@ -275,23 +301,7 @@ describe("대조군 연구 종료 코드 입력", () => {
     const { responses, releaseSummary } = verifyingServer({
       holdSummary: true,
     });
-    // 같은 기기로 참여한 대조군은 연구 기간의 세션이 기기에 남아 있다
-    const yesterdaySession = session("s-yesterday", {
-      endTime: daysAgo(1),
-      videos: [{ eventId: "e-1", videoId: "v-1", watchedAt: daysAgo(1) }],
-    });
-    const { root } = await bootReady(
-      participant({
-        group: "CON",
-        installDate: STUDY_ENDED(),
-        sessions: [yesterdaySession],
-      }),
-      { responses },
-    );
-    click(root, "#vl-study-end-cta");
-    submitCode(root.querySelector("#vl-study-end-code-input"));
-    await vi.waitFor(() => expect(hasFeedbackTabs(root)).toBe(true));
-    click(root, "#vl-date-prev");
+    const { root } = await verifyOnYesterday(responses);
     expect(root.textContent).toContain("시청 기록을 불러오고 있어요.");
     releaseSummary();
     await vi.waitFor(() =>
@@ -299,6 +309,29 @@ describe("대조군 연구 종료 코드 입력", () => {
     );
     expect(root.textContent).toContain("연구 기간의 하루 리뷰");
     expect(root.textContent).toContain("음악");
+  });
+
+  it("다시 받은 집계가 실패하면 리뷰 탭은 열린 채 불러오지 못했다고 안내한다(빈 집계로 되돌리지 않는다)", async () => {
+    const { responses } = verifyingServer({ failSummary: true });
+    const { root } = await verifyOnYesterday(responses);
+    await vi.waitFor(() =>
+      expect(root.textContent).toContain(
+        "시청 기록을 불러오지 못했어요. 잠시 후 다시 열어 주세요.",
+      ),
+    );
+    expect(hasFeedbackTabs(root)).toBe(true);
+    expect(root.textContent).toContain("연구 기간의 하루 리뷰");
+  });
+
+  it("검증 전에 받아 둔 집계에 기록이 있으면, 다시 받기가 실패해도 그 기록을 그대로 보여 준다", async () => {
+    const { responses } = verifyingServer({
+      failSummary: true,
+      daysBeforeVerify: [viewingDay("게임")],
+    });
+    const { root } = await verifyOnYesterday(responses);
+    await vi.waitFor(() => expect(root.textContent).toContain("게임"));
+    expect(root.textContent).not.toContain("시청 기록을 불러오지 못했어요");
+    expect(root.textContent).not.toContain("시청 기록을 불러오고 있어요");
   });
 
   it.each([

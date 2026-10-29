@@ -1350,7 +1350,10 @@ async function boot() {
       loadReviewHistory(true),
       loadPeriodReviews(),
     ]);
-    VL._viewingSummary ??= previousSummary;
+    // 날짜 기록이 있던 저장본(재설치 등)만 되돌린다. 빈 집계로 되돌리면 받기 실패가 "기록 없음"으로 보인다
+    if (!VL._viewingSummary && previousSummary?.data?.days?.length) {
+      VL._viewingSummary = previousSummary;
+    }
     for (const r of results) {
       if (r.status === "rejected") {
         console.warn("[popup] 종료 후 리뷰 다시 받기 오류:", r.reason?.message);
