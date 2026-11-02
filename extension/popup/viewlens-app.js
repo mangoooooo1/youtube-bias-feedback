@@ -99,9 +99,7 @@ function _latestViewableDate(installDate) {
 }
 
 function _isStudyEndTimeReached(installDate) {
-  if (!installDate) return false;
-  const revealDateStr = dayFromInstall(installDate, VL.TOTAL_DAYS);
-  return Date.now() >= new Date(`${revealDateStr}T09:00:00+09:00`).getTime();
+  return ViewLensStudy.isReviewReleased(installDate);
 }
 
 // 대조군 종료 후 리뷰 열람 게이트

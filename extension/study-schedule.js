@@ -53,9 +53,27 @@
     return "ended";
   }
 
+  /**
+   * 리뷰 공개 시각(마지막 날 다음 날 09:00 KST, 04:00 KST 기간 리뷰 배치 뒤)이 지났는지.
+   * 서버의 isStudyEnded와 같은 시각이어야 한다.
+   * @param {string|undefined} installDate
+   * @param {Date} [now]
+   * @returns {boolean}
+   */
+  function isReviewReleased(installDate, now = new Date()) {
+    if (!installDate || !Number.isFinite(new Date(installDate).getTime())) {
+      return false;
+    }
+    const releaseAt = Date.parse(
+      `${kstDayFromInstall(installDate, TOTAL_DAYS)}T09:00:00+09:00`,
+    );
+    return now.getTime() >= releaseAt;
+  }
+
+  // 집단별 다음 단계는 팝업 배너가 안내하므로 알림은 팝업을 열어 보라고만 한다
   const ENDED_NOTICE = Object.freeze({
-    title: "연구 참여 기간이 종료되었습니다.",
-    body: "참여해 주셔서 감사합니다. 연구자가 보내드릴 설문 안내를 기다려 주세요.",
+    title: "참여 기간이 끝났어요.",
+    body: "확장 프로그램을 열어 다음 단계를 확인해 주세요.",
   });
 
   globalThis.ViewLensStudy = Object.freeze({
@@ -66,5 +84,6 @@
     dayOfStudy,
     ENDED_NOTICE,
     getParticipationState,
+    isReviewReleased,
   });
 })();
