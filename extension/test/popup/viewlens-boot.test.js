@@ -236,6 +236,68 @@ describe("boot — 홈 시청 영상 수", () => {
     );
   });
 
+  describe("팝업을 연 채로 서버가 기록을 받으면", () => {
+    // 부를 때마다 오늘 유효 영상 수가 하나씩 늘어나는 서버
+    const growingSummary = () => {
+      let validCount = 0;
+      return () => {
+        validCount += 1;
+        return {
+          body: {
+            data: {
+              days: [],
+              periods: [],
+              dayCounts: [{ date: kstToday(), validCount }],
+            },
+          },
+        };
+      };
+    };
+    const bootOpen = async () => {
+      const opened = await bootPopup(
+        participant({
+          group: "CON",
+          installDate: daysAgo(BASELINE_DAYS + 1),
+          ...localSessions,
+        }),
+        { responses: { "/api/viewing-summary": growingSummary() } },
+      );
+      await vi.waitFor(() =>
+        expect(cell(opened.root, "오늘 시청한 영상").value).toBe("1개"),
+      );
+      return opened;
+    };
+    const video = (fields) => ({ videoId: "v1", eventId: "e1", ...fields });
+
+    it.each([
+      ["새 영상 기록(sent)", { sent: false }, { sent: true }],
+      [
+        "시청 시간(watchStatsSent)",
+        { sent: true, watchStatsSent: false },
+        { sent: true, watchStatsSent: true },
+      ],
+    ])(
+      "%s을 받으면 시청 집계를 다시 받아 숫자를 바꾼다",
+      async (_, before, after) => {
+        const { root, server, emitChange } = await bootOpen();
+        await emitChange({
+          video__s9__e1: { oldValue: video(before), newValue: video(after) },
+        });
+        await vi.waitFor(() =>
+          expect(cell(root, "오늘 시청한 영상").value).toBe("2개"),
+        );
+        expect(server.count("/api/viewing-summary")).toBe(2);
+      },
+    );
+
+    it("로컬에만 막 생긴 기록(sent:false)으로는 다시 받지 않는다", async () => {
+      const { root, server, emitChange } = await bootOpen();
+      await emitChange({ video__s9__e1: { newValue: video({ sent: false }) } });
+      expect(server.count("/api/viewing-summary")).toBe(1);
+      expect(cell(root, "오늘 시청한 영상").value).toBe("1개");
+    });
+  });
+
   it("dayCounts가 없는 응답(구버전 서버)이면 로컬 기록으로 센다", async () => {
     const { root, server } = await bootPopup(
       participant({

@@ -1646,6 +1646,22 @@ async function boot() {
     );
     if (liveVideosChanged) VL._liveVideos = await loadLiveVideos();
 
+    // 서버가 영상 기록·시청 시간을 받으면(sent·watchStatsSent가 true로 바뀜) 서버 집계도 다시 받는다.
+    // 홈 숫자가 서버 dayCounts라, 팝업을 연 채로도 새 영상(+1)과 잠깐 본 영상(−1)이 반영되게 한다
+    const serverAccepted = Object.entries(changes).some(
+      ([key, { oldValue, newValue }]) =>
+        key.startsWith("video__") &&
+        ((newValue?.sent === true && oldValue?.sent !== true) ||
+          (newValue?.watchStatsSent === true &&
+            oldValue?.watchStatsSent !== true)),
+    );
+    // 세션 변경은 위에서 이미 다시 받는다
+    if (serverAccepted && !changes.sessions) {
+      reloadViewingSummary().then((changed) => {
+        if (changed) popup.render();
+      });
+    }
+
     if (changes.sessions || changes.todayReviewsCache || liveVideosChanged) {
       popup.render();
     }
