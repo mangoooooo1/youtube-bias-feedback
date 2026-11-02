@@ -152,6 +152,25 @@ describe("대조군 연구 종료 코드 입력", () => {
     expect(server.paths()).not.toContain("/api/study-end-code/validate");
   });
 
+  // 연구 종료 뒤 유예 기간에도 남은 기록이 전송되며 저장소가 바뀌고 화면을 다시 그린다
+  it("입력하는 동안 화면을 다시 그려도 입력한 코드와 포커스·커서가 남는다", async () => {
+    const { root, input, emitChange } = await openCodeInput();
+    input.value = "ABCD";
+    input.focus();
+    input.setSelectionRange(2, 2);
+    await emitChange({
+      video__s9__e1: {
+        oldValue: { videoId: "v1", sent: false },
+        newValue: { videoId: "v1", sent: true },
+      },
+    });
+    const after = root.querySelector("#vl-study-end-code-input");
+    expect(after).not.toBe(input);
+    expect(after.value).toBe("ABCD");
+    expect(after.ownerDocument.activeElement).toBe(after);
+    expect([after.selectionStart, after.selectionEnd]).toEqual([2, 2]);
+  });
+
   it.each([
     [
       "틀린 코드",

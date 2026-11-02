@@ -37,6 +37,7 @@ function buildApp() {
 const app = buildApp();
 
 const DAY_MS = 86400000;
+const kstDate = (d) => d.toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
 
 function addParticipant(anonymousId, group, installDate, extra = {}) {
   db.prepare(
@@ -90,26 +91,32 @@ describe("POST /api/viewing-summary — 배선·자격", () => {
     expect(res.body.data.periods.length).toBeGreaterThan(0);
   });
 
-  it("베이스라인 기간 중인 EXP는 빈 배열을 받는다(today-reviews와 같은 규칙)", async () => {
-    addParticipant("exp-baseline", "EXP", new Date().toISOString());
-    addVideo("exp-baseline", { watchedAt: new Date().toISOString() });
+  it("베이스라인 기간 중인 EXP는 빈 배열과 날짜별 유효 영상 수만 받는다(today-reviews와 같은 규칙)", async () => {
+    const now = new Date();
+    addParticipant("exp-baseline", "EXP", now.toISOString());
+    addVideo("exp-baseline", { watchedAt: now.toISOString() });
 
     const res = await request(app)
       .post("/api/viewing-summary")
       .send({ anonymousId: "exp-baseline" });
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual({ days: [], periods: [] });
+    expect(res.body.data).toEqual({
+      days: [],
+      periods: [],
+      dayCounts: [{ date: kstDate(now), validCount: 1 }],
+    });
   });
 
-  it("종료 코드를 입력하기 전 CON은 빈 배열, 입력한 뒤에는 집계를 받는다", async () => {
+  it("종료 코드를 입력하기 전 CON은 빈 배열과 날짜별 유효 영상 수만, 입력한 뒤에는 집계를 받는다", async () => {
+    const now = new Date();
     const installDate = new Date(Date.now() - 6 * DAY_MS).toISOString();
     addParticipant("con-before", "CON", installDate);
     addParticipant("con-after", "CON", installDate, {
-      studyEndCodeVerifiedAt: new Date().toISOString(),
+      studyEndCodeVerifiedAt: now.toISOString(),
     });
-    addVideo("con-before", { watchedAt: new Date().toISOString() });
-    addVideo("con-after", { watchedAt: new Date().toISOString() });
+    addVideo("con-before", { watchedAt: now.toISOString() });
+    addVideo("con-after", { watchedAt: now.toISOString() });
 
     const before = await request(app)
       .post("/api/viewing-summary")
@@ -118,8 +125,66 @@ describe("POST /api/viewing-summary — 배선·자격", () => {
       .post("/api/viewing-summary")
       .send({ anonymousId: "con-after" });
 
-    expect(before.body.data).toEqual({ days: [], periods: [] });
+    expect(before.body.data).toEqual({
+      days: [],
+      periods: [],
+      dayCounts: [{ date: kstDate(now), validCount: 1 }],
+    });
     expect(after.body.data.days).toHaveLength(1);
+    expect(after.body.data.dayCounts).toBeUndefined();
+  });
+
+  // 홈의 "시청한 영상"이 실험군 화면과 같은 기준(30초 이상 또는 영상 길이의 1/4 이상)으로 센다
+  it("자격이 없을 때 dayCounts는 잠깐 본 영상을 빼고 날짜별로 센다", async () => {
+    const installDate = new Date(Date.now() - 6 * DAY_MS).toISOString();
+    addParticipant("con-counts", "CON", installDate);
+    const today = new Date();
+    const yesterday = new Date(Date.now() - DAY_MS);
+    addVideo("con-counts", { watchedAt: today.toISOString() }); // 300초
+    addVideo("con-counts", {
+      watchedAt: today.toISOString(),
+      watchedSeconds: 3,
+    });
+    // 끝까지 본 20초 쇼츠는 30초 미만이어도 1/4 기준으로 들어간다
+    addVideo("con-counts", {
+      watchedAt: today.toISOString(),
+      watchedSeconds: 20,
+      durationSeconds: 20,
+    });
+    // 보고 있어 시청 시간이 아직 없는 영상은 유효로 센다(서버 validCount와 같음)
+    addVideo("con-counts", {
+      watchedAt: today.toISOString(),
+      watchedSeconds: null,
+    });
+    addVideo("con-counts", {
+      watchedAt: yesterday.toISOString(),
+      watchedSeconds: 2,
+    });
+
+    const res = await request(app)
+      .post("/api/viewing-summary")
+      .send({ anonymousId: "con-counts" });
+
+    expect(res.body.data.dayCounts).toEqual([
+      { date: kstDate(yesterday), validCount: 0 },
+      { date: kstDate(today), validCount: 3 },
+    ]);
+  });
+
+  it("자격이 없을 때 응답에 분포·영상 목록·제목·구간이 없다", async () => {
+    const installDate = new Date(Date.now() - 6 * DAY_MS).toISOString();
+    addParticipant("con-minimal", "CON", installDate);
+    addVideo("con-minimal", { watchedAt: new Date().toISOString() });
+
+    const res = await request(app)
+      .post("/api/viewing-summary")
+      .send({ anonymousId: "con-minimal" });
+
+    const body = JSON.stringify(res.body.data);
+    expect(body).not.toMatch(
+      /Distribution|excluded|correctedTitles|eventId|vs-\d|음악/,
+    );
+    expect(res.body.data.periods).toEqual([]);
   });
 
   it("등록되지 않은 참여자는 404", async () => {

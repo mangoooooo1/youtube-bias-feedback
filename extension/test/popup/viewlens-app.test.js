@@ -388,6 +388,64 @@ describe("_controlTodayCount — 대조군 홈 오늘 시청한 영상 수", () 
     expect(count({ sessions: [morning], live })).toBe(3);
   });
 
+  describe("서버 dayCounts(유효 시청 기준)", () => {
+    const local = {
+      sessions: [
+        { sessionId: "s1", endTime: kst("2026-03-06T00:20:00"), videoCount: 7 },
+      ],
+    };
+    const dayCounts = [
+      { date: "2026-03-05", validCount: 4 },
+      { date: "2026-03-06", validCount: 2 },
+    ];
+    function counts(summary, status) {
+      g.VL._viewingSummary = summary;
+      g.VL._viewingSummaryStatus = status;
+      try {
+        return [count(local), g._controlTotalCount()];
+      } finally {
+        g.VL._viewingSummary = null;
+      }
+    }
+
+    it("오늘 받은 값이면 오늘 칸과 전체 합을 쓴다(받는 중인 오늘 저장본 포함)", () => {
+      const today = {
+        fetchedAt: kst("2026-03-06T00:10:00"),
+        data: { dayCounts },
+      };
+      expect(counts(today, "ok")).toEqual([2, 6]);
+      expect(counts(today, "loading")).toEqual([2, 6]);
+    });
+
+    it("오늘 칸이 없으면 오늘은 0개다(잠깐 본 영상만 있었던 날)", () => {
+      const summary = {
+        fetchedAt: kst("2026-03-06T00:10:00"),
+        data: { dayCounts: [dayCounts[0]] },
+      };
+      expect(counts(summary, "ok")).toEqual([0, 4]);
+    });
+
+    it.each([
+      [
+        "어제 받은 저장본",
+        { fetchedAt: kst("2026-03-05T23:50:00"), data: { dayCounts } },
+        "loading",
+      ],
+      [
+        "받기 실패",
+        { fetchedAt: kst("2026-03-06T00:10:00"), data: { dayCounts } },
+        "failed",
+      ],
+      [
+        "dayCounts 없음",
+        { fetchedAt: kst("2026-03-06T00:10:00"), data: { days: [] } },
+        "ok",
+      ],
+    ])("%s이면 로컬 기록으로 센다", (_, summary, status) => {
+      expect(counts(summary, status)).toEqual([7, 7]);
+    });
+  });
+
   it("영상 기록이 없는 세션은 종료 시각의 날짜로 videoCount를 센다", () => {
     const sessions = [
       { sessionId: "s1", endTime: kst("2026-03-06T00:20:00"), videoCount: 2 },

@@ -329,7 +329,8 @@ body {
   z-index: 100;
   pointer-events: none;
 }
-.vl-tip:hover::after {
+.vl-tip:hover::after,
+.vl-tip:focus-visible::after {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);

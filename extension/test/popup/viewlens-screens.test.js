@@ -199,6 +199,15 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
     expect(html).not.toContain("cursor:help");
   });
 
+  it("ⓘ는 Tab으로 갈 수 있고 스크린 리더가 안내 문구를 읽는다", () => {
+    const tag = render().match(/<span class="vl-tip[^>]*>/)[0];
+    const attr = (name) => tag.match(new RegExp(`${name}="([^"]*)"`))?.[1];
+    expect(attr("tabindex")).toBe("0");
+    expect(attr("role")).toBe("img");
+    expect(attr("aria-label")).toBe(attr("data-tip"));
+    expect(attr("aria-label")).toContain("30초 이상 보거나");
+  });
+
   it("저장본도 없이 불러오기에 실패하면 그래프 대신 안내한다", () => {
     const html = render(
       { timeDistribution: {}, countDistribution: {}, chartCount: 0 },

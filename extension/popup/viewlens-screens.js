@@ -244,12 +244,13 @@ function screenTodayEmpty(
 }
 
 const SHORT_WATCH_TIP =
-  "30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셌어요. 그보다 짧게 본 영상은 잘못 눌렀거나 바로 넘긴 영상으로 보고 빼요.";
+  "30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셌어요. 그보다 짧게 본 영상은 잘못 눌렀거나 바로 넘긴 영상으로 판단하고 시청 기록이 확인되면 빼요.";
 const UNCATEGORIZED_TIP =
   "유튜브에서 분야 정보를 가져오지 못한 영상이에요. 정보를 다시 가져오면 그래프에 들어가요.";
 
+// 키보드(Tab)로도 가서 툴팁을 띄우고, 스크린 리더는 "i" 대신 안내 문구를 읽는다
 function _infoTip(tip) {
-  return `<span class="vl-tip vl-tip-up vl-tip-line" data-tip="${vlEscapeHtml(tip)}" style="display:inline-flex;width:12px;height:12px;border-radius:50%;border:1px solid var(--vl-ink-3);align-items:center;justify-content:center;font-size:8px;font-weight:700;line-height:1;color:var(--vl-ink-3);cursor:default;flex-shrink:0">i</span>`;
+  return `<span class="vl-tip vl-tip-up vl-tip-line" tabindex="0" role="img" aria-label="${vlEscapeHtml(tip)}" data-tip="${vlEscapeHtml(tip)}" style="display:inline-flex;width:12px;height:12px;border-radius:50%;border:1px solid var(--vl-ink-3);align-items:center;justify-content:center;font-size:8px;font-weight:700;line-height:1;color:var(--vl-ink-3);cursor:default;flex-shrink:0">i</span>`;
 }
 
 function _footNote(text, tip) {
@@ -560,8 +561,13 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
 
 function screenControlHome(day, stats = {}) {
   const ended = !!stats.collectionEnded;
+  // 로컬 기록으로 대체된 때도 ⓘ가 사라지지 않게 늘 단다(문구가 "확인되면 빼요"라 어긋나지 않는다)
   const cells = [
-    { v: `${stats.todayCount ?? VL.con.todayCount}개`, l: "오늘 시청한 영상" },
+    {
+      v: `${stats.todayCount ?? VL.con.todayCount}개`,
+      l: "오늘 시청한 영상",
+      tip: _infoTip(SHORT_WATCH_TIP),
+    },
     {
       v: `${stats.totalCount ?? VL.con.totalCount}개`,
       l: "지금까지 시청한 영상",
@@ -569,12 +575,13 @@ function screenControlHome(day, stats = {}) {
     { v: `${day}일째`, l: "ViewLens와 함께한 지" },
     { v: `D-${Math.max(0, VL.TOTAL_DAYS - day)}`, l: "참여 기간 종료까지" },
   ];
+  // 라벨 줄이 position:relative여야 ⓘ(vl-tip-line) 툴팁이 이 줄 위로 펼쳐진다(없으면 팝업 밖으로 나감)
   const gridCells = cells
     .map(
       (cell, i) => `
     <div style="padding:16px 18px;border-right:${i % 2 === 0 ? "1px solid var(--vl-line)" : "none"};border-bottom:${i < 2 ? "1px solid var(--vl-line)" : "none"}">
       <div style="font-weight:700;font-size:var(--vl-fs-7);color:var(--vl-ink);letter-spacing:-0.02em;line-height:1">${cell.v}</div>
-      <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:6px;font-weight:500">${cell.l}</div>
+      <div style="position:relative;display:flex;align-items:center;gap:4px;font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:6px;font-weight:500">${cell.l}${cell.tip ?? ""}</div>
     </div>
   `,
     )

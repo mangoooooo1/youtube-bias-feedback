@@ -42,8 +42,22 @@ function _collectingTimerText() {
   return `피드백까지 ${mins}분 ${String(secs).padStart(2, "0")}초`;
 }
 
-// 대조군 홈 — 실제 세션 데이터 기반 총 누적 시청 영상 수 (진행 중 세션 포함).
+// 홈 숫자용 서버 날짜별 유효 영상 수(자격이 없는 참여자만 받음). 실험군 화면과 같은 기준이다.
+// 오늘 받은 값만 쓴다(지난날 저장본엔 오늘 칸이 없다). 받기에 실패했거나 없으면 null — 로컬 기록으로 센다
+function _serverDayCounts() {
+  const summary = VL._viewingSummary;
+  const counts = summary?.data?.dayCounts;
+  if (!counts || VL._viewingSummaryStatus === "failed") return null;
+  if (!summary.fetchedAt) return null;
+  return dateStr(new Date(summary.fetchedAt)) === dateStr(new Date())
+    ? counts
+    : null;
+}
+
+// 대조군 홈 — 총 누적 시청 영상 수. 서버 값이 없으면 로컬 세션 기준(진행 중 세션 포함).
 function _controlTotalCount() {
+  const counts = _serverDayCounts();
+  if (counts) return counts.reduce((sum, c) => sum + c.validCount, 0);
   const sessions = VL._allSessions || [];
   const ended = sessions.reduce(
     (sum, s) => sum + (s.videoCount ?? s.videos?.length ?? 0),
@@ -52,11 +66,13 @@ function _controlTotalCount() {
   return ended + (VL.today?.collectingCount ?? 0);
 }
 
-// 대조군 홈 — 오늘 시청한 영상 수 (끝난 세션 + 진행 중 세션).
+// 대조군 홈 — 오늘 시청한 영상 수. 서버 값이 없으면 로컬 기록(끝난 세션 + 진행 중 세션)으로 센다.
 // 서버 오늘 집계처럼 영상을 본 시각(KST)으로 센다. 자정을 걸친 세션은 오늘 본 영상만 센다.
 function _controlTodayCount() {
-  const sessions = VL._allSessions || [];
   const todayStr = dateStr(new Date());
+  const counts = _serverDayCounts();
+  if (counts) return counts.find((c) => c.date === todayStr)?.validCount ?? 0;
+  const sessions = VL._allSessions || [];
   // 영상 기록이 없는 세션은 세션 날짜로 videoCount를 더한다
   const withoutVideos = sessions.reduce(
     (sum, s) =>
@@ -432,6 +448,15 @@ class ViewLensPopup {
       });
     }
 
+    // 저장소 변경 등으로 다시 그려도 입력 중인 종료 확인 코드가 지워지지 않게 값·포커스·커서를 옮긴다
+    const typing = this.container.querySelector("#vl-study-end-code-input");
+    const typed = typing && {
+      value: typing.value,
+      focused: typing === this.container.ownerDocument?.activeElement,
+      start: typing.selectionStart,
+      end: typing.selectionEnd,
+    };
+
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
       ${_popupHeader(groupCfg, day, { participantCode: this._participantCode, collectionEnded })}
       ${
@@ -455,6 +480,17 @@ class ViewLensPopup {
 
     this._bind(groupCfg, currentWeek);
     this._animateCharts();
+
+    const input = typed
+      ? this.container.querySelector("#vl-study-end-code-input")
+      : null;
+    if (input) {
+      input.value = typed.value;
+      if (typed.focused) {
+        input.focus();
+        input.setSelectionRange(typed.start, typed.end);
+      }
+    }
   }
 
   /**
@@ -894,5 +930,6 @@ window.Studio = Studio;
 window._isStudyEndTimeReached = _isStudyEndTimeReached;
 window._dayViewForDate = _dayViewForDate;
 window._controlTodayCount = _controlTodayCount;
+window._controlTotalCount = _controlTotalCount;
 window._isStudyEndReviewReady = _isStudyEndReviewReady;
 window._isCollectionEnded = _isCollectionEnded;
