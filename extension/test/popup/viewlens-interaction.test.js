@@ -11,6 +11,7 @@ import {
 } from "vitest";
 import { loadPopup } from "./load-popup.js";
 import {
+  DAY,
   bootPopup,
   cleanupPopup,
   daysAgo,
@@ -42,6 +43,9 @@ const todayReview = (review) => ({
 
 const IN_PROGRESS = () => daysAgo(BASELINE_DAYS + 1);
 const STUDY_ENDED = () => daysAgo(TOTAL_DAYS + 1);
+// STUDY_ENDED 설치일 기준 참여 마지막 날의 한 시각
+const LAST_DAY_AT = () =>
+  new Date(Date.parse(STUDY_ENDED()) + (TOTAL_DAYS - 1) * DAY).toISOString();
 
 // 클릭 기록 리스너는 boot 마지막에 붙는다. 이번 사용 기록이 live 슬롯에 생기면 준비된 것
 async function bootReady(stored, opts) {
@@ -155,6 +159,11 @@ describe("대조군 연구 종료 코드 입력", () => {
       "코드가 올바르지 않아요. 설문에서 안내받은 코드를 확인해 주세요.",
     ],
     [
+      "맞는 코드지만 리뷰가 아직 준비되지 않은 경우",
+      { data: { valid: false, reason: "not_ready" } },
+      "리뷰를 준비하고 있어요. 잠시 후 다시 시도해 주세요.",
+    ],
+    [
       "서버 오류",
       () => ({ status: 500 }),
       "지금은 확인할 수 없어요. 잠시 후 다시 시도해 주세요.",
@@ -200,9 +209,9 @@ describe("대조군 연구 종료 코드 입력", () => {
   });
 
   // 실제 서버처럼 코드를 검증하기 전에는 빈 값, 검증한 뒤에는 리뷰·집계를 준다
-  const YESTERDAY = () => kst(new Date(Date.now() - 86400000).toISOString());
+  const LAST_DAY = () => kst(LAST_DAY_AT());
   const viewingDay = (category) => ({
-    date: YESTERDAY(),
+    date: LAST_DAY(),
     confirmedCount: 1,
     chartCount: 1,
     chartSeconds: 120,
@@ -242,7 +251,7 @@ describe("대조군 연구 종료 코드 입력", () => {
       "/api/today-reviews": () => ({
         body: {
           data: state.verified
-            ? [{ reviewDate: YESTERDAY(), review: "연구 기간의 하루 리뷰" }]
+            ? [{ reviewDate: LAST_DAY(), review: "연구 기간의 하루 리뷰" }]
             : [],
         },
       }),
@@ -268,24 +277,23 @@ describe("대조군 연구 종료 코드 입력", () => {
     input.value = "CODE-1";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
   };
-  // 같은 기기로 참여한 대조군은 연구 기간의 세션이 기기에 남아 있다. 어제 날짜를 띄운 채 코드를 검증한다
-  async function verifyOnYesterday(responses) {
-    const yesterdaySession = session("s-yesterday", {
-      endTime: daysAgo(1),
-      videos: [{ eventId: "e-1", videoId: "v-1", watchedAt: daysAgo(1) }],
+  // 같은 기기로 참여한 대조군은 연구 기간의 세션이 기기에 남아 있다. 하루 탭은 참여 마지막 날로 열린다
+  async function verifyOnLastDay(responses) {
+    const lastDaySession = session("s-last-day", {
+      endTime: LAST_DAY_AT(),
+      videos: [{ eventId: "e-1", videoId: "v-1", watchedAt: LAST_DAY_AT() }],
     });
     const p = await bootReady(
       participant({
         group: "CON",
         installDate: STUDY_ENDED(),
-        sessions: [yesterdaySession],
+        sessions: [lastDaySession],
       }),
       { responses },
     );
     click(p.root, "#vl-study-end-cta");
     submitCode(p.root.querySelector("#vl-study-end-code-input"));
     await vi.waitFor(() => expect(hasFeedbackTabs(p.root)).toBe(true));
-    click(p.root, "#vl-date-prev");
     return p;
   }
 
@@ -302,7 +310,6 @@ describe("대조군 연구 종료 코드 입력", () => {
       ]),
     );
     expect(hasFeedbackTabs(root)).toBe(true);
-    click(root, "#vl-date-prev");
     await vi.waitFor(() =>
       expect(root.textContent).toContain("연구 기간의 하루 리뷰"),
     );
@@ -312,7 +319,7 @@ describe("대조군 연구 종료 코드 입력", () => {
     const { responses, releaseSummary } = verifyingServer({
       holdSummary: true,
     });
-    const { root } = await verifyOnYesterday(responses);
+    const { root } = await verifyOnLastDay(responses);
     expect(root.textContent).toContain("시청 기록을 불러오고 있어요.");
     releaseSummary();
     await vi.waitFor(() =>
@@ -329,7 +336,6 @@ describe("대조군 연구 종료 코드 입력", () => {
     const { root, input } = await openCodeInput(responses);
     submitCode(input);
     await vi.waitFor(() => expect(hasFeedbackTabs(root)).toBe(true));
-    click(root, "#vl-date-prev");
     expect(root.textContent).toContain("시청 기록을 불러오고 있어요.");
     expect(root.textContent).not.toContain("이 날 시청 기록이 없어요");
     releaseSummary();
@@ -343,20 +349,20 @@ describe("대조군 연구 종료 코드 입력", () => {
     const { responses, releaseEarlySummary } = verifyingServer({
       holdSummaryBeforeVerify: true,
     });
-    const { root, data } = await verifyOnYesterday(responses);
+    const { root, data } = await verifyOnLastDay(responses);
     await vi.waitFor(() => expect(root.textContent).toContain("음악"));
     releaseEarlySummary();
     await settle();
     expect(root.textContent).toContain("음악");
     expect(root.textContent).not.toContain("시청 기록을 불러오");
     expect(data.viewingSummaryCache.data.days.map((d) => d.date)).toEqual([
-      YESTERDAY(),
+      LAST_DAY(),
     ]);
   });
 
   it("다시 받은 집계가 실패하면 리뷰 탭은 열린 채 불러오지 못했다고 안내한다(빈 집계로 되돌리지 않는다)", async () => {
     const { responses } = verifyingServer({ failSummary: true });
-    const { root } = await verifyOnYesterday(responses);
+    const { root } = await verifyOnLastDay(responses);
     await vi.waitFor(() =>
       expect(root.textContent).toContain(
         "시청 기록을 불러오지 못했어요. 잠시 후 다시 열어 주세요.",
@@ -371,7 +377,7 @@ describe("대조군 연구 종료 코드 입력", () => {
       failSummary: true,
       daysBeforeVerify: [viewingDay("게임")],
     });
-    const { root } = await verifyOnYesterday(responses);
+    const { root } = await verifyOnLastDay(responses);
     await vi.waitFor(() => expect(root.textContent).toContain("게임"));
     expect(root.textContent).not.toContain("시청 기록을 불러오지 못했어요");
     expect(root.textContent).not.toContain("시청 기록을 불러오고 있어요");

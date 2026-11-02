@@ -86,15 +86,20 @@ function _installDateForDay(day) {
   return new Date(Date.now() - (day - 1) * 86400000).toISOString();
 }
 
-// 전송 유예 기간까지 끝났는지 — 종료·설문 대기 배너 표시 여부
-function _isParticipationEnded(installDate) {
-  return ViewLensStudy.getParticipationState(installDate) === "ended";
+// 수집이 멈췄는지(마지막 날 다음 날 00:00 KST부터) — 수집 관련 표시를 거두고 종료 안내 배너를 띄우는 기준
+function _isCollectionEnded(installDate) {
+  return ViewLensStudy.getParticipationState(installDate) !== "active";
+}
+
+// 하루 탭에서 갈 수 있는 마지막 날짜. 수집이 멈췄으면 참여 마지막 날, 아니면 오늘
+function _latestViewableDate(installDate) {
+  return _isCollectionEnded(installDate)
+    ? localDateFromDateStr(dayFromInstall(installDate, VL.TOTAL_DAYS - 1))
+    : new Date();
 }
 
 function _isStudyEndTimeReached(installDate) {
-  if (!installDate) return false;
-  const revealDateStr = dayFromInstall(installDate, VL.TOTAL_DAYS);
-  return Date.now() >= new Date(`${revealDateStr}T09:00:00+09:00`).getTime();
+  return ViewLensStudy.isReviewReleased(installDate);
 }
 
 // 대조군 종료 후 리뷰 열람 게이트
@@ -102,16 +107,27 @@ function _isStudyEndReviewReady(groupCfg, installDate) {
   return VL.isConGroup(groupCfg.code) && _isStudyEndTimeReached(installDate);
 }
 
-// 대조군 6주 리뷰 화면 상단에 붙는 뒤로가기 행
-function _studyEndBackRow() {
-  return `<div style="padding:12px 16px 0">
+// 대조군 종료 후 리뷰·코드 입력 화면에서 종료 배너 자리(탭 위)에 두는 뒤로가기 행.
+// 탭이 있으면 탭 바와 한 덩어리로 보이게 같은 배경을 쓴다
+function _studyEndBackRow(withTabs) {
+  const style = withTabs
+    ? "padding:6px 16px 0;background:var(--vl-card)"
+    : "padding:10px 16px 6px";
+  return `<div style="${style}">
     <button id="vl-study-end-back" class="vl-press" style="display:flex;align-items:center;gap:5px;padding:5px 2px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-ink-2)">‹ 홈으로</button>
   </div>`;
 }
 
-function _popupHeader(groupCfg, day, { participantCode, studyEnded } = {}) {
+function _popupHeader(
+  groupCfg,
+  day,
+  { participantCode, collectionEnded } = {},
+) {
   const isTest = groupCfg.code.startsWith("TEST");
-  const statusLabel = studyEnded ? "참여 종료" : "참여 중";
+  const statusLabel = collectionEnded ? "참여 기간 종료" : "참여 중";
+  const dayText = collectionEnded
+    ? `${day}일 참여 완료`
+    : `설치 ${day}일째 · 종료 D-${Math.max(0, VL.TOTAL_DAYS - day)}`;
   const badge = isTest
     ? vlBadge({ text: "연구자 모드", tone: "accent", size: "sm" })
     : vlBadge({
@@ -132,7 +148,7 @@ function _popupHeader(groupCfg, day, { participantCode, studyEnded } = {}) {
       ${markSVG({ size: 26, accent: "var(--vl-accent)" })}
       <div style="display:flex;flex-direction:column;line-height:1.1">
         <span style="font-size:var(--vl-fs-4);font-weight:800;letter-spacing:-0.02em;color:var(--vl-ink)">View<span style="color:var(--vl-accent)">Lens</span></span>
-        <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:2px">설치 ${day}일째 · 종료 D-${Math.max(0, VL.TOTAL_DAYS - day)}</span>
+        <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:2px">${dayText}</span>
       </div>
     </div>
     ${rightArea}
@@ -317,7 +333,9 @@ class ViewLensPopup {
       return;
     }
     const tl = VL.TIMELINE[this._timelineKey] || VL.TIMELINE.w1_mid;
-    const day = _elapsedDay(tl.day);
+    const collectionEnded = _isCollectionEnded(this._installDate);
+    // 수집이 멈추면 일수는 참여 기간 길이에서 멈춘다
+    const day = collectionEnded ? VL.TOTAL_DAYS : _elapsedDay(tl.day);
     const groupCfg = VL.GROUPS[this._group] || VL.GROUPS.EXP;
     const totalWeeks = VL.TOTAL_WEEKS;
     const currentWeek = Math.min(
@@ -328,8 +346,13 @@ class ViewLensPopup {
 
     // 실제 세션이 없는 Studio에서는 예시 데이터(VL.today)를 그대로 쓴다
     if (this._tab === "today" && VL._allSessions) {
+      const latestDate = _latestViewableDate(this._installDate);
+      if (dateStr(this._selectedDate) > dateStr(latestDate)) {
+        this._selectedDate = latestDate;
+      }
       const d = buildDataForDate(VL._allSessions || [], this._selectedDate);
       const isToday = dateStr(this._selectedDate) === dateStr(new Date());
+      d.isLatestDate = dateStr(this._selectedDate) === dateStr(latestDate);
       d.collectingCount = isToday ? (VL._collectingCount ?? 0) : 0;
       d.collectingTimer = isToday ? _collectingTimerText() : "";
       const dateKey = dateStr(this._selectedDate);
@@ -356,11 +379,15 @@ class ViewLensPopup {
     // 대조군 종료 후 6주 리뷰 열람(Story 10-10) — _isFeedbackActive와 독립된 축이라
     // feedbackActive가 false인 경로 안에서만 추가로 분기한다.
     const studyEndReady = _isStudyEndReviewReady(groupCfg, this._installDate);
-    // 그룹 무관(EXP+CON) 시간 판정 — 종료 안내 오버레이와 헤더 배지가 함께 참조한다.
+    // 그룹 무관(EXP+CON) 리뷰 공개 시각 판정 — 종료 안내 모달이 참조한다.
     const studyEnded = _isStudyEndTimeReached(this._installDate);
     const showStudyEndNotice = studyEnded && !VL._studyEndNoticeShown;
     // 안내를 이미 본 뒤에만 CTA로 전환한다(대조군 전용).
     const showStudyEndCta = studyEndReady && !!VL._studyEndNoticeShown;
+
+    // 대조군이 종료 후 리뷰(또는 코드 입력) 화면을 연 상태. 배너 대신 홈으로 가는 줄을 둔다
+    const studyEndReviewOpen =
+      !feedbackActive && studyEndReady && this._studyEndReviewOpen;
 
     let bodyHTML;
     if (feedbackActive) {
@@ -373,20 +400,18 @@ class ViewLensPopup {
               _periodViewFor(selWeek),
               this._periodFocus,
             );
-    } else if (studyEndReady && this._studyEndReviewOpen) {
+    } else if (studyEndReviewOpen) {
       // currentWeek는 day(경과일)로 계산되는데, studyEndReady가 참이면 이미 day >= TOTAL_DAYS라
-      bodyHTML =
-        _studyEndBackRow() +
-        (VL._studyEndCodeVerified
-          ? this._tab === "today"
-            ? screenToday()
-            : screenFeedback(
-                currentWeek,
-                selWeek,
-                _periodViewFor(selWeek),
-                this._periodFocus,
-              )
-          : screenStudyEndCodeInput());
+      bodyHTML = VL._studyEndCodeVerified
+        ? this._tab === "today"
+          ? screenToday()
+          : screenFeedback(
+              currentWeek,
+              selWeek,
+              _periodViewFor(selWeek),
+              this._periodFocus,
+            )
+        : screenStudyEndCodeInput();
     } else {
       // 10-8: groupCfg.feedback이 true인데 feedbackActive가 false라는 건 "EXP인데 베이스라인
       // 게이트에 걸렸다"는 뜻이다(CON은 애초에 groupCfg.feedback이 false). 이 경우에만
@@ -402,12 +427,23 @@ class ViewLensPopup {
         totalCount: _controlTotalCount(),
         baselineDaysLeft,
         studyEndCtaReady: showStudyEndCta,
+        studyEndCodeVerified: !!VL._studyEndCodeVerified,
+        collectionEnded,
       });
     }
 
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
-      ${_popupHeader(groupCfg, day, { participantCode: this._participantCode, studyEnded })}
-      ${_isParticipationEnded(this._installDate) ? screenParticipationEndedBanner() : ""}
+      ${_popupHeader(groupCfg, day, { participantCode: this._participantCode, collectionEnded })}
+      ${
+        studyEndReviewOpen
+          ? _studyEndBackRow(this._studyEndTabsActive(groupCfg))
+          : collectionEnded
+            ? screenParticipationEndedBanner({
+                isControl: VL.isConGroup(groupCfg.code),
+                codeVerified: !!VL._studyEndCodeVerified,
+              })
+            : ""
+      }
       ${
         feedbackActive || this._studyEndTabsActive(groupCfg)
           ? _tabs(this._tab, !VL._todayConfirmed)
@@ -558,7 +594,8 @@ class ViewLensPopup {
     }
     if (nextBtn) {
       nextBtn.addEventListener("click", () => {
-        if (dateStr(this._selectedDate) !== dateStr(new Date())) {
+        const latestKey = dateStr(_latestViewableDate(this._installDate));
+        if (dateStr(this._selectedDate) < latestKey) {
           this._selectedDate = addDaysKst(this._selectedDate, 1);
           this.render();
         }
@@ -645,7 +682,9 @@ class ViewLensPopup {
         showErr(
           result.reason === "invalid"
             ? "코드가 올바르지 않아요. 설문에서 안내받은 코드를 확인해 주세요."
-            : "지금은 확인할 수 없어요. 잠시 후 다시 시도해 주세요.",
+            : result.reason === "not_ready"
+              ? "리뷰를 준비하고 있어요. 잠시 후 다시 시도해 주세요."
+              : "지금은 확인할 수 없어요. 잠시 후 다시 시도해 주세요.",
         );
         return;
       }
@@ -856,4 +895,4 @@ window._isStudyEndTimeReached = _isStudyEndTimeReached;
 window._dayViewForDate = _dayViewForDate;
 window._controlTodayCount = _controlTodayCount;
 window._isStudyEndReviewReady = _isStudyEndReviewReady;
-window._isParticipationEnded = _isParticipationEnded;
+window._isCollectionEnded = _isCollectionEnded;

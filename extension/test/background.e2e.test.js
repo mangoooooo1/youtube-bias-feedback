@@ -2861,7 +2861,7 @@ describe("참여 기간 종료 — 전송 기간이 끝나면 서버 요청을 �
     expect(chromeBeforeRestart.notifications.create).toHaveBeenCalledWith(
       "viewlens-participation-ended",
       expect.objectContaining({
-        message: expect.stringContaining("설문 안내를 기다려 주세요"),
+        message: expect.stringContaining("다음 단계를 확인해 주세요"),
       }),
     );
     const [[, { message }]] =
@@ -2891,6 +2891,67 @@ describe("참여 기간 종료 — 전송 기간이 끝나면 서버 요청을 �
       (await global.chrome.storage.local.get("participationEndedNotifiedAt"))
         .participationEndedNotifiedAt,
     ).toEqual(expect.any(String));
+  });
+
+  describe("전송 유예 중 리뷰 공개 시각(09:00 KST)의 종료 알림", () => {
+    // 수집은 2026-01-13 00:00 KST에 멈추고, 리뷰는 같은 날 09:00 KST에 공개된다
+    const INSTALL = "2026-01-01T10:00:00+09:00";
+    const RELEASE_AT = Date.parse("2026-01-13T09:00:00+09:00");
+
+    it("09:00 전에는 알림을 띄우지 않고 서버 작업은 그대로 돈다", async () => {
+      vi.setSystemTime(RELEASE_AT - 1);
+      const mod = await loadBackground(backlog(INSTALL));
+      global.fetch = okFetch();
+
+      await mod.runServerTasks();
+
+      expect(global.chrome.notifications.create).not.toHaveBeenCalled();
+      expect(global.fetch).toHaveBeenCalled();
+    });
+
+    it("09:00부터 알림을 한 번만 띄우고 서버 작업도 그대로 돈다", async () => {
+      vi.setSystemTime(RELEASE_AT);
+      const mod = await loadBackground(backlog(INSTALL));
+      global.fetch = okFetch();
+
+      await mod.runServerTasks();
+      await mod.runServerTasks();
+
+      expect(global.chrome.notifications.create).toHaveBeenCalledTimes(1);
+      expect(global.chrome.notifications.create).toHaveBeenCalledWith(
+        "viewlens-participation-ended",
+        expect.objectContaining({
+          message: expect.stringContaining("참여 기간이 끝났어요"),
+        }),
+      );
+      const paths = global.fetch.mock.calls.map(
+        ([url]) => new URL(url).pathname,
+      );
+      expect(paths).toContain("/api/participants");
+    });
+
+    it("알림이 실패해도 서버 작업은 돌고, 다음 틱에 알림을 다시 시도한다", async () => {
+      vi.setSystemTime(RELEASE_AT);
+      const mod = await loadBackground(backlog(INSTALL));
+      global.fetch = okFetch();
+      global.chrome.notifications.create
+        .mockRejectedValueOnce(new Error("notification failed"))
+        .mockResolvedValue("viewlens-participation-ended");
+
+      await expect(mod.runServerTasks()).resolves.toBeUndefined();
+      expect(global.fetch).toHaveBeenCalled();
+      expect(
+        (await global.chrome.storage.local.get("participationEndedNotifiedAt"))
+          .participationEndedNotifiedAt,
+      ).toBeUndefined();
+
+      await mod.runServerTasks();
+      expect(global.chrome.notifications.create).toHaveBeenCalledTimes(2);
+      expect(
+        (await global.chrome.storage.local.get("participationEndedNotifiedAt"))
+          .participationEndedNotifiedAt,
+      ).toEqual(expect.any(String));
+    });
   });
 
   it("종료 알림을 클릭하면 팝업만 열고 세션 열람 기록 요청은 보내지 않는다", async () => {

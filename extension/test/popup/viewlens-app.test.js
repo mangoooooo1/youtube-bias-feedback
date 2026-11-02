@@ -160,7 +160,7 @@ describe("참여 종료 배너와 팝업 등록 재시도", () => {
   beforeAll(async () => {
     const g = await loadPopup();
     gates = {
-      _isParticipationEnded: g._isParticipationEnded,
+      _isCollectionEnded: g._isCollectionEnded,
       screenParticipationEndedBanner: g.screenParticipationEndedBanner,
       shouldRetryParticipantSync: g.shouldRetryParticipantSync,
     };
@@ -170,22 +170,42 @@ describe("참여 종료 배너와 팝업 등록 재시도", () => {
     vi.useRealTimers();
   });
 
+  // 배너는 전송 유예와 상관없이 수집이 멈춘 순간(grace)부터 뜬다
   it.each([
     ["active", ACTIVE, false],
-    ["grace", GRACE, false],
+    ["grace", GRACE, true],
     ["ended", ENDED, true],
   ])("%s면 배너 표시 여부는 %s이다", (_label, installDate, expected) => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
-    expect(gates._isParticipationEnded(installDate)).toBe(expected);
+    expect(gates._isCollectionEnded(installDate)).toBe(expected);
   });
 
-  it("배너는 종료·설문 대기를 안내하고 삭제·제거는 안내하지 않는다", () => {
-    const html = gates.screenParticipationEndedBanner();
-    expect(html).toContain("연구 참여 기간이 종료되었습니다.");
-    expect(html).toContain("설문 안내를 기다려 주세요");
-    expect(html).not.toMatch(/삭제|제거/);
-  });
+  it.each([
+    [
+      "실험군",
+      { isControl: false },
+      "연구자가 보내 드릴 설문 안내를 기다려 주세요",
+    ],
+    [
+      "코드 입력 전 대조군",
+      { isControl: true, codeVerified: false },
+      "1차 설문을 마치면 받는 코드로 참여 기간의 시청 리뷰를 볼 수 있어요",
+    ],
+    [
+      "코드 확인 후 대조군",
+      { isControl: true, codeVerified: true },
+      "리뷰를 다 보셨다면 2차 설문으로 돌아가 이어서 응답해 주세요",
+    ],
+  ])(
+    "배너는 %s에게 다음 단계를 안내하고 삭제·제거는 안내하지 않는다",
+    (_label, opts, nextStep) => {
+      const html = gates.screenParticipationEndedBanner(opts);
+      expect(html).toContain("참여 기간이 끝났어요.");
+      expect(html).toContain(nextStep);
+      expect(html).not.toMatch(/삭제|제거|연구 종료|실험 종료/);
+    },
+  );
 
   it("ended면 팝업 boot에서 등록을 다시 시도하지 않는다(옛 참여코드 재등록 방지)", () => {
     vi.useFakeTimers();

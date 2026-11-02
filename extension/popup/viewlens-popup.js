@@ -4,6 +4,7 @@ window.addDaysKst = addDaysKst;
 window.dateStr = dateStr;
 window.sessionDateStr = sessionDateStr;
 window.dayFromInstall = dayFromInstall;
+window.localDateFromDateStr = localDateFromDateStr;
 window.shouldRetryParticipantSync = shouldRetryParticipantSync;
 window.flushPendingPopupEvents = flushPendingPopupEvents;
 window.loadViewingSummaryCache = loadViewingSummaryCache;
@@ -832,7 +833,10 @@ async function validateStudyEndCode(code) {
     if (!res.ok) return { ok: false, reason: "server" };
     const json = await res.json();
     const data = json.data ?? json;
-    return data.valid ? { ok: true } : { ok: false, reason: "invalid" };
+    if (data.valid) return { ok: true };
+    // 코드는 맞지만 서버가 기간 리뷰를 아직 다 만들지 못했다
+    if (data.reason === "not_ready") return { ok: false, reason: "not_ready" };
+    return { ok: false, reason: "invalid" };
   } catch (error) {
     console.warn("[popup] 종료 코드 검증 오류:", error.message);
     return { ok: false, reason: "network" };

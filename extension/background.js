@@ -175,17 +175,20 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 /**
- * 알람 틱의 서버 작업. 참여 전송 기간까지 끝났으면(ended) 등록·재시도 큐를 돌리지 않고
- * 종료 안내만 한 번 띄운다.
+ * 알람 틱의 서버 작업. 리뷰 공개 시각(09:00 KST)이 지나면 종료 안내를 한 번 띄운다.
+ * 참여 전송 기간까지 끝났으면(ended) 등록·재시도 큐를 돌리지 않고 종료 안내만 띄운다.
  * @returns {Promise<void>}
  */
 export async function runServerTasks() {
   const onboarding = await getOnboarding();
-  if (
-    ViewLensStudy.getParticipationState(onboarding?.installDate) === "ended"
-  ) {
+  const installDate = onboarding?.installDate;
+  if (ViewLensStudy.getParticipationState(installDate) === "ended") {
     await notifyParticipationEndedOnce();
     return;
+  }
+  if (ViewLensStudy.isReviewReleased(installDate)) {
+    // 실패해도 다음 틱에 다시 시도하므로 전송 유예 중 서버 작업을 막지 않는다
+    await notifyParticipationEndedOnce().catch(() => {});
   }
   await Promise.all([
     // 등록 전·등록이 막힌 동안의 오류도 보내야 하므로 등록 게이트를 기다리지 않는다

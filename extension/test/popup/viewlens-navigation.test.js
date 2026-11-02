@@ -543,3 +543,201 @@ describe("대조군 종료 후 리뷰 화면", () => {
     expect(root.querySelector("#vl-study-end-cta")).not.toBeNull();
   });
 });
+
+// 수집은 마지막 날 다음 날 00:00 KST에 멈춘다. 리뷰 공개(09:00)를 기다리지 않고 그때부터 머리말과 하루 탭이 바뀐다
+describe("참여 기간이 끝난 뒤 — 머리말과 하루 탭", () => {
+  const INSTALL = "2026-03-01T10:00:00+09:00";
+  const lastDayAt = () =>
+    new Date(Date.parse(INSTALL) + (TOTAL_DAYS - 1) * DAY);
+  const COLLECTION_ENDS_AT = () =>
+    Date.parse(`${kst(Date.parse(INSTALL) + TOTAL_DAYS * DAY)}T00:00:00+09:00`);
+  // 팝업 바깥 틀의 첫 요소가 머리말이다(대조군 홈 본문의 숫자 칸과 섞지 않는다)
+  const header = (root) => root.firstElementChild.firstElementChild.textContent;
+
+  it.each(["EXP", "CON"])(
+    "%s: 수집이 멈추기 직전까지는 연구 중 머리말이다",
+    async (group) => {
+      const { root } = await bootReady(
+        participant({ group, installDate: INSTALL }),
+        { now: COLLECTION_ENDS_AT() - 1 },
+      );
+      expect(header(root)).toContain(`설치 ${TOTAL_DAYS}일째 · 종료 D-0`);
+      expect(header(root)).toContain("참여 중 · P-001");
+    },
+  );
+
+  it.each([
+    ["EXP", "수집이 멈춘 순간", 0],
+    ["CON", "수집이 멈춘 순간", 0],
+    ["EXP", "전송 유예까지 끝난 뒤", 10 * DAY],
+    ["CON", "전송 유예까지 끝난 뒤", 10 * DAY],
+  ])(
+    "%s: %s부터 머리말이 참여 기간 종료로 바뀌고 일수는 참여 기간 길이에서 멈춘다",
+    async (group, _label, after) => {
+      const { root } = await bootReady(
+        participant({ group, installDate: INSTALL }),
+        { now: COLLECTION_ENDS_AT() + after },
+      );
+      expect(header(root)).toContain(`${TOTAL_DAYS}일 참여 완료`);
+      expect(header(root)).toContain("참여 기간 종료 · P-001");
+      expect(header(root)).not.toContain("설치");
+      expect(header(root)).not.toContain("D-");
+    },
+  );
+
+  it("하루 탭은 참여 마지막 날로 열리고, 그 다음 날짜로는 갈 수 없다", async () => {
+    const { root } = await bootReady(
+      participant({ group: "EXP", installDate: INSTALL }),
+      { now: COLLECTION_ENDS_AT() + 2 * 3600000 },
+    );
+    const { koreanDateLabel } = globalThis;
+    const lastLabel = koreanDateLabel(lastDayAt());
+    const nextBtn = () => root.querySelector("#vl-date-next");
+    expect(root.textContent).toContain(lastLabel);
+    expect(nextBtn().disabled).toBe(true);
+    expect(root.textContent).not.toContain("자동으로 수집이 시작돼요");
+    expect(root.textContent).not.toContain("아직 오늘 시청 기록이 없어요");
+
+    click(root, "#vl-date-next");
+    expect(root.textContent).toContain(lastLabel);
+
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain(
+      koreanDateLabel(new Date(lastDayAt().getTime() - DAY)),
+    );
+    expect(nextBtn().disabled).toBe(false);
+    click(root, "#vl-date-next");
+    expect(root.textContent).toContain(lastLabel);
+    expect(nextBtn().disabled).toBe(true);
+  });
+
+  const COLLECTING_TEXTS = [
+    "시청 기록을 수집하고 있어요",
+    "평소처럼 유튜브를 시청해 주세요",
+    "오늘 시청한 영상",
+    "ViewLens와 함께한 지",
+    "참여 기간 중 피드백 제공 시점",
+  ];
+
+  it("대조군 홈은 연구 중에는 수집 안내와 숫자 칸을 그대로 보여 준다", async () => {
+    const { root } = await bootReady(
+      participant({ group: "CON", installDate: INSTALL }),
+      { now: COLLECTION_ENDS_AT() - 1 },
+    );
+    for (const text of COLLECTING_TEXTS) {
+      expect(root.textContent).toContain(text);
+    }
+    expect(root.textContent).not.toContain("참여해 주셔서 감사해요");
+  });
+
+  it("대조군 홈은 수집이 멈추면 리뷰 공개 전이라도 수집 안내·숫자 칸 대신 감사 인사만 보여 준다", async () => {
+    const { root } = await bootReady(
+      participant({ group: "CON", installDate: INSTALL }),
+      { now: COLLECTION_ENDS_AT() + 2 * 3600000 },
+    );
+    expect(root.textContent).toContain("참여해 주셔서 감사해요");
+    expect(root.textContent).toContain(
+      "시청 기록은 연구 목적으로 안전하게 보관돼요.",
+    );
+    for (const text of COLLECTING_TEXTS) {
+      expect(root.textContent).not.toContain(text);
+    }
+    expect(root.querySelector("#vl-study-end-cta")).toBeNull();
+  });
+
+  it("대조군 홈은 리뷰가 공개되면 리뷰 열람 주 버튼을 두고, 누르면 코드 입력 화면을 연다", async () => {
+    const { root } = await bootReady(
+      participant({ group: "CON", installDate: INSTALL }),
+      { now: COLLECTION_ENDS_AT() + 10 * 3600000 },
+    );
+    const cta = root.querySelector("#vl-study-end-cta");
+    expect(cta.textContent).toContain("시청 리뷰가 준비됐어요");
+    expect(cta.style.background).toBe("var(--vl-accent)");
+    expect(root.textContent).toContain("참여해 주셔서 감사해요");
+    for (const text of COLLECTING_TEXTS) {
+      expect(root.textContent).not.toContain(text);
+    }
+
+    click(root, "#vl-study-end-cta");
+    expect(root.querySelector("#vl-study-end-code-input")).not.toBeNull();
+  });
+
+  const banner = (root) =>
+    root.querySelector("#vl-participation-ended-banner")?.textContent ?? null;
+
+  it.each(["EXP", "CON"])(
+    "%s: 연구 중에는 종료 안내 배너가 없다",
+    async (group) => {
+      const { root } = await bootReady(
+        participant({ group, installDate: INSTALL }),
+        { now: COLLECTION_ENDS_AT() - 1 },
+      );
+      expect(banner(root)).toBeNull();
+    },
+  );
+
+  // 전송 유예(3일)를 기다리지 않고 수집이 멈춘 순간부터 집단별 다음 단계를 안내한다
+  it.each([
+    [
+      "실험군",
+      { group: "EXP" },
+      2,
+      "연구자가 보내 드릴 설문 안내를 기다려 주세요",
+    ],
+    [
+      "코드 입력 전 대조군",
+      { group: "CON" },
+      2,
+      "1차 설문을 마치면 받는 코드로",
+    ],
+    [
+      "코드 확인 후 대조군",
+      { group: "CON", studyEndCodeVerified: true },
+      10,
+      "2차 설문으로 돌아가 이어서 응답해 주세요",
+    ],
+  ])(
+    "%s: 수집이 멈춘 뒤 배너가 다음 단계를 안내한다",
+    async (_label, over, hoursAfter, nextStep) => {
+      const { root } = await bootReady(
+        participant({ installDate: INSTALL, ...over }),
+        { now: COLLECTION_ENDS_AT() + hoursAfter * 3600000 },
+      );
+      expect(banner(root)).toContain("참여 기간이 끝났어요.");
+      expect(banner(root)).toContain(nextStep);
+    },
+  );
+
+  // 머리말 바로 아래(탭보다 위) 자리에 홈으로 줄이 있는지
+  const backRowUnderHeader = (root) =>
+    root.firstElementChild.children[1].querySelector("#vl-study-end-back");
+
+  it.each([
+    ["코드 입력 전", false, "가 준비됐어요", "#vl-study-end-code-input"],
+    ["코드 확인 후", true, " 다시 보기", "[data-tab]"],
+  ])(
+    "대조군(%s): 리뷰 화면에서는 배너 대신 머리말 아래에 홈으로 줄을 두고, 홈으로 돌아오면 배너가 다시 보인다",
+    async (_label, verified, ctaSuffix, screenSelector) => {
+      const { root } = await bootReady(
+        participant({
+          group: "CON",
+          installDate: INSTALL,
+          studyEndCodeVerified: verified,
+        }),
+        { now: COLLECTION_ENDS_AT() + 10 * 3600000 },
+      );
+      expect(root.querySelector("#vl-study-end-cta").textContent).toContain(
+        `시청 리뷰${ctaSuffix}`,
+      );
+
+      click(root, "#vl-study-end-cta");
+      expect(root.querySelector(screenSelector)).not.toBeNull();
+      expect(banner(root)).toBeNull();
+      expect(backRowUnderHeader(root)).not.toBeNull();
+
+      click(root, "#vl-study-end-back");
+      expect(banner(root)).not.toBeNull();
+      expect(root.querySelector("#vl-study-end-back")).toBeNull();
+    },
+  );
+});

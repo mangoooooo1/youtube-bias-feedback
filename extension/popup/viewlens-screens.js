@@ -204,11 +204,13 @@ function _collectingBanner(count) {
 
 // status: 그 날 서버 집계의 불러오기 상태(_dayViewForDate). 지난 날짜는 집계를 받기 전·받지 못했을 때
 // 기록이 없다고 단정하지 않는다. 오늘은 기기 기록으로 판단해 그대로 둔다
+// isLatest: 다음 날짜로 갈 수 없는 날(오늘, 수집이 멈췄으면 참여 마지막 날)
 function screenTodayEmpty(
   dateLabel,
   collectingCount,
   isToday = true,
   status = "ok",
+  isLatest = isToday,
 ) {
   const pastStatusText = isToday ? null : _summaryStatusText(status);
   return `<div style="display:flex;flex-direction:column;min-height:100%">
@@ -216,7 +218,7 @@ function screenTodayEmpty(
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px 0">
       ${_dateNavButton({ id: "vl-date-prev", dir: "left" })}
       <div style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : dateLabel}</div>
-      ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
+      ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isLatest })}
     </div>
     <div style="flex:1;padding:24px 24px 40px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:22px">
       <div style="position:relative;width:80px;height:80px">
@@ -327,6 +329,7 @@ function screenToday() {
       d.collectingCount,
       isToday,
       view.status,
+      d.isLatestDate ?? isToday,
     );
   }
 
@@ -368,7 +371,7 @@ function screenToday() {
       <div style="text-align:center">
         <div style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : d.dateLabel}</div>
       </div>
-      ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
+      ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: d.isLatestDate ?? isToday })}
     </div>
     ${
       statusRow
@@ -556,6 +559,7 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
 // ── Control group home ────────────────────────────────────────────────────────
 
 function screenControlHome(day, stats = {}) {
+  const ended = !!stats.collectionEnded;
   const cells = [
     { v: `${stats.todayCount ?? VL.con.todayCount}개`, l: "오늘 시청한 영상" },
     {
@@ -563,7 +567,7 @@ function screenControlHome(day, stats = {}) {
       l: "지금까지 시청한 영상",
     },
     { v: `${day}일째`, l: "ViewLens와 함께한 지" },
-    { v: `D-${Math.max(0, VL.TOTAL_DAYS - day)}`, l: "실험 종료까지" },
+    { v: `D-${Math.max(0, VL.TOTAL_DAYS - day)}`, l: "참여 기간 종료까지" },
   ];
   const gridCells = cells
     .map(
@@ -576,7 +580,9 @@ function screenControlHome(day, stats = {}) {
     )
     .join("");
 
-  return `<div style="padding:20px 18px 20px;display:flex;flex-direction:column;gap:20px">
+  // 종료 후에는 위에 배너(아래 여백 10px)가 있어, 배너·카드·버튼 사이가 모두 20px이고 좌우가 배너와 맞게 한다
+  const pad = ended ? "10px 16px 20px" : "20px 18px 20px";
+  return `<div style="padding:${pad};display:flex;flex-direction:column;gap:20px">
     ${vlCard({
       pad: 22,
       style: "text-align:center",
@@ -588,9 +594,13 @@ function screenControlHome(day, stats = {}) {
           ${markSVG({ size: 36, filled: false, accent: "var(--vl-accent)", animated: true })}
         </span>
       </div>
-      <div style="margin-top:16px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink)">시청 기록을 수집하고 있어요</div>
+      <div style="margin-top:16px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink)">${ended ? "참여해 주셔서 감사해요" : "시청 기록을 수집하고 있어요"}</div>
       <p style="margin:9px auto 0;max-width:280px;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;word-break:keep-all">
-        평소처럼 유튜브를 시청해 주세요.<br>시청 기록은 연구 목적으로 안전하게 <span style="white-space:nowrap">수집·보관돼요.</span>
+        ${
+          ended
+            ? `시청 기록은 연구 목적으로 안전하게 <span style="white-space:nowrap">보관돼요.</span>`
+            : `평소처럼 유튜브를 시청해 주세요.<br>시청 기록은 연구 목적으로 안전하게 <span style="white-space:nowrap">수집·보관돼요.</span>`
+        }
       </p>
       ${
         // 베이스라인 중인 EXP에게만 보여주는 한 줄 — CON은 종료 후 일괄 제공(10-10)이라
@@ -604,21 +614,23 @@ function screenControlHome(day, stats = {}) {
     `,
     })}
 
-    ${vlCard({ pad: 0, children: `<div style="display:grid;grid-template-columns:1fr 1fr">${gridCells}</div>` })}
+    ${ended ? "" : vlCard({ pad: 0, children: `<div style="display:grid;grid-template-columns:1fr 1fr">${gridCells}</div>` })}
 
     ${
-      // 종료 안내 모달을 이미 본 뒤엔 이 자리가 상시 재진입 CTA로 바뀐다.
+      // 종료 안내 모달을 이미 본 뒤엔 리뷰 열람 버튼을 주 버튼으로 둔다. 공개(09:00) 전 종료 홈에는 아무것도 두지 않는다
       stats.studyEndCtaReady
-        ? `<button id="vl-study-end-cta" class="vl-press" style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:15px 16px;background:var(--vl-accent-soft);border:none;border-radius:13px;box-shadow:0 1px 3px color-mix(in oklab,var(--vl-accent) 10%,transparent),0 1px 2px rgba(0,0,0,.03);cursor:pointer;font-family:inherit;text-align:left">
-        <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">${VL.studyDurationLabel()}의 시청 리뷰가 준비됐어요</span>
-        <span style="font-size:var(--vl-fs-4);color:var(--vl-accent);flex-shrink:0">→</span>
+        ? `<button id="vl-study-end-cta" class="vl-press" style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:15px 16px;background:var(--vl-accent);border:none;border-radius:13px;box-shadow:0 1px 3px color-mix(in oklab,var(--vl-accent) 10%,transparent),0 1px 2px rgba(0,0,0,.03);cursor:pointer;font-family:inherit;text-align:left">
+        <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-on-accent)">${VL.studyDurationLabel()}의 시청 리뷰${stats.studyEndCodeVerified ? " 다시 보기" : "가 준비됐어요"}</span>
+        <span style="font-size:var(--vl-fs-4);color:var(--vl-on-accent);flex-shrink:0">→</span>
       </button>`
-        : `<div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card);border-radius:13px;box-shadow:var(--vl-shadow-card)">
+        : ended
+          ? ""
+          : `<div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card);border-radius:13px;box-shadow:var(--vl-shadow-card)">
       <div style="width:25px;height:25px;border-radius:7px;background:var(--vl-accent-soft);color:var(--vl-accent);display:grid;place-items:center;flex-shrink:0;margin-top:1px">
         ${_lockIcon(15)}
       </div>
       <p style="margin:0;font-size:var(--vl-fs-2);line-height:1.55;color:var(--vl-ink-2);text-wrap:pretty">
-        실험 기간 중 피드백 제공 시점은 참여자마다 다를 수 있으며, 실험 종료 후 모든 참여자에게 결과를 공유합니다.
+        참여 기간 중 피드백 제공 시점은 참여자마다 다를 수 있으며, 참여 기간이 끝나면 모든 참여자에게 결과를 공유합니다.
       </p>
     </div>`
     }
@@ -653,13 +665,13 @@ function screenStudyEndCodeInput() {
 
 // ── Study end notice modal ───────────────────────────────────────
 
-// 종료 안내(그룹 무관) — 연구 종료 시점(시간 기준)에 최초 1회만 노출된다.
+// 종료 안내(그룹 무관) — 리뷰 공개 시각(마지막 날 다음 날 09:00 KST)에 최초 1회만 노출된다.
 function screenStudyEndNoticeModal() {
   return vlConfirmModal({
     icon: markSVG({ size: 26, filled: false, accent: "var(--vl-accent)" }),
-    title: "연구 기간이 종료되었습니다",
+    title: "참여 기간이 끝났어요",
     message:
-      "지금까지 참여해주셔서 감사합니다. 연구자로부터 곧 설문을 받게 되실 겁니다. 설문 완료 후 보상 규정에 맞는 참여율을 보이셨다면 보상이 제공될 예정입니다.",
+      "그동안 참여해 주셔서 감사해요. 연구자가 설문을 보내 드릴 예정이에요. 설문을 마치고 보상 기준을 충족하면 보상을 드려요.",
     confirmLabel: "확인",
     confirmId: "vl-study-end-notice-confirm",
   });
@@ -667,12 +679,19 @@ function screenStudyEndNoticeModal() {
 
 // ── Participation ended banner ────────────────────────────────────────────────
 
-// 전송 유예까지 끝난(ended) 참여자에게 상단에 계속 보이는 종료 안내.
+// 수집이 멈춘 참여자에게 상단에 계속 보이는 종료 안내. 집단별 다음 단계를 여기 한 곳에서 알려 준다.
 // 설문 중에도 리뷰를 다시 볼 수 있어야 해 아래 화면은 가리지 않는다.
-function screenParticipationEndedBanner() {
-  const { title, body } = ViewLensStudy.ENDED_NOTICE;
-  return `<div id="vl-participation-ended-banner" role="status" style="margin:10px 16px 0;padding:10px 12px;border-radius:12px;background:var(--vl-accent-soft);color:var(--vl-ink);font-size:var(--vl-fs-3);line-height:1.5">
-    <strong>${title}</strong><br>${body}
+function screenParticipationEndedBanner({
+  isControl = false,
+  codeVerified = false,
+} = {}) {
+  const body = !isControl
+    ? "참여해 주셔서 감사해요. 연구자가 보내 드릴 설문 안내를 기다려 주세요."
+    : codeVerified
+      ? "리뷰를 다 보셨다면 2차 설문으로 돌아가 이어서 응답해 주세요."
+      : "1차 설문을 마치면 받는 코드로 참여 기간의 시청 리뷰를 볼 수 있어요.";
+  return `<div id="vl-participation-ended-banner" role="status" style="margin:10px 16px;padding:10px 12px;border-radius:12px;background:var(--vl-accent-soft);color:var(--vl-ink);font-size:var(--vl-fs-3);line-height:1.5">
+    <strong>참여 기간이 끝났어요.</strong><br>${body}
   </div>`;
 }
 

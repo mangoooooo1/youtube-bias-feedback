@@ -241,12 +241,30 @@ describe("study-schedule.js — classic script로 불러올 때", () => {
   });
 });
 
+describe("isReviewReleased — 리뷰 공개 시각", () => {
+  it.each([
+    ["오후 설치(15:00 KST)", "2026-09-01T06:00:00.000Z"],
+    ["KST 자정 직전 설치(23:59)", "2026-09-01T14:59:00.000Z"],
+    ["KST 자정 직후 설치(00:01)", "2026-09-01T15:01:00.000Z"],
+  ])("%s: 수집이 멈춘 날 09:00 KST부터 공개된다", (_label, installDate) => {
+    const releaseAt = serverLastPeriodEndsAt(installDate) + 9 * 3600000;
+    const { isReviewReleased } = ViewLensStudy;
+    expect(isReviewReleased(installDate, new Date(releaseAt - 1))).toBe(false);
+    expect(isReviewReleased(installDate, new Date(releaseAt))).toBe(true);
+  });
+
+  it("설치일이 없거나 손상됐으면 공개되지 않은 것으로 본다", () => {
+    expect(ViewLensStudy.isReviewReleased(undefined)).toBe(false);
+    expect(ViewLensStudy.isReviewReleased("not-a-date")).toBe(false);
+  });
+});
+
 describe("ENDED_NOTICE — 종료 안내 문구", () => {
-  it("설문을 기다리라고 안내하고, 삭제·제거는 안내하지 않는다", () => {
+  it("참여 기간이 끝났다고 알리고 팝업에서 다음 단계를 보라고 하며, 삭제·제거는 안내하지 않는다", () => {
     const { title, body } = ViewLensStudy.ENDED_NOTICE;
     const text = `${title} ${body}`;
-    expect(text).toContain("종료");
-    expect(text).toContain("설문");
+    expect(text).toContain("참여 기간이 끝났어요");
+    expect(text).toContain("다음 단계");
     // 대조군은 종료 후 리뷰를 봐야 설문을 마칠 수 있고, 실험군도 설문 중 리뷰를 다시 볼 수 있어야 한다
     expect(text).not.toMatch(/삭제|제거/);
   });

@@ -180,7 +180,7 @@ describe("실제 server/routes/study-end-code.js — POST /validate", () => {
       withReviews: false,
     },
   ])(
-    "잠금 해제 전 CON($label)은 맞는 코드여도 valid:false",
+    "잠금 해제 전 CON($label)은 맞는 코드면 reason:not_ready로 틀린 코드와 구분된다",
     async ({ installDate, withReviews }) => {
       insertParticipant("con-user", "CON", installDate);
       if (withReviews) insertAllPeriodReviews("con-user");
@@ -189,10 +189,50 @@ describe("실제 server/routes/study-end-code.js — POST /validate", () => {
         anonymousId: "con-user",
         code: REVEAL_CODE,
       });
-      expect(res.body.data).toEqual({ valid: false });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({ valid: false, reason: "not_ready" });
       expect(verifiedAt("con-user")).toBeNull();
     },
   );
+
+  it("리뷰를 기다리는 맞는 코드는 횟수를 쓰지 않고, 리뷰가 생기면 같은 IP로 바로 통과한다", async () => {
+    insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
+    const ip = nextIp();
+
+    for (let i = 0; i < 6; i++) {
+      const res = await validate(
+        { anonymousId: "con-user", code: REVEAL_CODE },
+        ip,
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual({ valid: false, reason: "not_ready" });
+    }
+
+    insertAllPeriodReviews("con-user");
+    const res = await validate(
+      { anonymousId: "con-user", code: REVEAL_CODE },
+      ip,
+    );
+    expect(res.body.data).toEqual({ valid: true });
+  });
+
+  it("리뷰를 기다리는 중에도 틀린 코드는 횟수를 써서 6번째에 429가 된다", async () => {
+    insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
+    const ip = nextIp();
+
+    for (let i = 0; i < 5; i++) {
+      const res = await validate(
+        { anonymousId: "con-user", code: "WRONG" },
+        ip,
+      );
+      expect(res.body.data).toEqual({ valid: false });
+    }
+    const sixth = await validate(
+      { anonymousId: "con-user", code: REVEAL_CODE },
+      ip,
+    );
+    expect(sixth.status).toBe(429);
+  });
 
   it("잠금 해제된 CON은 대소문자·앞뒤 공백이 달라도 통과하고, 재호출해도 최초 시각이 유지된다", async () => {
     insertUnlockedControl("con-user");
