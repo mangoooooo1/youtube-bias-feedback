@@ -580,7 +580,9 @@ function screenControlHome(day, stats = {}) {
     )
     .join("");
 
-  return `<div style="padding:20px 18px 20px;display:flex;flex-direction:column;gap:20px">
+  // 종료 후에는 위에 배너(아래 여백 10px)가 있어, 배너·카드·버튼 사이가 모두 20px이고 좌우가 배너와 맞게 한다
+  const pad = ended ? "10px 16px 20px" : "20px 18px 20px";
+  return `<div style="padding:${pad};display:flex;flex-direction:column;gap:20px">
     ${vlCard({
       pad: 22,
       style: "text-align:center",

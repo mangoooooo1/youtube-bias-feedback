@@ -107,9 +107,13 @@ function _isStudyEndReviewReady(groupCfg, installDate) {
   return VL.isConGroup(groupCfg.code) && _isStudyEndTimeReached(installDate);
 }
 
-// 대조군 종료 후 리뷰·코드 입력 화면에서 종료 배너 자리(탭 위)에 두는 뒤로가기 행. 탭 바와 한 덩어리로 보이게 같은 배경을 쓴다
-function _studyEndBackRow() {
-  return `<div style="padding:6px 16px 0;background:var(--vl-card)">
+// 대조군 종료 후 리뷰·코드 입력 화면에서 종료 배너 자리(탭 위)에 두는 뒤로가기 행.
+// 탭이 있으면 탭 바와 한 덩어리로 보이게 같은 배경을 쓴다
+function _studyEndBackRow(withTabs) {
+  const style = withTabs
+    ? "padding:6px 16px 0;background:var(--vl-card)"
+    : "padding:10px 16px 6px";
+  return `<div style="${style}">
     <button id="vl-study-end-back" class="vl-press" style="display:flex;align-items:center;gap:5px;padding:5px 2px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-ink-2)">‹ 홈으로</button>
   </div>`;
 }
@@ -432,7 +436,7 @@ class ViewLensPopup {
       ${_popupHeader(groupCfg, day, { participantCode: this._participantCode, collectionEnded })}
       ${
         studyEndReviewOpen
-          ? _studyEndBackRow()
+          ? _studyEndBackRow(this._studyEndTabsActive(groupCfg))
           : collectionEnded
             ? screenParticipationEndedBanner({
                 isControl: VL.isConGroup(groupCfg.code),
