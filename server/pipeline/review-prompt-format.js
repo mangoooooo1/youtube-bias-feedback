@@ -91,4 +91,5 @@ module.exports = {
   formatShares,
   formatTitleGroups,
   sharesSentence,
+  josa,
 };

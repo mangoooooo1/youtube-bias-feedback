@@ -7,6 +7,8 @@ import {
 } from "../../pipeline/today-review-llm.js";
 
 // 기간 리뷰 테스트와 같은 문장을 확인한다(두 프롬프트가 같은 기준을 쓰는지)
+const FULL_SHARE_PRINCIPLE =
+  '- 한 분야가 시청 시간의 100%이면 퍼센트 대신 "전부"로 말하세요(예: "시청 시간 전부가 음악이었어요").';
 const POLITICAL_TOPIC_PRINCIPLE =
   "- 제목에 나온 인물·사건 이름은 사실대로 말해도 됩니다. 단, 제목의 주장은 사실로 단정하지 말고 무엇에 관한 영상인지만 말하며, 제목의 평가·조롱 표현은 옮기지 마세요. 시청자가 어떤 인물·정당을 지지하는지 추론하지 마세요.";
 const TOPIC_INSTRUCTION =
@@ -147,6 +149,14 @@ describe("buildTodayCumulativePrompt — 지침", () => {
   it("오늘 하루 전체를 하나로 요약하라는 지침을 포함한다(세션별 나열 금지)", () => {
     const prompt = buildTodayCumulativePrompt(baseArgs());
     expect(prompt).toContain("오늘 하루 전체를 하나로 요약하세요");
+  });
+
+  it("한 분야가 100%이면 퍼센트 대신 '전부'로 말하게 한다", () => {
+    const prompt = buildTodayCumulativePrompt(baseArgs());
+    expect(prompt).toContain(FULL_SHARE_PRINCIPLE);
+    expect(prompt).toContain(
+      "언급(한 분야가 100%이면 퍼센트 대신 '전부'라고 말할 것)",
+    );
   });
 });
 
