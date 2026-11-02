@@ -707,4 +707,37 @@ describe("참여 기간이 끝난 뒤 — 머리말과 하루 탭", () => {
       expect(banner(root)).toContain(nextStep);
     },
   );
+
+  // 머리말 바로 아래(탭보다 위) 자리에 홈으로 줄이 있는지
+  const backRowUnderHeader = (root) =>
+    root.firstElementChild.children[1].querySelector("#vl-study-end-back");
+
+  it.each([
+    ["코드 입력 전", false, "가 준비됐어요", "#vl-study-end-code-input"],
+    ["코드 확인 후", true, " 다시 보기", "[data-tab]"],
+  ])(
+    "대조군(%s): 리뷰 화면에서는 배너 대신 머리말 아래에 홈으로 줄을 두고, 홈으로 돌아오면 배너가 다시 보인다",
+    async (_label, verified, ctaSuffix, screenSelector) => {
+      const { root } = await bootReady(
+        participant({
+          group: "CON",
+          installDate: INSTALL,
+          studyEndCodeVerified: verified,
+        }),
+        { now: COLLECTION_ENDS_AT() + 10 * 3600000 },
+      );
+      expect(root.querySelector("#vl-study-end-cta").textContent).toContain(
+        `시청 리뷰${ctaSuffix}`,
+      );
+
+      click(root, "#vl-study-end-cta");
+      expect(root.querySelector(screenSelector)).not.toBeNull();
+      expect(banner(root)).toBeNull();
+      expect(backRowUnderHeader(root)).not.toBeNull();
+
+      click(root, "#vl-study-end-back");
+      expect(banner(root)).not.toBeNull();
+      expect(root.querySelector("#vl-study-end-back")).toBeNull();
+    },
+  );
 });

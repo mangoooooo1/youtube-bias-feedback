@@ -107,9 +107,9 @@ function _isStudyEndReviewReady(groupCfg, installDate) {
   return VL.isConGroup(groupCfg.code) && _isStudyEndTimeReached(installDate);
 }
 
-// 대조군 6주 리뷰 화면 상단에 붙는 뒤로가기 행
+// 대조군 종료 후 리뷰·코드 입력 화면에서 종료 배너 자리(탭 위)에 두는 뒤로가기 행. 탭 바와 한 덩어리로 보이게 같은 배경을 쓴다
 function _studyEndBackRow() {
-  return `<div style="padding:12px 16px 0">
+  return `<div style="padding:6px 16px 0;background:var(--vl-card)">
     <button id="vl-study-end-back" class="vl-press" style="display:flex;align-items:center;gap:5px;padding:5px 2px;border:none;background:transparent;cursor:pointer;font-family:inherit;font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-ink-2)">‹ 홈으로</button>
   </div>`;
 }
@@ -381,6 +381,10 @@ class ViewLensPopup {
     // 안내를 이미 본 뒤에만 CTA로 전환한다(대조군 전용).
     const showStudyEndCta = studyEndReady && !!VL._studyEndNoticeShown;
 
+    // 대조군이 종료 후 리뷰(또는 코드 입력) 화면을 연 상태. 배너 대신 홈으로 가는 줄을 둔다
+    const studyEndReviewOpen =
+      !feedbackActive && studyEndReady && this._studyEndReviewOpen;
+
     let bodyHTML;
     if (feedbackActive) {
       bodyHTML =
@@ -392,20 +396,18 @@ class ViewLensPopup {
               _periodViewFor(selWeek),
               this._periodFocus,
             );
-    } else if (studyEndReady && this._studyEndReviewOpen) {
+    } else if (studyEndReviewOpen) {
       // currentWeek는 day(경과일)로 계산되는데, studyEndReady가 참이면 이미 day >= TOTAL_DAYS라
-      bodyHTML =
-        _studyEndBackRow() +
-        (VL._studyEndCodeVerified
-          ? this._tab === "today"
-            ? screenToday()
-            : screenFeedback(
-                currentWeek,
-                selWeek,
-                _periodViewFor(selWeek),
-                this._periodFocus,
-              )
-          : screenStudyEndCodeInput());
+      bodyHTML = VL._studyEndCodeVerified
+        ? this._tab === "today"
+          ? screenToday()
+          : screenFeedback(
+              currentWeek,
+              selWeek,
+              _periodViewFor(selWeek),
+              this._periodFocus,
+            )
+        : screenStudyEndCodeInput();
     } else {
       // 10-8: groupCfg.feedback이 true인데 feedbackActive가 false라는 건 "EXP인데 베이스라인
       // 게이트에 걸렸다"는 뜻이다(CON은 애초에 groupCfg.feedback이 false). 이 경우에만
@@ -421,6 +423,7 @@ class ViewLensPopup {
         totalCount: _controlTotalCount(),
         baselineDaysLeft,
         studyEndCtaReady: showStudyEndCta,
+        studyEndCodeVerified: !!VL._studyEndCodeVerified,
         collectionEnded,
       });
     }
@@ -428,12 +431,14 @@ class ViewLensPopup {
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
       ${_popupHeader(groupCfg, day, { participantCode: this._participantCode, collectionEnded })}
       ${
-        collectionEnded
-          ? screenParticipationEndedBanner({
-              isControl: VL.isConGroup(groupCfg.code),
-              codeVerified: !!VL._studyEndCodeVerified,
-            })
-          : ""
+        studyEndReviewOpen
+          ? _studyEndBackRow()
+          : collectionEnded
+            ? screenParticipationEndedBanner({
+                isControl: VL.isConGroup(groupCfg.code),
+                codeVerified: !!VL._studyEndCodeVerified,
+              })
+            : ""
       }
       ${
         feedbackActive || this._studyEndTabsActive(groupCfg)

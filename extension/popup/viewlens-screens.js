@@ -618,7 +618,7 @@ function screenControlHome(day, stats = {}) {
       // 종료 안내 모달을 이미 본 뒤엔 리뷰 열람 버튼을 주 버튼으로 둔다. 공개(09:00) 전 종료 홈에는 아무것도 두지 않는다
       stats.studyEndCtaReady
         ? `<button id="vl-study-end-cta" class="vl-press" style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:15px 16px;background:var(--vl-accent);border:none;border-radius:13px;box-shadow:0 1px 3px color-mix(in oklab,var(--vl-accent) 10%,transparent),0 1px 2px rgba(0,0,0,.03);cursor:pointer;font-family:inherit;text-align:left">
-        <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-on-accent)">${VL.studyDurationLabel()}의 시청 리뷰가 준비됐어요</span>
+        <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-on-accent)">${VL.studyDurationLabel()}의 시청 리뷰${stats.studyEndCodeVerified ? " 다시 보기" : "가 준비됐어요"}</span>
         <span style="font-size:var(--vl-fs-4);color:var(--vl-on-accent);flex-shrink:0">→</span>
       </button>`
         : ended
@@ -688,7 +688,7 @@ function screenParticipationEndedBanner({
     : codeVerified
       ? "리뷰를 다 보셨다면 2차 설문으로 돌아가 이어서 응답해 주세요."
       : "1차 설문을 마치면 받는 코드로 참여 기간의 시청 리뷰를 볼 수 있어요.";
-  return `<div id="vl-participation-ended-banner" role="status" style="margin:10px 16px 0;padding:10px 12px;border-radius:12px;background:var(--vl-accent-soft);color:var(--vl-ink);font-size:var(--vl-fs-3);line-height:1.5">
+  return `<div id="vl-participation-ended-banner" role="status" style="margin:10px 16px;padding:10px 12px;border-radius:12px;background:var(--vl-accent-soft);color:var(--vl-ink);font-size:var(--vl-fs-3);line-height:1.5">
     <strong>참여 기간이 끝났어요.</strong><br>${body}
   </div>`;
 }
