@@ -34,6 +34,7 @@ function initializeDB() {
     execSchema();
     // 테스트·본 연구 중 추가한 열은 기존 행을 지킬 수 있도록 기존 DB에 소급 추가한다
     addColumn("today_reviews", "timeSharePercents", "TEXT");
+    addColumn("popup_events", "pastDayReviewViews", "INTEGER");
     assertLatestColumns();
     backfillPeriodReviewVersions();
   } catch (err) {
@@ -217,6 +218,7 @@ function execSchema() {
       tabWeekClicks  INTEGER DEFAULT 0,  -- '주차별' 탭 클릭 횟수
       todayFeedbackViewed  INTEGER DEFAULT 0,  -- '오늘' 피드백을 실제로 열람(블러 해제)했으면 1
       periodFeedbackViewed INTEGER DEFAULT 0,  -- '주차별' 피드백을 실제로 열람(체류시간 임계값 충족)했으면 1
+      pastDayReviewViews   INTEGER,  -- 날짜 이동으로 지난 날의 실제 리뷰를 2초 이상 본 서로 다른 날짜 수(구버전 확장은 NULL)
       openedAt       TEXT,     -- 팝업 오픈 시각 (engagement 최근성 분석용)
       createdAt      TEXT    DEFAULT (datetime('now'))
     );

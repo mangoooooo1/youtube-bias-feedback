@@ -81,6 +81,87 @@ describe("탭 전환 — 사용 기록", () => {
   });
 });
 
+// 지난 날 리뷰는 블러가 없어, 실제 리뷰가 보이는 같은 날짜에 2초 이상 머문 날짜 수를 센다
+describe("지난 날 리뷰 열람 — 사용 기록", () => {
+  const pastReview = (n, review) => ({
+    reviewDate: kst(daysAgo(n)),
+    review,
+    sessionCount: 1,
+  });
+  // 어제·그제 리뷰가 서버에 있고, 사흘 전은 기록만 있고 리뷰가 없다
+  const bootWithPastReviews = () =>
+    bootReady(
+      participant({
+        group: "EXP",
+        installDate: IN_PROGRESS(),
+        sessions: [
+          session("s3", { endTime: daysAgo(3) }),
+          session("s2", { endTime: daysAgo(2) }),
+          session("s1", { endTime: daysAgo(1) }),
+        ],
+      }),
+      {
+        responses: {
+          "/api/today-reviews": {
+            data: [
+              pastReview(2, "그제 리뷰 문장"),
+              pastReview(1, "어제 리뷰 문장"),
+            ],
+          },
+        },
+      },
+    );
+
+  it("지난 날 리뷰에 2초 이상 머물러야 세고, 같은 날짜를 다시 와도 한 번만 센다", async () => {
+    const { root, data } = await bootWithPastReviews();
+    const t0 = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(t0);
+
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("어제 리뷰 문장");
+    now.mockReturnValue(t0 + 1500);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(0);
+
+    now.mockReturnValue(t0 + 2500);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(1);
+
+    // 오늘로 갔다가 같은 어제로 다시 와서 머물러도 그대로 1
+    click(root, "#vl-date-next");
+    click(root, "#vl-date-prev");
+    now.mockReturnValue(t0 + 5000);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(1);
+
+    // 다른 날(그제)에 머물면 2
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("그제 리뷰 문장");
+    now.mockReturnValue(t0 + 7500);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(2);
+  });
+
+  it("2초 안에 넘긴 날짜와 리뷰가 없는 날짜는 세지 않는다", async () => {
+    const { root, data } = await bootWithPastReviews();
+    const t0 = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(t0);
+
+    // 어제·그제를 1초씩만 보고 지나간다
+    click(root, "#vl-date-prev");
+    now.mockReturnValue(t0 + 1000);
+    click(root, "#vl-date-prev");
+    now.mockReturnValue(t0 + 2000);
+    click(root, "#vl-date-prev");
+    expect(root.textContent).not.toContain("리뷰 문장");
+
+    // 리뷰가 없는 사흘 전에는 오래 머문다
+    now.mockReturnValue(t0 + 10000);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(0);
+  });
+});
+
 describe("피드백 확인하기", () => {
   it("가려진 오늘 리뷰를 누르면 블러가 풀리고, 확인을 기기·서버에 기록하고, 아이콘 표시를 지운다", async () => {
     const { root, data, server, chrome } = await bootReady(

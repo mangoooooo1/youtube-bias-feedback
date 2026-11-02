@@ -4,7 +4,12 @@ const { ERROR_CODES } = require("../middleware/responseHandler");
 const { normalizeIsoTimestamp } = require("./iso-timestamp");
 
 // 값이 있으면 음수 아닌 정수여야 하는 필드 (미전송 시 null)
-const COUNT_FIELDS = ["dwellMs", "tabTodayClicks", "tabWeekClicks"];
+const COUNT_FIELDS = [
+  "dwellMs",
+  "tabTodayClicks",
+  "tabWeekClicks",
+  "pastDayReviewViews",
+];
 
 // 값이 있으면 0 또는 1이어야 하는 필드 (미전송 시 null)
 const BOOLEAN_FIELDS = ["todayFeedbackViewed", "periodFeedbackViewed"];
