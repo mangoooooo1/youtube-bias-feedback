@@ -71,7 +71,29 @@ function startedPeriods(installDate, today) {
 }
 
 /**
- * @returns {{days: Array, periods: Array}} 자격이 없으면 빈 배열들(today-reviews와 같은 규칙)
+ * 자격이 없는 참여자(종료 코드 전 대조군, 기준선 실험군) 홈의 시청 영상 수.
+ * 실험군 화면과 같은 유효 시청 기준으로 날짜별 개수만 준다(분포·목록·제목 제외).
+ * @returns {Array<{date: string, validCount: number}>}
+ */
+function dayCountsOf(db, anonymousId) {
+  const events = db
+    .prepare(
+      `SELECT e.watchedAt, e.watchedSeconds, m.durationSeconds
+       FROM video_events e
+       LEFT JOIN video_metadata m ON m.videoId = e.videoId
+       WHERE e.anonymousId = ?
+       ORDER BY e.watchedAt ASC`,
+    )
+    .all(anonymousId);
+  return aggregateViewingByDay(events).map(({ date, validCount }) => ({
+    date,
+    validCount,
+  }));
+}
+
+/**
+ * @returns {{days: Array, periods: Array, dayCounts?: Array}} 자격이 없으면 days·periods는
+ *   빈 배열(today-reviews와 같은 규칙)이고 날짜별 유효 영상 수만 dayCounts로 준다
  */
 function getViewingSummary(db, anonymousId, now = new Date()) {
   const participant = db
@@ -80,7 +102,12 @@ function getViewingSummary(db, anonymousId, now = new Date()) {
     )
     .get(anonymousId);
   if (!isTodayReviewEligible(participant, now)) {
-    return { days: [], periods: [] };
+    // days에 섞지 않는다. 팝업은 days가 있으면 전체 집계로 보고 그래프·저장본 복구에 쓴다
+    return {
+      days: [],
+      periods: [],
+      dayCounts: participant ? dayCountsOf(db, anonymousId) : [],
+    };
   }
 
   const events = db
