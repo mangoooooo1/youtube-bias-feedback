@@ -616,7 +616,7 @@ describe("참여 기간이 끝난 뒤 — 머리말과 하루 탭", () => {
     "평소처럼 유튜브를 시청해 주세요",
     "오늘 시청한 영상",
     "ViewLens와 함께한 지",
-    "실험 기간 중 피드백 제공 시점",
+    "참여 기간 중 피드백 제공 시점",
   ];
 
   it("대조군 홈은 연구 중에는 수집 안내와 숫자 칸을 그대로 보여 준다", async () => {
@@ -661,4 +661,50 @@ describe("참여 기간이 끝난 뒤 — 머리말과 하루 탭", () => {
     click(root, "#vl-study-end-cta");
     expect(root.querySelector("#vl-study-end-code-input")).not.toBeNull();
   });
+
+  const banner = (root) =>
+    root.querySelector("#vl-participation-ended-banner")?.textContent ?? null;
+
+  it.each(["EXP", "CON"])(
+    "%s: 연구 중에는 종료 안내 배너가 없다",
+    async (group) => {
+      const { root } = await bootReady(
+        participant({ group, installDate: INSTALL }),
+        { now: COLLECTION_ENDS_AT() - 1 },
+      );
+      expect(banner(root)).toBeNull();
+    },
+  );
+
+  // 전송 유예(3일)를 기다리지 않고 수집이 멈춘 순간부터 집단별 다음 단계를 안내한다
+  it.each([
+    [
+      "실험군",
+      { group: "EXP" },
+      2,
+      "연구자가 보내 드릴 설문 안내를 기다려 주세요",
+    ],
+    [
+      "코드 입력 전 대조군",
+      { group: "CON" },
+      2,
+      "1차 설문을 마치면 받는 코드로",
+    ],
+    [
+      "코드 확인 후 대조군",
+      { group: "CON", studyEndCodeVerified: true },
+      10,
+      "2차 설문으로 돌아가 이어서 응답해 주세요",
+    ],
+  ])(
+    "%s: 수집이 멈춘 뒤 배너가 다음 단계를 안내한다",
+    async (_label, over, hoursAfter, nextStep) => {
+      const { root } = await bootReady(
+        participant({ installDate: INSTALL, ...over }),
+        { now: COLLECTION_ENDS_AT() + hoursAfter * 3600000 },
+      );
+      expect(banner(root)).toContain("참여 기간이 끝났어요.");
+      expect(banner(root)).toContain(nextStep);
+    },
+  );
 });

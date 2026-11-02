@@ -567,7 +567,7 @@ function screenControlHome(day, stats = {}) {
       l: "지금까지 시청한 영상",
     },
     { v: `${day}일째`, l: "ViewLens와 함께한 지" },
-    { v: `D-${Math.max(0, VL.TOTAL_DAYS - day)}`, l: "실험 종료까지" },
+    { v: `D-${Math.max(0, VL.TOTAL_DAYS - day)}`, l: "참여 기간 종료까지" },
   ];
   const gridCells = cells
     .map(
@@ -628,7 +628,7 @@ function screenControlHome(day, stats = {}) {
         ${_lockIcon(15)}
       </div>
       <p style="margin:0;font-size:var(--vl-fs-2);line-height:1.55;color:var(--vl-ink-2);text-wrap:pretty">
-        실험 기간 중 피드백 제공 시점은 참여자마다 다를 수 있으며, 실험 종료 후 모든 참여자에게 결과를 공유합니다.
+        참여 기간 중 피드백 제공 시점은 참여자마다 다를 수 있으며, 참여 기간이 끝나면 모든 참여자에게 결과를 공유합니다.
       </p>
     </div>`
     }
@@ -663,13 +663,13 @@ function screenStudyEndCodeInput() {
 
 // ── Study end notice modal ───────────────────────────────────────
 
-// 종료 안내(그룹 무관) — 연구 종료 시점(시간 기준)에 최초 1회만 노출된다.
+// 종료 안내(그룹 무관) — 리뷰 공개 시각(마지막 날 다음 날 09:00 KST)에 최초 1회만 노출된다.
 function screenStudyEndNoticeModal() {
   return vlConfirmModal({
     icon: markSVG({ size: 26, filled: false, accent: "var(--vl-accent)" }),
-    title: "연구 기간이 종료되었습니다",
+    title: "참여 기간이 끝났어요",
     message:
-      "지금까지 참여해주셔서 감사합니다. 연구자로부터 곧 설문을 받게 되실 겁니다. 설문 완료 후 보상 규정에 맞는 참여율을 보이셨다면 보상이 제공될 예정입니다.",
+      "그동안 참여해 주셔서 감사해요. 연구자가 설문을 보내 드릴 예정이에요. 설문을 마치고 보상 기준을 충족하면 보상을 드려요.",
     confirmLabel: "확인",
     confirmId: "vl-study-end-notice-confirm",
   });
@@ -677,12 +677,19 @@ function screenStudyEndNoticeModal() {
 
 // ── Participation ended banner ────────────────────────────────────────────────
 
-// 전송 유예까지 끝난(ended) 참여자에게 상단에 계속 보이는 종료 안내.
+// 수집이 멈춘 참여자에게 상단에 계속 보이는 종료 안내. 집단별 다음 단계를 여기 한 곳에서 알려 준다.
 // 설문 중에도 리뷰를 다시 볼 수 있어야 해 아래 화면은 가리지 않는다.
-function screenParticipationEndedBanner() {
-  const { title, body } = ViewLensStudy.ENDED_NOTICE;
+function screenParticipationEndedBanner({
+  isControl = false,
+  codeVerified = false,
+} = {}) {
+  const body = !isControl
+    ? "참여해 주셔서 감사해요. 연구자가 보내 드릴 설문 안내를 기다려 주세요."
+    : codeVerified
+      ? "리뷰를 다 보셨다면 2차 설문으로 돌아가 이어서 응답해 주세요."
+      : "1차 설문을 마치면 받는 코드로 참여 기간의 시청 리뷰를 볼 수 있어요.";
   return `<div id="vl-participation-ended-banner" role="status" style="margin:10px 16px 0;padding:10px 12px;border-radius:12px;background:var(--vl-accent-soft);color:var(--vl-ink);font-size:var(--vl-fs-3);line-height:1.5">
-    <strong>${title}</strong><br>${body}
+    <strong>참여 기간이 끝났어요.</strong><br>${body}
   </div>`;
 }
 

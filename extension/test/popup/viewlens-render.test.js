@@ -106,7 +106,8 @@ describe("ViewLensPopup 화면 선택 — 집단·시점별로 보이는 화면"
       daysSinceInstall: AFTER_STUDY_END,
       noticeShown: false,
     });
-    expect(c.textContent).toContain("연구 기간이 종료되었습니다");
+    expect(c.textContent).toContain("참여 기간이 끝났어요");
+    expect(c.textContent).toContain("그동안 참여해 주셔서 감사해요");
     expect(c.querySelector("#vl-study-end-cta")).toBeNull();
   });
 });

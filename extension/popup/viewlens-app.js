@@ -86,12 +86,7 @@ function _installDateForDay(day) {
   return new Date(Date.now() - (day - 1) * 86400000).toISOString();
 }
 
-// 전송 유예 기간까지 끝났는지 — 종료·설문 대기 배너 표시 여부
-function _isParticipationEnded(installDate) {
-  return ViewLensStudy.getParticipationState(installDate) === "ended";
-}
-
-// 수집이 멈췄는지(마지막 날 다음 날 00:00 KST부터) — 수집 관련 표시를 거두는 기준
+// 수집이 멈췄는지(마지막 날 다음 날 00:00 KST부터) — 수집 관련 표시를 거두고 종료 안내 배너를 띄우는 기준
 function _isCollectionEnded(installDate) {
   return ViewLensStudy.getParticipationState(installDate) !== "active";
 }
@@ -434,7 +429,14 @@ class ViewLensPopup {
 
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
       ${_popupHeader(groupCfg, day, { participantCode: this._participantCode, collectionEnded })}
-      ${_isParticipationEnded(this._installDate) ? screenParticipationEndedBanner() : ""}
+      ${
+        collectionEnded
+          ? screenParticipationEndedBanner({
+              isControl: VL.isConGroup(groupCfg.code),
+              codeVerified: !!VL._studyEndCodeVerified,
+            })
+          : ""
+      }
       ${
         feedbackActive || this._studyEndTabsActive(groupCfg)
           ? _tabs(this._tab, !VL._todayConfirmed)
@@ -886,4 +888,4 @@ window._isStudyEndTimeReached = _isStudyEndTimeReached;
 window._dayViewForDate = _dayViewForDate;
 window._controlTodayCount = _controlTodayCount;
 window._isStudyEndReviewReady = _isStudyEndReviewReady;
-window._isParticipationEnded = _isParticipationEnded;
+window._isCollectionEnded = _isCollectionEnded;
