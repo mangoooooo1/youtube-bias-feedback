@@ -645,7 +645,9 @@ class ViewLensPopup {
         showErr(
           result.reason === "invalid"
             ? "코드가 올바르지 않아요. 설문에서 안내받은 코드를 확인해 주세요."
-            : "지금은 확인할 수 없어요. 잠시 후 다시 시도해 주세요.",
+            : result.reason === "not_ready"
+              ? "리뷰를 준비하고 있어요. 잠시 후 다시 시도해 주세요."
+              : "지금은 확인할 수 없어요. 잠시 후 다시 시도해 주세요.",
         );
         return;
       }
