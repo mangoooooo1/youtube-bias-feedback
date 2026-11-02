@@ -448,6 +448,15 @@ class ViewLensPopup {
       });
     }
 
+    // 저장소 변경 등으로 다시 그려도 입력 중인 종료 확인 코드가 지워지지 않게 값·포커스·커서를 옮긴다
+    const typing = this.container.querySelector("#vl-study-end-code-input");
+    const typed = typing && {
+      value: typing.value,
+      focused: typing === this.container.ownerDocument?.activeElement,
+      start: typing.selectionStart,
+      end: typing.selectionEnd,
+    };
+
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
       ${_popupHeader(groupCfg, day, { participantCode: this._participantCode, collectionEnded })}
       ${
@@ -471,6 +480,17 @@ class ViewLensPopup {
 
     this._bind(groupCfg, currentWeek);
     this._animateCharts();
+
+    const input = typed
+      ? this.container.querySelector("#vl-study-end-code-input")
+      : null;
+    if (input) {
+      input.value = typed.value;
+      if (typed.focused) {
+        input.focus();
+        input.setSelectionRange(typed.start, typed.end);
+      }
+    }
   }
 
   /**

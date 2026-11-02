@@ -276,6 +276,11 @@ describe("boot — 홈 시청 영상 수", () => {
         { sent: true, watchStatsSent: false },
         { sent: true, watchStatsSent: true },
       ],
+      [
+        "다시 보낸 체크포인트(checkpointAt)",
+        { sent: true, watchStatsSent: true, checkpointAt: 1000 },
+        { sent: true, watchStatsSent: true, checkpointAt: 2000 },
+      ],
     ])(
       "%s을 받으면 시청 집계를 다시 받아 숫자를 바꾼다",
       async (_, before, after) => {

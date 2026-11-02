@@ -1652,8 +1652,10 @@ async function boot() {
       ([key, { oldValue, newValue }]) =>
         key.startsWith("video__") &&
         ((newValue?.sent === true && oldValue?.sent !== true) ||
+          // 체크포인트를 다시 보내면 watchStatsSent는 true 그대로이고 checkpointAt만 바뀐다
           (newValue?.watchStatsSent === true &&
-            oldValue?.watchStatsSent !== true)),
+            (oldValue?.watchStatsSent !== true ||
+              newValue.checkpointAt !== oldValue?.checkpointAt))),
     );
     // 세션 변경은 위에서 이미 다시 받는다
     if (serverAccepted && !changes.sessions) {
