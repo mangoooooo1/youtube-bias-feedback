@@ -248,8 +248,9 @@ const SHORT_WATCH_TIP =
 const UNCATEGORIZED_TIP =
   "유튜브에서 분야 정보를 가져오지 못한 영상이에요. 정보를 다시 가져오면 그래프에 들어가요.";
 
+// 키보드(Tab)로도 가서 툴팁을 띄우고, 스크린 리더는 "i" 대신 안내 문구를 읽는다
 function _infoTip(tip) {
-  return `<span class="vl-tip vl-tip-up vl-tip-line" data-tip="${vlEscapeHtml(tip)}" style="display:inline-flex;width:12px;height:12px;border-radius:50%;border:1px solid var(--vl-ink-3);align-items:center;justify-content:center;font-size:8px;font-weight:700;line-height:1;color:var(--vl-ink-3);cursor:default;flex-shrink:0">i</span>`;
+  return `<span class="vl-tip vl-tip-up vl-tip-line" tabindex="0" role="img" aria-label="${vlEscapeHtml(tip)}" data-tip="${vlEscapeHtml(tip)}" style="display:inline-flex;width:12px;height:12px;border-radius:50%;border:1px solid var(--vl-ink-3);align-items:center;justify-content:center;font-size:8px;font-weight:700;line-height:1;color:var(--vl-ink-3);cursor:default;flex-shrink:0">i</span>`;
 }
 
 function _footNote(text, tip) {
