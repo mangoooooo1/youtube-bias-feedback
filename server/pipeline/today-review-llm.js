@@ -7,6 +7,8 @@ const {
   formatShares,
   formatTitleGroups,
   sharesSentence,
+  VALID_WATCH_NOTE,
+  unknownNumbers,
 } = require("./review-prompt-format");
 
 const GEMINI_API_URL =
@@ -39,7 +41,7 @@ function buildTodayCumulativePrompt({
   return `당신은 사용자가 자신의 YouTube 콘텐츠 소비 패턴을 스스로 돌아볼 수 있도록 있는 그대로 비춰 주는 거울 같은 조력자입니다.
 
 [오늘 정보]
-- 오늘 시청한 영상 수: ${validVideoCount}개 (30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셈)
+- 오늘 시청한 영상 수: ${validVideoCount}개 ${VALID_WATCH_NOTE}
 ${formatShares(basis)}${formatTitleGroups(titleGroups)}${fewVideosSection}
 
 [피드백 원칙]
@@ -146,6 +148,15 @@ async function generateTodayReview(prompt, apiKey) {
       throw llmError(
         "policy_filtered",
         "정치·이념 관련 표현이 감지되어 폴백으로 대체",
+      );
+    }
+
+    // 넘겨준 퍼센트만 쓰게 했으므로, 입력에 없는 숫자가 있으면 실패로 보고 전체를 폴백으로 바꾼다
+    const unknown = unknownNumbers(prompt, feedback);
+    if (unknown.length > 0) {
+      throw llmError(
+        "number_mismatch",
+        `입력에 없는 숫자를 사용: ${unknown.join(", ")}`,
       );
     }
 

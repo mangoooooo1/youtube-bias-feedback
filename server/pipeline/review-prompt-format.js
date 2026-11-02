@@ -85,6 +85,28 @@ function sharesSentence(basis) {
     : first;
 }
 
+// 유효 시청 기준 설명. 데이터가 아니라서 허용 숫자에서 뺀다
+const VALID_WATCH_NOTE =
+  "(30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셈)";
+
+function numbersIn(text) {
+  return (text.match(/\d+/g) ?? []).map(Number);
+}
+
+/**
+ * 리뷰 문장에 쓰였지만 프롬프트 입력 부분([피드백 원칙] 앞)에는 없는 숫자(중복 제거).
+ * 원칙의 예시 숫자(62%, 85% 등)와 유효 시청 기준 설명(30초, 4분의 1)은 입력이 아니라 허용하지 않는다.
+ */
+function unknownNumbers(prompt, text) {
+  const end = prompt.indexOf("[피드백 원칙]");
+  const input = (end >= 0 ? prompt.slice(0, end) : prompt).replace(
+    VALID_WATCH_NOTE,
+    "",
+  );
+  const allowed = new Set(numbersIn(input));
+  return [...new Set(numbersIn(text).filter((n) => !allowed.has(n)))];
+}
+
 module.exports = {
   shareBasis,
   sharePercents,
@@ -92,4 +114,6 @@ module.exports = {
   formatTitleGroups,
   sharesSentence,
   josa,
+  VALID_WATCH_NOTE,
+  unknownNumbers,
 };

@@ -9,6 +9,8 @@ const {
   formatTitleGroups,
   sharesSentence,
   josa,
+  VALID_WATCH_NOTE,
+  unknownNumbers,
 } = require("./review-prompt-format");
 
 const GEMINI_API_URL =
@@ -21,9 +23,6 @@ const ERROR_BODY_MAX_LENGTH = 1000;
 // v3.0: topic을 분야 이름 대신 제목의 세부 소재로, 제목 속 인물·사건 이름은 사실로 서술 허용,
 //       100%는 "전부"로, 변화는 %p 대신 전후 값으로, 날짜별 나열 금지
 const PROMPT_VERSION = "viewlens-period-mirror-v3.0";
-
-const VALID_WATCH_NOTE =
-  "(30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셈)";
 
 /** 시청이 적은 구간인지 */
 function isFewVideosPeriod(validVideoCount, periodDays) {
@@ -184,22 +183,6 @@ function llmError(failureReason, message, extra = {}) {
   return Object.assign(err, extra);
 }
 
-// 숫자는 프롬프트의 입력 부분([피드백 원칙] 앞)에 적힌 것만 허용한다. 원칙의 예시 숫자(62%, 85% 등)는
-// 실제 입력이 아니라 허용 목록에서 뺀다. 비중·변화·영상 수·날짜·제목 속 숫자가 모두 입력 부분에 있다.
-function numbersIn(text) {
-  return (text.match(/\d+/g) ?? []).map(Number);
-}
-
-function allowedNumbers(prompt) {
-  const end = prompt.indexOf("[피드백 원칙]");
-  // 유효 시청 기준 설명(30초, 4분의 1)은 데이터가 아니므로 뺀다
-  const input = (end >= 0 ? prompt.slice(0, end) : prompt).replace(
-    VALID_WATCH_NOTE,
-    "",
-  );
-  return new Set(numbersIn(input));
-}
-
 async function generatePeriodReview(prompt, apiKey) {
   const controller = new AbortController();
   let timedOut = false;
@@ -280,12 +263,11 @@ async function generatePeriodReview(prompt, apiKey) {
     }
 
     // 넘겨준 숫자만 쓰게 했으므로, 입력에 없는 숫자가 있으면 실패로 보고 전체를 폴백으로 바꾼다
-    const allowed = allowedNumbers(prompt);
-    const unknown = numbersIn(feedback).filter((n) => !allowed.has(n));
+    const unknown = unknownNumbers(prompt, feedback);
     if (unknown.length > 0) {
       throw llmError(
         "number_mismatch",
-        `입력에 없는 숫자를 사용: ${[...new Set(unknown)].join(", ")}`,
+        `입력에 없는 숫자를 사용: ${unknown.join(", ")}`,
       );
     }
 

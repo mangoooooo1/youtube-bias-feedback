@@ -415,3 +415,53 @@ describe("generateTodayReview — 실패 사유 분류 (failureReason 태깅)", 
     await assertion;
   });
 });
+
+describe("generateTodayReview — 숫자 검증", () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  function respond(feedback) {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                { text: JSON.stringify({ topic: "아이유 라이브", feedback }) },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+  }
+
+  const prompt = buildTodayCumulativePrompt(baseArgs());
+
+  it("입력 비중과 다른 퍼센트를 쓰면 number_mismatch로 실패한다", async () => {
+    // 시청 시간 비중(62%) 대신 영상 개수 등으로 직접 계산한 숫자
+    respond("음악이 시청 시간의 66%였어요.");
+    await expect(generateTodayReview(prompt, "key")).rejects.toMatchObject({
+      failureReason: "number_mismatch",
+    });
+  });
+
+  it("원칙의 예시 숫자나 유효 시청 설명(30초)은 입력이 아니라 허용하지 않는다", async () => {
+    respond("30초 넘게 본 영상이 많았어요.");
+    await expect(generateTodayReview(prompt, "key")).rejects.toMatchObject({
+      failureReason: "number_mismatch",
+    });
+  });
+
+  it("비중·영상 수·본 횟수처럼 입력에 있는 숫자는 허용한다", async () => {
+    respond(
+      "영상 7개 중 음악이 시청 시간의 62%였어요. 아이유 라이브를 3번 보셨고, 게임 영상도 2개 보셨어요.",
+    );
+
+    const result = await generateTodayReview(prompt, "key");
+    expect(result.source).toBe("llm");
+  });
+});
