@@ -560,11 +560,18 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
 
 function screenControlHome(day, stats = {}) {
   const ended = !!stats.collectionEnded;
+  // 서버 유효 시청 기준으로 센 값일 때만 잠깐 본 영상을 뺐다는 안내를 단다(로컬 기록이면 다 센다)
+  const tip = stats.countsFromServer ? _infoTip(SHORT_WATCH_TIP) : "";
   const cells = [
-    { v: `${stats.todayCount ?? VL.con.todayCount}개`, l: "오늘 시청한 영상" },
+    {
+      v: `${stats.todayCount ?? VL.con.todayCount}개`,
+      l: "오늘 시청한 영상",
+      tip,
+    },
     {
       v: `${stats.totalCount ?? VL.con.totalCount}개`,
       l: "지금까지 시청한 영상",
+      tip,
     },
     { v: `${day}일째`, l: "ViewLens와 함께한 지" },
     { v: `D-${Math.max(0, VL.TOTAL_DAYS - day)}`, l: "참여 기간 종료까지" },
@@ -574,7 +581,7 @@ function screenControlHome(day, stats = {}) {
       (cell, i) => `
     <div style="padding:16px 18px;border-right:${i % 2 === 0 ? "1px solid var(--vl-line)" : "none"};border-bottom:${i < 2 ? "1px solid var(--vl-line)" : "none"}">
       <div style="font-weight:700;font-size:var(--vl-fs-7);color:var(--vl-ink);letter-spacing:-0.02em;line-height:1">${cell.v}</div>
-      <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:6px;font-weight:500">${cell.l}</div>
+      <div style="display:flex;align-items:center;gap:4px;font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:6px;font-weight:500">${cell.l}${cell.tip ?? ""}</div>
     </div>
   `,
     )

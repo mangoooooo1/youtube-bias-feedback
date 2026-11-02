@@ -159,6 +159,95 @@ describe("boot — 저장소 상태별 화면과 서버 요청", () => {
   });
 });
 
+// 자격이 없는 홈(대조군, 기준선 실험군)의 숫자는 실험군 화면과 같은 유효 시청 기준(서버 dayCounts)으로 센다.
+// 로컬 기록은 2~3초 눌러 본 영상까지 모두 담는다(아래 세션 videoCount 7).
+describe("boot — 홈 시청 영상 수", () => {
+  const kstToday = () =>
+    new Date().toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+  const SUMMARY_WITH_COUNTS = () => ({
+    data: {
+      days: [],
+      periods: [],
+      dayCounts: [
+        { date: "2026-01-01", validCount: 3 },
+        { date: kstToday(), validCount: 2 },
+      ],
+    },
+  });
+  // 숫자 칸의 라벨 줄(라벨 글자 + ⓘ) → 바로 위 숫자
+  const cell = (root, label) => {
+    const labelEl = [...root.querySelectorAll("div")].find(
+      (d) => d.firstChild?.textContent === label,
+    );
+    return {
+      value: labelEl?.previousElementSibling?.textContent,
+      tip: labelEl?.querySelector(".vl-tip")?.dataset.tip ?? null,
+    };
+  };
+  const localSessions = { sessions: [session("s1", { videoCount: 7 })] };
+
+  it.each([
+    // BASELINE_DAYS는 beforeAll에서 채워지므로 설치일은 테스트 안에서 계산한다
+    ["대조군", "CON", () => BASELINE_DAYS + 1],
+    ["기준선 실험군", "EXP", () => 1],
+  ])(
+    "%s은 서버 유효 영상 수를 보이고 잠깐 본 영상을 뺐다는 ⓘ를 단다",
+    async (_, group, installedDaysAgo) => {
+      const { root } = await bootPopup(
+        participant({
+          group,
+          installDate: daysAgo(installedDaysAgo()),
+          ...localSessions,
+        }),
+        { responses: { "/api/viewing-summary": SUMMARY_WITH_COUNTS() } },
+      );
+      await vi.waitFor(() =>
+        expect(cell(root, "오늘 시청한 영상").value).toBe("2개"),
+      );
+      expect(cell(root, "지금까지 시청한 영상").value).toBe("5개");
+      for (const label of ["오늘 시청한 영상", "지금까지 시청한 영상"]) {
+        expect(cell(root, label).tip).toContain(
+          "30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셌어요",
+        );
+      }
+    },
+  );
+
+  it("서버 집계를 받지 못하면 로컬 기록으로 세고 ⓘ를 달지 않는다", async () => {
+    const { root, server } = await bootPopup(
+      participant({
+        group: "CON",
+        installDate: daysAgo(BASELINE_DAYS + 1),
+        ...localSessions,
+      }),
+      { responses: { "/api/viewing-summary": () => ({ status: 500 }) } },
+    );
+    await vi.waitFor(() =>
+      expect(server.paths()).toContain("/api/viewing-summary"),
+    );
+    await vi.waitFor(() =>
+      expect(cell(root, "오늘 시청한 영상").value).toBe("7개"),
+    );
+    expect(cell(root, "지금까지 시청한 영상").value).toBe("7개");
+    expect(cell(root, "오늘 시청한 영상").tip).toBeNull();
+  });
+
+  it("dayCounts가 없는 응답(구버전 서버)이면 로컬 기록으로 센다", async () => {
+    const { root, server } = await bootPopup(
+      participant({
+        group: "CON",
+        installDate: daysAgo(BASELINE_DAYS + 1),
+        ...localSessions,
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(server.paths()).toContain("/api/viewing-summary"),
+    );
+    expect(cell(root, "오늘 시청한 영상").value).toBe("7개");
+    expect(cell(root, "오늘 시청한 영상").tip).toBeNull();
+  });
+});
+
 // 서버는 끝난 구간의 리뷰를 매일 04:00 KST에 만든다. 그 전에 연 팝업이 "리뷰 없음"을 오늘 캐시로
 // 남겨도, 끝난 구간의 리뷰가 빠져 있으면 다시 물어 같은 날 리뷰가 보이게 한다.
 describe("boot — 기간 리뷰 캐시", () => {
