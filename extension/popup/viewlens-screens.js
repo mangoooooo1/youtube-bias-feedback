@@ -204,11 +204,13 @@ function _collectingBanner(count) {
 
 // status: 그 날 서버 집계의 불러오기 상태(_dayViewForDate). 지난 날짜는 집계를 받기 전·받지 못했을 때
 // 기록이 없다고 단정하지 않는다. 오늘은 기기 기록으로 판단해 그대로 둔다
+// isLatest: 다음 날짜로 갈 수 없는 날(오늘, 수집이 멈췄으면 참여 마지막 날)
 function screenTodayEmpty(
   dateLabel,
   collectingCount,
   isToday = true,
   status = "ok",
+  isLatest = isToday,
 ) {
   const pastStatusText = isToday ? null : _summaryStatusText(status);
   return `<div style="display:flex;flex-direction:column;min-height:100%">
@@ -216,7 +218,7 @@ function screenTodayEmpty(
     <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px 0">
       ${_dateNavButton({ id: "vl-date-prev", dir: "left" })}
       <div style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : dateLabel}</div>
-      ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
+      ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isLatest })}
     </div>
     <div style="flex:1;padding:24px 24px 40px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:22px">
       <div style="position:relative;width:80px;height:80px">
@@ -327,6 +329,7 @@ function screenToday() {
       d.collectingCount,
       isToday,
       view.status,
+      d.isLatestDate ?? isToday,
     );
   }
 
@@ -368,7 +371,7 @@ function screenToday() {
       <div style="text-align:center">
         <div style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-ink-2)">${isToday ? "오늘" : d.dateLabel}</div>
       </div>
-      ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: isToday })}
+      ${_dateNavButton({ id: "vl-date-next", dir: "right", disabled: d.isLatestDate ?? isToday })}
     </div>
     ${
       statusRow

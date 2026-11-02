@@ -4,6 +4,7 @@ window.addDaysKst = addDaysKst;
 window.dateStr = dateStr;
 window.sessionDateStr = sessionDateStr;
 window.dayFromInstall = dayFromInstall;
+window.localDateFromDateStr = localDateFromDateStr;
 window.shouldRetryParticipantSync = shouldRetryParticipantSync;
 window.flushPendingPopupEvents = flushPendingPopupEvents;
 window.loadViewingSummaryCache = loadViewingSummaryCache;

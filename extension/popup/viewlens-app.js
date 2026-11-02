@@ -91,6 +91,18 @@ function _isParticipationEnded(installDate) {
   return ViewLensStudy.getParticipationState(installDate) === "ended";
 }
 
+// 수집이 멈췄는지(마지막 날 다음 날 00:00 KST부터) — 수집 관련 표시를 거두는 기준
+function _isCollectionEnded(installDate) {
+  return ViewLensStudy.getParticipationState(installDate) !== "active";
+}
+
+// 하루 탭에서 갈 수 있는 마지막 날짜. 수집이 멈췄으면 참여 마지막 날, 아니면 오늘
+function _latestViewableDate(installDate) {
+  return _isCollectionEnded(installDate)
+    ? localDateFromDateStr(dayFromInstall(installDate, VL.TOTAL_DAYS - 1))
+    : new Date();
+}
+
 function _isStudyEndTimeReached(installDate) {
   if (!installDate) return false;
   const revealDateStr = dayFromInstall(installDate, VL.TOTAL_DAYS);
@@ -109,9 +121,16 @@ function _studyEndBackRow() {
   </div>`;
 }
 
-function _popupHeader(groupCfg, day, { participantCode, studyEnded } = {}) {
+function _popupHeader(
+  groupCfg,
+  day,
+  { participantCode, collectionEnded } = {},
+) {
   const isTest = groupCfg.code.startsWith("TEST");
-  const statusLabel = studyEnded ? "참여 종료" : "참여 중";
+  const statusLabel = collectionEnded ? "참여 기간 종료" : "참여 중";
+  const dayText = collectionEnded
+    ? `${day}일 참여 완료`
+    : `설치 ${day}일째 · 종료 D-${Math.max(0, VL.TOTAL_DAYS - day)}`;
   const badge = isTest
     ? vlBadge({ text: "연구자 모드", tone: "accent", size: "sm" })
     : vlBadge({
@@ -132,7 +151,7 @@ function _popupHeader(groupCfg, day, { participantCode, studyEnded } = {}) {
       ${markSVG({ size: 26, accent: "var(--vl-accent)" })}
       <div style="display:flex;flex-direction:column;line-height:1.1">
         <span style="font-size:var(--vl-fs-4);font-weight:800;letter-spacing:-0.02em;color:var(--vl-ink)">View<span style="color:var(--vl-accent)">Lens</span></span>
-        <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:2px">설치 ${day}일째 · 종료 D-${Math.max(0, VL.TOTAL_DAYS - day)}</span>
+        <span style="font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:2px">${dayText}</span>
       </div>
     </div>
     ${rightArea}
@@ -317,7 +336,9 @@ class ViewLensPopup {
       return;
     }
     const tl = VL.TIMELINE[this._timelineKey] || VL.TIMELINE.w1_mid;
-    const day = _elapsedDay(tl.day);
+    const collectionEnded = _isCollectionEnded(this._installDate);
+    // 수집이 멈추면 일수는 참여 기간 길이에서 멈춘다
+    const day = collectionEnded ? VL.TOTAL_DAYS : _elapsedDay(tl.day);
     const groupCfg = VL.GROUPS[this._group] || VL.GROUPS.EXP;
     const totalWeeks = VL.TOTAL_WEEKS;
     const currentWeek = Math.min(
@@ -328,8 +349,13 @@ class ViewLensPopup {
 
     // 실제 세션이 없는 Studio에서는 예시 데이터(VL.today)를 그대로 쓴다
     if (this._tab === "today" && VL._allSessions) {
+      const latestDate = _latestViewableDate(this._installDate);
+      if (dateStr(this._selectedDate) > dateStr(latestDate)) {
+        this._selectedDate = latestDate;
+      }
       const d = buildDataForDate(VL._allSessions || [], this._selectedDate);
       const isToday = dateStr(this._selectedDate) === dateStr(new Date());
+      d.isLatestDate = dateStr(this._selectedDate) === dateStr(latestDate);
       d.collectingCount = isToday ? (VL._collectingCount ?? 0) : 0;
       d.collectingTimer = isToday ? _collectingTimerText() : "";
       const dateKey = dateStr(this._selectedDate);
@@ -356,7 +382,7 @@ class ViewLensPopup {
     // 대조군 종료 후 6주 리뷰 열람(Story 10-10) — _isFeedbackActive와 독립된 축이라
     // feedbackActive가 false인 경로 안에서만 추가로 분기한다.
     const studyEndReady = _isStudyEndReviewReady(groupCfg, this._installDate);
-    // 그룹 무관(EXP+CON) 시간 판정 — 종료 안내 오버레이와 헤더 배지가 함께 참조한다.
+    // 그룹 무관(EXP+CON) 리뷰 공개 시각 판정 — 종료 안내 모달이 참조한다.
     const studyEnded = _isStudyEndTimeReached(this._installDate);
     const showStudyEndNotice = studyEnded && !VL._studyEndNoticeShown;
     // 안내를 이미 본 뒤에만 CTA로 전환한다(대조군 전용).
@@ -406,7 +432,7 @@ class ViewLensPopup {
     }
 
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
-      ${_popupHeader(groupCfg, day, { participantCode: this._participantCode, studyEnded })}
+      ${_popupHeader(groupCfg, day, { participantCode: this._participantCode, collectionEnded })}
       ${_isParticipationEnded(this._installDate) ? screenParticipationEndedBanner() : ""}
       ${
         feedbackActive || this._studyEndTabsActive(groupCfg)
@@ -558,7 +584,8 @@ class ViewLensPopup {
     }
     if (nextBtn) {
       nextBtn.addEventListener("click", () => {
-        if (dateStr(this._selectedDate) !== dateStr(new Date())) {
+        const latestKey = dateStr(_latestViewableDate(this._installDate));
+        if (dateStr(this._selectedDate) < latestKey) {
           this._selectedDate = addDaysKst(this._selectedDate, 1);
           this.render();
         }
