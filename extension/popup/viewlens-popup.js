@@ -1719,6 +1719,19 @@ function reportClientError(code, where) {
   }
 }
 
+/**
+ * 부팅 실패 시 반쯤 그려진 화면을 숨기고 popup.html의 정적 안내를 연다.
+ * 다른 팝업 모듈이 실패했어도 동작하도록 DOM 속성만 바꾼다.
+ * @returns {void}
+ */
+function showBootFallback() {
+  const root = document.getElementById("vl-popup-root");
+  const fallback = document.getElementById("vl-boot-fallback");
+  if (!fallback) return;
+  if (root) root.hidden = true;
+  fallback.hidden = false;
+}
+
 boot().catch((err) => {
   // Fallback: opened directly in browser without chrome APIs
   if (typeof chrome === "undefined" || !chrome?.storage) {
@@ -1734,7 +1747,7 @@ boot().catch((err) => {
     });
   } else {
     console.error("[ViewLens popup] boot error:", err);
-    // 참여자에게는 빈 팝업으로 보이지만 서버 로그에는 남지 않는다
+    showBootFallback();
     reportClientError("POPUP_BOOT_FAILED", "popup.boot");
   }
 });

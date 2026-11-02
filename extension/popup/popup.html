@@ -22,10 +22,37 @@
         position: relative;
         font-family: Pretendard, system-ui, sans-serif;
       }
+      /* 부팅 실패 안내 — 색 토큰은 JS가 넣으므로 body 기본색을 쓴다 */
+      #vl-boot-fallback {
+        height: 600px;
+        padding: 0 32px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        text-align: center;
+      }
+      #vl-boot-fallback[hidden] {
+        display: none;
+      }
+      #vl-boot-fallback p {
+        margin: 0;
+        line-height: 1.5;
+      }
     </style>
   </head>
   <body style="margin: 0; padding: 0; background: var(--vl-bg)">
     <div id="vl-popup-root" class="vl-pop"></div>
+    <!-- 팝업 모듈 없이도 보이도록 정적으로 두고, 부팅 실패 시에만 연다 -->
+    <div id="vl-boot-fallback" hidden>
+      <p style="font-size: var(--vl-fs-4); font-weight: 700">
+        화면을 불러오지 못했어요. 잠시 후 다시 열어 주세요.
+      </p>
+      <p style="font-size: var(--vl-fs-3); color: #5b6070">
+        문제가 계속되면 연구자에게 연락해 주세요.
+      </p>
+    </div>
 
     <script src="../study-schedule.js"></script>
     <!-- data layer (VL global + mock data fallback) -->
