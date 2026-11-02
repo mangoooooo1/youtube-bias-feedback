@@ -574,12 +574,13 @@ function screenControlHome(day, stats = {}) {
     { v: `${day}일째`, l: "ViewLens와 함께한 지" },
     { v: `D-${Math.max(0, VL.TOTAL_DAYS - day)}`, l: "참여 기간 종료까지" },
   ];
+  // 라벨 줄이 position:relative여야 ⓘ(vl-tip-line) 툴팁이 이 줄 위로 펼쳐진다(없으면 팝업 밖으로 나감)
   const gridCells = cells
     .map(
       (cell, i) => `
     <div style="padding:16px 18px;border-right:${i % 2 === 0 ? "1px solid var(--vl-line)" : "none"};border-bottom:${i < 2 ? "1px solid var(--vl-line)" : "none"}">
       <div style="font-weight:700;font-size:var(--vl-fs-7);color:var(--vl-ink);letter-spacing:-0.02em;line-height:1">${cell.v}</div>
-      <div style="display:flex;align-items:center;gap:4px;font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:6px;font-weight:500">${cell.l}${cell.tip ?? ""}</div>
+      <div style="position:relative;display:flex;align-items:center;gap:4px;font-size:var(--vl-fs-2);color:var(--vl-ink-3);margin-top:6px;font-weight:500">${cell.l}${cell.tip ?? ""}</div>
     </div>
   `,
     )

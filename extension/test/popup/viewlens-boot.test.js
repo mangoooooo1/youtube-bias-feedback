@@ -182,6 +182,7 @@ describe("boot — 홈 시청 영상 수", () => {
     return {
       value: labelEl?.previousElementSibling?.textContent,
       tip: labelEl?.querySelector(".vl-tip")?.dataset.tip ?? null,
+      position: labelEl?.style.position,
     };
   };
   const localSessions = { sessions: [session("s1", { videoCount: 7 })] };
@@ -208,6 +209,8 @@ describe("boot — 홈 시청 영상 수", () => {
       expect(cell(root, "오늘 시청한 영상").tip).toContain(
         "30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셌어요",
       );
+      // 툴팁 기준점이 라벨 줄이어야 팝업 안에 보인다(jsdom은 배치를 계산하지 않아 스타일로 확인)
+      expect(cell(root, "오늘 시청한 영상").position).toBe("relative");
       expect(cell(root, "지금까지 시청한 영상").tip).toBeNull();
     },
   );
