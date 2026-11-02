@@ -610,4 +610,55 @@ describe("참여 기간이 끝난 뒤 — 머리말과 하루 탭", () => {
     expect(root.textContent).toContain(lastLabel);
     expect(nextBtn().disabled).toBe(true);
   });
+
+  const COLLECTING_TEXTS = [
+    "시청 기록을 수집하고 있어요",
+    "평소처럼 유튜브를 시청해 주세요",
+    "오늘 시청한 영상",
+    "ViewLens와 함께한 지",
+    "실험 기간 중 피드백 제공 시점",
+  ];
+
+  it("대조군 홈은 연구 중에는 수집 안내와 숫자 칸을 그대로 보여 준다", async () => {
+    const { root } = await bootReady(
+      participant({ group: "CON", installDate: INSTALL }),
+      { now: COLLECTION_ENDS_AT() - 1 },
+    );
+    for (const text of COLLECTING_TEXTS) {
+      expect(root.textContent).toContain(text);
+    }
+    expect(root.textContent).not.toContain("참여해 주셔서 감사해요");
+  });
+
+  it("대조군 홈은 수집이 멈추면 리뷰 공개 전이라도 수집 안내·숫자 칸 대신 감사 인사만 보여 준다", async () => {
+    const { root } = await bootReady(
+      participant({ group: "CON", installDate: INSTALL }),
+      { now: COLLECTION_ENDS_AT() + 2 * 3600000 },
+    );
+    expect(root.textContent).toContain("참여해 주셔서 감사해요");
+    expect(root.textContent).toContain(
+      "시청 기록은 연구 목적으로 안전하게 보관돼요.",
+    );
+    for (const text of COLLECTING_TEXTS) {
+      expect(root.textContent).not.toContain(text);
+    }
+    expect(root.querySelector("#vl-study-end-cta")).toBeNull();
+  });
+
+  it("대조군 홈은 리뷰가 공개되면 리뷰 열람 주 버튼을 두고, 누르면 코드 입력 화면을 연다", async () => {
+    const { root } = await bootReady(
+      participant({ group: "CON", installDate: INSTALL }),
+      { now: COLLECTION_ENDS_AT() + 10 * 3600000 },
+    );
+    const cta = root.querySelector("#vl-study-end-cta");
+    expect(cta.textContent).toContain("시청 리뷰가 준비됐어요");
+    expect(cta.style.background).toBe("var(--vl-accent)");
+    expect(root.textContent).toContain("참여해 주셔서 감사해요");
+    for (const text of COLLECTING_TEXTS) {
+      expect(root.textContent).not.toContain(text);
+    }
+
+    click(root, "#vl-study-end-cta");
+    expect(root.querySelector("#vl-study-end-code-input")).not.toBeNull();
+  });
 });

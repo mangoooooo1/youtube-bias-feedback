@@ -559,6 +559,7 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
 // ── Control group home ────────────────────────────────────────────────────────
 
 function screenControlHome(day, stats = {}) {
+  const ended = !!stats.collectionEnded;
   const cells = [
     { v: `${stats.todayCount ?? VL.con.todayCount}개`, l: "오늘 시청한 영상" },
     {
@@ -591,9 +592,13 @@ function screenControlHome(day, stats = {}) {
           ${markSVG({ size: 36, filled: false, accent: "var(--vl-accent)", animated: true })}
         </span>
       </div>
-      <div style="margin-top:16px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink)">시청 기록을 수집하고 있어요</div>
+      <div style="margin-top:16px;font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink)">${ended ? "참여해 주셔서 감사해요" : "시청 기록을 수집하고 있어요"}</div>
       <p style="margin:9px auto 0;max-width:280px;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;word-break:keep-all">
-        평소처럼 유튜브를 시청해 주세요.<br>시청 기록은 연구 목적으로 안전하게 <span style="white-space:nowrap">수집·보관돼요.</span>
+        ${
+          ended
+            ? `시청 기록은 연구 목적으로 안전하게 <span style="white-space:nowrap">보관돼요.</span>`
+            : `평소처럼 유튜브를 시청해 주세요.<br>시청 기록은 연구 목적으로 안전하게 <span style="white-space:nowrap">수집·보관돼요.</span>`
+        }
       </p>
       ${
         // 베이스라인 중인 EXP에게만 보여주는 한 줄 — CON은 종료 후 일괄 제공(10-10)이라
@@ -607,16 +612,18 @@ function screenControlHome(day, stats = {}) {
     `,
     })}
 
-    ${vlCard({ pad: 0, children: `<div style="display:grid;grid-template-columns:1fr 1fr">${gridCells}</div>` })}
+    ${ended ? "" : vlCard({ pad: 0, children: `<div style="display:grid;grid-template-columns:1fr 1fr">${gridCells}</div>` })}
 
     ${
-      // 종료 안내 모달을 이미 본 뒤엔 이 자리가 상시 재진입 CTA로 바뀐다.
+      // 종료 안내 모달을 이미 본 뒤엔 리뷰 열람 버튼을 주 버튼으로 둔다. 공개(09:00) 전 종료 홈에는 아무것도 두지 않는다
       stats.studyEndCtaReady
-        ? `<button id="vl-study-end-cta" class="vl-press" style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:15px 16px;background:var(--vl-accent-soft);border:none;border-radius:13px;box-shadow:0 1px 3px color-mix(in oklab,var(--vl-accent) 10%,transparent),0 1px 2px rgba(0,0,0,.03);cursor:pointer;font-family:inherit;text-align:left">
-        <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-accent)">${VL.studyDurationLabel()}의 시청 리뷰가 준비됐어요</span>
-        <span style="font-size:var(--vl-fs-4);color:var(--vl-accent);flex-shrink:0">→</span>
+        ? `<button id="vl-study-end-cta" class="vl-press" style="display:flex;align-items:center;justify-content:space-between;gap:9px;padding:15px 16px;background:var(--vl-accent);border:none;border-radius:13px;box-shadow:0 1px 3px color-mix(in oklab,var(--vl-accent) 10%,transparent),0 1px 2px rgba(0,0,0,.03);cursor:pointer;font-family:inherit;text-align:left">
+        <span style="font-size:var(--vl-fs-3);font-weight:700;color:var(--vl-on-accent)">${VL.studyDurationLabel()}의 시청 리뷰가 준비됐어요</span>
+        <span style="font-size:var(--vl-fs-4);color:var(--vl-on-accent);flex-shrink:0">→</span>
       </button>`
-        : `<div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card);border-radius:13px;box-shadow:var(--vl-shadow-card)">
+        : ended
+          ? ""
+          : `<div style="display:flex;align-items:flex-start;gap:9px;padding:13px 14px;background:var(--vl-card);border-radius:13px;box-shadow:var(--vl-shadow-card)">
       <div style="width:25px;height:25px;border-radius:7px;background:var(--vl-accent-soft);color:var(--vl-accent);display:grid;place-items:center;flex-shrink:0;margin-top:1px">
         ${_lockIcon(15)}
       </div>

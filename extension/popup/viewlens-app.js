@@ -428,6 +428,7 @@ class ViewLensPopup {
         totalCount: _controlTotalCount(),
         baselineDaysLeft,
         studyEndCtaReady: showStudyEndCta,
+        collectionEnded,
       });
     }
 
