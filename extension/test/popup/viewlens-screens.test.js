@@ -617,11 +617,27 @@ describe("vlReview — 관심 분야 헤드라인", () => {
   it("분야명만 굵고, 띄어쓰기에서만 줄바꿈한다", async () => {
     const { vlReview } = await loadScreens();
     const m = vlReview({ text: "리뷰", topic: "인물과 일상 루틴" }).match(
-      /<p style="([^"]*)">\s*당신은 <span style="([^"]*)">인물과 일상 루틴<\/span>에 관심이 많습니다\./,
+      /<p style="([^"]*)">\s*<span style="([^"]*)">인물과 일상 루틴<\/span>에 관심이 많은 하루였어요\./,
     );
     expect(m[1]).toContain("font-size:var(--vl-fs-4)");
     expect(m[1]).toContain("font-weight:500");
     expect(m[1]).toContain("word-break:keep-all");
     expect(m[2]).toContain("font-weight:700");
+  });
+
+  it("사람을 단정하는 '당신은 …에 관심이 많습니다' 문구를 쓰지 않는다", async () => {
+    const { vlReview } = await loadScreens();
+    const html = vlReview({ text: "리뷰", topic: "야구 하이라이트" });
+    expect(html).not.toContain("당신은");
+    expect(html).not.toContain("관심이 많습니다");
+  });
+
+  it("서버 대체 문구의 topic '분석 불가'와 빈 topic은 헤드라인을 그리지 않는다", async () => {
+    const { vlReview } = await loadScreens();
+    for (const topic of ["분석 불가", ""]) {
+      const html = vlReview({ text: "리뷰", topic });
+      expect(html).not.toContain("관심이 많은 하루였어요");
+      expect(html).not.toContain("분석 불가");
+    }
   });
 });

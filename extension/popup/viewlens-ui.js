@@ -271,11 +271,13 @@ function vlReview({
       : `<div style="${base};padding:3px 4px">${label}</div>`;
   };
 
-  const topicBlock = topic
-    ? `<p style="margin:0 0 10px;font-size:var(--vl-fs-4);font-weight:500;color:var(--vl-ink);line-height:1.4;letter-spacing:-0.02em;text-wrap:pretty;word-break:keep-all">
-        당신은 <span style="font-weight:700;color:var(--vl-accent)">${vlEscapeHtml(topic)}</span>에 관심이 많습니다.
+  // 사람을 단정하지 않고 그 하루의 시청으로 말한다. 서버 대체 문구의 "분석 불가"는 소재가 아니라 숨긴다
+  const topicBlock =
+    topic && topic !== "분석 불가"
+      ? `<p style="margin:0 0 10px;font-size:var(--vl-fs-4);font-weight:500;color:var(--vl-ink);line-height:1.4;letter-spacing:-0.02em;text-wrap:pretty;word-break:keep-all">
+        <span style="font-weight:700;color:var(--vl-accent)">${vlEscapeHtml(topic)}</span>에 관심이 많은 하루였어요.
       </p>`
-    : "";
+      : "";
 
   // 10개 넘으면 <details> 안에서 계속 스크롤하는 대신 10개씩 페이지로 나눠 가로로
   // 넘겨보게 한다(scroll-snap). 10개 이하면 화살표·페이지 표시 없이 세로 목록만 보여준다.
