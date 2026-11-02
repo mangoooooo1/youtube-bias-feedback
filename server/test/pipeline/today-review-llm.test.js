@@ -6,6 +6,12 @@ import {
   TODAY_PROMPT_VERSION,
 } from "../../pipeline/today-review-llm.js";
 
+// 기간 리뷰 테스트와 같은 문장을 확인한다(두 프롬프트가 같은 기준을 쓰는지)
+const POLITICAL_TOPIC_PRINCIPLE =
+  "- 제목에 나온 인물·사건 이름은 사실대로 말해도 됩니다. 단, 제목의 주장은 사실로 단정하지 말고 무엇에 관한 영상인지만 말하며, 제목의 평가·조롱 표현은 옮기지 마세요. 시청자가 어떤 인물·정당을 지지하는지 추론하지 마세요.";
+const TOPIC_INSTRUCTION =
+  '"topic": "비중이 큰 분야의 영상 제목에서 드러나는 구체적인 소재를 5단어 이내 명사구로 (예: 야구 하이라이트). 분야 이름을 그대로 쓰지 말고, 정치·시사 소재는 인물 이름 대신 사건·주제로 쓸 것"';
+
 // 이 파일은 원래 extension/pipeline/llm.js에서 확장 프로그램이 직접 Gemini를 호출하던
 // "오늘" 리뷰 로직을 서버로 이식한 것이다(연구 무결성 점검 항목 1 후속 조치, Stage 2a).
 // 확장 프로그램 쪽 원본은 Stage 2c에서 완전히 제거됐으므로(더 이상 클라이언트가 Gemini를
@@ -117,10 +123,17 @@ describe("buildTodayCumulativePrompt — 지침", () => {
     expect(prompt).toContain("비중이 가장 큰 분야는 그 퍼센트와 함께 언급");
   });
 
-  it("분야 안의 세부 소재를 짚되 인물·정당·이슈 논조는 요약하지 않게 한다", () => {
+  it("분야 안의 세부 소재를 짚되 인물·사건 이름은 사실로만 쓰고 주장·평가·지지 추론은 하지 않게 한다", () => {
     const prompt = buildTodayCumulativePrompt(baseArgs());
     expect(prompt).toContain("어떤 소재를 주로 봤는지 제목을 근거로 짚어");
-    expect(prompt).toContain("주장이나 논조는 절대 요약·평가하지 마세요");
+    expect(prompt).toContain(POLITICAL_TOPIC_PRINCIPLE);
+    expect(prompt).not.toContain("주장이나 논조는 절대 요약·평가하지 마세요");
+  });
+
+  it("topic은 분야 이름이 아니라 제목의 세부 소재로, 정치·시사는 인물 대신 사건·주제로 쓰게 한다", () => {
+    const prompt = buildTodayCumulativePrompt(baseArgs());
+    expect(prompt).toContain(TOPIC_INSTRUCTION);
+    expect(prompt).not.toContain("시청 카테고리 기반 주요 관심사");
   });
 
   it("업로더가 정한 분야가 제목과 다르면 소재로 말하되 숫자는 바꾸지 않게 한다", () => {

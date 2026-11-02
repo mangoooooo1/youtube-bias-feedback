@@ -7,6 +7,12 @@ import {
   PROMPT_VERSION,
 } from "../../pipeline/period-review-llm.js";
 
+// 오늘 리뷰 테스트와 같은 문장을 확인한다(두 프롬프트가 같은 기준을 쓰는지)
+const POLITICAL_TOPIC_PRINCIPLE =
+  "- 제목에 나온 인물·사건 이름은 사실대로 말해도 됩니다. 단, 제목의 주장은 사실로 단정하지 말고 무엇에 관한 영상인지만 말하며, 제목의 평가·조롱 표현은 옮기지 마세요. 시청자가 어떤 인물·정당을 지지하는지 추론하지 마세요.";
+const TOPIC_INSTRUCTION =
+  '"topic": "비중이 큰 분야의 영상 제목에서 드러나는 구체적인 소재를 5단어 이내 명사구로 (예: 야구 하이라이트). 분야 이름을 그대로 쓰지 말고, 정치·시사 소재는 인물 이름 대신 사건·주제로 쓸 것"';
+
 function baseArgs(overrides = {}) {
   return {
     validVideoCount: 20,
@@ -88,10 +94,21 @@ describe("buildPeriodPrompt — 지침", () => {
     expect(prompt).toContain("위 숫자로 확인되지 않는 패턴은 말하지 마세요");
     expect(prompt).toContain("비중이 가장 큰 분야는 그 퍼센트와 함께 언급");
     expect(prompt).toContain("어떤 소재를 주로 봤는지 제목을 근거로 짚어");
-    expect(prompt).toContain("주장이나 논조는 절대 요약·평가하지 마세요");
     expect(prompt).toContain(
       "분야는 영상을 올린 사람이 정한 것이라 내용과 다를 수 있습니다",
     );
+  });
+
+  it("오늘 리뷰와 같은 문구로 인물·사건 이름은 사실로만 쓰고 주장·평가·지지 추론은 하지 않게 한다", () => {
+    const prompt = buildPeriodPrompt(baseArgs());
+    expect(prompt).toContain(POLITICAL_TOPIC_PRINCIPLE);
+    expect(prompt).not.toContain("주장이나 논조는 절대 요약·평가하지 마세요");
+  });
+
+  it("오늘 리뷰와 같은 문구로 topic을 분야 이름이 아니라 제목의 세부 소재로 쓰게 한다", () => {
+    const prompt = buildPeriodPrompt(baseArgs());
+    expect(prompt).toContain(TOPIC_INSTRUCTION);
+    expect(prompt).not.toContain("시청 카테고리 기반 주요 관심사");
   });
 });
 
