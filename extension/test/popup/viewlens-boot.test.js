@@ -191,7 +191,7 @@ describe("boot — 홈 시청 영상 수", () => {
     ["대조군", "CON", () => BASELINE_DAYS + 1],
     ["기준선 실험군", "EXP", () => 1],
   ])(
-    "%s은 서버 유효 영상 수를 보이고 잠깐 본 영상을 뺐다는 ⓘ를 단다",
+    "%s은 서버 유효 영상 수를 보이고 오늘 칸에만 잠깐 본 영상을 뺐다는 ⓘ를 단다",
     async (_, group, installedDaysAgo) => {
       const { root } = await bootPopup(
         participant({
@@ -205,15 +205,14 @@ describe("boot — 홈 시청 영상 수", () => {
         expect(cell(root, "오늘 시청한 영상").value).toBe("2개"),
       );
       expect(cell(root, "지금까지 시청한 영상").value).toBe("5개");
-      for (const label of ["오늘 시청한 영상", "지금까지 시청한 영상"]) {
-        expect(cell(root, label).tip).toContain(
-          "30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셌어요",
-        );
-      }
+      expect(cell(root, "오늘 시청한 영상").tip).toContain(
+        "30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셌어요",
+      );
+      expect(cell(root, "지금까지 시청한 영상").tip).toBeNull();
     },
   );
 
-  it("서버 집계를 받지 못하면 로컬 기록으로 세고 ⓘ를 달지 않는다", async () => {
+  it("서버 집계를 받지 못하면 로컬 기록으로 세고 ⓘ는 그대로 단다", async () => {
     const { root, server } = await bootPopup(
       participant({
         group: "CON",
@@ -229,7 +228,9 @@ describe("boot — 홈 시청 영상 수", () => {
       expect(cell(root, "오늘 시청한 영상").value).toBe("7개"),
     );
     expect(cell(root, "지금까지 시청한 영상").value).toBe("7개");
-    expect(cell(root, "오늘 시청한 영상").tip).toBeNull();
+    expect(cell(root, "오늘 시청한 영상").tip).toContain(
+      "시청 기록이 확인되면 빼요",
+    );
   });
 
   it("dayCounts가 없는 응답(구버전 서버)이면 로컬 기록으로 센다", async () => {
@@ -244,7 +245,6 @@ describe("boot — 홈 시청 영상 수", () => {
       expect(server.paths()).toContain("/api/viewing-summary"),
     );
     expect(cell(root, "오늘 시청한 영상").value).toBe("7개");
-    expect(cell(root, "오늘 시청한 영상").tip).toBeNull();
   });
 });
 

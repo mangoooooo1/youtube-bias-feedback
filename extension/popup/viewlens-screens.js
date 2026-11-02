@@ -244,7 +244,7 @@ function screenTodayEmpty(
 }
 
 const SHORT_WATCH_TIP =
-  "30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셌어요. 그보다 짧게 본 영상은 잘못 눌렀거나 바로 넘긴 영상으로 보고 빼요.";
+  "30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셌어요. 그보다 짧게 본 영상은 잘못 눌렀거나 바로 넘긴 영상으로 판단하고 시청 기록이 확인되면 빼요.";
 const UNCATEGORIZED_TIP =
   "유튜브에서 분야 정보를 가져오지 못한 영상이에요. 정보를 다시 가져오면 그래프에 들어가요.";
 
@@ -560,18 +560,16 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
 
 function screenControlHome(day, stats = {}) {
   const ended = !!stats.collectionEnded;
-  // 서버 유효 시청 기준으로 센 값일 때만 잠깐 본 영상을 뺐다는 안내를 단다(로컬 기록이면 다 센다)
-  const tip = stats.countsFromServer ? _infoTip(SHORT_WATCH_TIP) : "";
+  // 로컬 기록으로 대체된 때도 ⓘ가 사라지지 않게 늘 단다(문구가 "확인되면 빼요"라 어긋나지 않는다)
   const cells = [
     {
       v: `${stats.todayCount ?? VL.con.todayCount}개`,
       l: "오늘 시청한 영상",
-      tip,
+      tip: _infoTip(SHORT_WATCH_TIP),
     },
     {
       v: `${stats.totalCount ?? VL.con.totalCount}개`,
       l: "지금까지 시청한 영상",
-      tip,
     },
     { v: `${day}일째`, l: "ViewLens와 함께한 지" },
     { v: `D-${Math.max(0, VL.TOTAL_DAYS - day)}`, l: "참여 기간 종료까지" },

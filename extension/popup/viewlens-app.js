@@ -441,7 +441,6 @@ class ViewLensPopup {
       bodyHTML = screenControlHome(day, {
         todayCount: _controlTodayCount(),
         totalCount: _controlTotalCount(),
-        countsFromServer: _serverDayCounts() != null,
         baselineDaysLeft,
         studyEndCtaReady: showStudyEndCta,
         studyEndCodeVerified: !!VL._studyEndCodeVerified,
