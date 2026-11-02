@@ -25,13 +25,18 @@ router.post("/validate", validateRateLimit, requireParticipant, (req, res) => {
     );
   }
 
-  const valid = verifyAndRecordStudyEndCode(
+  const result = verifyAndRecordStudyEndCode(
     db,
     anonymousId,
     code,
     process.env.STUDY_END_REVEAL_CODE,
   );
-  return success(res, { valid });
+  // 맞는 코드로 리뷰 준비를 기다리는 요청은 재시도 횟수에서 뺀다
+  if (result === "not_ready") {
+    req.refundRateLimit();
+    return success(res, { valid: false, reason: "not_ready" });
+  }
+  return success(res, { valid: result === "valid" });
 });
 
 module.exports = router;

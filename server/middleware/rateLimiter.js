@@ -44,12 +44,14 @@ function clientKey(req) {
  * @param {number} options.windowMs - 카운트 윈도우 길이(ms)
  * @param {number} options.max - 윈도우당 최대 허용 요청 수
  * @param {() => number} [options.now=Date.now] - 현재 시각을 반환하는 함수 (테스트 시 대체 가능)
+ * 통과한 요청에는 req.refundRateLimit()을 달아, 핸들러가 이 요청을 횟수에서 뺄 수 있게 한다.
  * @returns {(req: import("express").Request, res: import("express").Response, next: import("express").NextFunction) => void} rate limit 미들웨어
  */
 function rateLimiter({ windowMs, max, now = Date.now }) {
   const state = new Map();
   return (req, res, next) => {
-    const allowed = checkRateLimit(state, clientKey(req), now(), windowMs, max);
+    const key = clientKey(req);
+    const allowed = checkRateLimit(state, key, now(), windowMs, max);
     if (!allowed) {
       return fail(
         res,
@@ -58,6 +60,14 @@ function rateLimiter({ windowMs, max, now = Date.now }) {
         "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.",
       );
     }
+    const entry = state.get(key);
+    let refunded = false;
+    // 한 요청이 두 번 돌려받거나, 윈도우가 바뀐 뒤 새 카운트를 깎지 않게 한다
+    req.refundRateLimit = () => {
+      if (refunded || state.get(key) !== entry) return;
+      refunded = true;
+      entry.count = Math.max(0, entry.count - 1);
+    };
     next();
   };
 }

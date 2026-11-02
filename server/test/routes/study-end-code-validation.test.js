@@ -101,49 +101,60 @@ describe("verifyAndRecordStudyEndCode", () => {
     vi.useRealTimers();
   });
 
-  it("코드가 틀리면 자격과 무관하게 false를 반환하고 기록하지 않는다", () => {
+  it("코드가 틀리면 자격과 무관하게 invalid를 반환하고 기록하지 않는다", () => {
     makeCompleteCon(db, "con-complete");
     expect(verifyAndRecordStudyEndCode(db, "con-complete", "WRONG", CODE)).toBe(
-      false,
+      "invalid",
     );
     expect(getVerifiedAt(db, "con-complete")).toBeNull();
   });
 
-  it("등록되지 않은 anonymousId는 코드가 맞아도 false를 반환한다", () => {
+  it("등록되지 않은 anonymousId는 코드가 맞아도 invalid를 반환한다", () => {
     expect(verifyAndRecordStudyEndCode(db, "unknown-user", CODE, CODE)).toBe(
-      false,
+      "invalid",
     );
   });
 
-  it("EXP는 코드가 맞아도 false를 반환한다(이 게이트는 대조군 전용)", () => {
+  it("EXP는 코드가 맞아도 invalid를 반환한다(이 게이트는 대조군 전용)", () => {
     insertParticipant(db, "exp-user", "EXP", ENDED_INSTALL_DATE);
     insertPeriodReview(db, "exp-user", 1);
-    expect(verifyAndRecordStudyEndCode(db, "exp-user", CODE, CODE)).toBe(false);
+    expect(verifyAndRecordStudyEndCode(db, "exp-user", CODE, CODE)).toBe(
+      "invalid",
+    );
     expect(getVerifiedAt(db, "exp-user")).toBeNull();
   });
 
-  it("연구 종료 전 대조군은 코드가 맞아도 false를 반환한다", () => {
+  it("공개 시각 전 대조군은 코드가 맞으면 not_ready를 반환하고 기록하지 않는다", () => {
     insertParticipant(db, "con-not-ended", "CON", NOT_ENDED_INSTALL_DATE);
     insertPeriodReview(db, "con-not-ended", 1);
     insertPeriodReview(db, "con-not-ended", 2);
     insertPeriodReview(db, "con-not-ended", 3);
     expect(verifyAndRecordStudyEndCode(db, "con-not-ended", CODE, CODE)).toBe(
-      false,
+      "not_ready",
     );
+    expect(getVerifiedAt(db, "con-not-ended")).toBeNull();
   });
 
-  it("종료됐지만 전체 기간 리뷰가 미완성이면 false를 반환한다", () => {
+  it("종료됐지만 전체 기간 리뷰가 미완성이면 not_ready를 반환하고 기록하지 않는다", () => {
     insertParticipant(db, "con-incomplete", "CON", ENDED_INSTALL_DATE);
     insertPeriodReview(db, "con-incomplete", 1);
     expect(verifyAndRecordStudyEndCode(db, "con-incomplete", CODE, CODE)).toBe(
-      false,
+      "not_ready",
     );
+    expect(getVerifiedAt(db, "con-incomplete")).toBeNull();
   });
 
-  it("코드 일치 + 대조군 + 종료 + 완결 조건을 모두 만족하면 true를 반환하고 시각을 기록한다", () => {
+  it("리뷰가 미완성이어도 코드가 틀리면 not_ready가 아니라 invalid다", () => {
+    insertParticipant(db, "con-incomplete", "CON", ENDED_INSTALL_DATE);
+    expect(
+      verifyAndRecordStudyEndCode(db, "con-incomplete", "WRONG", CODE),
+    ).toBe("invalid");
+  });
+
+  it("코드 일치 + 대조군 + 종료 + 완결 조건을 모두 만족하면 valid를 반환하고 시각을 기록한다", () => {
     makeCompleteCon(db, "con-complete");
     expect(verifyAndRecordStudyEndCode(db, "con-complete", CODE, CODE)).toBe(
-      true,
+      "valid",
     );
     expect(getVerifiedAt(db, "con-complete")).not.toBeNull();
   });
@@ -152,7 +163,7 @@ describe("verifyAndRecordStudyEndCode", () => {
     makeCompleteCon(db, "test-con-complete", "TEST-CON");
     expect(
       verifyAndRecordStudyEndCode(db, "test-con-complete", CODE, CODE),
-    ).toBe(true);
+    ).toBe("valid");
   });
 
   it("이미 기록된 시각은 재검증해도 덮어쓰지 않는다(최초 1회만)", () => {
