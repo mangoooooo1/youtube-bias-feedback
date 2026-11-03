@@ -2381,8 +2381,10 @@ function createTabBrowser({ initialStorage = {}, fetch: fetchImpl } = {}) {
     hidden = false,
     tabIdFails = false,
     storageGetFails = false,
+    // false면 페이지를 열 때 <video>가 아직 없다(뒤에 열어 둔 탭에서 플레이어가 늦게 생기는 경우)
+    withVideo = true,
   }) {
-    const video = createFakeVideoElement({ paused: true });
+    let video = withVideo ? createFakeVideoElement({ paused: true }) : null;
     const location = {
       href: videoId
         ? `https://www.youtube.com/watch?v=${videoId}`
@@ -2395,7 +2397,7 @@ function createTabBrowser({ initialStorage = {}, fetch: fetchImpl } = {}) {
           get: () => Promise.reject(new Error("QUOTA_BYTES quota exceeded")),
         }
       : storage;
-    const { api } = await loadContent({
+    const { api, documentListeners } = await loadContent({
       chrome: {
         runtime: {
           id: "fake-extension-id",
@@ -2433,6 +2435,15 @@ function createTabBrowser({ initialStorage = {}, fetch: fetchImpl } = {}) {
       identity: () => api.captureTrackedVideoIdentity(),
       async play(seconds) {
         video.paused = false;
+        video.dispatch("play");
+        await vi.advanceTimersByTimeAsync(seconds * 1000);
+        video.paused = true;
+        video.dispatch("pause");
+      },
+      // 지금 재지 않는 새 <video>가 재생을 시작한다. 실제 브라우저처럼 문서 캡처 리스너가 먼저 받는다
+      async playNewElement(seconds) {
+        video = createFakeVideoElement({ paused: false });
+        for (const cb of documentListeners.play ?? []) cb({ target: video });
         video.dispatch("play");
         await vi.advanceTimersByTimeAsync(seconds * 1000);
         video.paused = true;
@@ -2990,6 +3001,57 @@ describe("content.js 일시정지 후 다시 재생해 나눌 때 — 세션 종
     expect(requests[0].body.resumedFromEventId).toBeNull();
     expect(first.sent).toBe(true);
     expect(first.watchStatsSent).toBe(true);
+  });
+});
+
+describe("content.js 일시정지 후 다시 재생 — 재고 있지 않던 <video>가 재생을 시작하는 경로", () => {
+  const MINUTE = 60 * 1000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-26T10:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("열 때 <video>가 없었고 11분 뒤 생긴 플레이어로 처음 재생하면 연 시점 기록(0초)과 새 기록으로 나눈다", async () => {
+    const browser = createTabBrowser();
+    const page = await browser.openPage({ videoId: "AAAA", withVideo: false });
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    await page.playNewElement(30);
+    await page.goTo("BBBB");
+
+    const [first, second] = browser.recordsOf("AAAA");
+    expect([first.watchedSeconds, second.watchedSeconds]).toEqual([0, 30]);
+    expect(second.resumedFromEventId).toBe(first.eventId);
+  });
+
+  it("멈춘 사이 플레이어 요소가 바뀌고 11분 뒤 재생하면 앞 기록은 멈춘 시점 값으로 두고 새 기록으로 나눈다", async () => {
+    const browser = createTabBrowser();
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    await page.playNewElement(30);
+    await page.goTo("BBBB");
+
+    expect(browser.recordsOf("AAAA").map((r) => r.watchedSeconds)).toEqual([
+      60, 30,
+    ]);
+  });
+
+  it("요소가 바뀌어도 9분 쉬었으면 지금처럼 같은 기록에 이어 쓴다", async () => {
+    const browser = createTabBrowser();
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(9 * MINUTE);
+    await page.playNewElement(30);
+    await page.goTo("BBBB");
+
+    expect(browser.recordsOf("AAAA").map((r) => r.watchedSeconds)).toEqual([
+      90,
+    ]);
   });
 });
 

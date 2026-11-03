@@ -903,6 +903,8 @@ document.addEventListener(
   (event) => {
     if (!watchTracker || event.target === trackedVideoEl) return;
     if (!extractVideoId(location.href)) return;
+    // 새 요소에 연결하면 바로 구간이 열리므로, 그 전에 오래 쉬었는지부터 본다(재생 시작 경로를 하나로)
+    startNewWatchIfIdle();
     attachVideoTracking(event.target);
   },
   true,
