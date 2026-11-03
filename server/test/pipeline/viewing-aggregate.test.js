@@ -466,6 +466,41 @@ describe("mergeResumedWatches — 합친 시청의 속성", () => {
     ]);
   });
 
+  it("이어 보는 중이라 모르는 조각이 있으면, 아는 합이 유효 시청 기준을 넘을 때만 그 합을 쓰고 아니면 모름으로 둔다", () => {
+    const watching = { ...next, watchedSeconds: null };
+    const merged = (seconds, durationSeconds, options) =>
+      mergeResumedWatches(
+        [{ ...first, durationSeconds, watchedSeconds: seconds }, watching],
+        options,
+      )[0].watchedSeconds;
+
+    expect(merged(40, 600)).toBe(40);
+    // 20초는 잠깐 본 영상이지만 아직 보는 중이라 판정하지 않는다
+    expect(merged(20, 600)).toBeNull();
+    // 60초 영상의 20초(33%)는 기본 상대 기준(25%)은 넘고, 넘겨받은 50% 기준은 못 넘는다
+    expect(merged(20, 60)).toBe(20);
+    expect(merged(20, 60, { minRelativeRatio: 0.5 })).toBeNull();
+  });
+
+  it("앞 조각 20초를 보고 다시 재생 중인 영상은 잠깐 본 영상이 아니라 시간을 모르는 유효 영상으로 센다", () => {
+    const result = aggregateViewing([
+      video({
+        eventId: "e1",
+        watchedSeconds: 20,
+        watchedAt: "2026-03-10T01:00:00Z",
+      }),
+      {
+        ...video({ eventId: "e2", watchedSeconds: null }),
+        watchedAt: "2026-03-10T01:20:00Z",
+        resumedFromEventId: "e1",
+      },
+    ]);
+
+    expect(result.shortCount).toBe(0);
+    expect(result.validCount).toBe(1);
+    expect(result.pendingTimeCount).toBe(1);
+  });
+
   it("연결이 순환해도(비정상 값) 멈추고 한 묶음으로 합친다", () => {
     const merged = mergeResumedWatches([
       { ...first, resumedFromEventId: "e2" },
