@@ -8,11 +8,13 @@ const {
 
 // 운영 서버에 Gemini 키가 빠진 설정 사고를 fallback 사유로 드러낸다
 const NO_API_KEY = "no_api_key";
+// 서버가 리뷰 숫자를 검사해 붙이는 사유라 확장이 보내는 FAILURE_REASONS에는 없다
+const NUMBER_MISMATCH = "number_mismatch";
 
 const ALLOWED_TAGS = {
   kind: new Set(["today", "period"]),
   status: new Set(LLM_STATUSES),
-  failure_reason: new Set([...FAILURE_REASONS, NO_API_KEY]),
+  failure_reason: new Set([...FAILURE_REASONS, NUMBER_MISMATCH, NO_API_KEY]),
   env: new Set(["production"]),
 };
 

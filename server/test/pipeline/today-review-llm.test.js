@@ -6,6 +6,18 @@ import {
   TODAY_PROMPT_VERSION,
 } from "../../pipeline/today-review-llm.js";
 
+// 기간 리뷰 테스트와 같은 문장을 확인한다(두 프롬프트가 같은 기준을 쓰는지)
+const FULL_SHARE_PRINCIPLE =
+  '- 한 분야가 시청 시간의 100%이면 퍼센트 대신 "전부"로 말하세요(예: "시청 시간 전부가 음악이었어요").';
+const POLITICAL_TOPIC_PRINCIPLE =
+  "- 제목에 나온 인물·사건 이름은 사실대로 말해도 됩니다. 단, 제목의 주장은 사실로 단정하지 말고 무엇에 관한 영상인지만 말하며, 제목의 평가·조롱 표현은 옮기지 마세요. 시청자가 어떤 인물·정당·진영을 지지하거나 반대하는지, 호감이나 반감을 가졌는지 추론하지 말고, 영상이나 채널을 보수·진보로 분류하지 마세요.";
+const JUDGMENT_PRINCIPLE =
+  '"다양하다/다양하지 못하다/편중됐다/쏠렸다/균형 잡혔다"처럼 시청을 좋거나 나쁘게 판정하는 말';
+const SENSITIVE_TRAIT_PRINCIPLE =
+  "- 시청자의 성적 지향·성별 정체성, 종교, 건강·질병·장애·임신, 감정·정신 상태, 국적·인종, 경제 사정 같은 개인적 특성을 추론하거나 단정하지 마세요. 그런 주제의 영상을 봤다면 무엇에 관한 영상을 봤는지까지만 말하세요.";
+const TOPIC_INSTRUCTION =
+  '"topic": "비중이 큰 분야의 영상 제목에서 드러나는 구체적인 소재를 5단어 이내 명사구로 (예: 야구 하이라이트). 분야 이름을 그대로 쓰지 말고, 정치·시사 소재는 인물 이름 대신 사건·주제로 쓸 것"';
+
 // 이 파일은 원래 extension/pipeline/llm.js에서 확장 프로그램이 직접 Gemini를 호출하던
 // "오늘" 리뷰 로직을 서버로 이식한 것이다(연구 무결성 점검 항목 1 후속 조치, Stage 2a).
 // 확장 프로그램 쪽 원본은 Stage 2c에서 완전히 제거됐으므로(더 이상 클라이언트가 Gemini를
@@ -111,16 +123,34 @@ describe("buildTodayCumulativePrompt — 지침", () => {
   it("넘겨준 퍼센트만 쓰고, 판정·권유 없이 가장 큰 분야의 비중을 언급하게 한다", () => {
     const prompt = buildTodayCumulativePrompt(baseArgs());
     expect(prompt).toContain("위에 적힌 퍼센트만 그대로 쓰세요");
-    expect(prompt).toContain(
-      '"다양하다/편중됐다/쏠렸다"처럼 시청을 판정하는 말',
-    );
+    expect(prompt).toContain(JUDGMENT_PRINCIPLE);
     expect(prompt).toContain("비중이 가장 큰 분야는 그 퍼센트와 함께 언급");
   });
 
-  it("분야 안의 세부 소재를 짚되 인물·정당·이슈 논조는 요약하지 않게 한다", () => {
+  it("분야 안의 세부 소재를 짚되 인물·사건 이름은 사실로만 쓰고 주장·평가·지지 추론은 하지 않게 한다", () => {
     const prompt = buildTodayCumulativePrompt(baseArgs());
     expect(prompt).toContain("어떤 소재를 주로 봤는지 제목을 근거로 짚어");
-    expect(prompt).toContain("주장이나 논조는 절대 요약·평가하지 마세요");
+    expect(prompt).toContain(POLITICAL_TOPIC_PRINCIPLE);
+    expect(prompt).not.toContain("주장이나 논조는 절대 요약·평가하지 마세요");
+  });
+
+  it("성적 지향·종교·건강·감정 상태 같은 개인적 특성은 추론하지 않고 무엇에 관한 영상인지만 말하게 한다", () => {
+    const prompt = buildTodayCumulativePrompt(baseArgs());
+    expect(prompt).toContain(SENSITIVE_TRAIT_PRINCIPLE);
+  });
+
+  it("기간 리뷰와 같이 시청자를 '사용자'가 아니라 '참여자'로 부른다", () => {
+    const prompt = buildTodayCumulativePrompt(baseArgs());
+    expect(prompt).toContain(
+      "당신은 참여자가 자신의 YouTube 콘텐츠 소비 패턴을",
+    );
+    expect(prompt).not.toContain("사용자");
+  });
+
+  it("topic은 분야 이름이 아니라 제목의 세부 소재로, 정치·시사는 인물 대신 사건·주제로 쓰게 한다", () => {
+    const prompt = buildTodayCumulativePrompt(baseArgs());
+    expect(prompt).toContain(TOPIC_INSTRUCTION);
+    expect(prompt).not.toContain("시청 카테고리 기반 주요 관심사");
   });
 
   it("업로더가 정한 분야가 제목과 다르면 소재로 말하되 숫자는 바꾸지 않게 한다", () => {
@@ -134,6 +164,14 @@ describe("buildTodayCumulativePrompt — 지침", () => {
   it("오늘 하루 전체를 하나로 요약하라는 지침을 포함한다(세션별 나열 금지)", () => {
     const prompt = buildTodayCumulativePrompt(baseArgs());
     expect(prompt).toContain("오늘 하루 전체를 하나로 요약하세요");
+  });
+
+  it("한 분야가 100%이면 퍼센트 대신 '전부'로 말하게 한다", () => {
+    const prompt = buildTodayCumulativePrompt(baseArgs());
+    expect(prompt).toContain(FULL_SHARE_PRINCIPLE);
+    expect(prompt).toContain(
+      "언급(한 분야가 100%이면 퍼센트 대신 '전부'라고 말할 것)",
+    );
   });
 });
 
@@ -390,5 +428,55 @@ describe("generateTodayReview — 실패 사유 분류 (failureReason 태깅)", 
     });
     await vi.advanceTimersByTimeAsync(10000);
     await assertion;
+  });
+});
+
+describe("generateTodayReview — 숫자 검증", () => {
+  const originalFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  function respond(feedback) {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                { text: JSON.stringify({ topic: "아이유 라이브", feedback }) },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+  }
+
+  const prompt = buildTodayCumulativePrompt(baseArgs());
+
+  it("입력 비중과 다른 퍼센트를 쓰면 number_mismatch로 실패한다", async () => {
+    // 시청 시간 비중(62%) 대신 영상 개수 등으로 직접 계산한 숫자
+    respond("음악이 시청 시간의 66%였어요.");
+    await expect(generateTodayReview(prompt, "key")).rejects.toMatchObject({
+      failureReason: "number_mismatch",
+    });
+  });
+
+  it("원칙의 예시 숫자나 유효 시청 설명(30초)은 입력이 아니라 허용하지 않는다", async () => {
+    respond("30초 넘게 본 영상이 많았어요.");
+    await expect(generateTodayReview(prompt, "key")).rejects.toMatchObject({
+      failureReason: "number_mismatch",
+    });
+  });
+
+  it("비중·영상 수·본 횟수처럼 입력에 있는 숫자는 허용한다", async () => {
+    respond(
+      "영상 7개 중 음악이 시청 시간의 62%였어요. 아이유 라이브를 3번 보셨고, 게임 영상도 2개 보셨어요.",
+    );
+
+    const result = await generateTodayReview(prompt, "key");
+    expect(result.source).toBe("llm");
   });
 });

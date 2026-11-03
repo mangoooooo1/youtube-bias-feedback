@@ -34,6 +34,7 @@ function initializeDB() {
     execSchema();
     // 테스트·본 연구 중 추가한 열은 기존 행을 지킬 수 있도록 기존 DB에 소급 추가한다
     addColumn("today_reviews", "timeSharePercents", "TEXT");
+    addColumn("popup_events", "pastDayReviewViews", "INTEGER");
     assertLatestColumns();
     backfillPeriodReviewVersions();
   } catch (err) {
@@ -80,7 +81,7 @@ function execSchema() {
       -- LLM 성공/폴백 로깅 — geminiMs~promptVersion은 서버가 오늘 리뷰 생성 직후 recordSessionReview로 기록한다.
       -- 2026-09-01(서버 생성 전환)부터 이 기록이 추가되기 전까지의 행은 이 칸들이 NULL이다(복구 불가).
       llmStatus            TEXT,     -- 'success' | 'fallback'
-      failureReason        TEXT,     -- timeout | http_error | empty_response | parse_error | network_error | policy_filtered (성공 시 NULL)
+      failureReason        TEXT,     -- timeout | http_error | empty_response | parse_error | network_error | policy_filtered | number_mismatch (성공 시 NULL)
       httpStatus           INTEGER,  -- failureReason='http_error'일 때만 (429 쿼터 vs 5xx 장애 구분)
       timedOut             INTEGER,  -- 타임아웃으로 실패한 경우 1
       -- 시간 가중(Time-weighted) 다양성 지표 — 클릭만 하고 이탈한 영상(노이즈)을 걸러낸 뒤
@@ -217,6 +218,7 @@ function execSchema() {
       tabWeekClicks  INTEGER DEFAULT 0,  -- '주차별' 탭 클릭 횟수
       todayFeedbackViewed  INTEGER DEFAULT 0,  -- '오늘' 피드백을 실제로 열람(블러 해제)했으면 1
       periodFeedbackViewed INTEGER DEFAULT 0,  -- '주차별' 피드백을 실제로 열람(체류시간 임계값 충족)했으면 1
+      pastDayReviewViews   INTEGER,  -- 날짜 이동으로 지난 날의 실제 리뷰를 2초 이상 본 서로 다른 날짜 수(구버전 확장은 NULL)
       openedAt       TEXT,     -- 팝업 오픈 시각 (engagement 최근성 분석용)
       createdAt      TEXT    DEFAULT (datetime('now'))
     );
@@ -309,6 +311,7 @@ function execSchema() {
       llmStatus            TEXT,              -- 'success' | 'fallback'
       failureReason        TEXT,              -- timeout | http_error | empty_response
                                                -- | parse_error | network_error | policy_filtered
+                                               -- | number_mismatch(입력에 없는 숫자를 씀)
       geminiMs             INTEGER,
       genCount             INTEGER,           -- 그날 몇 번째 재생성으로 만들어진 최신본인지(관측용)
       generatedAt          TEXT    NOT NULL,  -- 이 최신본을 생성한 시각

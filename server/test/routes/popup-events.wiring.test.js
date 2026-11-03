@@ -139,7 +139,7 @@ describe("실제 server/routes/popup-events.js 라우터 배선", () => {
 
     const row = db
       .prepare(
-        `SELECT dwellMs, tabTodayClicks, tabWeekClicks, todayFeedbackViewed, periodFeedbackViewed
+        `SELECT dwellMs, tabTodayClicks, tabWeekClicks, todayFeedbackViewed, periodFeedbackViewed, pastDayReviewViews
            FROM popup_events WHERE eventId = ?`,
       )
       .get("wiring-evt-1");
@@ -149,7 +149,33 @@ describe("실제 server/routes/popup-events.js 라우터 배선", () => {
       tabWeekClicks: null,
       todayFeedbackViewed: null,
       periodFeedbackViewed: null,
+      pastDayReviewViews: null,
     });
+  });
+
+  it("지난 날 리뷰를 본 날짜 수(pastDayReviewViews)를 그대로 저장한다", async () => {
+    const res = await request(app)
+      .post("/api/popup-events")
+      .send(basePayload({ pastDayReviewViews: 2 }));
+    expect(res.status).toBe(200);
+    expect(
+      db
+        .prepare(
+          "SELECT pastDayReviewViews FROM popup_events WHERE eventId = ?",
+        )
+        .get("wiring-evt-1").pastDayReviewViews,
+    ).toBe(2);
+  });
+
+  it("pastDayReviewViews가 음수면 400이고 저장하지 않는다", async () => {
+    const res = await request(app)
+      .post("/api/popup-events")
+      .send(basePayload({ pastDayReviewViews: -1 }));
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("INVALID_FIELD_VALUE");
+    expect(db.prepare("SELECT COUNT(*) AS c FROM popup_events").get().c).toBe(
+      0,
+    );
   });
 
   it("eventId 없는 구버전 요청은 dedup 없이 매번 새 행으로 저장된다", async () => {

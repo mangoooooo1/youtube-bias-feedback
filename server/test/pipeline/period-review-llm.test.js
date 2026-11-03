@@ -7,6 +7,18 @@ import {
   PROMPT_VERSION,
 } from "../../pipeline/period-review-llm.js";
 
+// 오늘 리뷰 테스트와 같은 문장을 확인한다(두 프롬프트가 같은 기준을 쓰는지)
+const FULL_SHARE_PRINCIPLE =
+  '- 한 분야가 시청 시간의 100%이면 퍼센트 대신 "전부"로 말하세요(예: "시청 시간 전부가 음악이었어요").';
+const POLITICAL_TOPIC_PRINCIPLE =
+  "- 제목에 나온 인물·사건 이름은 사실대로 말해도 됩니다. 단, 제목의 주장은 사실로 단정하지 말고 무엇에 관한 영상인지만 말하며, 제목의 평가·조롱 표현은 옮기지 마세요. 시청자가 어떤 인물·정당·진영을 지지하거나 반대하는지, 호감이나 반감을 가졌는지 추론하지 말고, 영상이나 채널을 보수·진보로 분류하지 마세요.";
+const JUDGMENT_PRINCIPLE =
+  '"다양하다/다양하지 못하다/편중됐다/쏠렸다/균형 잡혔다"처럼 시청을 좋거나 나쁘게 판정하는 말';
+const SENSITIVE_TRAIT_PRINCIPLE =
+  "- 시청자의 성적 지향·성별 정체성, 종교, 건강·질병·장애·임신, 감정·정신 상태, 국적·인종, 경제 사정 같은 개인적 특성을 추론하거나 단정하지 마세요. 그런 주제의 영상을 봤다면 무엇에 관한 영상을 봤는지까지만 말하세요.";
+const TOPIC_INSTRUCTION =
+  '"topic": "비중이 큰 분야의 영상 제목에서 드러나는 구체적인 소재를 5단어 이내 명사구로 (예: 야구 하이라이트). 분야 이름을 그대로 쓰지 말고, 정치·시사 소재는 인물 이름 대신 사건·주제로 쓸 것"';
+
 function baseArgs(overrides = {}) {
   return {
     validVideoCount: 20,
@@ -82,16 +94,48 @@ describe("buildPeriodPrompt — 지침", () => {
   it("넘겨준 퍼센트만 쓰고 판정·권유 없이, 세부 소재와 업로더 분야 지침을 포함한다", () => {
     const prompt = buildPeriodPrompt(baseArgs());
     expect(prompt).toContain("숫자는 위에 적힌 것만 그대로 쓰세요");
-    expect(prompt).toContain(
-      '"편중됐다/다양하지 못하다/균형 잡혔다"처럼 시청을 좋거나 나쁘게 평가하는 말',
-    );
+    expect(prompt).toContain(JUDGMENT_PRINCIPLE);
     expect(prompt).toContain("위 숫자로 확인되지 않는 패턴은 말하지 마세요");
     expect(prompt).toContain("비중이 가장 큰 분야는 그 퍼센트와 함께 언급");
     expect(prompt).toContain("어떤 소재를 주로 봤는지 제목을 근거로 짚어");
-    expect(prompt).toContain("주장이나 논조는 절대 요약·평가하지 마세요");
     expect(prompt).toContain(
       "분야는 영상을 올린 사람이 정한 것이라 내용과 다를 수 있습니다",
     );
+  });
+
+  it("오늘 리뷰와 같은 문구로 한 분야가 100%이면 퍼센트 대신 '전부'로 말하게 한다", () => {
+    const prompt = buildPeriodPrompt(baseArgs());
+    expect(prompt).toContain(FULL_SHARE_PRINCIPLE);
+    expect(prompt).toContain(
+      "언급(한 분야가 100%이면 퍼센트 대신 '전부'라고 말할 것)",
+    );
+  });
+
+  it("날짜별 비중은 이틀 이상 반복되는 점만 말하고 날짜를 하나씩 나열하지 않게 한다", () => {
+    const prompt = buildPeriodPrompt(baseArgs());
+    expect(prompt).toContain(
+      "날짜별 비중은 이틀 이상 반복되는 점이 있을 때만 말하세요",
+    );
+    expect(prompt).toContain(
+      "날짜를 하나씩 나열하거나 하루치 기록만 따로 말하지 마세요",
+    );
+  });
+
+  it("오늘 리뷰와 같은 문구로 인물·사건 이름은 사실로만 쓰고 주장·평가·지지 추론은 하지 않게 한다", () => {
+    const prompt = buildPeriodPrompt(baseArgs());
+    expect(prompt).toContain(POLITICAL_TOPIC_PRINCIPLE);
+    expect(prompt).not.toContain("주장이나 논조는 절대 요약·평가하지 마세요");
+  });
+
+  it("오늘 리뷰와 같은 문구로 개인적 특성은 추론하지 않고 무엇에 관한 영상인지만 말하게 한다", () => {
+    const prompt = buildPeriodPrompt(baseArgs());
+    expect(prompt).toContain(SENSITIVE_TRAIT_PRINCIPLE);
+  });
+
+  it("오늘 리뷰와 같은 문구로 topic을 분야 이름이 아니라 제목의 세부 소재로 쓰게 한다", () => {
+    const prompt = buildPeriodPrompt(baseArgs());
+    expect(prompt).toContain(TOPIC_INSTRUCTION);
+    expect(prompt).not.toContain("시청 카테고리 기반 주요 관심사");
   });
 });
 
@@ -489,6 +533,18 @@ describe("buildPeriodPrompt — 직전 구간 비교", () => {
     );
   });
 
+  it("비중 변화는 %p 대신 전후 값으로, 0%가 된 분야는 보지 않았다고, 새 분야는 새로 봤다고 말하게 한다", () => {
+    const prompt = buildPeriodPrompt(
+      baseArgs({ comparison: comparisonArgs() }),
+    );
+    expect(prompt).toContain(
+      '비중 변화는 "%p"로 말하지 말고 "60%에서 20%로 줄었어요"처럼 바뀌기 전후 값으로 말하세요',
+    );
+    expect(prompt).toContain(
+      '0%가 된 분야는 "보지 않았다", 새로 본 분야는 "새로 봤다"고 말하세요',
+    );
+  });
+
   it("이번이나 직전 구간이 적은 구간이면 비교 문장에 변화 폭이 다를 수 있다고 밝히게 한다", () => {
     const fewPrevious = comparisonArgs();
     fewPrevious.previousPeriods[1].isFew = true;
@@ -549,7 +605,7 @@ describe("buildCodeComparison — Gemini를 쓰지 못할 때의 비교 문장",
     });
 
     expect(buildCodeComparison(args(comparison))).toBe(
-      "직전 구간보다 게임 비중이 10%p 늘었어요.",
+      "게임 비중이 직전 구간 40%에서 50%로 늘었어요.",
     );
   });
 
@@ -562,10 +618,10 @@ describe("buildCodeComparison — Gemini를 쓰지 못할 때의 비교 문장",
     });
 
     expect(buildCodeComparison(args(comparisonArgs()))).toBe(
-      "직전 구간보다 게임 비중이 15%p 늘었어요.",
+      "게임 비중이 직전 구간 40%에서 55%로 늘었어요.",
     );
     expect(buildCodeComparison(args(down))).toBe(
-      "직전 구간보다 음악 비중이 15%p 줄었어요.",
+      "음악 비중이 직전 구간 60%에서 45%로 줄었어요.",
     );
   });
 
@@ -604,19 +660,51 @@ describe("buildCodeComparison — Gemini를 쓰지 못할 때의 비교 문장",
     );
   });
 
+  it("가장 크게 달라진 분야가 0%가 됐으면 %p 대신 이번엔 보지 않았다고 말한다", () => {
+    const comparison = comparisonArgs({
+      changeFromPrevious: {
+        previousPeriodIndex: 2,
+        changes: [{ category: "음악", from: 100, to: 0, delta: -100 }],
+        largest: { category: "음악", from: 100, to: 0, delta: -100 },
+        newCategories: ["엔터테인먼트"],
+        droppedCategories: ["음악"],
+      },
+    });
+
+    expect(buildCodeComparison(args(comparison))).toBe(
+      "직전 구간에 본 음악은 이번엔 보지 않았어요.",
+    );
+  });
+
+  it("가장 크게 달라진 분야가 직전 구간에 없었으면 이번 비중만 말한다", () => {
+    const comparison = comparisonArgs({
+      changeFromPrevious: {
+        previousPeriodIndex: 2,
+        changes: [{ category: "게임", from: 0, to: 50, delta: 50 }],
+        largest: { category: "게임", from: 0, to: 50, delta: 50 },
+        newCategories: ["게임"],
+        droppedCategories: [],
+      },
+    });
+
+    expect(buildCodeComparison(args(comparison))).toBe(
+      "직전 구간에는 보지 않았던 게임이 이번엔 시청 시간의 50%였어요.",
+    );
+  });
+
   // 영상이 적다는 안내는 한 번만 — 이번 구간이 적으면 대체 문구 마지막 문장이 맡는다
   it("직전 구간만 적으면 비교 문장에 '직전 구간은 영상이 적어서…'를 붙이고, 이번 구간이 적으면 붙이지 않는다", () => {
     const fewPrevious = comparisonArgs();
     fewPrevious.previousPeriods[1].isFew = true;
 
     expect(buildCodeComparison(args(fewPrevious))).toBe(
-      "직전 구간보다 게임 비중이 15%p 늘었어요. 직전 구간은 영상이 적어서, 변화 폭이 평소와 다를 수 있어요.",
+      "게임 비중이 직전 구간 40%에서 55%로 늘었어요. 직전 구간은 영상이 적어서, 변화 폭이 평소와 다를 수 있어요.",
     );
     expect(
       buildCodeComparison(args(comparisonArgs(), { validVideoCount: 7 })),
-    ).toBe("직전 구간보다 게임 비중이 15%p 늘었어요.");
+    ).toBe("게임 비중이 직전 구간 40%에서 55%로 늘었어요.");
     expect(buildCodeComparison(args(fewPrevious, { validVideoCount: 7 }))).toBe(
-      "직전 구간보다 게임 비중이 15%p 늘었어요.",
+      "게임 비중이 직전 구간 40%에서 55%로 늘었어요.",
     );
   });
 });
@@ -640,7 +728,7 @@ describe("generatePeriodFallbackReview — 비교 문장", () => {
       baseArgs({ comparison: comparisonArgs() }),
     );
     expect(result.feedback).toBe(
-      "직전 구간보다 게임 비중이 15%p 늘었어요. 이 기간에는 영상 20개를 보셨고, 전체 시청 시간 중 음악이 60%로 가장 많았어요. 그다음은 게임 40%였어요.",
+      "게임 비중이 직전 구간 40%에서 55%로 늘었어요. 이 기간에는 영상 20개를 보셨고, 전체 시청 시간 중 음악이 60%로 가장 많았어요. 그다음은 게임 40%였어요.",
     );
   });
 

@@ -194,7 +194,7 @@ describe("지난 날짜 리뷰 — 서버 이력", () => {
     });
     click(root, "#vl-date-prev");
     await vi.waitFor(() => expect(root.textContent).toContain("복구된 리뷰"));
-    expect(root.textContent).not.toContain("이 날 시청 기록이 없어요");
+    expect(root.textContent).not.toContain("이 날은 유효한 시청 기록이 없어요");
   });
 
   it("서버에 그날 시청 기록이 없으면 리뷰가 있어도 '시청 기록이 없어요' 화면이다", async () => {
@@ -204,7 +204,7 @@ describe("지난 날짜 리뷰 — 서버 이력", () => {
       },
     });
     click(root, "#vl-date-prev");
-    expect(root.textContent).toContain("이 날 시청 기록이 없어요");
+    expect(root.textContent).toContain("이 날은 유효한 시청 기록이 없어요");
     expect(root.textContent).not.toContain("기록 없는 날 리뷰");
   });
 });

@@ -11,6 +11,7 @@ function basePayload(overrides = {}) {
     tabWeekClicks: 1,
     todayFeedbackViewed: 1,
     periodFeedbackViewed: 1,
+    pastDayReviewViews: 2,
     openedAt: "2026-08-13T10:00:00+09:00",
     ...overrides,
   };
@@ -57,8 +58,8 @@ describe("validatePopupEvent — anonymousId", () => {
   );
 });
 
-describe("validatePopupEvent — 카운트 필드 (dwellMs/tabTodayClicks/tabWeekClicks)", () => {
-  it.each(["dwellMs", "tabTodayClicks", "tabWeekClicks"])(
+describe("validatePopupEvent — 카운트 필드 (dwellMs/tabTodayClicks/tabWeekClicks/pastDayReviewViews)", () => {
+  it.each(["dwellMs", "tabTodayClicks", "tabWeekClicks", "pastDayReviewViews"])(
     "%s는 미전송(undefined)이면 통과한다(하위호환)",
     (field) => {
       const payload = basePayload({ [field]: undefined });
@@ -66,21 +67,21 @@ describe("validatePopupEvent — 카운트 필드 (dwellMs/tabTodayClicks/tabWee
     },
   );
 
-  it.each(["dwellMs", "tabTodayClicks", "tabWeekClicks"])(
+  it.each(["dwellMs", "tabTodayClicks", "tabWeekClicks", "pastDayReviewViews"])(
     "%s는 null이면 통과한다(하위호환)",
     (field) => {
       expect(validatePopupEvent(basePayload({ [field]: null }))).toBeNull();
     },
   );
 
-  it.each(["dwellMs", "tabTodayClicks", "tabWeekClicks"])(
+  it.each(["dwellMs", "tabTodayClicks", "tabWeekClicks", "pastDayReviewViews"])(
     "%s는 0이면 허용한다(경계값)",
     (field) => {
       expect(validatePopupEvent(basePayload({ [field]: 0 }))).toBeNull();
     },
   );
 
-  it.each(["dwellMs", "tabTodayClicks", "tabWeekClicks"])(
+  it.each(["dwellMs", "tabTodayClicks", "tabWeekClicks", "pastDayReviewViews"])(
     "%s가 음수면 거부한다",
     (field) => {
       expect(validatePopupEvent(basePayload({ [field]: -1 }))).toEqual({
@@ -90,7 +91,7 @@ describe("validatePopupEvent — 카운트 필드 (dwellMs/tabTodayClicks/tabWee
     },
   );
 
-  it.each(["dwellMs", "tabTodayClicks", "tabWeekClicks"])(
+  it.each(["dwellMs", "tabTodayClicks", "tabWeekClicks", "pastDayReviewViews"])(
     "%s가 정수가 아니면(실수) 거부한다",
     (field) => {
       expect(validatePopupEvent(basePayload({ [field]: 1.5 }))).toEqual({
@@ -100,7 +101,7 @@ describe("validatePopupEvent — 카운트 필드 (dwellMs/tabTodayClicks/tabWee
     },
   );
 
-  it.each(["dwellMs", "tabTodayClicks", "tabWeekClicks"])(
+  it.each(["dwellMs", "tabTodayClicks", "tabWeekClicks", "pastDayReviewViews"])(
     "%s가 숫자 문자열이면 거부한다(타입 강제 변환 없음)",
     (field) => {
       expect(validatePopupEvent(basePayload({ [field]: "10" }))).toEqual({

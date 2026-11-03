@@ -548,7 +548,7 @@ describe("generate-period-reviews.js — run()", () => {
         llmStatus: "fallback",
         failureReason: "number_mismatch",
         review:
-          "직전 구간보다 게임 비중이 50%p 늘었어요. 이 기간에는 영상 8개를 보셨고, 전체 시청 시간 중 음악과 게임이 각각 50%로 가장 많았어요.",
+          "직전 구간에는 보지 않았던 게임이 이번엔 시청 시간의 50%였어요. 이 기간에는 영상 8개를 보셨고, 전체 시청 시간 중 음악과 게임이 각각 50%로 가장 많았어요.",
       });
       // Gemini를 불렀다가 실패한 것으로 센다(1구간 성공이 있어 전량 실패는 아님)
       expect(summary.llmFailures).toBe(1);

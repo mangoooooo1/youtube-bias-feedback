@@ -8,6 +8,9 @@ const {
   formatShares,
   formatTitleGroups,
   sharesSentence,
+  josa,
+  VALID_WATCH_NOTE,
+  unknownNumbers,
 } = require("./review-prompt-format");
 
 const GEMINI_API_URL =
@@ -17,10 +20,9 @@ const TIMEOUT_MS = 10000;
 const ERROR_BODY_MAX_LENGTH = 1000;
 
 // 세션 리뷰의 PROMPT_VERSION과 별도로 관리
-const PROMPT_VERSION = "viewlens-period-mirror-v2.0";
-
-const VALID_WATCH_NOTE =
-  "(30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셈)";
+// v3.0: topic을 분야 이름 대신 제목의 세부 소재로, 제목 속 인물·사건 이름은 사실로 서술 허용,
+//       100%는 "전부"로, 변화는 %p 대신 전후 값으로, 날짜별 나열 금지
+const PROMPT_VERSION = "viewlens-period-mirror-v3.0";
 
 /** 시청이 적은 구간인지 */
 function isFewVideosPeriod(validVideoCount, periodDays) {
@@ -136,6 +138,7 @@ function buildPeriodPrompt({
   const comparisonPrinciples = withComparison
     ? `
 - feedback의 첫 문장은 직전 구간과의 비교입니다. 직전 구간과 비교해 가장 크게 달라진 점, 또는 비슷했다는 사실을 한 문장으로 쓰세요. 위 [이전 구간과 비교]의 숫자만 쓰세요.
+- 비중 변화는 "%p"로 말하지 말고 "60%에서 20%로 줄었어요"처럼 바뀌기 전후 값으로 말하세요. 0%가 된 분야는 "보지 않았다", 새로 본 분야는 "새로 봤다"고 말하세요(예: "직전 구간엔 음악만 봤는데, 이번엔 음악은 보지 않고 엔터테인먼트 영상을 보셨어요").
 - 평소 변화 폭이 주어졌을 때만 이번 변화가 그보다 큰지 비슷한지 말할 수 있습니다. 주어지지 않았으면 평소와 비교하지 마세요.
 - 이전 구간 전체에서 계속 같은 방향으로 움직이는 분야가 있으면 그 사실을 말해도 됩니다.
 - 분야 비중이 비슷해도 직전 구간 제목과 비교해 주로 본 소재가 바뀌었으면 짚어도 됩니다.
@@ -144,8 +147,8 @@ function buildPeriodPrompt({
 - 이번이 첫 구간이라 비교할 이전 구간이 없습니다. 이전과 비교하지 말고 이 기간 자체만 서술하세요.`;
 
   const feedbackShape = withComparison
-    ? "위 원칙에 따른 3~4문장. 첫 문장은 직전 구간과의 비교 → 이 기간 동안 무엇을 봤는지 비추되 비중이 가장 큰 분야는 그 퍼센트와 함께 언급 → 시청 패턴과 비중이 큰 분야 안에서 주로 본 소재 짚기. 판정이나 처방 없이 관찰에서 멈출 것"
-    : "위 원칙에 따른 2~3문장. 이 기간 동안 무엇을 봤는지 비추되 비중이 가장 큰 분야는 그 퍼센트와 함께 언급 → 시청 패턴과 비중이 큰 분야 안에서 주로 본 소재 짚기. 판정이나 처방 없이 관찰에서 멈출 것";
+    ? "위 원칙에 따른 3~4문장. 첫 문장은 직전 구간과의 비교 → 이 기간 동안 무엇을 봤는지 비추되 비중이 가장 큰 분야는 그 퍼센트와 함께 언급(한 분야가 100%이면 퍼센트 대신 '전부'라고 말할 것) → 시청 패턴과 비중이 큰 분야 안에서 주로 본 소재 짚기. 판정이나 처방 없이 관찰에서 멈출 것"
+    : "위 원칙에 따른 2~3문장. 이 기간 동안 무엇을 봤는지 비추되 비중이 가장 큰 분야는 그 퍼센트와 함께 언급(한 분야가 100%이면 퍼센트 대신 '전부'라고 말할 것) → 시청 패턴과 비중이 큰 분야 안에서 주로 본 소재 짚기. 판정이나 처방 없이 관찰에서 멈출 것";
 
   return `당신은 참여자가 자신의 YouTube 콘텐츠 소비 패턴을 스스로 돌아볼 수 있도록 있는 그대로 비춰 주는 거울 같은 조력자입니다.
 
@@ -157,16 +160,19 @@ ${formatShares(basis)}${formatTitleGroups(titleGroups)}${formatDailyShares(compa
 - 위에 제시된 분야별 비중, 날짜별 비중, 이전 구간 정보와 영상 제목에만 근거하세요. 정치 성향·이념·성격 등 데이터로 알 수 없는 내용은 추론하거나 단정하지 마세요.
 - 평가하거나 가르치려 들지 말고, 친근하고 중립적인 톤으로 참여자가 자신의 시청 패턴을 스스로 알아차리도록 돕는 데 집중하세요.
 - 숫자는 위에 적힌 것만 그대로 쓰세요(예: "음악이 시청 시간의 62%였어요"). 숫자를 새로 계산하거나 바꾸지 마세요. 다양성 지수 같은 통계 용어는 쓰지 마세요.
-- 이 기간의 시청 패턴을 위의 숫자로 설명할 수 있습니다. 한 분야의 비중이 크면 그 비중을 퍼센트와 함께 말하세요(예: "시청 시간의 85%가 음악이었어요"). 날짜별 비중에서 반복되는 점이 있으면 말하세요(예: "기록이 있는 3일 모두 음악이 가장 길었어요", "주말 이틀은 게임 비중이 더 컸어요"). 위 숫자로 확인되지 않는 패턴은 말하지 마세요.
-- "편중됐다/다양하지 못하다/균형 잡혔다"처럼 시청을 좋거나 나쁘게 평가하는 말, "이렇게 하라"는 행동 지시, 특정 분야 시청 권유는 하지 마세요.${comparisonPrinciples}
-- 비중이 큰 분야는 그 안에서 어떤 소재를 주로 봤는지 제목을 근거로 짚어 주세요(예: "스포츠 중에서도 야구 하이라이트를 주로 보셨어요"). 단, 제목 속 특정 인물·정당·이슈에 대한 주장이나 논조는 절대 요약·평가하지 마세요.
+- 한 분야가 시청 시간의 100%이면 퍼센트 대신 "전부"로 말하세요(예: "시청 시간 전부가 음악이었어요").
+- 이 기간의 시청 패턴을 위의 숫자로 설명할 수 있습니다. 한 분야의 비중이 크면 그 비중을 퍼센트와 함께 말하세요(예: "시청 시간의 85%가 음악이었어요"). 날짜별 비중은 이틀 이상 반복되는 점이 있을 때만 말하세요(예: "기록이 있는 3일 모두 음악이 가장 길었어요", "주말 이틀은 게임 비중이 더 컸어요"). 날짜를 하나씩 나열하거나 하루치 기록만 따로 말하지 마세요. 위 숫자로 확인되지 않는 패턴은 말하지 마세요.
+- "다양하다/다양하지 못하다/편중됐다/쏠렸다/균형 잡혔다"처럼 시청을 좋거나 나쁘게 판정하는 말, "이렇게 하라"는 행동 지시, 특정 분야 시청 권유는 하지 마세요.${comparisonPrinciples}
+- 비중이 큰 분야는 그 안에서 어떤 소재를 주로 봤는지 제목을 근거로 짚어 주세요(예: "스포츠 중에서도 야구 하이라이트를 주로 보셨어요").
+- 제목에 나온 인물·사건 이름은 사실대로 말해도 됩니다. 단, 제목의 주장은 사실로 단정하지 말고 무엇에 관한 영상인지만 말하며, 제목의 평가·조롱 표현은 옮기지 마세요. 시청자가 어떤 인물·정당·진영을 지지하거나 반대하는지, 호감이나 반감을 가졌는지 추론하지 말고, 영상이나 채널을 보수·진보로 분류하지 마세요.
+- 시청자의 성적 지향·성별 정체성, 종교, 건강·질병·장애·임신, 감정·정신 상태, 국적·인종, 경제 사정 같은 개인적 특성을 추론하거나 단정하지 마세요. 그런 주제의 영상을 봤다면 무엇에 관한 영상을 봤는지까지만 말하세요.
 - 분야는 영상을 올린 사람이 정한 것이라 내용과 다를 수 있습니다. 제목으로 볼 때 실제 소재가 분야와 분명히 다르면 소재를 기준으로 말하되, 비중 숫자는 바꾸지 마세요.
 - 이 기간 동안 있었던 여러 세션을 개별적으로 나열하지 말고, 기간 전체를 하나로 요약하세요.
 
 아래 JSON 형식으로만 응답하세요. 다른 텍스트는 포함하지 마세요.
 
 {
-  "topic": "시청 카테고리 기반 주요 관심사를 5단어 이내 명사구로 (예: 과학과 기술)",
+  "topic": "비중이 큰 분야의 영상 제목에서 드러나는 구체적인 소재를 5단어 이내 명사구로 (예: 야구 하이라이트). 분야 이름을 그대로 쓰지 말고, 정치·시사 소재는 인물 이름 대신 사건·주제로 쓸 것",
   "feedback": "${feedbackShape}"
 }`;
 }
@@ -176,22 +182,6 @@ function llmError(failureReason, message, extra = {}) {
   const err = new Error(message);
   err.failureReason = failureReason;
   return Object.assign(err, extra);
-}
-
-// 숫자는 프롬프트의 입력 부분([피드백 원칙] 앞)에 적힌 것만 허용한다. 원칙의 예시 숫자(62%, 85% 등)는
-// 실제 입력이 아니라 허용 목록에서 뺀다. 비중·변화·영상 수·날짜·제목 속 숫자가 모두 입력 부분에 있다.
-function numbersIn(text) {
-  return (text.match(/\d+/g) ?? []).map(Number);
-}
-
-function allowedNumbers(prompt) {
-  const end = prompt.indexOf("[피드백 원칙]");
-  // 유효 시청 기준 설명(30초, 4분의 1)은 데이터가 아니므로 뺀다
-  const input = (end >= 0 ? prompt.slice(0, end) : prompt).replace(
-    VALID_WATCH_NOTE,
-    "",
-  );
-  return new Set(numbersIn(input));
 }
 
 async function generatePeriodReview(prompt, apiKey) {
@@ -274,12 +264,11 @@ async function generatePeriodReview(prompt, apiKey) {
     }
 
     // 넘겨준 숫자만 쓰게 했으므로, 입력에 없는 숫자가 있으면 실패로 보고 전체를 폴백으로 바꾼다
-    const allowed = allowedNumbers(prompt);
-    const unknown = numbersIn(feedback).filter((n) => !allowed.has(n));
+    const unknown = unknownNumbers(prompt, feedback);
     if (unknown.length > 0) {
       throw llmError(
         "number_mismatch",
-        `입력에 없는 숫자를 사용: ${[...new Set(unknown)].join(", ")}`,
+        `입력에 없는 숫자를 사용: ${unknown.join(", ")}`,
       );
     }
 
@@ -309,7 +298,15 @@ function buildCodeComparison({ comparison, validVideoCount, periodDays }) {
   const { largest, newCategories } = comparison.changeFromPrevious;
   let sentence;
   if (largest && Math.abs(largest.delta) >= SIMILAR_MAX_DELTA) {
-    sentence = `직전 구간보다 ${largest.category} 비중이 ${Math.abs(largest.delta)}%p ${largest.delta > 0 ? "늘었어요" : "줄었어요"}.`;
+    const { category, from, to } = largest;
+    // %p 대신 전후 값으로, 0%가 된 분야는 보지 않았다고 말한다
+    if (to === 0) {
+      sentence = `직전 구간에 본 ${josa(category, "은", "는")} 이번엔 보지 않았어요.`;
+    } else if (from === 0) {
+      sentence = `직전 구간에는 보지 않았던 ${josa(category, "이", "가")} 이번엔 시청 시간의 ${to}%였어요.`;
+    } else {
+      sentence = `${category} 비중이 직전 구간 ${from}%에서 ${to}%로 ${largest.delta > 0 ? "늘었어요" : "줄었어요"}.`;
+    }
   } else if (newCategories.length > 0) {
     sentence = `직전 구간에는 보지 않았던 ${newCategories.join(", ")} 분야도 봤어요.`;
   } else {

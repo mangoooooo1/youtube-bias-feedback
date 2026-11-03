@@ -200,6 +200,46 @@ describe("initializeDB — today_reviews.timeSharePercents 소급 추가", () =>
   });
 });
 
+describe("initializeDB — popup_events.pastDayReviewViews 소급 추가", () => {
+  it("열이 없는 기존 popup_events에 열을 추가하고, 기존 행은 값 없이 그대로 남긴다", () => {
+    db.exec("DROP TABLE popup_events");
+    db.exec(`CREATE TABLE popup_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      eventId TEXT,
+      anonymousId TEXT NOT NULL,
+      todayFeedbackViewed INTEGER DEFAULT 0,
+      openedAt TEXT
+    )`);
+    db.prepare(
+      `INSERT INTO popup_events (eventId, anonymousId, todayFeedbackViewed, openedAt)
+       VALUES ('e1', 'a1', 1, '2026-10-25T12:00:00.000Z')`,
+    ).run();
+    try {
+      initializeDB();
+
+      expect(db.prepare("SELECT * FROM popup_events").all()).toEqual([
+        expect.objectContaining({
+          eventId: "e1",
+          anonymousId: "a1",
+          todayFeedbackViewed: 1,
+          pastDayReviewViews: null,
+        }),
+      ]);
+    } finally {
+      db.exec("DROP TABLE popup_events");
+      initializeDB();
+    }
+  });
+
+  it("새로 만든 DB의 popup_events에도 열이 있다", () => {
+    const columns = db
+      .prepare("PRAGMA table_info(popup_events)")
+      .all()
+      .map((c) => c.name);
+    expect(columns).toContain("pastDayReviewViews");
+  });
+});
+
 describe("initializeDB — 예전 스키마 DB 감지", () => {
   // 인덱스가 없는 새 열은 CREATE TABLE IF NOT EXISTS로 추가되지 않고 오류도 나지 않는다.
   // 재생성을 잊고 배포하면 서버는 뜨고 오늘 리뷰만 조용히 실패하므로, 시작 단계에서 막는다.

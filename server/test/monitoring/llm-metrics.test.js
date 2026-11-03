@@ -48,7 +48,7 @@ describe("recordLlmCall", () => {
     ]);
   });
 
-  it.each(FAILURE_REASONS)(
+  it.each([...FAILURE_REASONS, "number_mismatch"])(
     "fallback 사유 %s가 허용 목록을 그대로 통과한다",
     (reason) => {
       const client = recordingClient();

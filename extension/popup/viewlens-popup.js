@@ -852,6 +852,8 @@ window.validateStudyEndCode = validateStudyEndCode;
 // periodFeedbackViewed: "주차별" 탭은 블러가 없어 탭을 여는 순간 내용이 바로 보이지만, 클릭 직후
 // 바로 다른 곳으로 이동하는 경우까지 열람으로 세지 않도록 PERIOD_FEEDBACK_VIEW_THRESHOLD_MS만큼
 // 탭에 머물렀을 때만 확정한다(아래 setInterval).
+// pastDayReviewViews: 날짜 이동으로 보는 지난 날 리뷰는 블러가 없어, 실제 리뷰 카드가 스크롤 영역에
+// 보이는 같은 날짜에 같은 시간만큼 머문 서로 다른 날짜 수를 센다.
 // 전송 경로 1(기본)
 // 팝업 close 시점의 fetch는 teardown에 끊길 수 있어 신뢰하지 않는다.
 // 대신 세션 중 livePopupEvent 슬롯을 상호작용·1초 간격으로 계속 갱신해 최신 스냅샷을 남기고,
@@ -969,6 +971,43 @@ function accruePeriodFeedbackDwell(m) {
   }
 }
 
+// 리뷰 카드가 이만큼(카드가 더 작으면 카드 전체) 보여야 본 것으로 친다. 가장자리만 걸친 경우는 뺀다
+const PAST_REVIEW_MIN_VISIBLE_PX = 40;
+
+// 카드가 팝업 본문 스크롤 영역 안에 기준만큼 보이는지. 카드는 그래프 아래라 스크롤 전에는 화면 밖일 수 있다
+function isCardVisible(card) {
+  const scroller = card.closest(".vl-scroll-body");
+  if (!scroller) return false;
+  const c = card.getBoundingClientRect();
+  const v = scroller.getBoundingClientRect();
+  const visible = Math.min(c.bottom, v.bottom) - Math.max(c.top, v.top);
+  return (
+    visible > 0 && visible >= Math.min(PAST_REVIEW_MIN_VISIBLE_PX, c.height)
+  );
+}
+
+// 오늘 탭에 지난 날의 실제 리뷰 카드가 보이고 있으면 그 날짜, 아니면 null
+function shownPastReviewDate(popup, popEl) {
+  const card = popEl.querySelector("#vl-review-card");
+  if (popup._tab !== "today" || !card || !isCardVisible(card)) return null;
+  const dateKey = VL.today?.dateKey;
+  if (!dateKey || dateKey === dateStr(new Date())) return null;
+  return isRealReview(VL.today.review) ? dateKey : null;
+}
+
+// 지금 보이는 지난 날 리뷰(shownDate)로 마커를 갱신한다. 같은 날짜에 연속으로 머문 시간이
+// 기준 이상이면 그 날짜를 센다. 반복 호출해도 같은 날짜는 한 번만 센다.
+function trackPastReviewDwell(m, shownDate) {
+  const now = Date.now();
+  const marker = m.pastReviewShown;
+  if (marker && now - marker.since >= PERIOD_FEEDBACK_VIEW_THRESHOLD_MS) {
+    m.pastReviewDates.add(marker.dateKey);
+  }
+  if (marker?.dateKey !== shownDate) {
+    m.pastReviewShown = shownDate ? { dateKey: shownDate, since: now } : null;
+  }
+}
+
 function buildPopupEventPayload(m) {
   return {
     eventId: m.eventId,
@@ -979,6 +1018,7 @@ function buildPopupEventPayload(m) {
     tabWeekClicks: m.tabWeekClicks,
     todayFeedbackViewed: m.todayFeedbackViewed,
     periodFeedbackViewed: m.periodFeedbackViewed,
+    pastDayReviewViews: m.pastReviewDates.size,
     openedAt: m.openedAt,
   };
 }
@@ -1492,12 +1532,17 @@ async function boot() {
       // 주차별 탭에 현재 연속으로 머무는 중이면 그 시작 시각, 아니면 null.
       // 팝업은 항상 "오늘" 탭으로 열리므로 초기값은 null.
       feedbackTabEnteredAt: null,
+      // 기준 시간을 채운 지난 날 리뷰 날짜와, 지금 보고 있는 지난 날 리뷰({dateKey, since}|null)
+      pastReviewDates: new Set(),
+      pastReviewShown: null,
     };
     persistLivePopupEvent(popupMetrics);
 
     // 탭 클릭 계측 + 피드백 확인 버튼
     // popEl은 re-render(innerHTML 교체) 후에도 유지되므로 위임 리스너로 한 번만 바인딩
     popEl.addEventListener("click", (e) => {
+      // 날짜 이동·탭 전환 버튼의 자체 리스너가 먼저 다시 그린 뒤라, 바뀐 화면 기준으로 마커를 옮긴다
+      trackPastReviewDwell(popupMetrics, shownPastReviewDate(popup, popEl));
       const tabBtn = e.target.closest && e.target.closest("[data-tab]");
       if (tabBtn) {
         if (tabBtn.dataset.tab === "today") {
@@ -1545,6 +1590,7 @@ async function boot() {
       // 주차별 탭에 머문 채로 팝업이 닫히는 경우, 마지막 setInterval tick 이후의
       // 짧은 잔여 체류시간까지 마저 반영한다.
       accruePeriodFeedbackDwell(popupMetrics);
+      trackPastReviewDwell(popupMetrics, shownPastReviewDate(popup, popEl));
       persistLivePopupEvent(popupMetrics);
       sendPopupEventBeacon(stored.serverUrl, popupMetrics);
     };
@@ -1680,6 +1726,8 @@ async function boot() {
       // 주차별 탭에 머문 실제 경과 시간을 갱신. tick 횟수가 아니라 feedbackTabEnteredAt과의
       // 실제 시간차를 쓰므로, 탭 진입 직후 tick이 곧바로 돌아도 그만큼만 인정된다.
       accruePeriodFeedbackDwell(popupMetrics);
+      // 클릭 없이 다시 그려진 경우(저장소 변경 등)도 1초 안에 따라간다
+      trackPastReviewDwell(popupMetrics, shownPastReviewDate(popup, popEl));
       // dwellMs 스냅샷 갱신. close write가 잘려도 최근값(±1초)이 보존됨
       persistLivePopupEvent(popupMetrics);
     }

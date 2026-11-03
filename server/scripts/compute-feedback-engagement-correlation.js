@@ -10,8 +10,12 @@
  * 오클릭 필터 + 시청시간 가중이 적용된 2차 가설용 지표이므로 둘 다 함께
  * 보고해 1차 지표(entropy)만으로 내린 결론과 갈리는지 대조할 수 있게 한다.
  *
- * 새 데이터 수집이나 본실험 코드 변경 없이 이미 저장된 sessions.feedbackViewedAt과
- * period_reviews만 읽는다. 참여자 표본이 적을 때(파일럿 단계) 상관계수가 불안정할 수 있으므로
+ * 새 데이터 수집이나 본실험 코드 변경 없이 이미 저장된 sessions.feedbackViewedAt,
+ * popup_events.pastDayReviewViews, period_reviews만 읽는다.
+ *
+ * pastDayViewCount는 날짜 이동으로 지난 날 리뷰를 2초 이상 본 날짜 수를 팝업마다 더한 값이다.
+ * viewCount(알림 클릭, 세션 단위)와 단위가 달라 합치지 않고 따로 보고한다. 팝업을 여러 번 열어
+ * 같은 날짜를 다시 보면 그만큼 더 센다. 참여자 표본이 적을 때(파일럿 단계) 상관계수가 불안정할 수 있으므로
  * n을 항상 함께 보고한다.
  *
  * viewCount는 lastIntervention.periodEnd 이전(그날 포함) 열람만 센다 — 그 뒤에 발생한 열람을
@@ -25,7 +29,6 @@ const path = require("path");
 
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
-const { db, initializeDB } = require("../db");
 const { kstDateStr } = require("../pipeline/period-boundaries");
 
 const round3 = (x) => Math.round(x * 1000) / 1000;
@@ -51,7 +54,26 @@ function pearson(xs, ys) {
   return round3(num / Math.sqrt(dx2 * dy2));
 }
 
+/**
+ * periodEnd 이전(그날 포함)에 연 팝업의 지난 날 리뷰 열람 날짜 수 합.
+ * openedAt이나 값이 없는 행(구버전 확장)은 세지 않는다.
+ * @param {{openedAt: string|null, pastDayReviewViews: number|null}[]} events
+ * @param {string} periodEnd - YYYY-MM-DD(KST)
+ */
+function countPastDayViews(events, periodEnd) {
+  return events
+    .filter(
+      (e) =>
+        e.openedAt != null &&
+        e.pastDayReviewViews != null &&
+        kstDateStr(new Date(e.openedAt)) <= periodEnd,
+    )
+    .reduce((sum, e) => sum + e.pastDayReviewViews, 0);
+}
+
 function main() {
+  // 모듈을 불러오는 것만으로 운영 DB를 열지 않도록 실행할 때 연다
+  const { db, initializeDB } = require("../db");
   initializeDB();
 
   const participants = db
@@ -63,6 +85,9 @@ function main() {
   // lastIntervention.periodEnd 이전 열람만 세려면 JS 쪽에서 날짜 비교가 필요하다.
   const selectViewedAt = db.prepare(
     `SELECT feedbackViewedAt FROM sessions WHERE anonymousId = ? AND feedbackViewedAt IS NOT NULL`,
+  );
+  const selectPopupEvents = db.prepare(
+    `SELECT openedAt, pastDayReviewViews FROM popup_events WHERE anonymousId = ?`,
   );
   const selectPeriods = db.prepare(
     `SELECT periodIndex, periodEnd, isBaseline, entropy, weightedEntropy FROM period_reviews
@@ -92,6 +117,10 @@ function main() {
           kstDateStr(new Date(r.feedbackViewedAt)) <=
           lastIntervention.periodEnd,
       ).length;
+    const pastDayViewCount = countPastDayViews(
+      selectPopupEvents.all(p.anonymousId),
+      lastIntervention.periodEnd,
+    );
     const entropyChange =
       lastIntervention.entropy != null && baseline.entropy != null
         ? round3(lastIntervention.entropy - baseline.entropy)
@@ -105,6 +134,7 @@ function main() {
     rows.push({
       anonymousId: p.anonymousId,
       viewCount,
+      pastDayViewCount,
       lastInterventionPeriodIndex: lastIntervention.periodIndex,
       entropyChange,
       weightedEntropyChange,
@@ -121,7 +151,8 @@ function main() {
     note:
       "상관계수는 참여자 수가 적으면(파일럿 단계) 불안정할 수 있다 — 항상 n과 함께 해석할 것. " +
       "weightedEntropyChange는 sessions/period_reviews에 시청시간 데이터가 쌓이기 전(구버전 확장) " +
-      "참여자는 null이 될 수 있다(feedback 1 참고).",
+      "참여자는 null이 될 수 있다(feedback 1 참고). " +
+      "pastDayViewCount는 그 기록을 남기기 전 확장 버전의 팝업을 세지 않아 0일 수 있다.",
     eligibleParticipantCount: participants.length,
     excludedNoInterventionPeriod,
     analyzedParticipantCount: rows.length,
@@ -137,6 +168,20 @@ function main() {
         n: withWeightedChange.length,
         r: pearson(
           withWeightedChange.map((r) => r.viewCount),
+          withWeightedChange.map((r) => r.weightedEntropyChange),
+        ),
+      },
+      pastDayViewCount_vs_entropyChange: {
+        n: withEntropyChange.length,
+        r: pearson(
+          withEntropyChange.map((r) => r.pastDayViewCount),
+          withEntropyChange.map((r) => r.entropyChange),
+        ),
+      },
+      pastDayViewCount_vs_weightedEntropyChange: {
+        n: withWeightedChange.length,
+        r: pearson(
+          withWeightedChange.map((r) => r.pastDayViewCount),
           withWeightedChange.map((r) => r.weightedEntropyChange),
         ),
       },
@@ -158,4 +203,6 @@ function main() {
   );
 }
 
-main();
+if (require.main === module) main();
+
+module.exports = { countPastDayViews, pearson };

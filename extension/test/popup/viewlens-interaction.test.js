@@ -81,6 +81,133 @@ describe("탭 전환 — 사용 기록", () => {
   });
 });
 
+// 지난 날 리뷰는 블러가 없어, 실제 리뷰가 보이는 같은 날짜에 2초 이상 머문 날짜 수를 센다
+describe("지난 날 리뷰 열람 — 사용 기록", () => {
+  const pastReview = (n, review) => ({
+    reviewDate: kst(daysAgo(n)),
+    review,
+    sessionCount: 1,
+  });
+  // jsdom은 배치를 계산하지 않아 위치를 정해 준다. 스크롤 영역은 0~500px, 리뷰 카드는 높이 300px
+  let cardTop;
+  beforeEach(() => {
+    cardTop = 100;
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function () {
+        if (this.id === "vl-review-card")
+          return { top: cardTop, bottom: cardTop + 300, height: 300 };
+        if (this.classList.contains("vl-scroll-body"))
+          return { top: 0, bottom: 500, height: 500 };
+        return { top: 0, bottom: 0, height: 0 };
+      },
+    );
+  });
+
+  // 어제·그제 리뷰가 서버에 있고, 사흘 전은 기록만 있고 리뷰가 없다
+  const bootWithPastReviews = () =>
+    bootReady(
+      participant({
+        group: "EXP",
+        installDate: IN_PROGRESS(),
+        sessions: [
+          session("s3", { endTime: daysAgo(3) }),
+          session("s2", { endTime: daysAgo(2) }),
+          session("s1", { endTime: daysAgo(1) }),
+        ],
+      }),
+      {
+        responses: {
+          "/api/today-reviews": {
+            data: [
+              pastReview(2, "그제 리뷰 문장"),
+              pastReview(1, "어제 리뷰 문장"),
+            ],
+          },
+        },
+      },
+    );
+
+  it("지난 날 리뷰에 2초 이상 머물러야 세고, 같은 날짜를 다시 와도 한 번만 센다", async () => {
+    const { root, data } = await bootWithPastReviews();
+    const t0 = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(t0);
+
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("어제 리뷰 문장");
+    now.mockReturnValue(t0 + 1500);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(0);
+
+    now.mockReturnValue(t0 + 2500);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(1);
+
+    // 오늘로 갔다가 같은 어제로 다시 와서 머물러도 그대로 1
+    click(root, "#vl-date-next");
+    click(root, "#vl-date-prev");
+    now.mockReturnValue(t0 + 5000);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(1);
+
+    // 다른 날(그제)에 머물면 2
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("그제 리뷰 문장");
+    now.mockReturnValue(t0 + 7500);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(2);
+  });
+
+  it("리뷰 카드가 스크롤 아래에 있거나 가장자리만 보이면 세지 않고, 스크롤해 보인 뒤 2초가 지나야 센다", async () => {
+    const { root, data } = await bootWithPastReviews();
+    const t0 = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(t0);
+
+    // 그래프만 보이고 카드는 화면 아래
+    cardTop = 520;
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("어제 리뷰 문장");
+    now.mockReturnValue(t0 + 3000);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(0);
+
+    // 카드 윗부분 20px만 걸침
+    cardTop = 480;
+    now.mockReturnValue(t0 + 6000);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(0);
+
+    // 스크롤해 카드가 200px 보인다. 보이기 시작한 때부터 2초
+    cardTop = 300;
+    now.mockReturnValue(t0 + 7000);
+    vi.advanceTimersByTime(1000);
+    now.mockReturnValue(t0 + 8500);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(0);
+    now.mockReturnValue(t0 + 9500);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(1);
+  });
+
+  it("2초 안에 넘긴 날짜와 리뷰가 없는 날짜는 세지 않는다", async () => {
+    const { root, data } = await bootWithPastReviews();
+    const t0 = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(t0);
+
+    // 어제·그제를 1초씩만 보고 지나간다
+    click(root, "#vl-date-prev");
+    now.mockReturnValue(t0 + 1000);
+    click(root, "#vl-date-prev");
+    now.mockReturnValue(t0 + 2000);
+    click(root, "#vl-date-prev");
+    expect(root.textContent).not.toContain("리뷰 문장");
+
+    // 리뷰가 없는 사흘 전에는 오래 머문다
+    now.mockReturnValue(t0 + 10000);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(0);
+  });
+});
+
 describe("피드백 확인하기", () => {
   it("가려진 오늘 리뷰를 누르면 블러가 풀리고, 확인을 기기·서버에 기록하고, 아이콘 표시를 지운다", async () => {
     const { root, data, server, chrome } = await bootReady(
@@ -356,7 +483,7 @@ describe("대조군 연구 종료 코드 입력", () => {
     submitCode(input);
     await vi.waitFor(() => expect(hasFeedbackTabs(root)).toBe(true));
     expect(root.textContent).toContain("시청 기록을 불러오고 있어요.");
-    expect(root.textContent).not.toContain("이 날 시청 기록이 없어요");
+    expect(root.textContent).not.toContain("이 날은 유효한 시청 기록이 없어요");
     releaseSummary();
     await vi.waitFor(() =>
       expect(root.textContent).toContain("연구 기간의 하루 리뷰"),

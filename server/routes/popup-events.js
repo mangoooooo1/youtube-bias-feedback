@@ -12,8 +12,8 @@ const router = express.Router();
 // OR IGNORE: eventId(멱등 키) 중복 시 조용히 건너뜀 → 재전송돼도 한 행만 남는다.
 // eventId가 없는 구버전 확장 요청은 NULL로 저장되어 dedup만 생략된다(하위호환).
 const insertPopupEvent = db.prepare(`
-  INSERT OR IGNORE INTO popup_events (eventId, anonymousId, dwellMs, tabTodayClicks, tabWeekClicks, todayFeedbackViewed, periodFeedbackViewed, openedAt)
-  VALUES (@eventId, @anonymousId, @dwellMs, @tabTodayClicks, @tabWeekClicks, @todayFeedbackViewed, @periodFeedbackViewed, @openedAt)
+  INSERT OR IGNORE INTO popup_events (eventId, anonymousId, dwellMs, tabTodayClicks, tabWeekClicks, todayFeedbackViewed, periodFeedbackViewed, pastDayReviewViews, openedAt)
+  VALUES (@eventId, @anonymousId, @dwellMs, @tabTodayClicks, @tabWeekClicks, @todayFeedbackViewed, @periodFeedbackViewed, @pastDayReviewViews, @openedAt)
 `);
 
 // 클라이언트의 pendingPopupEvents 큐가 실패한 항목을 그대로 남겨 다음 팝업 open 때
@@ -38,6 +38,7 @@ router.post("/", requireParticipant, (req, res, next) => {
     tabWeekClicks,
     todayFeedbackViewed,
     periodFeedbackViewed,
+    pastDayReviewViews,
     openedAt,
   } = req.body;
 
@@ -50,6 +51,7 @@ router.post("/", requireParticipant, (req, res, next) => {
       tabWeekClicks: tabWeekClicks ?? null,
       todayFeedbackViewed: todayFeedbackViewed ?? null,
       periodFeedbackViewed: periodFeedbackViewed ?? null,
+      pastDayReviewViews: pastDayReviewViews ?? null,
       openedAt: normalizeIsoTimestamp(openedAt),
     });
   } catch (err) {

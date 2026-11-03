@@ -238,14 +238,47 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
     (_label, status, text) => {
       const html = render(NO_RECORD, status, { isEmpty: true });
       expect(html).toContain(text);
-      expect(html).not.toContain("이 날 시청 기록이 없어요");
+      expect(html).not.toContain("이 날은 유효한 시청 기록이 없어요");
     },
   );
 
   it("집계를 받았는데 기록이 없는 지난 날짜는 이 날 시청 기록이 없다고 한다", () => {
     const html = render(NO_RECORD, "ok", { isEmpty: true });
-    expect(html).toContain("이 날 시청 기록이 없어요");
+    expect(html).toContain("이 날은 유효한 시청 기록이 없어요");
     expect(html).not.toContain("시청 기록을 불러오");
+  });
+
+  // 기기에는 기록이 있지만 서버 집계로 셀 영상이 없는 날(잠깐 본 영상만 있음)
+  const SHORT_ONLY = { ...NO_RECORD, shortCount: 2, unconfirmedCount: 1 };
+
+  it("지난 날에 잠깐 본 영상만 있으면 기록 없는 날과 같은 화면으로, 유효한 시청 기록이 없다고 한다", () => {
+    const html = render(SHORT_ONLY, "ok", { isEmpty: false, review: "" });
+    expect(html).toContain("이 날은 유효한 시청 기록이 없어요");
+    expect(html).not.toContain("영상 0개");
+    expect(html).not.toContain("아직 없어요");
+  });
+
+  it("지난 날이라도 리뷰가 있거나 집계를 받는 중이면 빈 화면으로 보내지 않는다", () => {
+    expect(
+      render(SHORT_ONLY, "ok", { isEmpty: false, review: "그날 리뷰 문장" }),
+    ).not.toContain("유효한 시청 기록이 없어요");
+    expect(
+      render(SHORT_ONLY, "loading", { isEmpty: false, review: "" }),
+    ).not.toContain("유효한 시청 기록이 없어요");
+  });
+
+  it("빈 화면 아래 날짜 줄은 위 날짜와 겹치는 지난 날에는 없고, 위에 '오늘'만 보이는 오늘에는 있다", () => {
+    const count = (html, text) => html.split(text).length - 1;
+    const past = render(NO_RECORD, "ok", { isEmpty: true });
+    expect(count(past, "3월 5일 목요일")).toBe(1);
+
+    const todayLabel = koreanDateLabel(new Date());
+    const today = render(NO_RECORD, "ok", {
+      isEmpty: true,
+      dateLabel: todayLabel,
+    });
+    expect(count(today, todayLabel)).toBe(1);
+    expect(today).toContain("아직 오늘 시청 기록이 없어요");
   });
 
   it("오늘은 집계를 받는 중이어도 지금처럼 아직 오늘 시청 기록이 없다고 한다", () => {
@@ -617,11 +650,27 @@ describe("vlReview — 관심 분야 헤드라인", () => {
   it("분야명만 굵고, 띄어쓰기에서만 줄바꿈한다", async () => {
     const { vlReview } = await loadScreens();
     const m = vlReview({ text: "리뷰", topic: "인물과 일상 루틴" }).match(
-      /<p style="([^"]*)">\s*당신은 <span style="([^"]*)">인물과 일상 루틴<\/span>에 관심이 많습니다\./,
+      /<p style="([^"]*)">\s*<span style="([^"]*)">인물과 일상 루틴<\/span>에 관심이 많은 하루였어요\./,
     );
     expect(m[1]).toContain("font-size:var(--vl-fs-4)");
     expect(m[1]).toContain("font-weight:500");
     expect(m[1]).toContain("word-break:keep-all");
     expect(m[2]).toContain("font-weight:700");
+  });
+
+  it("사람을 단정하는 '당신은 …에 관심이 많습니다' 문구를 쓰지 않는다", async () => {
+    const { vlReview } = await loadScreens();
+    const html = vlReview({ text: "리뷰", topic: "야구 하이라이트" });
+    expect(html).not.toContain("당신은");
+    expect(html).not.toContain("관심이 많습니다");
+  });
+
+  it("서버 대체 문구의 topic '분석 불가'와 빈 topic은 헤드라인을 그리지 않는다", async () => {
+    const { vlReview } = await loadScreens();
+    for (const topic of ["분석 불가", ""]) {
+      const html = vlReview({ text: "리뷰", topic });
+      expect(html).not.toContain("관심이 많은 하루였어요");
+      expect(html).not.toContain("분석 불가");
+    }
   });
 });
