@@ -715,6 +715,43 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
     expect(all["video__s1__uuid1"].sent).toBe(true);
   });
 
+  it("다시 재생해 새로 만든 기록을 재전송하면 앞 기록의 eventId(resumedFromEventId)도 함께 보낸다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { videoEvents: [] };
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.endsWith("/api/video-events")) {
+        calls.videoEvents.push(JSON.parse(options.body));
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      currentSession: { sessionId: "s2", startTime: "2026-01-10T11:20:00Z" },
+      video__s2__uuid2: {
+        videoId: "v1",
+        watchedAt: "2026-01-10T11:20:00Z",
+        sent: false,
+        eventId: "uuid2",
+        resumedFromEventId: "uuid1",
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentVideoEvents();
+
+    expect(calls.videoEvents).toHaveLength(1);
+    expect(calls.videoEvents[0]).toMatchObject({
+      eventId: "uuid2",
+      resumedFromEventId: "uuid1",
+    });
+  });
+
   it("세션 종료 후(sessions[].videos)에 남은 미전송 영상도 재전송하고 sent:true로 표시한다", async () => {
     global.chrome = createChromeMock();
     const calls = { videoEvents: [] };

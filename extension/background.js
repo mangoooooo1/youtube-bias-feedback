@@ -848,6 +848,7 @@ async function postVideoEventToServer(anonymousId, participantToken, event) {
     entryPath: event.entryPath,
     navigationTrigger: event.navigationTrigger,
     isShortsUrl: event.isShortsUrl,
+    resumedFromEventId: event.resumedFromEventId,
   });
 }
 
