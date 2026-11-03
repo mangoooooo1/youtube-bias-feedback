@@ -21,7 +21,8 @@ const SCHEMA = `
   CREATE TABLE participants (anonymousId TEXT, group_code TEXT, installDate TEXT);
   CREATE TABLE video_events (
     anonymousId TEXT, videoId TEXT, watchedAt TEXT, watchedSeconds REAL,
-    wasBackgrounded INTEGER, referrerType TEXT, relatedTrigger TEXT
+    wasBackgrounded INTEGER, referrerType TEXT, relatedTrigger TEXT,
+    eventId TEXT, resumedFromEventId TEXT
   );
   CREATE TABLE video_metadata (videoId TEXT PRIMARY KEY, categoryId TEXT, durationSeconds INTEGER);
 `;
@@ -78,7 +79,9 @@ describe("run — DB 조회", () => {
       "10",
       100,
     );
-    db.prepare("INSERT INTO video_events VALUES (?,?,?,?,?,?,?)").run(
+    db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, watchedAt, watchedSeconds, wasBackgrounded, referrerType, relatedTrigger) VALUES (?,?,?,?,?,?,?)",
+    ).run(
       "anon-exp",
       "v1",
       "2026-09-02T10:00:00+09:00",
@@ -153,5 +156,39 @@ describe("main — 암호화 DB 파일로 실행", () => {
     process.exitCode = undefined;
     expect(main({ argv: [], env: { SOURCE_DB_PATH: dbPath } })).toBeNull();
     expect(process.exitCode).toBe(1);
+  });
+});
+
+describe("run — 멈췄다 이어 본 기록", () => {
+  it("DB에서 연결 칸을 읽어 이어진 두 조각(각 20초)을 한 시청으로 합쳐 유효 영상 1건으로 센다", () => {
+    const db = new Database(":memory:");
+    db.exec(SCHEMA);
+    db.prepare("INSERT INTO participants VALUES (?,?,?)").run(
+      "anon-exp",
+      "EXP",
+      "2026-08-31T15:00:00.000Z",
+    );
+    db.prepare("INSERT INTO video_metadata VALUES (?,?,?)").run(
+      "v1",
+      "10",
+      600,
+    );
+    const insert = db.prepare(
+      "INSERT INTO video_events (eventId, resumedFromEventId, anonymousId, videoId, watchedAt, watchedSeconds) VALUES (?,?,?,?,?,?)",
+    );
+    insert.run("e1", null, "anon-exp", "v1", "2026-09-02T10:00:00+09:00", 20);
+    insert.run("e2", "e1", "anon-exp", "v1", "2026-09-02T10:30:00+09:00", 20);
+
+    const { rows } = run(db, {
+      groups: ["EXP"],
+      now: new Date("2026-09-10T12:00:00+09:00"),
+    });
+    db.close();
+
+    // 조각마다는 20초(600초의 3%)라 잠깐 본 영상이지만, 합치면 40초라 유효하다
+    expect(rows[0].validCount).toBe(1);
+    for (const name of Object.keys(VARIANTS)) {
+      expect(rows[0][name].validCount).toBe(1);
+    }
   });
 });
