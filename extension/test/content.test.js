@@ -2370,8 +2370,9 @@ describe("content.js handleVideoChange 전체 수명주기 — 비영상 페이�
 
 // 같은 탭에서 같은 영상을 다시 열면(새로고침, 홈에 갔다 돌아옴) 마지막 재생 후 10분 안이면 그 기록에 이어 쓴다.
 // 페이지마다 content.js를 새로 불러오고(새로고침 = 이전 페이지 pagehide 후 새 인스턴스), 저장소는 공유한다.
-function createTabBrowser() {
-  const storage = createSharedStorage({});
+// 서버 전송을 확인할 때만 initialStorage(serverUrl 등)와 fetch를 넘긴다
+function createTabBrowser({ initialStorage = {}, fetch: fetchImpl } = {}) {
+  const storage = createSharedStorage(initialStorage);
   const errorReports = [];
 
   async function openPage({
@@ -2418,7 +2419,9 @@ function createTabBrowser() {
           if (type === "pagehide") pagehide = cb;
         },
       },
-      fetch: () => Promise.reject(new Error("네트워크 전송이 없어야 한다")),
+      fetch:
+        fetchImpl ??
+        (() => Promise.reject(new Error("네트워크 전송이 없어야 한다"))),
       console: { log: () => {}, warn: () => {} },
     });
     // 최초 handleVideoChange(탭 번호 응답 → 기록)가 끝날 때까지 흘려보낸다
@@ -2851,6 +2854,142 @@ describe("content.js 같은 탭에서 일시정지 후 다시 재생 — 마지�
     expect(browser.recordsOf("AAAA").map((r) => r.watchedSeconds)).toEqual([
       60, 30,
     ]);
+  });
+});
+
+describe("content.js 일시정지 후 다시 재생해 나눌 때 — 세션 종료·참여 종료·체크포인트·전송과 함께", () => {
+  const MINUTE = 60 * 1000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-26T10:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("멈춘 사이 세션이 닫혀 앞 기록이 sessions[]로 옮겨졌어도 그 안의 앞 기록을 멈춘 시점 값으로 확정하고, 새 기록은 새 세션에 넣는다", async () => {
+    const browser = createTabBrowser();
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    const { endSession } = await import("../storage.js");
+    await endSession();
+    await page.play(30);
+    await page.goTo("BBBB");
+
+    const closed = browser.storage.dump().sessions[0];
+    expect(closed.videos).toHaveLength(1);
+    expect(closed.videos[0]).toMatchObject({
+      videoId: "AAAA",
+      watchedSeconds: 60,
+      watchStatsSource: "final",
+    });
+    const [, second] = browser.recordsOf("AAAA");
+    expect(second).toMatchObject({
+      watchedSeconds: 30,
+      resumedFromEventId: closed.videos[0].eventId,
+    });
+    expect(browser.storage.dump().currentSession.sessionId).not.toBe(
+      closed.sessionId,
+    );
+  });
+
+  it("멈춘 사이 수집 기간이 끝났으면 새 기록을 만들지 않고 앞 기록만 확정하며, 다시 재생한 시간이 앞 기록에 붙지 않는다", async () => {
+    // installDate 1970-01-01T09:00 KST → 수집 종료 1970-01-13 00:00 KST
+    const collectionEndsAt = Date.parse("1970-01-13T00:00:00+09:00");
+    vi.setSystemTime(collectionEndsAt - 2 * MINUTE);
+    const browser = createTabBrowser({
+      initialStorage: { installDate: "1970-01-01T00:00:00.000Z" },
+    });
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    await page.play(30);
+    await page.goTo("BBBB");
+
+    expect(
+      browser
+        .recordsOf("AAAA")
+        .map((r) => [r.watchedSeconds, r.watchStatsSource]),
+    ).toEqual([[60, "final"]]);
+    expect(page.identity()).toBeNull();
+  });
+
+  it("나눈 뒤 체크포인트와 탭 기록은 새 기록을 가리키고, 앞 기록의 체크포인트는 멈춘 시점 값으로 남는다", async () => {
+    const browser = createTabBrowser();
+    const page = await browser.openPage({ tabId: 7, videoId: "AAAA" });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    await page.play(30); // 그 사이 15초 주기 체크포인트가 돈다
+
+    const [first, second] = browser.recordsOf("AAAA");
+    const dump = browser.storage.dump();
+    expect(dump[`watchcp__${first.eventId}`].watchedSeconds).toBe(60);
+    expect(dump[`watchcp__${second.eventId}`].eventId).toBe(second.eventId);
+    expect(dump.tabwatch__7).toMatchObject({
+      videoId: "AAAA",
+      eventId: second.eventId,
+    });
+  });
+
+  it("나눈 직후 새로고침하면 앞 기록이 아니라 새 기록에 이어 쓴다", async () => {
+    const browser = createTabBrowser();
+    let page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    await page.play(30);
+
+    page = await page.reload();
+    await page.play(20);
+    await page.goTo("BBBB");
+
+    const records = browser.recordsOf("AAAA");
+    expect(records.map((r) => r.watchedSeconds)).toEqual([60, 50]);
+    expect(records[1].resumedFromEventId).toBe(records[0].eventId);
+  });
+
+  it("서버에는 앞 기록의 확정 PATCH를 앞 eventId로, 새 기록 POST를 resumedFromEventId와 함께 보낸다", async () => {
+    const requests = [];
+    const browser = createTabBrowser({
+      initialStorage: { anonymousId: "a1", serverUrl: "https://srv.example" },
+      fetch: (url, options = {}) => {
+        requests.push({
+          url,
+          method: options.method,
+          body: JSON.parse(options.body),
+        });
+        return Promise.resolve({ ok: true });
+      },
+    });
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    await page.play(30);
+
+    const [first, second] = browser.recordsOf("AAAA");
+    const afterSplit = requests.slice(1);
+    expect(afterSplit).toEqual(
+      expect.arrayContaining([
+        {
+          url: `https://srv.example/api/video-events/${first.eventId}`,
+          method: "PATCH",
+          body: expect.objectContaining({ watchedSeconds: 60 }),
+        },
+        {
+          url: "https://srv.example/api/video-events",
+          method: "POST",
+          body: expect.objectContaining({
+            eventId: second.eventId,
+            resumedFromEventId: first.eventId,
+          }),
+        },
+      ]),
+    );
+    expect(requests[0].body.resumedFromEventId).toBeNull();
+    expect(first.sent).toBe(true);
+    expect(first.watchStatsSent).toBe(true);
   });
 });
 
