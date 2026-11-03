@@ -3,7 +3,10 @@
 // 비중이 큰 카테고리 안에서 무엇을 주로 봤는지 짚으려면 그 카테고리의 제목을 전부 봐야 한다.
 // 그래서 일부만 뽑지 않고 유효 시청 영상 제목을 전부 넘기고, 비정상적으로 많은 날만 상한으로 줄인다.
 const { isValidWatch, getCategoryName } = require("./category-diversity");
-const { cappedWatchSeconds } = require("./viewing-aggregate");
+const {
+  cappedWatchSeconds,
+  mergeResumedWatches,
+} = require("./viewing-aggregate");
 const { MAX_TITLES_PER_DAY } = require("./study-constants");
 
 // 카테고리를 못 가져온 유효 영상 묶음 이름. 분포에서는 빠지지만 제목은 넘긴다.
@@ -68,7 +71,8 @@ function groupTitlesByCategory(
   { maxTitles = MAX_TITLES_PER_DAY } = {},
 ) {
   const groups = new Map();
-  const confirmed = entries.filter(
+  // 멈췄다 이어 본 기록은 한 시청으로 합친 뒤 판정해야 제목이 빠지거나 두 번 세어지지 않는다
+  const confirmed = mergeResumedWatches(entries).filter(
     (e) => e.watchedSeconds != null && isValidWatch(e),
   );
   for (const e of confirmed) {
