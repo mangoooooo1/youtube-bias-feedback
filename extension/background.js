@@ -156,6 +156,19 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== ALARM_NAME) return;
+  runPeriodicTasks();
+});
+
+// 재시작으로 알람이 지워져도 크롬을 켜기만 하면 남은 기록을 보낸다
+chrome.runtime.onStartup.addListener(() => {
+  runPeriodicTasks();
+});
+
+/**
+ * 알람 틱마다, 그리고 크롬 시작 때 한 번 도는 작업.
+ * @returns {void}
+ */
+function runPeriodicTasks() {
   runServerTasks().catch((error) => {
     console.error(
       `[background] task=server_tasks result=crashed error=${error?.message}`,
@@ -172,7 +185,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   });
   // 실패해도 다음 틱에 다시 지우므로 보고하지 않는다
   pruneTabWatches().catch(() => {});
-});
+}
 
 /**
  * 알람 틱의 서버 작업. 리뷰 공개 시각(09:00 KST)이 지나면 종료 안내를 한 번 띄운다.

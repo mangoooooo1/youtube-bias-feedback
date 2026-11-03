@@ -54,6 +54,7 @@ function createChromeMock() {
     },
     runtime: {
       onMessage: { addListener: vi.fn() },
+      onStartup: { addListener: vi.fn() },
       getURL: (p) => `chrome-extension://fake/${p}`,
       getManifest: () => ({ version: "2.4.1" }),
     },
@@ -2962,6 +2963,69 @@ describe("참여 기간 종료 — 전송 기간이 끝나면 서버 요청을 �
 
     expect(global.chrome.tabs.create).toHaveBeenCalledTimes(1);
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  // 마지막 날 수집 종료 1시간 전에 보던 세션을 열어 둔 채 크롬을 끈 상태
+  function openLastDaySession(installDate) {
+    const lastDay = new Date(
+      Date.parse(installDate) + 12 * DAY,
+    ).toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+    const lastWatchedAt = new Date(
+      Date.parse(`${lastDay}T00:00:00+09:00`) - 60 * 60000,
+    ).toISOString();
+    return {
+      ...backlog(installDate),
+      participantSynced: true,
+      participantToken: "tok",
+      currentSession: { sessionId: "last", startTime: lastWatchedAt },
+      lastWatchedAt,
+      video__last__e9: {
+        videoId: "v9",
+        watchedAt: lastWatchedAt,
+        eventId: "e9",
+        sent: true,
+        watchedSeconds: 30,
+        watchStatsSent: true,
+      },
+    };
+  }
+
+  function startChrome() {
+    const onStartup =
+      global.chrome.runtime.onStartup.addListener.mock.calls[0][0];
+    onStartup();
+  }
+
+  it("grace에 크롬을 켜면 알람 없이도 열려 있던 마지막 날 세션이 닫혀 서버로 간다", async () => {
+    await loadBackground(openLastDaySession(GRACE_INSTALL_DATE));
+    global.fetch = okFetch();
+
+    startChrome();
+    await vi.advanceTimersByTimeAsync(0);
+
+    const postedSessionIds = global.fetch.mock.calls
+      .filter(([url]) => new URL(url).pathname === "/api/sessions")
+      .map(([, options]) => JSON.parse(options.body).sessionId);
+    expect(postedSessionIds).toContain("last");
+    const { currentSession } =
+      await global.chrome.storage.local.get("currentSession");
+    expect(currentSession).toBeNull();
+  });
+
+  it("ended에 크롬을 켜면 세션은 닫되 서버로 보내지 않는다", async () => {
+    await loadBackground(openLastDaySession(ENDED_INSTALL_DATE));
+    global.fetch = okFetch();
+
+    startChrome();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(global.fetch).not.toHaveBeenCalled();
+    const { currentSession, sessions } =
+      await global.chrome.storage.local.get(null);
+    expect(currentSession).toBeNull();
+    expect(sessions.find((s) => s.sessionId === "last").syncedToServer).toBe(
+      false,
+    );
   });
 
   it("ended에 세션이 닫혀도 서버로 보내지 않고 로컬에 미전송으로 남긴다", async () => {
