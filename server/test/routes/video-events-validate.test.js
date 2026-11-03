@@ -256,6 +256,41 @@ describe("validateVideoEvent — navigationTrigger (옵션 필드, 정해진 값
   });
 });
 
+describe("validateVideoEvent — resumedFromEventId (옵션 필드, 다시 재생해 이어진 앞 기록)", () => {
+  it.each([undefined, null])(
+    "%s이면 통과한다(이동으로 생긴 기록·구버전 확장)",
+    (value) => {
+      expect(
+        validateVideoEvent(basePayload({ resumedFromEventId: value })),
+      ).toBeNull();
+    },
+  );
+
+  it.each(["", "  "])("빈 문자열(%j)이면 거부한다", (value) => {
+    expect(
+      validateVideoEvent(basePayload({ resumedFromEventId: value })),
+    ).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "resumedFromEventId",
+    });
+  });
+
+  it.each([true, 1, { x: 1 }])("문자열이 아니면(%j) 거부한다", (value) => {
+    expect(
+      validateVideoEvent(basePayload({ resumedFromEventId: value })),
+    ).toEqual({
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "resumedFromEventId",
+    });
+  });
+
+  it("유효한 문자열이면 통과한다", () => {
+    expect(
+      validateVideoEvent(basePayload({ resumedFromEventId: "evt-prev" })),
+    ).toBeNull();
+  });
+});
+
 describe("validateVideoEvent — title (옵션, 검증 대상 아님)", () => {
   it("title이 없어도 통과한다", () => {
     const payload = basePayload();
