@@ -3,7 +3,7 @@
   const TOTAL_DAYS = 12;
   // 실험 첫 4일은 그룹 무관하게 전원 피드백·알림을 받지 않는 베이스라인(첫 기간 전체)
   const BASELINE_DAYS = 4;
-  const END_GRACE_DAYS = 3;
+  const END_GRACE_DAYS = 14;
   const DAY_MS = 86400000;
 
   // 1구간과 같이 설치일(KST)부터 BASELINE_DAYS일째 24:00 KST까지가 베이스라인이다.

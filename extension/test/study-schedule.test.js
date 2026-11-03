@@ -35,11 +35,11 @@ describe("getParticipationState — 참여 상태 경계", () => {
     ["KST 자정 직전 설치(23:59)", "2026-09-01T14:59:00.000Z"],
     ["KST 자정 직후 설치(00:01)", "2026-09-01T15:01:00.000Z"],
   ])(
-    "%s: 수집은 서버 마지막 기간이 끝나는 순간 멈추고, 3일 뒤 완전 종료된다",
+    "%s: 수집은 서버 마지막 기간이 끝나는 순간 멈추고, END_GRACE_DAYS일 뒤 완전 종료된다",
     (_label, installDate) => {
       const { getParticipationState } = ViewLensStudy;
       const endsAt = serverLastPeriodEndsAt(installDate);
-      const graceEndsAt = endsAt + 3 * DAY_MS;
+      const graceEndsAt = endsAt + ViewLensStudy.END_GRACE_DAYS * DAY_MS;
 
       expect(getParticipationState(installDate, new Date(endsAt - 1))).toBe(
         "active",
@@ -226,8 +226,8 @@ describe("연구 기간 상수 — 서버·팝업과 같은 값", () => {
     );
   });
 
-  it("END_GRACE_DAYS는 3일이다", () => {
-    expect(ViewLensStudy.END_GRACE_DAYS).toBe(3);
+  it("END_GRACE_DAYS는 14일이다", () => {
+    expect(ViewLensStudy.END_GRACE_DAYS).toBe(14);
   });
 });
 
