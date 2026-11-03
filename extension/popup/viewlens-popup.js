@@ -852,8 +852,8 @@ window.validateStudyEndCode = validateStudyEndCode;
 // periodFeedbackViewed: "주차별" 탭은 블러가 없어 탭을 여는 순간 내용이 바로 보이지만, 클릭 직후
 // 바로 다른 곳으로 이동하는 경우까지 열람으로 세지 않도록 PERIOD_FEEDBACK_VIEW_THRESHOLD_MS만큼
 // 탭에 머물렀을 때만 확정한다(아래 setInterval).
-// pastDayReviewViews: 날짜 이동으로 보는 지난 날 리뷰는 블러가 없어, 실제 리뷰가 보이는 같은 날짜에
-// 같은 시간만큼 머문 서로 다른 날짜 수를 센다.
+// pastDayReviewViews: 날짜 이동으로 보는 지난 날 리뷰는 블러가 없어, 실제 리뷰 카드가 스크롤 영역에
+// 보이는 같은 날짜에 같은 시간만큼 머문 서로 다른 날짜 수를 센다.
 // 전송 경로 1(기본)
 // 팝업 close 시점의 fetch는 teardown에 끊길 수 있어 신뢰하지 않는다.
 // 대신 세션 중 livePopupEvent 슬롯을 상호작용·1초 간격으로 계속 갱신해 최신 스냅샷을 남기고,
@@ -971,10 +971,25 @@ function accruePeriodFeedbackDwell(m) {
   }
 }
 
+// 리뷰 카드가 이만큼(카드가 더 작으면 카드 전체) 보여야 본 것으로 친다. 가장자리만 걸친 경우는 뺀다
+const PAST_REVIEW_MIN_VISIBLE_PX = 40;
+
+// 카드가 팝업 본문 스크롤 영역 안에 기준만큼 보이는지. 카드는 그래프 아래라 스크롤 전에는 화면 밖일 수 있다
+function isCardVisible(card) {
+  const scroller = card.closest(".vl-scroll-body");
+  if (!scroller) return false;
+  const c = card.getBoundingClientRect();
+  const v = scroller.getBoundingClientRect();
+  const visible = Math.min(c.bottom, v.bottom) - Math.max(c.top, v.top);
+  return (
+    visible > 0 && visible >= Math.min(PAST_REVIEW_MIN_VISIBLE_PX, c.height)
+  );
+}
+
 // 오늘 탭에 지난 날의 실제 리뷰 카드가 보이고 있으면 그 날짜, 아니면 null
 function shownPastReviewDate(popup, popEl) {
-  if (popup._tab !== "today" || !popEl.querySelector("#vl-review-card"))
-    return null;
+  const card = popEl.querySelector("#vl-review-card");
+  if (popup._tab !== "today" || !card || !isCardVisible(card)) return null;
   const dateKey = VL.today?.dateKey;
   if (!dateKey || dateKey === dateStr(new Date())) return null;
   return isRealReview(VL.today.review) ? dateKey : null;

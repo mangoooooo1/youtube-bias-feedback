@@ -474,7 +474,7 @@ class ViewLensPopup {
           ? _tabs(this._tab, !VL._todayConfirmed)
           : ""
       }
-      <div style="flex:1;overflow-y:auto;overflow-x:hidden">${bodyHTML}</div>
+      <div class="vl-scroll-body" style="flex:1;overflow-y:auto;overflow-x:hidden">${bodyHTML}</div>
       ${showStudyEndNotice ? screenStudyEndNoticeModal() : ""}
     </div>`;
 

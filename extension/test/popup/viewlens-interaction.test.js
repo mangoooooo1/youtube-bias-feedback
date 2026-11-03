@@ -88,6 +88,21 @@ describe("지난 날 리뷰 열람 — 사용 기록", () => {
     review,
     sessionCount: 1,
   });
+  // jsdom은 배치를 계산하지 않아 위치를 정해 준다. 스크롤 영역은 0~500px, 리뷰 카드는 높이 300px
+  let cardTop;
+  beforeEach(() => {
+    cardTop = 100;
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(
+      function () {
+        if (this.id === "vl-review-card")
+          return { top: cardTop, bottom: cardTop + 300, height: 300 };
+        if (this.classList.contains("vl-scroll-body"))
+          return { top: 0, bottom: 500, height: 500 };
+        return { top: 0, bottom: 0, height: 0 };
+      },
+    );
+  });
+
   // 어제·그제 리뷰가 서버에 있고, 사흘 전은 기록만 있고 리뷰가 없다
   const bootWithPastReviews = () =>
     bootReady(
@@ -140,6 +155,37 @@ describe("지난 날 리뷰 열람 — 사용 기록", () => {
     now.mockReturnValue(t0 + 7500);
     vi.advanceTimersByTime(1000);
     expect(data.livePopupEvent.pastDayReviewViews).toBe(2);
+  });
+
+  it("리뷰 카드가 스크롤 아래에 있거나 가장자리만 보이면 세지 않고, 스크롤해 보인 뒤 2초가 지나야 센다", async () => {
+    const { root, data } = await bootWithPastReviews();
+    const t0 = Date.now();
+    const now = vi.spyOn(Date, "now").mockReturnValue(t0);
+
+    // 그래프만 보이고 카드는 화면 아래
+    cardTop = 520;
+    click(root, "#vl-date-prev");
+    expect(root.textContent).toContain("어제 리뷰 문장");
+    now.mockReturnValue(t0 + 3000);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(0);
+
+    // 카드 윗부분 20px만 걸침
+    cardTop = 480;
+    now.mockReturnValue(t0 + 6000);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(0);
+
+    // 스크롤해 카드가 200px 보인다. 보이기 시작한 때부터 2초
+    cardTop = 300;
+    now.mockReturnValue(t0 + 7000);
+    vi.advanceTimersByTime(1000);
+    now.mockReturnValue(t0 + 8500);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(0);
+    now.mockReturnValue(t0 + 9500);
+    vi.advanceTimersByTime(1000);
+    expect(data.livePopupEvent.pastDayReviewViews).toBe(1);
   });
 
   it("2초 안에 넘긴 날짜와 리뷰가 없는 날짜는 세지 않는다", async () => {
