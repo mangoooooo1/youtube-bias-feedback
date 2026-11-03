@@ -2729,10 +2729,11 @@ describe("content.js 같은 탭에서 다시 연 영상 — 마지막 재생 후
 });
 
 describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
-  // installDate 1970-01-01T09:00 KST → 수집 종료 1970-01-13 00:00 KST, 전송 종료 3일 뒤
+  // installDate 1970-01-01T09:00 KST → 수집 종료 1970-01-13 00:00 KST, 전송 종료 END_GRACE_DAYS일 뒤
   const INSTALL_DATE = "1970-01-01T00:00:00.000Z";
   const COLLECTION_ENDS_AT = Date.parse("1970-01-13T00:00:00+09:00");
-  const TRANSMISSION_ENDS_AT = COLLECTION_ENDS_AT + 3 * 86400000;
+  const TRANSMISSION_ENDS_AT =
+    COLLECTION_ENDS_AT + globalThis.ViewLensStudy.END_GRACE_DAYS * 86400000;
 
   let videoEl, documentMock, locationMock, storage, fetchCalls, api;
 

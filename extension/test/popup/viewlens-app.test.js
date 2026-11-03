@@ -154,7 +154,10 @@ describe("참여 종료 배너와 팝업 등록 재시도", () => {
   const NOW = Date.parse("2026-01-20T03:00:00Z");
   const ACTIVE = new Date(NOW - 5 * DAY).toISOString();
   const GRACE = new Date(NOW - 13 * DAY).toISOString();
-  const ENDED = new Date(NOW - 20 * DAY).toISOString();
+  const { TOTAL_DAYS, END_GRACE_DAYS } = globalThis.ViewLensStudy;
+  const ENDED = new Date(
+    NOW - (TOTAL_DAYS + END_GRACE_DAYS + 2) * DAY,
+  ).toISOString();
 
   let gates;
   beforeAll(async () => {

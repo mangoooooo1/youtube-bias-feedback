@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import "../study-schedule.js";
 
 // E2E: 시청 감지 이후 단계 — 세션 분석 → 서버 전송(videoId 목록만 보내면 서버가
 // categoryId 조회·다양성 계산·세션 저장·오늘 리뷰 생성을 한 번에 처리) → 응답 반영
@@ -103,6 +104,11 @@ function createFetchMock({
 
 const FIXED_NOW = new Date(2026, 0, 10, 12, 0, 0);
 const ACTIVE_INSTALL_DATE = new Date(2026, 0, 5).toISOString();
+// 전송 기간까지 끝난 설치일
+const { TOTAL_DAYS, END_GRACE_DAYS } = globalThis.ViewLensStudy;
+const ENDED_INSTALL_DATE = new Date(
+  FIXED_NOW - (TOTAL_DAYS + END_GRACE_DAYS + 2) * 86400000,
+).toISOString();
 
 async function loadAnalyzeSession() {
   vi.resetModules();
@@ -2316,7 +2322,7 @@ describe("참여자 등록 게이트 — 팝업을 열지 않아도 알람이 �
   it("참여가 종료됐으면 토큰 키가 없어도 재등록하지 않는다", async () => {
     const mod = await loadBackground({
       ...BASE,
-      installDate: new Date(FIXED_NOW - 20 * 86400000).toISOString(),
+      installDate: ENDED_INSTALL_DATE,
       participantSynced: true,
     });
     global.fetch = respond(200);
@@ -2773,8 +2779,6 @@ describe("참여 기간 종료 — 전송 기간이 끝나면 서버 요청을 �
   const DAY = 86400000;
   // 수집 종료(설치+12일이 속한 KST 날짜의 00:00)로부터 FIXED_NOW까지 1~2일 → grace
   const GRACE_INSTALL_DATE = new Date(FIXED_NOW - 13 * DAY).toISOString();
-  // 8~9일 → ended
-  const ENDED_INSTALL_DATE = new Date(FIXED_NOW - 20 * DAY).toISOString();
 
   function backlog(installDate) {
     return {
@@ -3012,6 +3016,28 @@ describe("참여 기간 종료 — 전송 기간이 끝나면 서버 요청을 �
     expect(currentSession).toBeNull();
   });
 
+  it("수집 종료 4~5일 뒤에 크롬을 켜도 남은 세션과 시청 시간을 보낸다", async () => {
+    const installDate = new Date(
+      FIXED_NOW - (TOTAL_DAYS + 4) * DAY,
+    ).toISOString();
+    await loadBackground(openLastDaySession(installDate));
+    global.fetch = okFetch();
+
+    startChrome();
+    await vi.advanceTimersByTimeAsync(0);
+
+    const requests = global.fetch.mock.calls.map(([url, options]) => ({
+      path: `${options.method} ${new URL(url).pathname}`,
+      body: JSON.parse(options.body),
+    }));
+    expect(
+      requests
+        .filter((r) => r.path === "POST /api/sessions")
+        .map((r) => r.body.sessionId),
+    ).toContain("last");
+    expect(requests.map((r) => r.path)).toContain("PATCH /api/video-events/e2");
+  });
+
   it("ended에 크롬을 켜면 세션은 닫되 서버로 보내지 않는다", async () => {
     await loadBackground(openLastDaySession(ENDED_INSTALL_DATE));
     global.fetch = okFetch();
@@ -3162,12 +3188,11 @@ describe("오류 원격 보고 — 서버에서 안 보이는 확장 오류를 �
   });
 
   it("참여 기간이 끝났으면 모인 오류도 보내지 않는다", async () => {
-    const ended = new Date(FIXED_NOW - 20 * 86400000).toISOString();
     global.chrome = createChromeMock();
     global.chrome.tabs.create = vi.fn();
     await global.chrome.storage.local.set({
       ...BASE,
-      installDate: ended,
+      installDate: ENDED_INSTALL_DATE,
       pendingClientErrors: {
         "TASK_CRASHED|background.serverTasks": {
           code: "TASK_CRASHED",
