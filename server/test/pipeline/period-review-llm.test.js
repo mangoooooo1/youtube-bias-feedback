@@ -12,6 +12,10 @@ const FULL_SHARE_PRINCIPLE =
   '- 한 분야가 시청 시간의 100%이면 퍼센트 대신 "전부"로 말하세요(예: "시청 시간 전부가 음악이었어요").';
 const POLITICAL_TOPIC_PRINCIPLE =
   "- 제목에 나온 인물·사건 이름은 사실대로 말해도 됩니다. 단, 제목의 주장은 사실로 단정하지 말고 무엇에 관한 영상인지만 말하며, 제목의 평가·조롱 표현은 옮기지 마세요. 시청자가 어떤 인물·정당·진영을 지지하거나 반대하는지, 호감이나 반감을 가졌는지 추론하지 말고, 영상이나 채널을 보수·진보로 분류하지 마세요.";
+const JUDGMENT_PRINCIPLE =
+  '"다양하다/다양하지 못하다/편중됐다/쏠렸다/균형 잡혔다"처럼 시청을 좋거나 나쁘게 판정하는 말';
+const SENSITIVE_TRAIT_PRINCIPLE =
+  "- 시청자의 성적 지향·성별 정체성, 종교, 건강·질병·장애·임신, 감정·정신 상태, 국적·인종, 경제 사정 같은 개인적 특성을 추론하거나 단정하지 마세요. 그런 주제의 영상을 봤다면 무엇에 관한 영상을 봤는지까지만 말하세요.";
 const TOPIC_INSTRUCTION =
   '"topic": "비중이 큰 분야의 영상 제목에서 드러나는 구체적인 소재를 5단어 이내 명사구로 (예: 야구 하이라이트). 분야 이름을 그대로 쓰지 말고, 정치·시사 소재는 인물 이름 대신 사건·주제로 쓸 것"';
 
@@ -90,9 +94,7 @@ describe("buildPeriodPrompt — 지침", () => {
   it("넘겨준 퍼센트만 쓰고 판정·권유 없이, 세부 소재와 업로더 분야 지침을 포함한다", () => {
     const prompt = buildPeriodPrompt(baseArgs());
     expect(prompt).toContain("숫자는 위에 적힌 것만 그대로 쓰세요");
-    expect(prompt).toContain(
-      '"편중됐다/다양하지 못하다/균형 잡혔다"처럼 시청을 좋거나 나쁘게 평가하는 말',
-    );
+    expect(prompt).toContain(JUDGMENT_PRINCIPLE);
     expect(prompt).toContain("위 숫자로 확인되지 않는 패턴은 말하지 마세요");
     expect(prompt).toContain("비중이 가장 큰 분야는 그 퍼센트와 함께 언급");
     expect(prompt).toContain("어떤 소재를 주로 봤는지 제목을 근거로 짚어");
@@ -123,6 +125,11 @@ describe("buildPeriodPrompt — 지침", () => {
     const prompt = buildPeriodPrompt(baseArgs());
     expect(prompt).toContain(POLITICAL_TOPIC_PRINCIPLE);
     expect(prompt).not.toContain("주장이나 논조는 절대 요약·평가하지 마세요");
+  });
+
+  it("오늘 리뷰와 같은 문구로 개인적 특성은 추론하지 않고 무엇에 관한 영상인지만 말하게 한다", () => {
+    const prompt = buildPeriodPrompt(baseArgs());
+    expect(prompt).toContain(SENSITIVE_TRAIT_PRINCIPLE);
   });
 
   it("오늘 리뷰와 같은 문구로 topic을 분야 이름이 아니라 제목의 세부 소재로 쓰게 한다", () => {
