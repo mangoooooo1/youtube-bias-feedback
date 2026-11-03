@@ -2449,6 +2449,10 @@ function createTabBrowser() {
         await done;
         await flushPendingMicrotasks(50);
       },
+      // 이동 이벤트(handleVideoChange) 없이 주소만 바꾼다(이동이 끝나기 전 상태)
+      setUrl(nextVideoId) {
+        location.href = `https://www.youtube.com/watch?v=${nextVideoId}`;
+      },
       // 이 페이지를 닫고(pagehide) 같은 탭에서 같은 주소를 새로 연다
       async reload(options = {}) {
         pagehide();
@@ -2725,6 +2729,169 @@ describe("content.js 같은 탭에서 다시 연 영상 — 마지막 재생 후
     await page.goTo("AAAA");
 
     expect(browser.recordsOf("AAAA")).toHaveLength(2);
+  });
+});
+
+describe("content.js 같은 탭에서 일시정지 후 다시 재생 — 마지막 재생 후 10분이 지났으면 새 시청으로 기록한다", () => {
+  const MINUTE = 60 * 1000;
+  let browser;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-26T10:00:00Z"));
+    browser = createTabBrowser();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("11분 멈춘 뒤 재생하면 앞 기록은 멈춘 시점 값으로 확정하고, 다시 재생한 시각으로 앞 기록에 이어진 새 기록을 만든다", async () => {
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    const resumedAt = new Date().toISOString();
+    await page.play(30);
+    await page.goTo("BBBB");
+
+    const [first, second] = browser.recordsOf("AAAA");
+    expect(browser.recordsOf("AAAA")).toHaveLength(2);
+    expect(first).toMatchObject({
+      watchedSeconds: 60,
+      resumedFromEventId: null,
+    });
+    expect(second).toMatchObject({
+      watchedSeconds: 30,
+      watchedAt: resumedAt,
+      resumedFromEventId: first.eventId,
+      entryHost: null,
+      entryPath: null,
+      navigationTrigger: null,
+    });
+    expect(second.eventId).not.toBe(first.eventId);
+  });
+
+  it("새 기록을 만들면 마지막 시청 시각이 다시 재생한 시각으로 바뀌어 팝업이 수집 중으로 보인다", async () => {
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    const resumedAt = new Date().toISOString();
+    await page.play(30);
+
+    expect(browser.storage.dump().lastWatchedAt).toBe(resumedAt);
+  });
+
+  it("9분 멈춘 뒤 재생하면 지금처럼 같은 기록에 이어 쓴다", async () => {
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(9 * MINUTE);
+    await page.play(30);
+    await page.goTo("BBBB");
+
+    expect(browser.recordsOf("AAAA").map((r) => r.watchedSeconds)).toEqual([
+      90,
+    ]);
+  });
+
+  it("정확히 10분 멈췄으면 새 시청이다(다시 연 영상의 규칙과 같음)", async () => {
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(10 * MINUTE);
+    await page.play(30);
+    await page.goTo("BBBB");
+
+    expect(browser.recordsOf("AAAA").map((r) => r.watchedSeconds)).toEqual([
+      60, 30,
+    ]);
+  });
+
+  it("23:50(KST)에 멈추고 다음 날 다시 재생하면 새 기록은 다음 날 시각으로 남는다", async () => {
+    vi.setSystemTime(Date.parse("2026-10-26T23:49:00+09:00"));
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    vi.setSystemTime(Date.parse("2026-10-27T00:05:00+09:00"));
+    await page.play(30);
+
+    expect(browser.recordsOf("AAAA")[1].watchedAt).toBe(
+      new Date("2026-10-27T00:05:00+09:00").toISOString(),
+    );
+  });
+
+  it("한 번도 재생하지 않고 11분 뒤 처음 재생하면 연 시점 기록(0초)과 새 기록으로 나눈다", async () => {
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    await page.play(30);
+    await page.goTo("BBBB");
+
+    const [first, second] = browser.recordsOf("AAAA");
+    expect([first.watchedSeconds, second.watchedSeconds]).toEqual([0, 30]);
+    expect(second.resumedFromEventId).toBe(first.eventId);
+  });
+
+  it("주소가 이미 다른 영상으로 바뀐 뒤의 재생(이동이 끝나기 전)으로는 앞 영상을 나누지 않는다", async () => {
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    page.setUrl("BBBB");
+    await page.play(5);
+
+    expect(browser.recordsOf("AAAA")).toHaveLength(1);
+    expect(browser.recordsOf("BBBB")).toHaveLength(0);
+  });
+
+  it("새로고침으로 이어 쓴 뒤에도 앞 시청의 마지막 재생 시각을 기준으로, 합쳐 11분 쉬었으면 나눈다", async () => {
+    let page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(6 * MINUTE);
+    page = await page.reload(); // 6분: 이어 씀
+    await vi.advanceTimersByTimeAsync(5 * MINUTE);
+    await page.play(30);
+    await page.goTo("BBBB");
+
+    expect(browser.recordsOf("AAAA").map((r) => r.watchedSeconds)).toEqual([
+      60, 30,
+    ]);
+  });
+});
+
+describe("content.js recordVideo — 다시 재생해 나누는 기록(resumedFromEventId)", () => {
+  it("앞 기록의 eventId를 저장·전송하고, 같은 세션에 같은 영상이 마지막 기록이어도 새로고침 중복으로 거르지 않는다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+      lastRecordedVideo: { videoId: "v1", sessionId: "s1", eventId: "evt-0" },
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    let sentBody = null;
+    const recordVideo = await loadRecordVideo(
+      { runtime: { id: "fake-extension-id" }, storage: { local: storage } },
+      (_url, options) => {
+        sentBody = JSON.parse(options.body);
+        return Promise.resolve({ ok: true });
+      },
+      { log: () => {}, warn: () => {} },
+    );
+
+    await recordVideo(
+      "v1",
+      "영상1",
+      null,
+      null,
+      null,
+      false,
+      null,
+      null,
+      "evt-0",
+    );
+    await flushMicrotasks();
+
+    const videos = collectVideos(storage.dump(), "s1");
+    expect(videos).toHaveLength(1);
+    expect(videos[0].resumedFromEventId).toBe("evt-0");
+    expect(sentBody).toMatchObject({
+      eventId: videos[0].eventId,
+      resumedFromEventId: "evt-0",
+    });
   });
 });
 
