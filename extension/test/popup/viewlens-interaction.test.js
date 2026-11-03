@@ -437,7 +437,7 @@ describe("대조군 연구 종료 코드 입력", () => {
     submitCode(input);
     await vi.waitFor(() => expect(hasFeedbackTabs(root)).toBe(true));
     expect(root.textContent).toContain("시청 기록을 불러오고 있어요.");
-    expect(root.textContent).not.toContain("이 날 시청 기록이 없어요");
+    expect(root.textContent).not.toContain("이 날은 유효한 시청 기록이 없어요");
     releaseSummary();
     await vi.waitFor(() =>
       expect(root.textContent).toContain("연구 기간의 하루 리뷰"),

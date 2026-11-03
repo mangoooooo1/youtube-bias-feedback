@@ -229,7 +229,7 @@ function screenTodayEmpty(
         </span>
       </div>
       <div>
-        <div style="font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em;text-wrap:pretty;word-break:keep-all">${pastStatusText ?? (isToday ? "아직 오늘 시청 기록이 없어요" : "이 날 시청 기록이 없어요")}</div>
+        <div style="font-size:var(--vl-fs-5);font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em;text-wrap:pretty;word-break:keep-all">${pastStatusText ?? (isToday ? "아직 오늘 시청 기록이 없어요" : "이 날은 유효한 시청 기록이 없어요")}</div>
         ${
           isToday
             ? `<p style="margin:8px 0 0;font-size:var(--vl-fs-3);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;max-width:240px">
@@ -238,7 +238,7 @@ function screenTodayEmpty(
             : ""
         }
       </div>
-      <div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3)">${dateLabel}</div>
+      ${isToday ? `<div style="font-size:var(--vl-fs-2);color:var(--vl-ink-3)">${dateLabel}</div>` : ""}
     </div>
   </div>`;
 }
@@ -323,8 +323,14 @@ function screenToday() {
   const d = VL.today;
   const view = d.view || VL.dayView(null);
   const hasRecord = view.confirmedCount + view.unconfirmedCount > 0;
-  if (d.isEmpty && !hasRecord) {
-    const isToday = d.dateLabel === koreanDateLabel(new Date());
+  const isToday = d.dateLabel === koreanDateLabel(new Date());
+  // 지난 날에 잠깐 본 영상만 있으면(집계를 받았고 셀 영상·리뷰가 없음) 기록 없는 날과 같은 화면으로 보인다
+  const noValidPastDay =
+    !isToday &&
+    view.status === "ok" &&
+    view.confirmedCount === 0 &&
+    !isRealReview(d.review);
+  if ((d.isEmpty && !hasRecord) || noValidPastDay) {
     return screenTodayEmpty(
       d.dateLabel,
       d.collectingCount,
@@ -334,7 +340,6 @@ function screenToday() {
     );
   }
 
-  const isToday = d.dateLabel === koreanDateLabel(new Date());
   // 잠금 상태는 VL._todayCumulative에서 읽는다.
   // d(VL.today, sessions 기준)에서 따로 계산하면 세션 종료 시 두 storage 갱신 사이의 간극 동안 블러 없이 새 리뷰가 잠깐 보이는 경합이 생긴다
   const reviewLocked = isToday && !!VL._todayCumulative?.locked;
