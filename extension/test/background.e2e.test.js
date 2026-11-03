@@ -1201,6 +1201,52 @@ describe("analyzeSession — watchedSecondsList를 세션 페이로드에 함께
 
     expect(calls.sessions[0].watchedSecondsList).toEqual([null]);
   });
+
+  it("멈췄다 이어 본 기록은 같은 세션 안 앞 기록의 위치를 보내고, videoCount는 그 기록을 하나로 센다", async () => {
+    global.chrome = createChromeMock();
+    const { fetchMock, calls } = createFetchMock({ todayReview: null });
+    global.fetch = fetchMock;
+    const videos = [
+      { videoId: "v1", eventId: "e1", watchedSeconds: 20 },
+      { videoId: "v2", eventId: "e2", watchedSeconds: 40 },
+      // 같은 세션 안에서 e1을 이어 봄
+      {
+        videoId: "v1",
+        eventId: "e3",
+        resumedFromEventId: "e1",
+        watchedSeconds: 20,
+      },
+      // 앞 기록이 다른 세션에 있음
+      {
+        videoId: "v3",
+        eventId: "e4",
+        resumedFromEventId: "e0",
+        watchedSeconds: 60,
+      },
+    ];
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
+          endTime: FIXED_NOW.toISOString(),
+          videos,
+        },
+      ],
+    });
+
+    const analyzeSession = await loadAnalyzeSession();
+    await analyzeSession({ sessionId: "s1", videos });
+
+    expect(calls.sessions[0]).toMatchObject({
+      videoIds: ["v1", "v2", "v1", "v3"],
+      resumedFromIndexes: [null, null, 0, null],
+      videoCount: 3,
+    });
+  });
 });
 
 describe("sendToServer — 재시도 큐가 판단할 수 있도록 전송 결과를 분류한다", () => {

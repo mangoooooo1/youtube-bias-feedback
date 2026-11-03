@@ -294,6 +294,44 @@ describe("validateSession — watchedSecondsList (옵션 필드, videoIds와 병
   );
 });
 
+describe("validateSession — resumedFromIndexes (옵션 필드, videoIds와 병렬)", () => {
+  const withIndexes = (resumedFromIndexes) =>
+    validateSession(
+      basePayload({ videoIds: ["v1", "v2", "v3"], resumedFromIndexes }),
+    );
+  const rejected = {
+    code: ERROR_CODES.INVALID_FIELD_VALUE,
+    field: "resumedFromIndexes",
+  };
+
+  it.each([undefined, null])(
+    "%s이면 통과한다(구버전 확장 하위호환)",
+    (value) => {
+      expect(withIndexes(value)).toBeNull();
+    },
+  );
+
+  it("각 값이 null이거나 자기보다 앞 위치이면 통과한다", () => {
+    expect(withIndexes([null, 0, 1])).toBeNull();
+    expect(withIndexes([null, null, 0])).toBeNull();
+  });
+
+  it("길이가 videoIds와 다르거나 배열이 아니면 거부한다", () => {
+    expect(withIndexes([null, 0])).toEqual(rejected);
+    expect(withIndexes("0,1")).toEqual(rejected);
+  });
+
+  it.each([
+    ["자기 자신을", [null, 1, null]],
+    ["뒤 위치를", [2, null, null]],
+    ["음수를", [null, -1, null]],
+    ["정수가 아닌 수를", [null, 0.5, null]],
+    ["문자열을", [null, "0", null]],
+  ])("%s 가리키면 거부한다(순환 연결 방지)", (_label, value) => {
+    expect(withIndexes(value)).toEqual(rejected);
+  });
+});
+
 describe("validateSession — videoIds", () => {
   it("videoIds가 없으면 MISSING_REQUIRED_FIELD로 거부한다", () => {
     const payload = basePayload();

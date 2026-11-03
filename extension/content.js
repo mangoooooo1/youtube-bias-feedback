@@ -492,7 +492,13 @@ function recordVideo(
           ...session,
           // 화면의 "N개 수집 중" 표시용 참고치일 뿐 저장 근거로는 쓰이지 않는다 —
           // 탭 경합으로 순간적으로 1 어긋나도(드묾) 실제 데이터에는 영향이 없다.
-          videoCount: (session.videoCount ?? 0) + 1,
+          // 멈췄다 이어 본 기록이 앞 기록과 같은 세션이면 같은 시청이라 세지 않는다
+          videoCount:
+            (session.videoCount ?? 0) +
+            (resumedFromEventId &&
+            previousVideoIdentity?.sessionId === session.sessionId
+              ? 0
+              : 1),
         },
         // eventId를 함께 저장해야, 다음 영상 전환 때 이 영상의 시청시간을 finalize할
         // video_events 행을 정확히 특정할 수 있다.

@@ -2993,6 +2993,48 @@ describe("content.js 일시정지 후 다시 재생해 나눌 때 — 세션 종
   });
 });
 
+describe("content.js 일시정지 후 다시 재생해 나눌 때 — 수집 중 영상 수", () => {
+  const MINUTE = 60 * 1000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-26T10:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("새 기록이 새 세션에 들어가면 그 세션의 수집 중 영상 수는 1이다", async () => {
+    const browser = createTabBrowser();
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    const firstSession = browser.storage.dump().currentSession.sessionId;
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    await page.play(30);
+
+    const { currentSession } = browser.storage.dump();
+    expect(currentSession.sessionId).not.toBe(firstSession);
+    expect(currentSession.videoCount).toBe(1);
+  });
+
+  it("다른 탭이 그 사이 세션을 이어 줘 앞 기록과 같은 세션에 들어가면 수집 중 영상 수를 올리지 않는다", async () => {
+    const browser = createTabBrowser();
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    const firstSession = browser.storage.dump().currentSession.sessionId;
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    // 다른 탭이 방금 영상을 기록했다(같은 세션이 이어짐)
+    await browser.storage.set({ lastWatchedAt: new Date().toISOString() });
+    await page.play(30);
+
+    const { currentSession } = browser.storage.dump();
+    expect(currentSession.sessionId).toBe(firstSession);
+    expect(currentSession.videoCount).toBe(1);
+    expect(browser.recordsOf("AAAA")).toHaveLength(2);
+  });
+});
+
 describe("content.js recordVideo — 다시 재생해 나누는 기록(resumedFromEventId)", () => {
   it("앞 기록의 eventId를 저장·전송하고, 같은 세션에 같은 영상이 마지막 기록이어도 새로고침 중복으로 거르지 않는다", async () => {
     const storage = createSharedStorage({

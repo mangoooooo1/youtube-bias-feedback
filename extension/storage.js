@@ -202,6 +202,32 @@ function mergeVideos(existing, incoming) {
 }
 
 /**
+ * 세션 영상 목록에서 멈췄다 이어 본 기록이 가리키는 앞 기록의 위치. 앞 기록이 이 세션에 없으면 null.
+ * 앞 위치만 가리키게 만들어 순환 연결이 생기지 않는다. 서버는 이 위치로 이어진 기록을 한 시청으로 센다.
+ * @param {Array<{eventId?: string, resumedFromEventId?: string|null}>} videos - 본 시각 순 세션 영상
+ * @returns {(number|null)[]}
+ */
+export function resumedFromIndexes(videos) {
+  const indexById = new Map();
+  return videos.map((v, i) => {
+    const from = v.resumedFromEventId
+      ? indexById.get(v.resumedFromEventId)
+      : undefined;
+    if (v.eventId) indexById.set(v.eventId, i);
+    return from ?? null;
+  });
+}
+
+/**
+ * 세션의 시청 수. 같은 세션 안에서 멈췄다 이어 본 기록은 하나로 센다.
+ * @param {Array<object>} videos - 본 시각 순 세션 영상
+ * @returns {number}
+ */
+export function sessionWatchCount(videos) {
+  return resumedFromIndexes(videos).filter((i) => i === null).length;
+}
+
+/**
  * 이미 sessions[]에 있는 세션에 영상을 합친다. 시작 시각과 분석 결과 필드는 그대로 둔다.
  * 아직 보내지 않은 세션은 재시도 큐가 찾도록 전송 대기로 둔다.
  */

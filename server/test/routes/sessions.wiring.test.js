@@ -356,6 +356,50 @@ describe("POST /api/sessions — 클릭성 이탈 필터링 및 시간 가중 en
     expect(row.validVideoCount).toBe(1);
   });
 
+  it("resumedFromIndexes로 이어진 기록은 한 시청으로 합쳐, 조각마다 20초여도 유효 영상 1건으로 센다", async () => {
+    // wt-game을 20초 보고 멈췄다가 같은 세션에서 다시 20초 — 합치면 40초라 유효하다
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "resumed-in-session",
+          videoIds: ["wt-game", "wt-music", "wt-game"],
+          watchedSecondsList: [20, 40, 20],
+          resumedFromIndexes: [null, null, 0],
+        }),
+      );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.categoryDistribution).toEqual({
+      게임: 0.5,
+      음악: 0.5,
+    });
+    const row = db
+      .prepare("SELECT * FROM sessions WHERE sessionId = ?")
+      .get("resumed-in-session");
+    expect(row.validVideoCount).toBe(2);
+  });
+
+  it("resumedFromIndexes가 앞 위치가 아닌 곳을 가리키면 400이고 저장하지 않는다", async () => {
+    const res = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "resumed-forward",
+          videoIds: ["wt-game", "wt-game"],
+          watchedSecondsList: [20, 20],
+          resumedFromIndexes: [1, null],
+        }),
+      );
+
+    expect(res.status).toBe(400);
+    expect(
+      db
+        .prepare("SELECT COUNT(*) AS c FROM sessions WHERE sessionId = ?")
+        .get("resumed-forward").c,
+    ).toBe(0);
+  });
+
   it("유효한 영상들에 한해 시청시간으로 가중한 weightedEntropy/weightedCategoryDistribution을 함께 저장한다", async () => {
     // 둘 다 유효(wt-game=40초, wt-music=120초)하지만 개수는 1:1, 시청시간은 40:120(1:3)
     // 개수 기준 entropy(균등, 1.0)와 시간 가중 entropy(비균등, 더 낮음)가 갈려야 한다.

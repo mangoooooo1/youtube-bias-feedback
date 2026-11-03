@@ -33,9 +33,15 @@ const router = express.Router();
  * @param {import("better-sqlite3").Database} db - DB 커넥션
  * @param {string[]} videoIds - 세션에서 시청한 videoId 목록 (중복 포함)
  * @param {(number|null)[]|undefined} watchedSecondsList - videoIds와 병렬인 시청시간(초) 원시값, 없으면 undefined
+ * @param {(number|null)[]|undefined} resumedFromIndexes - videoIds와 병렬. 멈췄다 이어 본 기록이면 앞 기록의 위치
  * @returns {{categoryDistribution: object, entropy: number, weightedCategoryDistribution: object|null, weightedEntropy: number|null, validVideoCount: number}}
  */
-function computeSessionAnalysis(db, videoIds, watchedSecondsList) {
+function computeSessionAnalysis(
+  db,
+  videoIds,
+  watchedSecondsList,
+  resumedFromIndexes,
+) {
   const categoryIds = getCategoryIdsForVideos(db, videoIds);
   const durations = getDurationsForVideos(db, videoIds);
   const list = Array.isArray(watchedSecondsList)
@@ -45,6 +51,10 @@ function computeSessionAnalysis(db, videoIds, watchedSecondsList) {
   // 유효 시청 판정·영상 길이 상한·분포 계산은 기간·오늘 집계와 같은 공통 모듈을 쓴다
   const aggregate = aggregateViewing(
     videoIds.map((_, i) => ({
+      // 위치를 기록 ID로 써서 이어진 기록을 한 시청으로 합친다
+      eventId: String(i),
+      resumedFromEventId:
+        resumedFromIndexes?.[i] != null ? String(resumedFromIndexes[i]) : null,
       categoryId: categoryIds[i],
       durationSeconds: durations[i],
       watchedSeconds: list[i] ?? null,
@@ -75,7 +85,7 @@ router.post("/", requireParticipant, async (req, res, next) => {
   // categoryId 조회·다양성 계산은 이제 서버 책임이다.
   // 클라이언트는 이 세션에서 시청한 videoId 목록(중복 포함)과, 같은 순서의 시청시간
   // 원시 데이터(watchedSecondsList, 선택)만 보낸다.
-  const { videoIds, watchedSecondsList } = req.body;
+  const { videoIds, watchedSecondsList, resumedFromIndexes } = req.body;
   const youtubeStart = Date.now();
   await ensureVideoMetadata(db, videoIds, process.env.YOUTUBE_API_KEY);
   // YOUTUBE_API_KEY 미설정·일시적 API 장애 등으로 일부 videoId가 끝내 캐시되지
@@ -86,7 +96,12 @@ router.post("/", requireParticipant, async (req, res, next) => {
   const unresolvedVideoIds = findMissingVideoIds(db, videoIds);
   const analysis =
     unresolvedVideoIds.length === 0
-      ? computeSessionAnalysis(db, videoIds, watchedSecondsList)
+      ? computeSessionAnalysis(
+          db,
+          videoIds,
+          watchedSecondsList,
+          resumedFromIndexes,
+        )
       : {
           categoryDistribution: null,
           entropy: null,
