@@ -645,6 +645,92 @@ describe("VL.playedVideos·VL.needsServerVideos — 서버에서 받은 그날 �
   });
 });
 
+describe("VL.playedVideos·VL.needsServerVideos — 멈췄다 이어 본 기록은 한 줄", () => {
+  let VL;
+  beforeAll(async () => {
+    VL = await loadVL();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const DATE = "2026-03-05";
+  const v = (eventId, watchedAt, extra = {}) => ({
+    eventId,
+    videoId: "vid-same",
+    title: "이어 본 영상",
+    watchedAt,
+    watchedSeconds: 20,
+    ...extra,
+  });
+
+  it("끝난 세션과 진행 중인 세션에 나뉜 두 기록을 맨 앞 기록 한 줄로 보여 준다", () => {
+    const sessions = [{ videos: [v("e1", "2026-03-05T10:00:00+09:00")] }];
+    const live = [
+      v("e2", "2026-03-05T10:30:00+09:00", { resumedFromEventId: "e1" }),
+    ];
+
+    const list = VL.playedVideos(sessions, live, DATE);
+
+    expect(list.map((x) => x.eventId)).toEqual(["e1"]);
+  });
+
+  it("여러 번 이어진 기록도 한 줄이고, 시청 시간을 아는 조각이 하나라도 있으면 미확인 표시를 하지 않는다", () => {
+    const live = [
+      v("e1", "2026-03-05T10:00:00+09:00", { watchedSeconds: null }),
+      v("e2", "2026-03-05T10:30:00+09:00", { resumedFromEventId: "e1" }),
+      v("e3", "2026-03-05T11:00:00+09:00", {
+        resumedFromEventId: "e2",
+        watchedSeconds: null,
+      }),
+    ];
+
+    const list = VL.playedVideos([], live, DATE);
+
+    expect(list.map((x) => [x.eventId, x.mark])).toEqual([["e1", null]]);
+  });
+
+  it("맨 앞 기록은 서버 목록에만 있고 뒤 기록은 기기에 있어도 한 줄이다", () => {
+    const live = [
+      v("e2", "2026-03-05T10:30:00+09:00", { resumedFromEventId: "e1" }),
+    ];
+    const server = [v("e1", "2026-03-05T10:00:00+09:00")];
+
+    expect(
+      VL.playedVideos([], live, DATE, {}, {}, server).map((x) => x.eventId),
+    ).toEqual(["e1"]);
+  });
+
+  it("앞 기록이 전날이면 그날 목록에서는 따로 한 줄이다", () => {
+    const sessions = [{ videos: [v("e1", "2026-03-04T23:50:00+09:00")] }];
+    const live = [
+      v("e2", "2026-03-05T00:05:00+09:00", { resumedFromEventId: "e1" }),
+    ];
+
+    expect(VL.playedVideos(sessions, live, DATE).map((x) => x.eventId)).toEqual(
+      ["e2"],
+    );
+  });
+
+  it("연결 없이 같은 영상을 다시 본 기록은 두 줄이다", () => {
+    const live = [
+      v("e1", "2026-03-05T10:00:00+09:00"),
+      v("e2", "2026-03-05T10:30:00+09:00"),
+    ];
+
+    expect(VL.playedVideos([], live, DATE)).toHaveLength(2);
+  });
+
+  it("서버 목록이 필요한지는 합친 수로 판단한다(서버 기록 수도 합친 기준)", () => {
+    const live = [
+      v("e1", "2026-03-05T10:00:00+09:00"),
+      v("e2", "2026-03-05T10:30:00+09:00", { resumedFromEventId: "e1" }),
+    ];
+
+    expect(VL.needsServerVideos([], live, [], DATE, 1)).toBe(false);
+    expect(VL.needsServerVideos([], live, [], DATE, 2)).toBe(true);
+  });
+});
+
 describe("VL.reviewAsOfLabel — 리뷰 카드의 기준 시각", () => {
   let VL;
   beforeAll(async () => {
