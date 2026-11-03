@@ -619,3 +619,91 @@ describe("getDayVideos — 날짜 하나의 영상 목록", () => {
     });
   });
 });
+
+describe("멈췄다 이어 본 기록 — 팝업 집계·날짜별 개수·그날 목록에서 한 시청으로 센다", () => {
+  const INSTALL = "2026-03-01T00:00:00+09:00";
+  const NOW = new Date("2026-03-06T12:00:00+09:00");
+
+  // 같은 영상을 같은 탭에서 멈췄다 다시 재생해 두 기록으로 나뉜 경우. 조각마다 20초라 따로 보면 잠깐 본 영상이다
+  function addResumedPair(anonymousId, { first, second }) {
+    db.prepare(
+      "INSERT OR IGNORE INTO video_metadata (videoId, categoryId, durationSeconds) VALUES ('vs-resumed', '10', 600)",
+    ).run();
+    const insert = db.prepare(
+      `INSERT INTO video_events (eventId, resumedFromEventId, anonymousId, videoId, title, watchedAt, watchedSeconds)
+       VALUES (?, ?, ?, 'vs-resumed', '이어 본 영상', ?, 20)`,
+    );
+    insert.run(`${anonymousId}-r1`, null, anonymousId, first);
+    insert.run(`${anonymousId}-r2`, `${anonymousId}-r1`, anonymousId, second);
+  }
+
+  it("같은 날이면 날짜·구간 집계에서 유효 영상 1건이고 잠깐 본 영상으로 빠지지 않는다", () => {
+    addParticipant("resumed", "TEST-EXP", INSTALL);
+    addResumedPair("resumed", {
+      first: "2026-03-05T10:00:00+09:00",
+      second: "2026-03-05T10:30:00+09:00",
+    });
+
+    const { days, periods } = getViewingSummary(db, "resumed", NOW);
+
+    expect(days).toHaveLength(1);
+    expect(days[0]).toMatchObject({ validCount: 1, shortCount: 0 });
+    expect(periods[1]).toMatchObject({ validCount: 1, shortCount: 0 });
+  });
+
+  it("자정을 넘겨 이어 보면 날마다 따로 판정하고, 구간에서는 한 시청으로 합친다", () => {
+    addParticipant("midnight", "TEST-EXP", INSTALL);
+    addResumedPair("midnight", {
+      first: "2026-03-05T23:50:00+09:00",
+      second: "2026-03-06T00:05:00+09:00",
+    });
+
+    const { days, periods } = getViewingSummary(db, "midnight", NOW);
+
+    expect(days.map((d) => [d.date, d.validCount, d.shortCount])).toEqual([
+      ["2026-03-05", 0, 1],
+      ["2026-03-06", 0, 1],
+    ]);
+    expect(periods[1]).toMatchObject({ validCount: 1, shortCount: 0 });
+  });
+
+  it("자격이 없을 때 날짜별 개수에도 같은 규칙을 쓴다", () => {
+    addParticipant(
+      "resumed-con",
+      "CON",
+      new Date(Date.now() - 6 * DAY_MS).toISOString(),
+    );
+    const today = new Date();
+    addResumedPair("resumed-con", {
+      // 자정 직후 실행돼도 날짜가 갈리지 않게 같은 시각으로 둔다
+      first: today.toISOString(),
+      second: today.toISOString(),
+    });
+
+    const { dayCounts } = getViewingSummary(db, "resumed-con");
+
+    expect(dayCounts).toEqual([{ date: kstDate(today), validCount: 1 }]);
+  });
+
+  it("그날 목록은 맨 앞 기록 한 줄에 시청 시간을 합쳐 돌려주고, 수가 그날 validCount + shortCount와 같다", () => {
+    addParticipant("resumed-list", "TEST-EXP", INSTALL);
+    addResumedPair("resumed-list", {
+      first: "2026-03-05T10:00:00+09:00",
+      second: "2026-03-05T10:30:00+09:00",
+    });
+
+    const { videos } = getDayVideos(db, "resumed-list", "2026-03-05", NOW);
+    const day = getViewingSummary(db, "resumed-list", NOW).days[0];
+
+    expect(videos).toEqual([
+      {
+        eventId: "resumed-list-r1",
+        videoId: "vs-resumed",
+        watchedAt: "2026-03-05T10:00:00+09:00",
+        watchedSeconds: 40,
+        title: "이어 본 영상",
+      },
+    ]);
+    expect(videos).toHaveLength(day.validCount + day.shortCount);
+  });
+});

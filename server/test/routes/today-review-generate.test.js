@@ -10,6 +10,7 @@ function createTestDb() {
     CREATE TABLE video_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       eventId TEXT,
+      resumedFromEventId TEXT,
       anonymousId TEXT NOT NULL,
       videoId TEXT,
       sessionId TEXT,
@@ -268,6 +269,34 @@ describe("generateAndStoreTodayReview", () => {
       .get("u-valid");
     expect(row.videoCount).toBe(3);
     expect(row.validVideoCount).toBe(2);
+  });
+
+  it("멈췄다 이어 본 두 기록은 한 시청으로 세어, 조각마다 잠깐 본 영상이어도 영상 수·유효 영상 수가 1이다", async () => {
+    const db = createTestDb();
+    const now = new Date("2026-03-10T20:00:00+09:00");
+    db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES ('vid-resumed', '10', 600)",
+    ).run();
+    const insert = db.prepare(
+      `INSERT INTO video_events (eventId, resumedFromEventId, anonymousId, videoId, sessionId, title, watchedAt, watchedSeconds)
+       VALUES (?, ?, 'u-resumed', 'vid-resumed', ?, '이어 본 영상', ?, 20)`,
+    );
+    insert.run("r1", null, "s1", "2026-03-10T10:00:00+09:00");
+    insert.run("r2", "r1", "s2", "2026-03-10T10:30:00+09:00");
+
+    await generateAndStoreTodayReview(db, {
+      anonymousId: "u-resumed",
+      apiKey: undefined,
+      now,
+    });
+
+    const row = db
+      .prepare("SELECT * FROM today_reviews WHERE anonymousId = ?")
+      .get("u-resumed");
+    expect(row.videoCount).toBe(1);
+    expect(row.validVideoCount).toBe(1);
+    expect(row.sessionCount).toBe(2);
+    db.close();
   });
 
   it("오늘 영상이 모두 카테고리를 못 가져왔으면 Gemini 없이 폴백 리뷰를 저장한다(리뷰를 보류하지 않음)", async () => {

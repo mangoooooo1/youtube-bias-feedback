@@ -45,7 +45,8 @@ function aggregateTodayCumulative({ events, now = new Date() }) {
     reviewDate: today,
     categoryDistribution: aggregate.analysisDistribution,
     entropy: aggregate.entropy,
-    videoCount: todayEvents.length,
+    // 잠깐 본 영상까지 포함한 시청 수. 멈췄다 이어 본 기록은 하나로 센다
+    videoCount: aggregate.validCount + aggregate.shortCount,
     // 리뷰가 "봤다"고 말하는 영상 수(시청 시간이 확인된 유효 영상). 재생성 판단에도 쓴다 —
     // 보는 중이던 영상의 시청 시간이 도착하면 늘어나 리뷰를 다시 만든다
     validVideoCount: aggregate.confirmedCount,

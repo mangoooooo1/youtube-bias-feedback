@@ -6,6 +6,7 @@
 const {
   aggregateViewing,
   aggregateViewingByDay,
+  mergeResumedWatches,
 } = require("../pipeline/viewing-aggregate");
 const { kstDateStr, dayFromInstall } = require("../pipeline/period-boundaries");
 const { TOTAL_DAYS, DAYS_PER_PERIOD } = require("../pipeline/study-constants");
@@ -78,7 +79,7 @@ function startedPeriods(installDate, today) {
 function dayCountsOf(db, anonymousId) {
   const events = db
     .prepare(
-      `SELECT e.watchedAt, e.watchedSeconds, m.durationSeconds
+      `SELECT e.eventId, e.resumedFromEventId, e.watchedAt, e.watchedSeconds, m.durationSeconds
        FROM video_events e
        LEFT JOIN video_metadata m ON m.videoId = e.videoId
        WHERE e.anonymousId = ?
@@ -112,7 +113,7 @@ function getViewingSummary(db, anonymousId, now = new Date()) {
 
   const events = db
     .prepare(
-      `SELECT e.eventId, e.watchedAt, e.watchedSeconds, m.categoryId, m.durationSeconds,
+      `SELECT e.eventId, e.resumedFromEventId, e.watchedAt, e.watchedSeconds, m.categoryId, m.durationSeconds,
               e.title AS sentTitle, TRIM(m.title) AS metadataTitle
        FROM video_events e
        LEFT JOIN video_metadata m ON m.videoId = e.videoId
@@ -160,18 +161,30 @@ function getDayVideos(db, anonymousId, date, now = new Date()) {
     .get(anonymousId);
   if (!isTodayReviewEligible(participant, now)) return { date, videos: [] };
 
-  const videos = db
+  const events = db
     .prepare(
-      `SELECT eventId, videoId, watchedAt, watchedSeconds, title
-       FROM video_events
-       WHERE anonymousId = ?
-       ORDER BY watchedAt ASC`,
+      `SELECT e.eventId, e.videoId, e.watchedAt, e.watchedSeconds, e.title,
+              e.resumedFromEventId, m.durationSeconds
+       FROM video_events e
+       LEFT JOIN video_metadata m ON m.videoId = e.videoId
+       WHERE e.anonymousId = ?
+       ORDER BY e.watchedAt ASC`,
     )
     .all(anonymousId)
     .filter((e) => {
       const ms = Date.parse(e.watchedAt);
       return Number.isFinite(ms) && kstDateStr(new Date(ms)) === date;
     });
+  // 멈췄다 이어 본 기록은 집계처럼 한 줄로 합친다. 영상 길이·연결은 합칠 때만 쓴다
+  const videos = mergeResumedWatches(events).map(
+    ({ eventId, videoId, watchedAt, watchedSeconds, title }) => ({
+      eventId,
+      videoId,
+      watchedAt,
+      watchedSeconds,
+      title,
+    }),
+  );
   return { date, videos };
 }
 
