@@ -6,7 +6,12 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { main, rotateBackups, offsitePush } from "../../scripts/backup-db.js";
+import {
+  main,
+  rotateBackups,
+  offsitePush,
+  checkpointFully,
+} from "../../scripts/backup-db.js";
 
 const require = createRequire(import.meta.url);
 const Database = require("better-sqlite3-multiple-ciphers");
@@ -110,6 +115,9 @@ describe("main — 암호화 백업", () => {
     const files = backupFiles(backupDir);
     expect(files).toHaveLength(1);
 
+    // 검증용 임시 파일과 그 -wal·-shm이 남지 않는다
+    expect(fs.readdirSync(backupDir)).toEqual(files);
+
     const backup = openWithKey(path.join(backupDir, files[0]), KEY);
     try {
       expect(backup.pragma("integrity_check", { simple: true })).toBe("ok");
@@ -119,6 +127,51 @@ describe("main — 암호화 백업", () => {
     } finally {
       backup.close();
     }
+  });
+
+  it("복사본이 깨져 있으면 정식 백업을 남기지 않고 실패로 끝난다", async () => {
+    const corruptCopy = (src, dst) => {
+      const bytes = fs.readFileSync(src);
+      bytes.fill(0xff, 4096); // 첫 페이지 뒤를 덮어써 테이블 페이지를 망가뜨린다
+      fs.writeFileSync(dst, bytes);
+    };
+
+    await main({
+      dbPath,
+      backupDir,
+      retentionDays: 30,
+      encryptionKey: KEY,
+      copy: corruptCopy,
+    });
+
+    expect(process.exitCode).toBe(1);
+    expect(fs.readdirSync(backupDir)).toEqual([]);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[backup] 실패: 검증 실패"),
+    );
+  });
+
+  it("복사본에 원본보다 행이 적으면 실패로 끝난다", async () => {
+    const copyMissingRow = (src, dst) => {
+      fs.copyFileSync(src, dst);
+      const copied = openWithKey(dst, KEY);
+      copied.exec("DELETE FROM events WHERE id = 1");
+      copied.close();
+    };
+
+    await main({
+      dbPath,
+      backupDir,
+      retentionDays: 30,
+      encryptionKey: KEY,
+      copy: copyMissingRow,
+    });
+
+    expect(process.exitCode).toBe(1);
+    expect(fs.readdirSync(backupDir)).toEqual([]);
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[backup] 실패: 검증 실패 — events 행 수 부족(원본 3, 복사본 2)",
+    );
   });
 
   it("백업 파일은 틀린 키로 열 수 없다(암호화 유지)", async () => {
@@ -133,6 +186,27 @@ describe("main — 암호화 백업", () => {
     } finally {
       wrong.close();
     }
+  });
+});
+
+describe("checkpointFully — WAL 전부 반영 확인", () => {
+  const done = [{ busy: 0, log: 0, checkpointed: 0 }];
+  const busy = [{ busy: 1, log: 5, checkpointed: 2 }];
+
+  it("서버가 읽는 중이라 일부만 반영되면 다시 시도한다", async () => {
+    const db = {
+      pragma: vi.fn().mockReturnValueOnce(busy).mockReturnValue(done),
+    };
+    await checkpointFully(db, { attempts: 3, waitMs: 0 });
+    expect(db.pragma).toHaveBeenCalledTimes(2);
+  });
+
+  it("끝까지 다 반영되지 않으면 실패한다", async () => {
+    const db = { pragma: vi.fn().mockReturnValue(busy) };
+    await expect(
+      checkpointFully(db, { attempts: 3, waitMs: 0 }),
+    ).rejects.toThrow("WAL 체크포인트가 끝나지 않았습니다(3회 시도)");
+    expect(db.pragma).toHaveBeenCalledTimes(3);
   });
 });
 
