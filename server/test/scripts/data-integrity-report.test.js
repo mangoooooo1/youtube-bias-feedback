@@ -13,7 +13,14 @@ import {
   SETTLE_MS,
   RUN_INTERVAL_MS,
   NEAR_DUPLICATE_MS,
+  formatIntegritySummary,
+  reportToHealthchecks,
+  sendIntegrityGauges,
+  CHECK_TAGS,
+  ALLOWED_TAGS,
+  GAUGES,
 } from "../../scripts/data-integrity-report.js";
+import { formatMetric } from "../../monitoring/dogstatsd.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const NOW = Date.parse("2026-11-10T00:00:00.000Z");
@@ -465,5 +472,79 @@ describe("run — 점검 전체", () => {
     for (const name of Object.keys(CHECK_LABELS)) {
       expect(result[name]).toMatchObject({ total: 0, newCount: 0 });
     }
+  });
+});
+
+// 점검마다 다른 건수와, 식별자가 담긴 신규 행을 둔다
+function sampleResult() {
+  const secret = "11111111-2222-3333-4444-555555555555";
+  return Object.fromEntries(
+    Object.keys(CHECK_LABELS).map((name, i) => [
+      name,
+      {
+        total: i + 10,
+        newCount: i,
+        newRows: [{ anonymousId: secret, sessionId: "1793084950187" }],
+      },
+    ]),
+  );
+}
+
+describe("formatIntegritySummary — Healthchecks 본문", () => {
+  it("점검마다 전체·신규 건수를 담고, 식별자는 담지 않는다", () => {
+    const body = formatIntegritySummary(sampleResult());
+    for (const label of Object.values(CHECK_LABELS)) {
+      expect(body).toContain(label);
+    }
+    expect(body).toContain("세션 ID 공유 10(신규 0)");
+    expect(body).not.toContain("11111111");
+    expect(body).not.toContain("1793084950187");
+  });
+});
+
+describe("reportToHealthchecks — 실행 완료 알림", () => {
+  it("이상이 있어도 success를 POST로 보내고 본문에 건수를 싣는다", async () => {
+    const ping = { pingSuccess: vi.fn().mockResolvedValue({ ok: true }) };
+    const result = sampleResult();
+    await reportToHealthchecks(result, { ping });
+    expect(ping.pingSuccess).toHaveBeenCalledWith("DATA_INTEGRITY_PING_URL", {
+      method: "POST",
+      body: formatIntegritySummary(result),
+    });
+  });
+});
+
+describe("sendIntegrityGauges — Datadog gauge", () => {
+  it("점검마다 전체·신규 gauge를 check 태그로 하나씩 보낸다", () => {
+    const client = { send: vi.fn() };
+    sendIntegrityGauges(sampleResult(), client);
+    expect(client.send).toHaveBeenCalledTimes(
+      Object.keys(CHECK_TAGS).length * Object.keys(GAUGES).length,
+    );
+    expect(client.send).toHaveBeenCalledWith(GAUGES.total, 10, "g", {
+      check: "shared_session_ids",
+    });
+    expect(client.send).toHaveBeenCalledWith(GAUGES.newCount, 1, "g", {
+      check: "missing_suspected",
+    });
+  });
+
+  it("모든 점검에 태그가 있고, 보내는 줄은 형식 검증과 태그 허용 목록을 통과한다", () => {
+    expect(Object.keys(CHECK_TAGS)).toEqual(Object.keys(CHECK_LABELS));
+    const client = {
+      send: (name, value, type, tags) =>
+        expect(formatMetric(name, value, type, tags, ALLOWED_TAGS)).toBe(
+          `${name}:${value}|g|#check:${tags.check}`,
+        ),
+    };
+    sendIntegrityGauges(sampleResult(), client);
+  });
+
+  it("허용 목록 밖 check 값은 태그에서 버린다", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(
+      formatMetric(GAUGES.total, 1, "g", { check: "anon-123" }, ALLOWED_TAGS),
+    ).toBe(`${GAUGES.total}:1|g`);
+    vi.restoreAllMocks();
   });
 });

@@ -13,6 +13,11 @@
  * 매일 실행하면 각 이상은 "지금 − 2일 ~ 지금 − 1일" 창에서 한 번만 신규로 잡힌다.
  * TEST 그룹은 제외한다. 출력에는 anonymousId 원본 대신 지문만 남긴다.
  *
+ * 알림 역할(participant-silence-report.js와 같다):
+ * - Healthchecks.io: 점검이 돌았는지만 본다. 이상이 있어도 success(건수 본문), 실행이 실패하면 /fail.
+ * - Datadog: 점검별 전체·신규 건수를 gauge(check 태그)로 보내고, Monitor가 알린다.
+ * 외부로는 건수만 보내고, 누구인지는 서버 monitoring.log에만 남긴다.
+ *
  * 읽기 전용 — DB를 수정하지 않는다.
  *
  * 사용:
@@ -24,6 +29,10 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { fingerprint } = require("./fingerprint");
 const { TEST_CODES } = require("../routes/participant-recovery");
+const { pingSuccess, pingFail } = require("../monitoring/healthchecks-ping");
+const { createDogStatsd } = require("../monitoring/dogstatsd");
+
+const PING_ENV_VAR = "DATA_INTEGRITY_PING_URL";
 
 const DAY_MS = 86400000;
 // 이만큼 지난 것만 판정한다. 세션은 마지막 기록 10분 뒤 닫히고, 전송에 실패하면 1분마다 다시 보낸다
@@ -273,26 +282,83 @@ function run(db, { now = Date.now() } = {}) {
   return result;
 }
 
-function main() {
-  const { db } = require("../db");
-  try {
-    run(db);
-  } finally {
-    db.close();
+/** Healthchecks.io 본문. 건수만 담는다(식별자를 받지 않는다). */
+function formatIntegritySummary(result) {
+  return Object.entries(CHECK_LABELS)
+    .map(
+      ([name, label]) =>
+        `${label} ${result[name].total}(신규 ${result[name].newCount})`,
+    )
+    .join(" / ");
+}
+
+/** 실행 완료를 알린다. 이상이 있어도 success다(이상 알림은 Datadog 몫, 파일 상단 참고). */
+function reportToHealthchecks(result, { ping = { pingSuccess } } = {}) {
+  return ping.pingSuccess(PING_ENV_VAR, {
+    method: "POST",
+    body: formatIntegritySummary(result),
+  });
+}
+
+// check 태그값. Monitor가 이 값으로 알림 대상 점검을 고른다
+const CHECK_TAGS = {
+  sharedSessionIds: "shared_session_ids",
+  missingSuspected: "missing_suspected",
+  missingPending: "missing_pending",
+  undeterminedDistribution: "undetermined_distribution",
+  nearDuplicates: "near_duplicates",
+  sessionCountMismatches: "session_count_mismatches",
+};
+const ALLOWED_TAGS = { check: new Set(Object.values(CHECK_TAGS)) };
+const GAUGES = {
+  total: "viewlens.data_integrity.total",
+  newCount: "viewlens.data_integrity.new",
+};
+
+/** @param {{send: Function}} client */
+function sendIntegrityGauges(result, client) {
+  for (const [name, check] of Object.entries(CHECK_TAGS)) {
+    for (const [key, metric] of Object.entries(GAUGES)) {
+      client.send(metric, result[name][key], "g", { check });
+    }
   }
 }
 
-if (require.main === module) {
+async function main() {
+  const { db } = require("../db");
+  let result;
   try {
-    main();
+    result = run(db);
   } catch (err) {
+    await pingFail(PING_ENV_VAR, `실행 실패: ${err.message}`);
+    throw err;
+  } finally {
+    db.close();
+  }
+
+  await reportToHealthchecks(result);
+  console.log(`[data-integrity] 완료 — ${formatIntegritySummary(result)}.`);
+
+  const metrics = createDogStatsd({ allowedTags: ALLOWED_TAGS });
+  sendIntegrityGauges(result, metrics);
+  await metrics.close();
+}
+
+if (require.main === module) {
+  main().catch((err) => {
     console.error("[data-integrity] 스크립트 오류:", err.message);
     process.exitCode = 1;
-  }
+  });
 }
 
 module.exports = {
   run,
+  formatIntegritySummary,
+  reportToHealthchecks,
+  sendIntegrityGauges,
+  CHECK_TAGS,
+  ALLOWED_TAGS,
+  GAUGES,
   collectRecords,
   findSharedSessionIds,
   findMissingSessions,
