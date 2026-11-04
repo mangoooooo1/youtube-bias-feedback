@@ -152,7 +152,8 @@ async function processPeriod({
   const { entropy, weightedEntropy } = aggregate;
   const weightedCategoryDistribution = aggregate.weightedDistribution;
   const validVideoCount = aggregate.validCount;
-  // 잠깐 본 영상까지 포함한 기간 내 시청 수(세션 videoCount 합과 같은 의미). 멈췄다 이어 본 기록은 하나로 센다
+  // 잠깐 본 영상까지 포함한 기간 내 시청 수. 멈췄다 이어 본 기록은 기간 안에서 하나로 센다.
+  // 세션은 같은 세션 안에서만 합치므로, 세션을 넘겨 이어 본 시청이 있으면 세션 videoCount 합보다 작다
   const videoCount = aggregate.validCount + aggregate.shortCount;
 
   let result;
