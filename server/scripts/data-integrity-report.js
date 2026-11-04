@@ -210,11 +210,14 @@ function findSessionCountMismatches(events, sessions) {
 
 /**
  * 기준 시각이 SETTLE_MS 넘게 지난 것만 세고, 그중 직전 실행 이후 창에 든 것을 신규로 센다.
+ * 기준 시각을 읽을 수 없는 행(SQLite가 NULL을 돌려준 값 등)은 세지 않는다. null < 숫자는 참이라 따로 막는다.
  * @returns {{total: number, newCount: number, newRows: object[]}}
  */
 function classify(rows, now) {
   const settledBefore = now - SETTLE_MS;
-  const settled = rows.filter((r) => r.refMs < settledBefore);
+  const settled = rows.filter(
+    (r) => Number.isFinite(r.refMs) && r.refMs < settledBefore,
+  );
   const newRows = settled.filter(
     (r) => r.refMs >= settledBefore - RUN_INTERVAL_MS,
   );

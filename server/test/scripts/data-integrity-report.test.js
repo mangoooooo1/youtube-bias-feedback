@@ -78,9 +78,16 @@ describe("classify — 하루 지난 것만 세고, 직전 실행 이후 창을 
     expect(counts).toEqual([1, 0, 0]);
   });
 
-  it("기준 시각을 읽을 수 없는 행은 세지 않는다", () => {
-    expect(classify([{ refMs: NaN }], NOW).total).toBe(0);
-  });
+  // SQLite는 읽을 수 없는 시각을 NULL(null)로 돌려준다. null < 숫자는 참이라 따로 막아야 한다
+  it.each([NaN, null, undefined])(
+    "기준 시각을 읽을 수 없는 행(%s)은 세지 않는다",
+    (refMs) => {
+      expect(classify([{ refMs }], NOW)).toMatchObject({
+        total: 0,
+        newCount: 0,
+      });
+    },
+  );
 });
 
 describe("findSharedSessionIds — 한 sessionId를 둘 이상의 참여자가 씀", () => {
@@ -395,6 +402,34 @@ describe("collectRecords — DB 조회", () => {
       watchedAt: "not-a-date",
     });
     expect(collectRecords(db).events).toEqual([]);
+  });
+});
+
+describe("run — 종료 시각을 읽을 수 없는 세션 행", () => {
+  let db;
+  afterEach(() => {
+    db?.close();
+    vi.restoreAllMocks();
+  });
+
+  it("분포 미확정·시청 수 불일치의 전체 건수에 들어가지 않는다", () => {
+    db = createTestDb();
+    insertParticipant(db, "u1");
+    // 영상 기록 0건인데 영상 수 2, 분포 없음 → 시각만 맞으면 두 점검에 다 잡히는 행
+    insertSession(db, {
+      anonymousId: "u1",
+      sessionId: "broken",
+      endTime: "not-a-date",
+      videoCount: 2,
+      categoryDistribution: null,
+      createdAt: "2026-11-01 00:00:00",
+    });
+    expect(collectRecords(db).sessions[0].endMs).toBeNull();
+
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const result = run(db, { now: NOW });
+    expect(result.undeterminedDistribution.total).toBe(0);
+    expect(result.sessionCountMismatches.total).toBe(0);
   });
 });
 
