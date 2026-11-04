@@ -13,9 +13,9 @@ const router = express.Router();
 
 const insertEvent = db.prepare(`
   INSERT OR IGNORE INTO video_events
-    (eventId, anonymousId, videoId, title, watchedAt, sessionId, entryHost, entryPath, referrerType, relatedTrigger, isShortsUrl)
+    (eventId, anonymousId, videoId, title, watchedAt, sessionId, entryHost, entryPath, referrerType, relatedTrigger, isShortsUrl, resumedFromEventId)
   VALUES
-    (@eventId, @anonymousId, @videoId, @title, @watchedAt, @sessionId, @entryHost, @entryPath, @referrerType, @relatedTrigger, @isShortsUrl)
+    (@eventId, @anonymousId, @videoId, @title, @watchedAt, @sessionId, @entryHost, @entryPath, @referrerType, @relatedTrigger, @isShortsUrl, @resumedFromEventId)
 `);
 
 // entryPath를 저장해도 되는 referrerType 화이트리스트. 외부 사이트 경로(external)뿐 아니라,
@@ -53,6 +53,7 @@ router.post("/", requireParticipant, (req, res, next) => {
     entryPath,
     navigationTrigger,
     isShortsUrl,
+    resumedFromEventId,
   } = req.body;
 
   // referrerType/relatedTrigger는 요청 body로 직접 받지 않고,
@@ -80,6 +81,7 @@ router.post("/", requireParticipant, (req, res, next) => {
       referrerType,
       relatedTrigger,
       isShortsUrl: isShortsUrl === undefined ? null : isShortsUrl,
+      resumedFromEventId: resumedFromEventId ?? null,
     });
   } catch (err) {
     return next(err);

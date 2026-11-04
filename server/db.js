@@ -35,6 +35,7 @@ function initializeDB() {
     // 테스트·본 연구 중 추가한 열은 기존 행을 지킬 수 있도록 기존 DB에 소급 추가한다
     addColumn("today_reviews", "timeSharePercents", "TEXT");
     addColumn("popup_events", "pastDayReviewViews", "INTEGER");
+    addColumn("video_events", "resumedFromEventId", "TEXT");
     assertLatestColumns();
     backfillPeriodReviewVersions();
   } catch (err) {
@@ -155,6 +156,8 @@ function execSchema() {
       wasBackgrounded INTEGER, -- 이 영상 시청 중 탭이 한 번이라도 백그라운드로 전환된 적 있으면 1
       -- durationSeconds를 통한 쇼츠 여부 판별이 신뢰성이 부족하다고 판단하여, URL 경로로 직접 판별한다.
       isShortsUrl INTEGER,
+      -- 같은 탭에서 10분 넘게 멈췄다가 다시 재생해 새로 만든 기록이면 앞 기록의 eventId, 아니면 NULL
+      resumedFromEventId TEXT,
       createdAt   TEXT    DEFAULT (datetime('now'))
     );
 

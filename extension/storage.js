@@ -135,6 +135,7 @@ function buildClosedSession(sessionId, videos, startTime, endTime) {
         entryPath,
         navigationTrigger,
         isShortsUrl,
+        resumedFromEventId,
         watchedSeconds,
         playbackRate,
         wasBackgrounded,
@@ -151,6 +152,7 @@ function buildClosedSession(sessionId, videos, startTime, endTime) {
         entryPath,
         navigationTrigger,
         isShortsUrl,
+        resumedFromEventId,
         // 시청시간 원시 데이터 — 세션이 닫혀 video__ 키가 이 배열로 옮겨간
         // 뒤에도 background.js가 재시도 큐·세션 전송(watchedSecondsList)에 쓸 수 있도록
         // 그대로 들고 간다.
@@ -197,6 +199,32 @@ function mergeVideos(existing, incoming) {
     else withoutEventId.push(v);
   }
   return [...byEventId.values(), ...withoutEventId];
+}
+
+/**
+ * 세션 영상 목록에서 멈췄다 이어 본 기록이 가리키는 앞 기록의 위치. 앞 기록이 이 세션에 없으면 null.
+ * 앞 위치만 가리키게 만들어 순환 연결이 생기지 않는다. 서버는 이 위치로 이어진 기록을 한 시청으로 센다.
+ * @param {Array<{eventId?: string, resumedFromEventId?: string|null}>} videos - 본 시각 순 세션 영상
+ * @returns {(number|null)[]}
+ */
+export function resumedFromIndexes(videos) {
+  const indexById = new Map();
+  return videos.map((v, i) => {
+    const from = v.resumedFromEventId
+      ? indexById.get(v.resumedFromEventId)
+      : undefined;
+    if (v.eventId) indexById.set(v.eventId, i);
+    return from ?? null;
+  });
+}
+
+/**
+ * 세션의 시청 수. 같은 세션 안에서 멈췄다 이어 본 기록은 하나로 센다.
+ * @param {Array<object>} videos - 본 시각 순 세션 영상
+ * @returns {number}
+ */
+export function sessionWatchCount(videos) {
+  return resumedFromIndexes(videos).filter((i) => i === null).length;
 }
 
 /**
@@ -328,6 +356,7 @@ export async function getUnsentVideoEvents() {
       entryPath: v.entryPath,
       navigationTrigger: v.navigationTrigger,
       isShortsUrl: v.isShortsUrl,
+      resumedFromEventId: v.resumedFromEventId,
     }));
 
   const fromSessions = (all.sessions ?? []).flatMap((session) =>
@@ -344,6 +373,7 @@ export async function getUnsentVideoEvents() {
         entryPath: v.entryPath,
         navigationTrigger: v.navigationTrigger,
         isShortsUrl: v.isShortsUrl,
+        resumedFromEventId: v.resumedFromEventId,
       })),
   );
 

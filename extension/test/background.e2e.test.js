@@ -715,6 +715,43 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
     expect(all["video__s1__uuid1"].sent).toBe(true);
   });
 
+  it("다시 재생해 새로 만든 기록을 재전송하면 앞 기록의 eventId(resumedFromEventId)도 함께 보낸다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { videoEvents: [] };
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.endsWith("/api/video-events")) {
+        calls.videoEvents.push(JSON.parse(options.body));
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      currentSession: { sessionId: "s2", startTime: "2026-01-10T11:20:00Z" },
+      video__s2__uuid2: {
+        videoId: "v1",
+        watchedAt: "2026-01-10T11:20:00Z",
+        sent: false,
+        eventId: "uuid2",
+        resumedFromEventId: "uuid1",
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentVideoEvents();
+
+    expect(calls.videoEvents).toHaveLength(1);
+    expect(calls.videoEvents[0]).toMatchObject({
+      eventId: "uuid2",
+      resumedFromEventId: "uuid1",
+    });
+  });
+
   it("세션 종료 후(sessions[].videos)에 남은 미전송 영상도 재전송하고 sent:true로 표시한다", async () => {
     global.chrome = createChromeMock();
     const calls = { videoEvents: [] };
@@ -1163,6 +1200,52 @@ describe("analyzeSession — watchedSecondsList를 세션 페이로드에 함께
     });
 
     expect(calls.sessions[0].watchedSecondsList).toEqual([null]);
+  });
+
+  it("멈췄다 이어 본 기록은 같은 세션 안 앞 기록의 위치를 보내고, videoCount는 그 기록을 하나로 센다", async () => {
+    global.chrome = createChromeMock();
+    const { fetchMock, calls } = createFetchMock({ todayReview: null });
+    global.fetch = fetchMock;
+    const videos = [
+      { videoId: "v1", eventId: "e1", watchedSeconds: 20 },
+      { videoId: "v2", eventId: "e2", watchedSeconds: 40 },
+      // 같은 세션 안에서 e1을 이어 봄
+      {
+        videoId: "v1",
+        eventId: "e3",
+        resumedFromEventId: "e1",
+        watchedSeconds: 20,
+      },
+      // 앞 기록이 다른 세션에 있음
+      {
+        videoId: "v3",
+        eventId: "e4",
+        resumedFromEventId: "e0",
+        watchedSeconds: 60,
+      },
+    ];
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
+          endTime: FIXED_NOW.toISOString(),
+          videos,
+        },
+      ],
+    });
+
+    const analyzeSession = await loadAnalyzeSession();
+    await analyzeSession({ sessionId: "s1", videos });
+
+    expect(calls.sessions[0]).toMatchObject({
+      videoIds: ["v1", "v2", "v1", "v3"],
+      resumedFromIndexes: [null, null, 0, null],
+      videoCount: 3,
+    });
   });
 });
 

@@ -90,6 +90,8 @@ function toEntries(db, events) {
   const categoryIds = getCategoryIdsForVideos(db, videoIds);
   const durations = getDurationsForVideos(db, videoIds);
   return events.map((e, i) => ({
+    eventId: e.eventId,
+    resumedFromEventId: e.resumedFromEventId ?? null,
     title: e.title,
     watchedAt: e.watchedAt,
     categoryId: categoryIds[i],
@@ -150,8 +152,8 @@ async function processPeriod({
   const { entropy, weightedEntropy } = aggregate;
   const weightedCategoryDistribution = aggregate.weightedDistribution;
   const validVideoCount = aggregate.validCount;
-  // 잠깐 본 영상까지 포함한 기간 내 영상 기록 수(세션 videoCount 합과 같은 의미)
-  const videoCount = eventsInRange.length;
+  // 잠깐 본 영상까지 포함한 기간 내 시청 수(세션 videoCount 합과 같은 의미). 멈췄다 이어 본 기록은 하나로 센다
+  const videoCount = aggregate.validCount + aggregate.shortCount;
 
   let result;
   let llmStatus;
@@ -271,7 +273,7 @@ async function run(db, apiKey, { recordMetric } = {}) {
   // 여기서 title 없는 이벤트를 미리 제외하면 실제로는 유효한 시청인데도 validVideoCount·가중 분포·가중 엔트로피가
   // 과소 산정된다. title 필터는 Gemini 프롬프트용 titlesInRange를 만들 때만 적용한다.
   const selectVideoEvents = db.prepare(`
-    SELECT e.videoId, ${PREFERRED_TITLE_SQL} AS title, e.watchedAt, e.watchedSeconds
+    SELECT e.eventId, e.resumedFromEventId, e.videoId, ${PREFERRED_TITLE_SQL} AS title, e.watchedAt, e.watchedSeconds
     FROM video_events e
     LEFT JOIN video_metadata m ON m.videoId = e.videoId
     WHERE e.anonymousId = ?

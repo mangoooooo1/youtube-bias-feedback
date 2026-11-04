@@ -109,6 +109,23 @@ function validateSession(body) {
       };
     }
   }
+  // 멈췄다 이어 본 기록이 가리키는 같은 세션 안 앞 기록의 위치(videoIds와 병렬). 구버전 확장은 보내지 않는다.
+  // 자기보다 앞 위치만 허용해 순환 연결이 생길 수 없다
+  const { resumedFromIndexes } = body;
+  if (resumedFromIndexes !== undefined && resumedFromIndexes !== null) {
+    if (
+      !Array.isArray(resumedFromIndexes) ||
+      resumedFromIndexes.length !== videoIds.length ||
+      resumedFromIndexes.some(
+        (v, i) => v !== null && !(Number.isInteger(v) && v >= 0 && v < i),
+      )
+    ) {
+      return {
+        code: ERROR_CODES.INVALID_FIELD_VALUE,
+        field: "resumedFromIndexes",
+      };
+    }
+  }
   // totalMs/geminiMs: 있으면(선택 항목) 음수 아닌 정수인지 검증
   for (const field of LATENCY_FIELDS) {
     const value = body[field];

@@ -20,6 +20,8 @@ function createTestDb() {
     );
     CREATE TABLE video_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      eventId TEXT,
+      resumedFromEventId TEXT,
       anonymousId TEXT NOT NULL,
       videoId TEXT,
       title TEXT,
@@ -235,6 +237,53 @@ describe("generate-period-reviews.js — run()", () => {
     expect(row.validVideoCount).toBe(1);
     expect(row.weightedEntropy).toBe(0);
     expect(JSON.parse(row.weightedCategoryDistribution)).toEqual({ 음악: 1 });
+  });
+
+  it("기간 안에서 멈췄다 이어 본 두 기록은 한 시청으로 세어 영상 수·유효 영상 수가 1이다", async () => {
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run("resumed-user", INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+    ).run(
+      "resumed-user",
+      JSON.stringify({ 음악: 1 }),
+      1,
+      "2026-06-01T10:00:00+09:00",
+    );
+    db.prepare(
+      "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES ('vid-resumed', '10', 600)",
+    ).run();
+    // 조각마다는 20초라 잠깐 본 영상이지만, 합치면 40초로 유효 시청이다
+    const insert = db.prepare(
+      `INSERT INTO video_events (eventId, resumedFromEventId, anonymousId, videoId, title, watchedAt, watchedSeconds)
+       VALUES (?, ?, 'resumed-user', 'vid-resumed', '이어 본 영상', ?, 20)`,
+    );
+    insert.run("r1", null, "2026-06-01T10:00:00+09:00");
+    insert.run("r2", "r1", "2026-06-02T10:00:00+09:00");
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"음악","feedback":"문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await run(db, "fake-key");
+
+    const row = db
+      .prepare(
+        "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+      )
+      .get("resumed-user");
+    expect(row.videoCount).toBe(1);
+    expect(row.validVideoCount).toBe(1);
   });
 
   it("watchedSeconds 데이터가 없으면(구버전 확장) weighted 계열을 NULL로 남기고 1차 지표는 그대로 계산한다", async () => {

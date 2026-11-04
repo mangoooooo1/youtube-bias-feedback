@@ -31,7 +31,10 @@ const {
   kstDateStr,
   pendingCompletedPeriods,
 } = require("../pipeline/period-boundaries");
-const { aggregateViewing } = require("../pipeline/viewing-aggregate");
+const {
+  aggregateViewing,
+  mergeResumedWatches,
+} = require("../pipeline/viewing-aggregate");
 const {
   TOTAL_DAYS,
   DAYS_PER_PERIOD,
@@ -52,9 +55,11 @@ const EXCLUSIONS = {
 
 /**
  * 한 기간의 영상 기록으로 주 분석과 제외 조건별 weightedEntropy를 계산한다. 순수 함수.
- * excludedCount는 제외 조건에 걸린 기록 수(잠깐 본 영상 포함)다.
+ * excludedCount는 제외 조건에 걸린 시청 수(잠깐 본 영상 포함)다.
+ * 멈췄다 이어 본 기록은 먼저 한 시청으로 합쳐, 맨 앞 기록의 유입 경로로 함께 빼거나 남긴다.
  */
-function computePeriodSensitivity(entries) {
+function computePeriodSensitivity(records) {
+  const entries = mergeResumedWatches(records);
   const main = aggregateViewing(entries);
   const result = {
     validCount: main.validCount,
@@ -86,7 +91,8 @@ function completedPeriods(installDate, now) {
 function loadEntries(db, anonymousId) {
   const events = db
     .prepare(
-      `SELECT videoId, watchedAt, watchedSeconds, wasBackgrounded, referrerType, relatedTrigger
+      `SELECT eventId, resumedFromEventId, videoId, watchedAt, watchedSeconds, wasBackgrounded,
+              referrerType, relatedTrigger
          FROM video_events WHERE anonymousId = ? ORDER BY watchedAt ASC`,
     )
     .all(anonymousId);

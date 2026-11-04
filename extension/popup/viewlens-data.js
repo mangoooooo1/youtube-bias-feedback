@@ -196,7 +196,7 @@ function videoTitle(v, { correctedTitles = {}, fetchedTitles = {} } = {}) {
 
 /**
  * 그날 영상 기록. 기기 기록(끝난 세션 → 진행 중인 세션) 뒤에 서버에서 받은 목록을 이어
- * 같은 eventId는 앞의 것만 남긴다. eventId가 없는 기록은 한 건씩 둔다.
+ * 같은 eventId는 앞의 것만 남긴다. eventId가 없는 기록은 한 건씩 둔다. 멈췄다 이어 본 기록은 한 줄로 합친다.
  */
 function recordsOfDate(sessions, liveVideos, serverVideos, dateKey) {
   const all = [
@@ -205,7 +205,7 @@ function recordsOfDate(sessions, liveVideos, serverVideos, dateKey) {
     ...(serverVideos || []),
   ];
   const seen = new Set();
-  return all.filter((v) => {
+  const records = all.filter((v) => {
     const ms = Date.parse(v.watchedAt);
     if (!Number.isFinite(ms) || kstDate(new Date(ms)) !== dateKey) return false;
     // 세션 종료 직전·직후에 같은 영상 기록이 두 곳에 잠깐 함께 있을 수 있다
@@ -215,6 +215,37 @@ function recordsOfDate(sessions, liveVideos, serverVideos, dateKey) {
     }
     return true;
   });
+  return mergeResumedRecords(records);
+}
+
+/**
+ * 멈췄다 이어 본 기록(resumedFromEventId)을 맨 앞 기록 한 줄로 합친다. 서버 집계와 같은 규칙이다.
+ * 본 시각 순으로 훑어 앞 기록이 먼저 나온다. 앞 기록이 그날 목록에 없으면(전날 등) 따로 한 줄이다.
+ * 목록은 시청 시간이 있는지만 보므로, 아는 값이 하나라도 있으면 그 합을 둔다.
+ * @returns {Array<object>} 본 시각 순
+ */
+function mergeResumedRecords(records) {
+  const ordered = [...records].sort(
+    (a, b) => Date.parse(a.watchedAt) - Date.parse(b.watchedAt),
+  );
+  const rows = [];
+  const rowById = new Map();
+  for (const v of ordered) {
+    const row = v.resumedFromEventId
+      ? rowById.get(v.resumedFromEventId)
+      : undefined;
+    if (row) {
+      if (v.watchedSeconds != null) {
+        row.watchedSeconds = (row.watchedSeconds ?? 0) + v.watchedSeconds;
+      }
+      if (v.eventId) rowById.set(v.eventId, row);
+      continue;
+    }
+    const own = { ...v };
+    rows.push(own);
+    if (v.eventId) rowById.set(v.eventId, own);
+  }
+  return rows;
 }
 
 /**

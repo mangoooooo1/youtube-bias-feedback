@@ -138,7 +138,8 @@ describe("run — DB 조회", () => {
       CREATE TABLE participants (anonymousId TEXT, group_code TEXT, installDate TEXT);
       CREATE TABLE video_events (
         anonymousId TEXT, videoId TEXT, watchedAt TEXT, watchedSeconds REAL,
-        wasBackgrounded INTEGER, referrerType TEXT, relatedTrigger TEXT
+        wasBackgrounded INTEGER, referrerType TEXT, relatedTrigger TEXT,
+        eventId TEXT, resumedFromEventId TEXT
       );
       CREATE TABLE video_metadata (videoId TEXT PRIMARY KEY, categoryId TEXT, durationSeconds INTEGER);
     `);
@@ -148,7 +149,9 @@ describe("run — DB 조회", () => {
     const addM = db.prepare("INSERT INTO video_metadata VALUES (?,?,?)");
     addM.run("v10", "10", 600);
     addM.run("v20", "20", 600);
-    const addE = db.prepare("INSERT INTO video_events VALUES (?,?,?,?,?,?,?)");
+    const addE = db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, watchedAt, watchedSeconds, wasBackgrounded, referrerType, relatedTrigger) VALUES (?,?,?,?,?,?,?)",
+    );
     // 1구간: 두 분야 + 백그라운드 자동재생 1건
     addE.run(
       "anon-exp",
@@ -249,7 +252,8 @@ describe("main — 암호화 DB 파일로 실행", () => {
       CREATE TABLE participants (anonymousId TEXT, group_code TEXT, installDate TEXT);
       CREATE TABLE video_events (
         anonymousId TEXT, videoId TEXT, watchedAt TEXT, watchedSeconds REAL,
-        wasBackgrounded INTEGER, referrerType TEXT, relatedTrigger TEXT
+        wasBackgrounded INTEGER, referrerType TEXT, relatedTrigger TEXT,
+        eventId TEXT, resumedFromEventId TEXT
       );
       CREATE TABLE video_metadata (videoId TEXT PRIMARY KEY, categoryId TEXT, durationSeconds INTEGER);
       INSERT INTO participants VALUES ('anon-1', 'CON', '2026-01-01T00:00:00.000Z');
@@ -290,5 +294,47 @@ describe("main — 암호화 DB 파일로 실행", () => {
     process.exitCode = undefined;
     expect(main({ argv: [], env: { SOURCE_DB_PATH: dbPath } })).toBeNull();
     expect(process.exitCode).toBe(1);
+  });
+});
+
+describe("computePeriodSensitivity — 멈췄다 이어 본 기록", () => {
+  // 같은 영상을 멈췄다 다시 재생해 나뉜 두 기록. 뒤 기록은 이동으로 생긴 게 아니라 유입 경로가 unknown이다
+  const split = (first, second = {}) => [
+    entry("20", {
+      eventId: "e1",
+      watchedAt: "2026-09-02T10:00:00+09:00",
+      ...first,
+    }),
+    entry("20", {
+      eventId: "e2",
+      resumedFromEventId: "e1",
+      watchedAt: "2026-09-02T10:30:00+09:00",
+      referrerType: "unknown",
+      ...second,
+    }),
+  ];
+
+  it("한 시청으로 합친 뒤 맨 앞 기록이 검색 유입이면 이어 본 부분까지 함께 빼고, 제외 수는 시청 1건이다", () => {
+    const entries = [entry("10"), ...split({ referrerType: "direct_search" })];
+    const r = computePeriodSensitivity(entries);
+
+    expect(r.validCount).toBe(2);
+    expect(r.directSearch.excludedCount).toBe(1);
+    // 남는 건 음악 하나뿐이라 entropy 0
+    expect(r.directSearch.weightedEntropy).toBe(0);
+  });
+
+  it("맨 앞 기록이 자동재생이고 이어 본 조각이 백그라운드였으면 백그라운드 자동재생으로 뺀다", () => {
+    const entries = [
+      entry("10"),
+      ...split(
+        { referrerType: "related", relatedTrigger: "autoplay" },
+        { wasBackgrounded: 1 },
+      ),
+    ];
+    const r = computePeriodSensitivity(entries);
+
+    expect(r.backgroundAutoplay.excludedCount).toBe(1);
+    expect(r.backgroundAutoplay.weightedEntropy).toBe(0);
   });
 });

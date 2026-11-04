@@ -30,6 +30,81 @@ function cappedWatchSeconds(watchedSeconds, durationSeconds) {
   return watchedSeconds;
 }
 
+function watchedAtMs(entry) {
+  const ms = Date.parse(entry.watchedAt);
+  return Number.isFinite(ms) ? ms : Infinity;
+}
+
+/** 이어진 기록 묶음을 맨 앞 기록의 속성을 가진 한 시청으로 만든다. */
+function mergeWatchGroup(group, options) {
+  if (group.length === 1) return group[0];
+  const ordered = [...group].sort((a, b) => watchedAtMs(a) - watchedAtMs(b));
+  const [first] = ordered;
+  const known = ordered.filter((e) => e.watchedSeconds != null);
+  const knownSeconds = known.reduce((sum, e) => sum + e.watchedSeconds, 0);
+  // 모르는 조각이 있으면 아는 합은 최소값이다. 그것만으로 유효하지 않으면 보는 중인 영상처럼 모름으로 둔다
+  const settled =
+    known.length === ordered.length ||
+    (known.length > 0 &&
+      isValidWatch(
+        {
+          watchedSeconds: knownSeconds,
+          durationSeconds: first.durationSeconds,
+        },
+        options,
+      ));
+  const flags = ordered.map((e) => e.wasBackgrounded).filter((v) => v != null);
+  const rates = ordered.filter((e) => e.playbackRate != null);
+  return {
+    ...first,
+    watchedSeconds: settled ? knownSeconds : null,
+    wasBackgrounded:
+      flags.length > 0 ? (flags.includes(1) ? 1 : 0) : first.wasBackgrounded,
+    playbackRate:
+      rates.length > 0 ? rates.at(-1).playbackRate : first.playbackRate,
+  };
+}
+
+/**
+ * 같은 목록 안에서 resumedFromEventId로 이어진 기록을 한 시청으로 합친다.
+ * 같은 탭에서 10분 넘게 멈췄다가 다시 재생해 나뉜 기록이라 영상 수·유효 시청 판정은 합친 시청 하나로 한다.
+ * - 맨 앞 기록의 eventId·본 시각·카테고리·유입 경로를 쓴다
+ * - 시청 시간은 아는 값을 더한다. 모르는 조각이 있는데 아는 합만으로 유효 시청이 아니면 null(모름)이다
+ * - 백그라운드는 하나라도 1이면 1, 배속은 마지막으로 관측된 값이다
+ * 앞 기록이 목록에 없으면(다른 날 등) 그 기록부터 따로 센다. 연결이 순환해도 한 묶음으로 끝난다.
+ * @param {Array<object>} entries
+ * @param {{minRelativeRatio?: number}} [options] - 유효 시청 기준(isValidWatch 옵션)
+ * @returns {Array<object>} 묶음의 첫 기록이 나온 순서
+ */
+function mergeResumedWatches(entries, options) {
+  if (!entries.some((e) => e.resumedFromEventId)) return entries;
+  const indexById = new Map();
+  entries.forEach((e, i) => {
+    if (e.eventId) indexById.set(e.eventId, i);
+  });
+  const parent = entries.map((_, i) => i);
+  const find = (i) => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  };
+  entries.forEach((e, i) => {
+    const j = e.resumedFromEventId
+      ? indexById.get(e.resumedFromEventId)
+      : undefined;
+    if (j !== undefined) parent[find(i)] = find(j);
+  });
+  const groups = new Map();
+  entries.forEach((e, i) => {
+    const root = find(i);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(e);
+  });
+  return [...groups.values()].map((group) => mergeWatchGroup(group, options));
+}
+
 /**
  * 그래프에서 빠지는 사유. 그래프에 들어가면 null.
  * 카테고리 없음을 시청 시간 모름보다 먼저 본다 — 시청 시간은 나중에 채워지지만 카테고리는 대개 그렇지 않다.
@@ -43,7 +118,8 @@ function excludedReason(entry, minRelativeRatio) {
 
 /**
  * @param {Array<{eventId?: string, categoryId: number|null, durationSeconds: number|null,
- *   watchedSeconds: number|null, watchedAt?: string}>} entries - 영상 기록(재시청은 별도 항목)
+ *   watchedSeconds: number|null, watchedAt?: string, resumedFromEventId?: string|null}>} entries
+ *   - 영상 기록(재시청은 별도 항목, 멈췄다 이어 본 기록은 mergeResumedWatches로 합친다)
  * @param {{capWatchSeconds?: boolean, minRelativeRatio?: number}} [options] - 민감도 분석용.
  *   시청 시간 상한 적용 여부(기본 true)와 유효 시청 상대 기준(기본 isValidWatch 값). 화면·리뷰는 넘기지 않는다
  * @returns {object} 집계 결과 — 필드 설명은 본문 주석 참고
@@ -52,10 +128,12 @@ function aggregateViewing(
   entries,
   { capWatchSeconds = true, minRelativeRatio } = {},
 ) {
-  const withReason = entries.map((e) => ({
-    ...e,
-    reason: excludedReason(e, minRelativeRatio),
-  }));
+  const withReason = mergeResumedWatches(entries, { minRelativeRatio }).map(
+    (e) => ({
+      ...e,
+      reason: excludedReason(e, minRelativeRatio),
+    }),
+  );
   const valid = withReason.filter((e) => e.reason !== EXCLUDED_REASONS.SHORT);
   const chart = withReason.filter((e) => e.reason === null);
   const countOf = (reason) =>
@@ -139,6 +217,7 @@ function aggregateViewingByDay(entries) {
 module.exports = {
   EXCLUDED_REASONS,
   cappedWatchSeconds,
+  mergeResumedWatches,
   aggregateViewing,
   aggregateViewingByDay,
 };

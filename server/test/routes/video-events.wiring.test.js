@@ -266,6 +266,41 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
     expect(row.relatedTrigger).toBeNull();
   });
 
+  it("다시 재생해 새로 만든 기록은 앞 기록의 eventId를 저장하고, 유입 경로는 unknown으로 둔다", async () => {
+    const res = await request(app)
+      .post("/api/video-events")
+      .send(
+        basePayload({ eventId: "evt-next", resumedFromEventId: "evt-prev" }),
+      );
+    expect(res.status).toBe(200);
+
+    const row = db
+      .prepare("SELECT * FROM video_events WHERE eventId = ?")
+      .get("evt-next");
+    expect(row.resumedFromEventId).toBe("evt-prev");
+    expect(row.referrerType).toBe("unknown");
+  });
+
+  it("resumedFromEventId 미전송(이동으로 생긴 기록·구버전 확장)이면 null로 저장된다", async () => {
+    await request(app).post("/api/video-events").send(basePayload());
+
+    const row = db
+      .prepare("SELECT * FROM video_events WHERE videoId = ?")
+      .get("wiring-v1");
+    expect(row.resumedFromEventId).toBeNull();
+  });
+
+  it("resumedFromEventId가 빈 문자열이면 400이고 저장하지 않는다", async () => {
+    const res = await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ resumedFromEventId: "" }));
+
+    expect(res.status).toBe(400);
+    expect(db.prepare("SELECT COUNT(*) AS c FROM video_events").get().c).toBe(
+      0,
+    );
+  });
+
   it("eventId 없는 구버전 요청은 dedup 없이 매번 새 행으로 저장된다", async () => {
     const payload = basePayload();
     delete payload.eventId;

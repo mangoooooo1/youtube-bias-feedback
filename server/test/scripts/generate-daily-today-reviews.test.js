@@ -18,6 +18,7 @@ function createTestDb() {
     CREATE TABLE video_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       eventId TEXT,
+      resumedFromEventId TEXT,
       anonymousId TEXT NOT NULL,
       videoId TEXT,
       sessionId TEXT,

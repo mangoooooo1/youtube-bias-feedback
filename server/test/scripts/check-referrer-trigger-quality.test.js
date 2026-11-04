@@ -149,12 +149,14 @@ describe("run — DB 조회", () => {
     db = new Database(":memory:");
     db.exec(`
       CREATE TABLE participants (anonymousId TEXT, group_code TEXT);
-      CREATE TABLE video_events (anonymousId TEXT, referrerType TEXT, relatedTrigger TEXT);
+      CREATE TABLE video_events (anonymousId TEXT, referrerType TEXT, relatedTrigger TEXT, eventId TEXT, resumedFromEventId TEXT, watchedAt TEXT);
     `);
     const addP = db.prepare("INSERT INTO participants VALUES (?,?)");
     addP.run("anon-test", "TEST-EXP");
     addP.run("anon-main", "EXP");
-    const addE = db.prepare("INSERT INTO video_events VALUES (?,?,?)");
+    const addE = db.prepare(
+      "INSERT INTO video_events (anonymousId, referrerType, relatedTrigger) VALUES (?,?,?)",
+    );
     addE.run("anon-test", "related", "autoplay");
     addE.run("anon-test", "related", "unknown");
     addE.run("anon-main", "related", "unknown");
@@ -227,9 +229,9 @@ describe("main — 암호화 DB 파일로 실행", () => {
     db.key(Buffer.from(KEY));
     db.exec(`
       CREATE TABLE participants (anonymousId TEXT, group_code TEXT);
-      CREATE TABLE video_events (anonymousId TEXT, referrerType TEXT, relatedTrigger TEXT);
+      CREATE TABLE video_events (anonymousId TEXT, referrerType TEXT, relatedTrigger TEXT, eventId TEXT, resumedFromEventId TEXT, watchedAt TEXT);
       INSERT INTO participants VALUES ('anon-1', 'EXP');
-      INSERT INTO video_events VALUES ('anon-1', 'related', 'unknown');
+      INSERT INTO video_events (anonymousId, referrerType, relatedTrigger) VALUES ('anon-1', 'related', 'unknown');
     `);
     db.close();
     vi.spyOn(console, "log").mockImplementation(() => {});
@@ -278,5 +280,33 @@ describe("main — 암호화 DB 파일로 실행", () => {
     process.exitCode = undefined;
     expect(main({ argv: [dbPath], env: {} })).toBeNull();
     expect(process.exitCode).toBe(1);
+  });
+});
+
+describe("buildReport — 멈췄다 이어 본 기록", () => {
+  it("이어 본 기록은 맨 앞 기록의 유입 경로로 한 번만 세어 unknown 비율을 부풀리지 않는다", () => {
+    const records = [
+      ev("related", "click", {
+        anonymousId: "a1",
+        groupCode: "EXP",
+        eventId: "e1",
+        watchedAt: "2026-09-02T10:00:00+09:00",
+      }),
+      ev("unknown", null, {
+        anonymousId: "a1",
+        groupCode: "EXP",
+        eventId: "e2",
+        resumedFromEventId: "e1",
+        watchedAt: "2026-09-02T10:30:00+09:00",
+      }),
+    ];
+    const report = buildReport(records, {
+      groups: ["EXP"],
+      generatedAt: "2026-10-20T00:00:00.000Z",
+    });
+
+    expect(report.overall.totalEvents).toBe(1);
+    expect(report.overall.referrerType.unknown.count).toBe(0);
+    expect(report.overall.related.click.count).toBe(1);
   });
 });

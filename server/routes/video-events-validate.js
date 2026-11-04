@@ -94,6 +94,19 @@ function validateVideoEvent(body) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "isShortsUrl" };
   }
 
+  // 다시 재생해 새로 만든 기록이 이어진 앞 기록의 eventId. 이동으로 생긴 기록과 구버전 확장은 보내지 않는다.
+  const { resumedFromEventId } = body;
+  if (
+    resumedFromEventId !== undefined &&
+    resumedFromEventId !== null &&
+    (typeof resumedFromEventId !== "string" || resumedFromEventId.trim() === "")
+  ) {
+    return {
+      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      field: "resumedFromEventId",
+    };
+  }
+
   return null;
 }
 

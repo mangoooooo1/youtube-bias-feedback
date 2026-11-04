@@ -19,6 +19,8 @@ import {
   markParticipantSynced,
   recordParticipantSyncFailure,
   invalidateParticipantSync,
+  resumedFromIndexes,
+  sessionWatchCount,
   SESSION_TIMEOUT_MS,
 } from "./storage.js";
 import {
@@ -391,7 +393,8 @@ export async function analyzeSession(session) {
   // 여기서는 videoCount만 먼저 로컬에 기록해 "세션 종료, 서버 응답 대기" 상태를 표시한다.
   // categoryDistribution/entropy는 서버 응답을 받은 뒤(syncSessionToServer)에야 채워진다.
   const t0 = Date.now();
-  const videoCount = session.videos.length;
+  // 같은 세션 안에서 멈췄다 이어 본 기록은 하나로 센다
+  const videoCount = sessionWatchCount(session.videos);
 
   // syncedToServer를 false로 명시해둬야, 곧이어 서버 전송이 오프라인/오류로 실패했을 때
   // retryUnsyncedSessions()가 이 세션을 재시도 대상으로 찾아낼 수 있다(이 필드가 아예
@@ -848,6 +851,7 @@ async function postVideoEventToServer(anonymousId, participantToken, event) {
     entryPath: event.entryPath,
     navigationTrigger: event.navigationTrigger,
     isShortsUrl: event.isShortsUrl,
+    resumedFromEventId: event.resumedFromEventId,
   });
 }
 
@@ -939,6 +943,8 @@ async function postSessionToServer(
       videoCount,
       videoIds,
       watchedSecondsList,
+      // videoIds와 병렬. 멈췄다 이어 본 기록이면 이 세션 안 앞 기록의 위치
+      resumedFromIndexes: resumedFromIndexes(session.videos),
       totalMs: metrics.totalMs,
       feedbackNotifiedAt: metrics.feedbackNotifiedAt,
     },

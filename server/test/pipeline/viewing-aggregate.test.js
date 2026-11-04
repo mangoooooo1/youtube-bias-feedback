@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   EXCLUDED_REASONS,
   cappedWatchSeconds,
+  mergeResumedWatches,
   aggregateViewing,
   aggregateViewingByDay,
 } from "../../pipeline/viewing-aggregate.js";
@@ -307,5 +308,210 @@ describe("aggregateViewing — 엔트로피 정밀도", () => {
     // 반올림 비율로 계산한 값(약 0.00014 작음)과 구별된다
     const fromRounded = -3 * (0.333 * Math.log2(0.333));
     expect(result.entropy).not.toBeCloseTo(fromRounded, 6);
+  });
+});
+
+describe("mergeResumedWatches — 멈췄다 이어 본 기록을 한 시청으로 합친다", () => {
+  // 같은 탭에서 10분 넘게 멈췄다가 다시 재생하면 기록이 나뉘고 뒤 기록이 앞 기록의 eventId를 가리킨다
+  const resumed = (from, props) => ({
+    ...video(props),
+    resumedFromEventId: from,
+  });
+
+  it("같은 목록에서 이어진 두 기록은 1건으로 세고 시청 시간은 더한다", () => {
+    const result = aggregateViewing([
+      video({
+        eventId: "e1",
+        watchedSeconds: 300,
+        watchedAt: "2026-03-10T01:00:00Z",
+      }),
+      {
+        ...resumed("e1", { eventId: "e2", watchedSeconds: 180 }),
+        watchedAt: "2026-03-10T01:20:00Z",
+      },
+    ]);
+
+    expect(result.validCount).toBe(1);
+    expect(result.chartSeconds).toBe(480);
+  });
+
+  it("조각마다는 잠깐 본 영상이어도 합쳐서 기준을 넘으면 유효 시청이다", () => {
+    const result = aggregateViewing([
+      video({
+        eventId: "e1",
+        watchedSeconds: 20,
+        watchedAt: "2026-03-10T01:00:00Z",
+      }),
+      {
+        ...resumed("e1", { eventId: "e2", watchedSeconds: 20 }),
+        watchedAt: "2026-03-10T01:20:00Z",
+      },
+    ]);
+
+    expect(result.validCount).toBe(1);
+    expect(result.shortCount).toBe(0);
+  });
+
+  it("여러 번 이어진 사슬도 1건이고, 빠지는 사유는 맨 앞 기록의 eventId로 남는다", () => {
+    const result = aggregateViewing([
+      short({
+        eventId: "e1",
+        watchedSeconds: 3,
+        watchedAt: "2026-03-10T01:00:00Z",
+      }),
+      {
+        ...resumed("e1", { eventId: "e2", watchedSeconds: 3 }),
+        watchedAt: "2026-03-10T01:20:00Z",
+      },
+      {
+        ...resumed("e2", { eventId: "e3", watchedSeconds: 3 }),
+        watchedAt: "2026-03-10T01:40:00Z",
+      },
+    ]);
+
+    expect(result.shortCount).toBe(1);
+    expect(result.excluded).toEqual([{ eventId: "e1", reason: "short" }]);
+  });
+
+  it("연결 없이 같은 영상을 다시 본 기록은 지금처럼 따로 센다", () => {
+    const result = aggregateViewing([
+      video({ eventId: "e1" }),
+      video({ eventId: "e2" }),
+    ]);
+    expect(result.validCount).toBe(2);
+  });
+
+  it("앞 기록이 목록에 없으면(다른 날) 그 기록부터 따로 세고, 그 뒤 기록과는 합친다", () => {
+    const result = aggregateViewing([
+      {
+        ...resumed("yesterday", { eventId: "e2", watchedSeconds: 60 }),
+        watchedAt: "2026-03-10T01:00:00Z",
+      },
+      {
+        ...resumed("e2", { eventId: "e3", watchedSeconds: 60 }),
+        watchedAt: "2026-03-10T01:20:00Z",
+      },
+    ]);
+    expect(result.validCount).toBe(1);
+    expect(result.chartSeconds).toBe(120);
+  });
+
+  it("날짜별 집계에서 자정을 넘겨 이어 본 시청은 날마다 1건이다", () => {
+    const days = aggregateViewingByDay([
+      video({
+        eventId: "e1",
+        watchedSeconds: 300,
+        watchedAt: "2026-03-10T14:50:00Z",
+      }), // 23:50 KST
+      {
+        ...resumed("e1", { eventId: "e2", watchedSeconds: 200 }),
+        watchedAt: "2026-03-10T15:05:00Z",
+      }, // 다음 날 00:05 KST
+    ]);
+    expect(days.map((d) => [d.date, d.validCount, d.chartSeconds])).toEqual([
+      ["2026-03-10", 1, 300],
+      ["2026-03-11", 1, 200],
+    ]);
+  });
+});
+
+describe("mergeResumedWatches — 합친 시청의 속성", () => {
+  const first = {
+    eventId: "e1",
+    videoId: "v1",
+    watchedAt: "2026-03-10T01:00:00Z",
+    watchedSeconds: 300,
+    referrerType: "direct_search",
+    relatedTrigger: null,
+    wasBackgrounded: 0,
+    playbackRate: 1,
+  };
+  const next = {
+    eventId: "e2",
+    videoId: "v1",
+    watchedAt: "2026-03-10T01:20:00Z",
+    watchedSeconds: 100,
+    resumedFromEventId: "e1",
+    referrerType: "unknown",
+    relatedTrigger: null,
+    wasBackgrounded: 1,
+    playbackRate: 1.5,
+  };
+
+  it("맨 앞 기록의 eventId·본 시각·유입 경로를 쓰고, 백그라운드는 하나라도 1이면 1, 배속은 마지막 값이다", () => {
+    // 입력 순서가 시각 순이 아니어도 맨 앞은 먼저 본 기록이다
+    expect(mergeResumedWatches([next, first])).toEqual([
+      {
+        ...first,
+        watchedSeconds: 400,
+        wasBackgrounded: 1,
+        playbackRate: 1.5,
+      },
+    ]);
+  });
+
+  it("시청 시간은 아는 값만 더하고, 모두 모르면 null이다", () => {
+    expect(
+      mergeResumedWatches([{ ...first, watchedSeconds: null }, next]),
+    ).toEqual([
+      expect.objectContaining({ eventId: "e1", watchedSeconds: 100 }),
+    ]);
+    expect(
+      mergeResumedWatches([
+        { ...first, watchedSeconds: null },
+        { ...next, watchedSeconds: null },
+      ]),
+    ).toEqual([
+      expect.objectContaining({ eventId: "e1", watchedSeconds: null }),
+    ]);
+  });
+
+  it("이어 보는 중이라 모르는 조각이 있으면, 아는 합이 유효 시청 기준을 넘을 때만 그 합을 쓰고 아니면 모름으로 둔다", () => {
+    const watching = { ...next, watchedSeconds: null };
+    const merged = (seconds, durationSeconds, options) =>
+      mergeResumedWatches(
+        [{ ...first, durationSeconds, watchedSeconds: seconds }, watching],
+        options,
+      )[0].watchedSeconds;
+
+    expect(merged(40, 600)).toBe(40);
+    // 20초는 잠깐 본 영상이지만 아직 보는 중이라 판정하지 않는다
+    expect(merged(20, 600)).toBeNull();
+    // 60초 영상의 20초(33%)는 기본 상대 기준(25%)은 넘고, 넘겨받은 50% 기준은 못 넘는다
+    expect(merged(20, 60)).toBe(20);
+    expect(merged(20, 60, { minRelativeRatio: 0.5 })).toBeNull();
+  });
+
+  it("앞 조각 20초를 보고 다시 재생 중인 영상은 잠깐 본 영상이 아니라 시간을 모르는 유효 영상으로 센다", () => {
+    const result = aggregateViewing([
+      video({
+        eventId: "e1",
+        watchedSeconds: 20,
+        watchedAt: "2026-03-10T01:00:00Z",
+      }),
+      {
+        ...video({ eventId: "e2", watchedSeconds: null }),
+        watchedAt: "2026-03-10T01:20:00Z",
+        resumedFromEventId: "e1",
+      },
+    ]);
+
+    expect(result.shortCount).toBe(0);
+    expect(result.validCount).toBe(1);
+    expect(result.pendingTimeCount).toBe(1);
+  });
+
+  it("연결이 순환해도(비정상 값) 멈추고 한 묶음으로 합친다", () => {
+    const merged = mergeResumedWatches([
+      { ...first, resumedFromEventId: "e2" },
+      next,
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].watchedSeconds).toBe(400);
+  });
+
+  it("연결된 기록이 없으면 받은 목록을 그대로 돌려준다", () => {
+    const entries = [first, { ...next, resumedFromEventId: null }];
+    expect(mergeResumedWatches(entries)).toBe(entries);
   });
 });

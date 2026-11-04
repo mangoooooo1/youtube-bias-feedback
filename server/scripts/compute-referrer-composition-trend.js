@@ -21,6 +21,7 @@ require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { db, initializeDB } = require("../db");
 const { dayFromInstall, kstDateStr } = require("../pipeline/period-boundaries");
+const { mergeResumedWatches } = require("../pipeline/viewing-aggregate");
 const {
   TOTAL_DAYS,
   DAYS_PER_PERIOD,
@@ -69,6 +70,24 @@ function composition(events) {
   return { total: events.length, ...ratios };
 }
 
+/**
+ * 참여자 한 명의 기간별 유입 경로 구성. 멈췄다 이어 본 기록은 한 시청으로 합쳐 맨 앞 기록의 유입 경로로 센다.
+ * @param {Array<{eventId?: string, resumedFromEventId?: string|null, referrerType: string|null, watchedAt: string}>} events
+ * @param {string} installDate
+ * @returns {Record<number, object|null>} 기간 인덱스별 composition 결과
+ */
+function compositionByPeriod(events, installDate) {
+  const byPeriod = {};
+  for (const period of buildPeriodBoundaries(installDate)) {
+    const inRange = events.filter((e) => {
+      const d = kstDateStr(new Date(e.watchedAt));
+      return d >= period.periodStart && d <= period.periodEnd;
+    });
+    byPeriod[period.periodIndex] = composition(mergeResumedWatches(inRange));
+  }
+  return byPeriod;
+}
+
 /** 참여자별 비율을 동일 가중(참여자 1명 = 1표)으로 단순 평균한다 — 시청량이 많은 참여자가
  * 그룹 평균을 지배하지 않도록 하기 위함(영상 수로 가중하는 분포 집계와는
  * 다른 목적: 여기서는 "그룹 내 개인들이 평균적으로 어떻게 달라졌는가"를 보려는 것이라
@@ -102,25 +121,16 @@ function main() {
     )
     .all(...ELIGIBLE_GROUPS);
   const selectEvents = db.prepare(
-    `SELECT referrerType, watchedAt FROM video_events WHERE anonymousId = ?`,
+    `SELECT eventId, resumedFromEventId, referrerType, watchedAt FROM video_events WHERE anonymousId = ?`,
   );
 
   const totalPeriods = Math.ceil(TOTAL_DAYS / DAYS_PER_PERIOD);
   const byParticipant = participants.map((p) => {
     const events = selectEvents.all(p.anonymousId);
-    const periods = buildPeriodBoundaries(p.installDate);
-    const byPeriod = {};
-    for (const period of periods) {
-      const inRange = events.filter((e) => {
-        const d = kstDateStr(new Date(e.watchedAt));
-        return d >= period.periodStart && d <= period.periodEnd;
-      });
-      byPeriod[period.periodIndex] = composition(inRange);
-    }
     return {
       anonymousId: p.anonymousId,
       groupCode: p.groupCode,
-      byPeriod,
+      byPeriod: compositionByPeriod(events, p.installDate),
     };
   });
 
@@ -164,4 +174,7 @@ function main() {
   );
 }
 
-main();
+// 직접 실행할 때만 돈다. 테스트는 계산 함수만 불러 쓴다
+if (require.main === module) main();
+
+module.exports = { composition, compositionByPeriod };

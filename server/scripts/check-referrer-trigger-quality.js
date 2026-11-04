@@ -21,6 +21,7 @@ const Database = require("better-sqlite3-multiple-ciphers");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const { fingerprint } = require("./fingerprint");
+const { mergeResumedWatches } = require("../pipeline/viewing-aggregate");
 
 const KNOWN_GROUPS = ["EXP", "CON", "TEST-EXP", "TEST-CON"];
 const DEFAULT_GROUPS = ["TEST-EXP", "TEST-CON"];
@@ -94,7 +95,8 @@ function collectEvents(db, groups) {
   const placeholders = groups.map(() => "?").join(",");
   return db
     .prepare(
-      `SELECT v.anonymousId, p.group_code AS groupCode, v.referrerType, v.relatedTrigger
+      `SELECT v.anonymousId, p.group_code AS groupCode, v.eventId, v.resumedFromEventId,
+              v.watchedAt, v.referrerType, v.relatedTrigger
          FROM video_events v
          JOIN participants p ON p.anonymousId = v.anonymousId
         WHERE p.group_code IN (${placeholders})`,
@@ -102,8 +104,12 @@ function collectEvents(db, groups) {
     .all(...groups);
 }
 
-/** 전체·그룹별·참여자별 리포트를 조립한다. 판정은 전체 합산 기준. 순수 함수. */
-function buildReport(events, { groups, generatedAt }) {
+/**
+ * 전체·그룹별·참여자별 리포트를 조립한다. 판정은 전체 합산 기준. 순수 함수.
+ * 멈췄다 이어 본 기록은 한 시청으로 합쳐 맨 앞 기록의 유입 경로로 센다. eventId가 참여자마다 겹치지 않아 한 번에 합친다.
+ */
+function buildReport(records, { groups, generatedAt }) {
+  const events = mergeResumedWatches(records);
   const overall = summarizeReferrerTriggers(events);
 
   const byGroup = {};

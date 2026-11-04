@@ -712,6 +712,40 @@ describe("getUnsentVideoEvents / markVideoEventSent", () => {
     expect(event.isShortsUrl).toBe(0);
   });
 
+  it("다시 재생해 새로 만든 기록이면 재시도 대상에 앞 기록의 eventId(resumedFromEventId)를 그대로 들고 간다", async () => {
+    await global.chrome.storage.local.set({
+      "video__s2__v1-2": {
+        videoId: "v1",
+        watchedAt: "2026-01-01T00:20:00Z",
+        sent: false,
+        eventId: "v1-2",
+        resumedFromEventId: "v1-1",
+      },
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [
+            {
+              videoId: "v1",
+              watchedAt: "2026-01-01T00:00:00Z",
+              sent: false,
+              eventId: "v1-3",
+              resumedFromEventId: "v1-0",
+            },
+          ],
+        },
+      ],
+    });
+
+    const events = await getUnsentVideoEvents();
+    expect(
+      events.map((e) => [e.location, e.eventId, e.resumedFromEventId]),
+    ).toEqual([
+      ["live", "v1-2", "v1-1"],
+      ["session", "v1-3", "v1-0"],
+    ]);
+  });
+
   it("sent:true인 영상(세션 종료 전)은 대상에서 제외한다", async () => {
     await global.chrome.storage.local.set({
       "video__s1__v1-1": {
@@ -1497,6 +1531,23 @@ describe("endSession — sent·eventId를 세션 종료 이후에도 보존한�
 
     const sessions = await getAllSessions();
     expect(sessions[0].videos[0].isShortsUrl).toBe(1);
+  });
+
+  it("resumedFromEventId도 그대로 옮긴다(누락되면 세션 종료 후 재시도 시 이어진 기록인지 알 수 없음)", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      video__s1__v1: {
+        videoId: "v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: false,
+        eventId: "evt-v1-2",
+        resumedFromEventId: "evt-v1-1",
+      },
+    });
+    await endSession();
+
+    const sessions = await getAllSessions();
+    expect(sessions[0].videos[0].resumedFromEventId).toBe("evt-v1-1");
   });
 });
 

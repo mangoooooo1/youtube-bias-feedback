@@ -162,3 +162,23 @@ describe("groupTitlesByCategory", () => {
     expect(groupTitlesByCategory([video({ watchedSeconds: 1 })])).toEqual([]);
   });
 });
+
+describe("groupTitlesByCategory — 멈췄다 이어 본 기록", () => {
+  it("조각마다는 잠깐 본 영상이어도 합쳐 유효하면 제목을 한 번만 넣는다", () => {
+    const groups = groupTitlesByCategory([
+      {
+        ...video({ title: "이어 본 영상", watchedSeconds: 20 }),
+        eventId: "e1",
+      },
+      {
+        ...video({ title: "이어 본 영상", watchedSeconds: 20 }),
+        eventId: "e2",
+        resumedFromEventId: "e1",
+      },
+    ]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].videoCount).toBe(1);
+    expect(groups[0].titles).toEqual([{ title: "이어 본 영상", count: 1 }]);
+  });
+});

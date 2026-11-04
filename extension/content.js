@@ -369,6 +369,7 @@ function reportClientError(code, where) {
  * @param {boolean} isShorts - 이 영상이 /shorts/ URL로 시청됐는지
  * @param {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1}|null} previousWatchStats - 직전 영상의 시청시간 스냅샷
  * @param {{sessionId: string, eventId: string}|null} previousVideoIdentity - captureTrackedVideoIdentity 결과(이 탭 메모리 기준)
+ * @param {string|null} [resumedFromEventId=null] - 10분 넘게 쉬었다가 다시 재생해 새로 기록하면 앞 기록의 eventId
  * @returns {Promise<void>}
  */
 function recordVideo(
@@ -380,6 +381,7 @@ function recordVideo(
   isShorts,
   previousWatchStats,
   previousVideoIdentity,
+  resumedFromEventId = null,
 ) {
   writeQueue = writeQueue.then(async () => {
     // 확장 리로드/업데이트 후 남은 탭은 새로고침 전까지 컨텍스트가 무효화돼 chrome.*
@@ -455,8 +457,9 @@ function recordVideo(
               startTime: now,
             };
 
-      // 새로고침(F5)으로 같은 영상이 다시 감지되는 경우를 막는다.
+      // 새로고침(F5)으로 같은 영상이 다시 감지되는 경우를 막는다. 다시 재생해 나누는 기록은 일부러 만드는 것이라 거르지 않는다
       if (
+        !resumedFromEventId &&
         lastRecordedVideo?.videoId === videoId &&
         lastRecordedVideo?.sessionId === session.sessionId
       ) {
@@ -489,7 +492,13 @@ function recordVideo(
           ...session,
           // 화면의 "N개 수집 중" 표시용 참고치일 뿐 저장 근거로는 쓰이지 않는다 —
           // 탭 경합으로 순간적으로 1 어긋나도(드묾) 실제 데이터에는 영향이 없다.
-          videoCount: (session.videoCount ?? 0) + 1,
+          // 멈췄다 이어 본 기록이 앞 기록과 같은 세션이면 같은 시청이라 세지 않는다
+          videoCount:
+            (session.videoCount ?? 0) +
+            (resumedFromEventId &&
+            previousVideoIdentity?.sessionId === session.sessionId
+              ? 0
+              : 1),
         },
         // eventId를 함께 저장해야, 다음 영상 전환 때 이 영상의 시청시간을 finalize할
         // video_events 행을 정확히 특정할 수 있다.
@@ -504,6 +513,7 @@ function recordVideo(
           entryPath,
           navigationTrigger,
           isShortsUrl: isShorts ? 1 : 0,
+          resumedFromEventId,
         },
       });
       console.log("[content] recorded:", { videoId, title });
@@ -525,6 +535,7 @@ function recordVideo(
             entryPath,
             navigationTrigger,
             isShortsUrl: isShorts ? 1 : 0,
+            resumedFromEventId,
           }),
         })
           .then((response) => {
@@ -747,7 +758,44 @@ function openWatchSegment() {
   watchTracker.segmentStartAt = Date.now();
 }
 
+/**
+ * 마지막 재생 후 SESSION_TIMEOUT_MS 넘게 쉬었다가 다시 재생하면 앞 기록을 멈춘 시점 값으로 확정하고 새 시청으로 기록한다.
+ * 같은 탭에서 10분 넘게 지나 영상을 다시 연 경우와 같은 규칙이다. 구간을 열기 전에 불러야 한다.
+ * @returns {void}
+ */
+function startNewWatchIfIdle() {
+  if (!watchTracker || watchTracker.segmentStartAt != null) return;
+  const identity = captureTrackedVideoIdentity();
+  if (!identity?.eventId) return;
+  // 이동 중 다음 영상의 play가 먼저 오면 주소가 이미 바뀌어 있다. 그 영상은 handleVideoChange가 기록한다
+  const videoId = extractVideoId(location.href);
+  if (!videoId || videoId !== watchTracker.videoId) return;
+  if (Date.now() - lastPlayingAt(watchTracker) < SESSION_TIMEOUT_MS) return;
+
+  const stats = captureWatchStatsSnapshot();
+  writeWatchCheckpoint();
+  clearTrackedVideo();
+  resetWatchTracker();
+
+  const isShorts = isShortsUrl(location.href);
+  const confirmed = isShorts ? undefined : readWatchPageTitle(videoId);
+  const title = confirmed === undefined ? parseTitle() : confirmed;
+  // 이동으로 생긴 기록이 아니라 유입 경로는 비워 둔다
+  recordVideo(
+    videoId,
+    title,
+    null,
+    null,
+    null,
+    isShorts,
+    stats,
+    identity,
+    identity.eventId,
+  );
+}
+
 function onTrackedVideoPlay() {
+  startNewWatchIfIdle();
   openWatchSegment();
 }
 
@@ -855,6 +903,8 @@ document.addEventListener(
   (event) => {
     if (!watchTracker || event.target === trackedVideoEl) return;
     if (!extractVideoId(location.href)) return;
+    // 새 요소에 연결하면 바로 구간이 열리므로, 그 전에 오래 쉬었는지부터 본다(재생 시작 경로를 하나로)
+    startNewWatchIfIdle();
     attachVideoTracking(event.target);
   },
   true,
