@@ -72,6 +72,7 @@ jobs:
             echo "PARTICIPANT_SILENCE_PING_URL=${{ secrets.PARTICIPANT_SILENCE_PING_URL }}" >> server/.env
             echo "DATA_INTEGRITY_PING_URL=${{ secrets.DATA_INTEGRITY_PING_URL }}" >> server/.env
             echo "FEEDBACK_EXPOSURE_PING_URL=${{ secrets.FEEDBACK_EXPOSURE_PING_URL }}" >> server/.env
+            echo "RESEARCH_OPS_PING_URL=${{ secrets.RESEARCH_OPS_PING_URL }}" >> server/.env
             echo "E1_BACKUP_HOST=${{ secrets.E1_BACKUP_HOST }}" >> server/.env
             echo "DB_BACKUP_NIGHT_PING_URL=${{ secrets.DB_BACKUP_NIGHT_PING_URL }}" >> server/.env
             echo "DB_BACKUP_MORNING_PING_URL=${{ secrets.DB_BACKUP_MORNING_PING_URL }}" >> server/.env
