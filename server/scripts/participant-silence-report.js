@@ -2,7 +2,7 @@
 /**
  * 개별 참여자 결측(시청 활동 공백) 리포트
  *
- * "아직 연구 관찰 기간 중인" 참여자 중, 마지막 활동으로부터 임계값(기본 4일) 이상 지난 사람을 찾아 보고한다.
+ * "아직 연구 관찰 기간 중인" 참여자 중, 마지막 활동으로부터 임계값(기본 5일) 이상 지난 사람을 찾아 보고한다.
  * 연구 종료 시점(확장이 수집을 멈추는 TOTAL_DAYS번째 날 다음 날 00:00 KST)이 지난 참여자는 조용해도 정상이므로 제외한다.
  *
  * 알림 역할:
@@ -29,8 +29,9 @@ const { pingSuccess, pingFail } = require("../monitoring/healthchecks-ping");
 const { createDogStatsd } = require("../monitoring/dogstatsd");
 
 const PING_ENV_VAR = "PARTICIPANT_SILENCE_PING_URL";
-// 1차 파일럿 활동 간격 분포(참여자별 최대 간격)로 정한 값. 근거는 관측체계 P00·1 기록 문서.
-const DEFAULT_THRESHOLD_DAYS = 4;
+// 2차 테스트 활동 간격 분포로 정한 값. 4일이면 쉬었다 돌아온 참여자의 1/3이 잡혔고,
+// 주 2회 사용 조건을 지켜도 4일 공백은 흔하다.
+const DEFAULT_THRESHOLD_DAYS = 5;
 // crontab 실행 주기(매일 1회). 신규 판정 구간의 폭이다.
 const RUN_INTERVAL_DAYS = 1;
 

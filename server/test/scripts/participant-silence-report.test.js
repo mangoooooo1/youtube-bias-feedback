@@ -174,8 +174,8 @@ describe("evaluateParticipantSilence — 순수 판정 로직", () => {
     });
   });
 
-  it("기본 임계값은 4일이다(1차 파일럿 활동 간격 분포 근거)", () => {
-    expect(DEFAULT_THRESHOLD_DAYS).toBe(4);
+  it("기본 임계값은 5일이다(2차 테스트 활동 간격 분포 근거)", () => {
+    expect(DEFAULT_THRESHOLD_DAYS).toBe(5);
   });
 });
 
@@ -636,7 +636,7 @@ describe("Healthchecks 본문과 ping 정책 — 외부로는 인원수만", () 
       insertIssuedCode(db, "UNREG-CODE-1", "EXP");
       const ping = fakePing();
 
-      await reportToHealthchecks(run(db, { now }), { ping });
+      await reportToHealthchecks(run(db, { now, thresholdDays: 4 }), { ping });
 
       const { body } = ping.pingSuccess.mock.calls[0][1];
       for (const secret of [
