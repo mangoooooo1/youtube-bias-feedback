@@ -151,7 +151,7 @@ describe("errorHandler", () => {
       status: 400,
       type: "entity.parse.failed",
     });
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     errorHandler(err, req, res, vi.fn());
 
@@ -221,7 +221,7 @@ describe("errorHandler", () => {
   it("본문이 없으면(JSON 파싱 실패 등) anonymousId 없이 남긴다", () => {
     const res = createMockRes();
     const req = { method: "POST", path: "/api/sessions" };
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     // body-parser의 JSON 파싱 실패는 status 400이라 스택이 붙지 않는다
     const err = Object.assign(new Error("잘못된 JSON"), { status: 400 });
@@ -229,10 +229,32 @@ describe("errorHandler", () => {
     errorHandler(err, req, res, vi.fn());
 
     expect(consoleSpy).toHaveBeenCalledWith(
-      "[Error] POST /api/sessions : 잘못된 JSON",
+      "[bad-request] POST /api/sessions : 잘못된 JSON",
     );
 
     consoleSpy.mockRestore();
+  });
+
+  it("4xx는 [Error]로 남기지 않아 에러 감시가 즉시 알리지 않는다(외부의 깨진 요청)", () => {
+    const res = createMockRes();
+    const req = { method: "POST", path: "/" };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // 압축 본문이 끊긴 요청에서 body-parser가 내는 오류
+    const err = Object.assign(new Error("unexpected end of file"), {
+      status: 400,
+    });
+
+    errorHandler(err, req, res, vi.fn());
+
+    expect(errorSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[bad-request] POST / : unexpected end of file",
+    );
+    expect(res.status).toHaveBeenCalledWith(400);
+
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it("500 응답이면 스택을 줄바꿈 없이 한 줄로 끝에 붙인다", () => {
@@ -255,7 +277,7 @@ describe("errorHandler", () => {
   it("4xx 응답이면 스택을 남기지 않는다(예상된 입력 오류)", () => {
     const res = createMockRes();
     const req = { method: "POST", path: "/api/sessions" };
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const err = Object.assign(new Error("참여자 없음"), { status: 404 });
 
     errorHandler(err, req, res, vi.fn());
@@ -268,7 +290,7 @@ describe("errorHandler", () => {
   it("오류 메시지 속 줄바꿈으로 가짜 [Error] 줄을 만들 수 없다(잘못된 JSON 요청 재현)", () => {
     const res = createMockRes();
     const req = { method: "POST", path: "/api/sessions" };
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     // Node 22 JSON 파싱 오류는 요청 본문 일부를 그대로 담는다
     let parseError;
     try {
@@ -281,8 +303,8 @@ describe("errorHandler", () => {
 
     const line = consoleSpy.mock.calls[0][0];
     expect(line).not.toMatch(/[\r\n]/);
-    expect(line.startsWith("[Error] POST /api/sessions : ")).toBe(true);
-    expect(line.indexOf("[Error]", 1)).toBeGreaterThan(0); // 위조 시도는 줄 중간에 문자로만 남는다
+    expect(line.startsWith("[bad-request] POST /api/sessions : ")).toBe(true);
+    expect(line.indexOf("[Error]")).toBeGreaterThan(0); // 위조 시도는 줄 중간에 문자로만 남는다
 
     consoleSpy.mockRestore();
   });
