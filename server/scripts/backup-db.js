@@ -7,6 +7,11 @@
  * 독립적으로 생성된 두 암호화 파일은 salt가 달라 "incompatible source and target databases"로
  * 실패한다. 체크포인트 후 파일 복사는 암호화된 바이트를 그대로 복제하므로 이 문제가 없다.
  *
+ * 복사본은 쓰기 전에 검증한다. 체크포인트가 다 끝났는지, 임시 이름으로 복사한 파일이 같은 키로
+ * 열리고 quick_check를 통과하는지, 테이블마다 행 수가 원본 이상인지 본다. 통과해야 정식 이름이
+ * 붙고 로테이션·오프사이트 전송이 진행된다. 실패하면 임시 파일을 지우고 exit 1로 끝나
+ * backup-checked.sh가 실패로 알린다.
+ *
  * - 백업 대상 : server/youtube_bias.db
  * - 저장 위치 : BACKUP_DIR (기본 ~/db-backups) — repo 밖에 둬 git pull/배포와 분리
  * - 파일명    : youtube_bias-YYYYMMDD-HHMMSS.db
@@ -56,13 +61,80 @@ function timestamp() {
   );
 }
 
-// 경로·키·오프사이트 주입점은 인자로 줄 수 있다(테스트용). 생략하면 cron 실행과 같은 기본값을 쓴다.
+function openEncrypted(file, key) {
+  const db = new Database(file);
+  db.pragma("cipher = 'sqlcipher'"); // db.js와 동일 cipher(AES-256)로 맞춰야 키가 들어맞는다
+  db.key(Buffer.from(key)); // 문자열 보간 대신 바인딩 API. db.js와 동일 이유
+  return db;
+}
+
+/**
+ * WAL 내용이 메인 파일에 전부 반영될 때까지 체크포인트를 시도한다.
+ * 서버가 읽는 중이면 일부만 반영되고(busy) 남은 변경은 복사본에서 빠지므로, 끝나지 않으면 실패한다.
+ */
+async function checkpointFully(db, { attempts = 3, waitMs = 2000 } = {}) {
+  for (let i = 1; i <= attempts; i++) {
+    const [result] = db.pragma("wal_checkpoint(TRUNCATE)");
+    if (result.busy === 0 && result.log === result.checkpointed) return;
+    if (i < attempts) await new Promise((r) => setTimeout(r, waitMs));
+  }
+  throw new Error(`WAL 체크포인트가 끝나지 않았습니다(${attempts}회 시도)`);
+}
+
+/** 사용자 테이블별 행 수 */
+function countRows(db) {
+  const tables = db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    )
+    .pluck()
+    .all();
+  return Object.fromEntries(
+    tables.map((t) => [
+      t,
+      db
+        .prepare(`SELECT COUNT(*) FROM "${t.replaceAll('"', '""')}"`)
+        .pluck()
+        .get(),
+    ]),
+  );
+}
+
+/** 복사본이 같은 키로 열리고, 구조가 온전하고, 원본에서 센 행이 모두 있는지 확인한다. 문제가 있으면 throw */
+function verifyCopy(file, key, sourceCounts) {
+  const db = openEncrypted(file, key);
+  try {
+    const check = db.pragma("quick_check", { simple: true });
+    if (check !== "ok") throw new Error(`quick_check 결과: ${check}`);
+    const copyCounts = countRows(db);
+    for (const [table, n] of Object.entries(sourceCounts)) {
+      if (!(table in copyCounts)) throw new Error(`${table} 테이블 없음`);
+      if (copyCounts[table] < n) {
+        throw new Error(
+          `${table} 행 수 부족(원본 ${n}, 복사본 ${copyCounts[table]})`,
+        );
+      }
+    }
+    return Object.keys(copyCounts).length;
+  } finally {
+    db.close();
+  }
+}
+
+// 검증 연결을 닫으면 SQLite가 -wal·-shm을 지우지만, 남아 있어도 정식 백업에는 필요 없다
+function removeSidecars(file) {
+  for (const f of [`${file}-wal`, `${file}-shm`]) fs.rmSync(f, { force: true });
+}
+
+// 경로·키·오프사이트·복사·체크포인트 주입점은 인자로 줄 수 있다(테스트용). 생략하면 cron 실행과 같은 기본값을 쓴다.
 async function main({
   dbPath = DB_PATH,
   backupDir = BACKUP_DIR,
   retentionDays = RETENTION_DAYS,
   encryptionKey = DB_ENCRYPTION_KEY,
   offsite = {},
+  copy = fs.copyFileSync,
+  checkpoint = {},
 } = {}) {
   // process.exit 대신 exitCode. 출력 문구와 종료 코드는 그대로 두고 테스트에서 불러올 수 있게 한다
   if (!fs.existsSync(dbPath)) {
@@ -78,17 +150,33 @@ async function main({
   fs.mkdirSync(backupDir, { recursive: true });
 
   const dest = path.join(backupDir, `youtube_bias-${timestamp()}.db`);
-  const db = new Database(dbPath);
-  db.pragma("cipher = 'sqlcipher'"); // db.js와 동일 cipher(AES-256)로 맞춰야 키가 들어맞는다
-  db.key(Buffer.from(encryptionKey)); // 문자열 보간 대신 바인딩 API. db.js와 동일 이유
+  // 로테이션·오프사이트의 파일명 규칙(*.db)에 걸리지 않아, 검증 전 파일은 지워지거나 전송되지 않는다
+  const tmp = `${dest}.tmp`;
+  let tableCount;
   try {
-    db.pragma("wal_checkpoint(TRUNCATE)"); // WAL 내용을 메인 파일에 전부 반영
-  } finally {
-    db.close();
+    const db = openEncrypted(dbPath, encryptionKey);
+    let sourceCounts;
+    try {
+      await checkpointFully(db, checkpoint);
+      sourceCounts = countRows(db);
+    } finally {
+      db.close();
+    }
+    copy(dbPath, tmp); // 암호화된 바이트를 그대로 복사. 대상 파일도 자동으로 동일하게 암호화됨
+    tableCount = verifyCopy(tmp, encryptionKey, sourceCounts);
+  } catch (err) {
+    fs.rmSync(tmp, { force: true });
+    removeSidecars(tmp);
+    console.error(`[backup] 실패: 검증 실패 — ${err.message}`);
+    process.exitCode = 1;
+    return;
   }
-  fs.copyFileSync(dbPath, dest); // 암호화된 바이트를 그대로 복사. 대상 파일도 자동으로 동일하게 암호화됨
+  removeSidecars(tmp);
+  fs.renameSync(tmp, dest);
   const sizeKb = Math.round(fs.statSync(dest).size / 1024);
-  console.log(`[backup] 완료: ${dest} (${sizeKb} KB)`);
+  console.log(
+    `[backup] 완료: ${dest} (${sizeKb} KB, 검증 통과: 테이블 ${tableCount}개)`,
+  );
 
   // 설정 오류로 백업을 잃지 않도록 로테이션만 건너뛰고, 종료 코드로 backup-checked.sh가 실패를 보고하게 한다
   if (isValidRetentionDays(retentionDays)) {
@@ -191,4 +279,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, rotateBackups, offsitePush };
+module.exports = { main, rotateBackups, offsitePush, checkpointFully };
