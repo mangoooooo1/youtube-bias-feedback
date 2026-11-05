@@ -2,10 +2,11 @@
 /**
  * 연구 운영 대시보드 지표
  *
- * 알림 기준에 못 미치는 이상(수집이 고르지 않음, 피드백이 열람까지 이어지지 않음, 빈 세션 증가)을
+ * 알림 기준에 못 미치는 이상(수집이 고르지 않음, 피드백이 확인까지 이어지지 않음, 빈 세션 증가)을
  * 연구 기간 안에 보려고, 어제(KST) 하루치를 매일 Datadog gauge로 보낸다.
  * - 참여자별: 어제 영상 기록 수, 마지막 활동 뒤 경과일. 연구 기간 중인 참여자만(결측 감지와 같은 기준)
- * - 피드백 퍼널: 어제 끝난 실험군 세션 중 피드백 자격이 있던 세션의 생성 → 알림 → 열람 → 확인 수
+ * - 피드백 퍼널: 어제 끝난 실험군 세션 중 피드백 자격이 있던 세션의 생성 → 알림 → 확인 수와 알림 클릭 수.
+ *   알림 클릭(feedbackViewedAt)은 알림을 눌렀을 때만 찍혀, 팝업을 직접 열어 확인하면 비어 있다(확인보다 작을 수 있음)
  * - 세션 품질: 어제 끝난 세션의 영상 수 분포(세션 수, 0개 세션 수, 중앙값, p95, 최댓값)
  *
  * 참여자별 gauge에는 participant 태그로 anonymousId 지문만 붙인다. 참여 코드·집단·카테고리·제목은
@@ -108,7 +109,7 @@ function collectEndedSessions(db, { startMs, endMs }) {
         s.videoCount,
         s.review IS NOT NULL AS reviewed,
         s.feedbackNotifiedAt IS NOT NULL AS notified,
-        s.feedbackViewedAt IS NOT NULL AS viewed,
+        s.feedbackViewedAt IS NOT NULL AS clicked,
         s.feedbackConfirmedAt IS NOT NULL AS confirmed,
         p.group_code,
         p.installDate,
@@ -125,14 +126,14 @@ function collectEndedSessions(db, { startMs, endMs }) {
 
 /**
  * 실험군 세션 중 끝난 시각에 피드백 자격이 있던 것만 센다. 베이스라인 세션은 처치 대상이 아니다.
- * 열람·확인은 실행 시각(다음 날 오전)까지 일어난 것만 잡힌다.
+ * 알림 클릭·확인은 실행 시각(다음 날 오전)까지 일어난 것만 잡힌다.
  */
 function summarizeFunnel(sessions) {
   const funnel = {
     sessions: 0,
     reviewed: 0,
     notified: 0,
-    viewed: 0,
+    clicked: 0,
     confirmed: 0,
   };
   for (const s of sessions) {
@@ -141,7 +142,7 @@ function summarizeFunnel(sessions) {
     funnel.sessions += 1;
     if (s.reviewed) funnel.reviewed += 1;
     if (s.notified) funnel.notified += 1;
-    if (s.viewed) funnel.viewed += 1;
+    if (s.clicked) funnel.clicked += 1;
     if (s.confirmed) funnel.confirmed += 1;
   }
   return funnel;
@@ -185,7 +186,7 @@ function formatSummary(result) {
   const active = participants.filter((p) => p.dailyVideos > 0).length;
   return (
     `${result.day} 참여자 ${participants.length}명(활동 ${active}명) / ` +
-    `퍼널 ${funnel.sessions}→${funnel.reviewed}→${funnel.notified}→${funnel.viewed}→${funnel.confirmed} / ` +
+    `퍼널 세션 ${funnel.sessions}·생성 ${funnel.reviewed}·알림 ${funnel.notified}·확인 ${funnel.confirmed}·알림 클릭 ${funnel.clicked} / ` +
     `세션 ${quality.sessions}개(0개 ${quality.zero})`
   );
 }
