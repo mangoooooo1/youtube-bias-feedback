@@ -92,7 +92,7 @@ describe("summarizeFunnel — 자격 있던 실험군 세션만", () => {
     studyEndCodeVerifiedAt: null,
     reviewed: 1,
     notified: 1,
-    viewed: 0,
+    clicked: 0,
     confirmed: 0,
     ...overrides,
   });
@@ -100,15 +100,15 @@ describe("summarizeFunnel — 자격 있던 실험군 세션만", () => {
   it("단계별 세션 수를 센다", () => {
     expect(
       summarizeFunnel([
-        session({ viewed: 1, confirmed: 1 }),
-        session({ viewed: 1 }),
+        session({ clicked: 1, confirmed: 1 }),
+        session({ clicked: 1 }),
         session({ notified: 0 }),
       ]),
     ).toEqual({
       sessions: 3,
       reviewed: 3,
       notified: 2,
-      viewed: 2,
+      clicked: 2,
       confirmed: 1,
     });
   });
@@ -241,7 +241,7 @@ describe("run — 실제 테이블에서 어제 하루를 집계", () => {
       sessions: 1,
       reviewed: 1,
       notified: 1,
-      viewed: 1,
+      clicked: 1,
       confirmed: 0,
     });
     expect(result.quality).toMatchObject({ sessions: 2, zero: 1, max: 2 });
@@ -256,14 +256,20 @@ describe("Healthchecks 본문과 Datadog gauge", () => {
       { fp: "aaaaaaaaaa", dailyVideos: 3, daysSinceActivity: 0.4 },
       { fp: "bbbbbbbbbb", dailyVideos: 0, daysSinceActivity: 5.2 },
     ],
-    funnel: { sessions: 4, reviewed: 4, notified: 3, viewed: 2, confirmed: 1 },
+    funnel: {
+      sessions: 4,
+      reviewed: 4,
+      notified: 3,
+      clicked: 2,
+      confirmed: 1,
+    },
     quality: { sessions: 6, zero: 1, median: 3, p95: 8, max: 9 },
   };
 
   it("본문에는 건수만 담고 지문은 담지 않는다", () => {
     const body = formatSummary(result);
     expect(body).toBe(
-      "2026-11-09 참여자 2명(활동 1명) / 퍼널 4→4→3→2→1 / 세션 6개(0개 1)",
+      "2026-11-09 참여자 2명(활동 1명) / 퍼널 세션 4·생성 4·알림 3·확인 1·알림 클릭 2 / 세션 6개(0개 1)",
     );
     expect(body).not.toContain("aaaaaaaaaa");
   });
