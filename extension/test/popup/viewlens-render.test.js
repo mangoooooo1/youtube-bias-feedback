@@ -64,6 +64,25 @@ describe("ViewLensPopup 화면 선택 — 집단·시점별로 보이는 화면"
     expect(hasHome(c)).toBe(true);
   });
 
+  it("저장된 집단이 알 수 없는 값이면 실험군 화면으로 그리지 않아, 베이스라인 이후에도 피드백 탭 없이 홈 화면을 본다", async () => {
+    const c = await mountPopup({
+      group: "XYZ",
+      daysSinceInstall: AFTER_BASELINE,
+    });
+    expect(hasFeedbackTabs(c)).toBe(false);
+    expect(hasHome(c)).toBe(true);
+  });
+
+  it("저장된 집단을 알 수 없으면 연구 종료 뒤에도 대조군 코드 입력·리뷰 흐름을 열지 않는다", async () => {
+    const c = await mountPopup({
+      group: "XYZ",
+      daysSinceInstall: AFTER_STUDY_END,
+      codeVerified: true,
+    });
+    expect(hasFeedbackTabs(c)).toBe(false);
+    expect(c.querySelector("#vl-study-end-code-input")).toBeNull();
+  });
+
   it("대조군은 연구 진행 중(베이스라인 이후) 피드백 탭 없이 홈 화면만 본다", async () => {
     const c = await mountPopup({
       group: "CON",
