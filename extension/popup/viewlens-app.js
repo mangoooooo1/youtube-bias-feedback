@@ -118,6 +118,9 @@ function _isStudyEndTimeReached(installDate) {
   return ViewLensStudy.isReviewReleased(installDate);
 }
 
+// VL.GROUPS에 없는 집단 값일 때 쓰는 설정. 피드백 탭도, 대조군 종료 흐름도 열리지 않는다
+const UNKNOWN_GROUP = Object.freeze({ code: "", feedback: false });
+
 // 대조군 종료 후 리뷰 열람 게이트
 function _isStudyEndReviewReady(groupCfg, installDate) {
   return VL.isConGroup(groupCfg.code) && _isStudyEndTimeReached(installDate);
@@ -352,7 +355,8 @@ class ViewLensPopup {
     const collectionEnded = _isCollectionEnded(this._installDate);
     // 수집이 멈추면 일수는 참여 기간 길이에서 멈춘다
     const day = collectionEnded ? VL.TOTAL_DAYS : _elapsedDay(tl.day);
-    const groupCfg = VL.GROUPS[this._group] || VL.GROUPS.EXP;
+    // 저장된 집단을 알 수 없으면 피드백도 대조군 종료 흐름도 없는 화면으로 그린다(모르면 막는 쪽)
+    const groupCfg = VL.GROUPS[this._group] || UNKNOWN_GROUP;
     const totalWeeks = VL.TOTAL_WEEKS;
     const currentWeek = Math.min(
       totalWeeks,

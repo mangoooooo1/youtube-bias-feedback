@@ -65,11 +65,14 @@ function errorHandler(err, req, res, _next) {
     ? ` anonymousId=${JSON.stringify(req.body.anonymousId)}`
     : "";
   const status = err.status || 500;
-  // 4xx는 예상된 입력 오류라 스택이 잡음이다. 예상 못 한 5xx만 남긴다.
-  const stack = status >= 500 ? formatStack(err) : "";
-  console.error(
-    `[Error] ${req.method} ${req.path} : ${oneLine(err.message)}${who}${traceRef()}${stack}`,
-  );
+  const detail = `${req.method} ${req.path} : ${oneLine(err.message)}${who}${traceRef()}`;
+  if (status >= 500) {
+    console.error(`[Error] ${detail}${formatStack(err)}`);
+  } else {
+    // 4xx(본문 파싱 실패 등)는 예상된 입력 오류라 스택 없이, 에러 감시가 즉시 알리지 않는 접두사로 남긴다.
+    // 응답 코드는 접근 로그가 따로 남겨 우리 API로 온 요청이면 [access]로 알린다
+    console.warn(`[bad-request] ${detail}`);
+  }
 
   // express.json의 파싱 실패는 code가 없어 INTERNAL_SERVER_ERROR로 나가므로 입력 오류로 바꾼다
   if (err.type === "entity.parse.failed") {

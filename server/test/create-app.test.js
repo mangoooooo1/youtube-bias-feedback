@@ -160,7 +160,7 @@ describe("createApp — 접근 로그·오류 처리 순서", () => {
     ]);
   });
 
-  it("잘못된 JSON은 errorHandler 형식의 400으로 응답하고 [access]로 기록된다", async () => {
+  it("잘못된 JSON은 errorHandler 형식의 400으로 응답하고 [access]로 기록된다(파서 메시지는 알림 없는 [bad-request]로)", async () => {
     const res = await request(app)
       .post("/api/sessions")
       .set("Content-Type", "application/json")
@@ -172,7 +172,14 @@ describe("createApp — 접근 로그·오류 처리 순서", () => {
       code: "INVALID_FIELD_VALUE",
       detail: "body",
     });
-    expect(await accessLines()).toEqual(["[access] POST /api/sessions 400"]);
+    const lines = await accessLines();
+    expect(lines.filter((l) => l.startsWith("[access"))).toEqual([
+      "[access] POST /api/sessions 400",
+    ]);
+    // 파서 메시지 문구는 Node 버전마다 달라 접두사·경로만 본다
+    expect(lines.filter((l) => l.startsWith("[bad-request] "))).toEqual([
+      expect.stringMatching(/^\[bad-request\] POST \/api\/sessions : /),
+    ]);
   });
 });
 

@@ -315,11 +315,20 @@ describe("offsitePush — 오프사이트 전송", () => {
   const EXEC_OPTS = { stdio: "pipe", timeout: 30000 };
   const BASE_ENV = { E1_BACKUP_HOST: "203.0.113.9", E1_BACKUP_KEY: "/keys/e1" };
 
-  it("E1_BACKUP_HOST가 없으면 원격 명령을 실행하지 않는다", () => {
-    const exec = vi.fn();
-    offsitePush(DEST, { env: {}, exec });
-    expect(exec).not.toHaveBeenCalled();
-  });
+  // 설정이 빠진 채 조용히 넘어가 오프사이트가 꺼진 걸 모른 적이 있다. 실패 문구로 backup-checked.sh가 알리게 한다
+  it.each([{}, { E1_BACKUP_HOST: "" }])(
+    "E1_BACKUP_HOST가 없으면(%j) 원격 명령 없이 '오프사이트 전송 실패'를 남긴다",
+    (env) => {
+      const exec = vi.fn();
+      offsitePush(DEST, { env, exec });
+
+      expect(exec).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[backup] 오프사이트 전송 실패(설정 없음, 로컬 백업은 정상): E1_BACKUP_HOST가 없습니다.",
+      );
+      expect(process.exitCode).toBe(prevExitCode);
+    },
+  );
 
   const DIR_REASON = "E1_BACKUP_DIR에 허용되지 않는 문자가 있습니다.";
   const RETENTION_REASON = "E1_RETENTION_DAYS가 0 이상의 정수가 아닙니다.";

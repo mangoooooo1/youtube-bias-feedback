@@ -4,6 +4,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["extension/test/**/*.test.js", "server/test/**/*.test.js"],
+    // SQLCipher DB는 열 때마다 키 유도로 약 160ms가 든다. 병렬 실행 때 겹치면 기본 5초를 넘겨 무작위로 실패해 늘린다
+    testTimeout: 20000,
     // 서버 CJS를 import(vite 변환)와 require(Node)로 섞어 불러오면 커버리지 병합이 깨져 Node 경로로 통일한다.
     // 한계: Node 경로는 일부 파일(dogstatsd, llm-metrics)에서 줄·분기 매핑이 몇 줄 밀린다.
     server: { deps: { external: [/[\\/]server[\\/](?!test[\\/])/] } },

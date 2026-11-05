@@ -50,6 +50,8 @@ function createTestDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       eventId TEXT,
       anonymousId TEXT NOT NULL,
+      tabTodayClicks INTEGER DEFAULT 0,
+      tabWeekClicks INTEGER DEFAULT 0,
       todayFeedbackViewed INTEGER DEFAULT 0,
       periodFeedbackViewed INTEGER DEFAULT 0,
       pastDayReviewViews INTEGER,
@@ -84,10 +86,12 @@ function insertSession(db, row) {
 
 function insertPopup(db, row) {
   db.prepare(
-    `INSERT INTO popup_events (eventId, anonymousId, todayFeedbackViewed, periodFeedbackViewed, pastDayReviewViews, openedAt, createdAt)
-     VALUES (@eventId, @anonymousId, @todayFeedbackViewed, @periodFeedbackViewed, @pastDayReviewViews, @openedAt, @createdAt)`,
+    `INSERT INTO popup_events (eventId, anonymousId, tabTodayClicks, tabWeekClicks, todayFeedbackViewed, periodFeedbackViewed, pastDayReviewViews, openedAt, createdAt)
+     VALUES (@eventId, @anonymousId, @tabTodayClicks, @tabWeekClicks, @todayFeedbackViewed, @periodFeedbackViewed, @pastDayReviewViews, @openedAt, @createdAt)`,
   ).run({
     eventId: "p1",
+    tabTodayClicks: 0,
+    tabWeekClicks: 0,
     todayFeedbackViewed: 0,
     periodFeedbackViewed: 0,
     pastDayReviewViews: null,
@@ -196,7 +200,7 @@ describe("자격 밖 팝업 리뷰 열람", () => {
     expect(runQuietly(db).ineligiblePopupViews.total).toBe(0);
   });
 
-  it("대조군은 코드 검증 전에 본 기간·지난 날 리뷰가 위반이고, 검증 뒤에 본 것은 아니다", () => {
+  it("대조군은 코드 검증 전에 본 지난 날 리뷰가 위반이고, 검증 뒤에 본 것은 아니다", () => {
     db = createTestDb();
     insertParticipant(db, "con", "CON", VERIFIED);
     insertPopup(db, {
@@ -216,11 +220,11 @@ describe("자격 밖 팝업 리뷰 열람", () => {
     expect(ineligiblePopupViews.total).toBe(1);
     expect(ineligiblePopupViews.newRows[0]).toMatchObject({
       popupEventId: "before",
-      item: "periodFeedbackViewed,pastDayReviewViews",
+      item: "pastDayReviewViews",
     });
   });
 
-  it("리뷰를 보지 않은 팝업은 읽지 않는다", () => {
+  it("리뷰도 탭도 보지 않은 팝업은 읽지 않는다", () => {
     db = createTestDb();
     insertParticipant(db, "con", "CON");
     insertPopup(db, { anonymousId: "con", openedAt: IN_BASELINE });
@@ -238,6 +242,83 @@ describe("자격 밖 팝업 리뷰 열람", () => {
     const result = runQuietly(db);
     expect(result.ineligiblePopupViews.total).toBe(0);
     expect(result.unjudgedPopupViews.total).toBe(1);
+  });
+});
+
+describe("자격 밖 피드백 탭 노출", () => {
+  it("코드 검증 전 대조군의 팝업에 주차별 탭 클릭·체류가 있으면 탭 노출로 잡고, 리뷰 열람으로는 세지 않는다", () => {
+    db = createTestDb();
+    insertParticipant(db, "con", "CON", VERIFIED);
+    // 설치 당일 탭 줄이 그려져 주차별 탭을 눌러 머문 기록
+    insertPopup(db, {
+      anonymousId: "con",
+      tabWeekClicks: 1,
+      periodFeedbackViewed: 1,
+      openedAt: "2026-11-23T11:13:00+09:00",
+    });
+    const result = runQuietly(db);
+    expect(result.ineligiblePopupViews.total).toBe(0);
+    expect(result.ineligibleTabViews.total).toBe(1);
+    expect(result.ineligibleTabViews.newRows[0].item).toBe(
+      "tabWeekClicks,periodFeedbackViewed",
+    );
+  });
+
+  it("기준선 중 실험군이 오늘 탭만 눌러도 탭 줄이 그려진 것이라 잡는다", () => {
+    db = createTestDb();
+    insertParticipant(db, "exp", "EXP");
+    insertPopup(db, {
+      anonymousId: "exp",
+      tabTodayClicks: 2,
+      openedAt: IN_BASELINE,
+    });
+    expect(runQuietly(db).ineligibleTabViews.newRows[0].item).toBe(
+      "tabTodayClicks",
+    );
+  });
+
+  it("자격이 생긴 뒤의 탭 클릭은 잡지 않는다(기준선 뒤 실험군, 코드 검증 뒤 대조군)", () => {
+    db = createTestDb();
+    insertParticipant(db, "exp", "EXP");
+    insertParticipant(db, "con", "CON", VERIFIED);
+    insertPopup(db, {
+      eventId: "e",
+      anonymousId: "exp",
+      tabWeekClicks: 1,
+      periodFeedbackViewed: 1,
+      openedAt: AFTER_BASELINE,
+    });
+    insertPopup(db, {
+      eventId: "c",
+      anonymousId: "con",
+      tabTodayClicks: 1,
+      tabWeekClicks: 1,
+      openedAt: "2027-01-05T10:30:00+09:00",
+    });
+    expect(runQuietly(db).ineligibleTabViews.total).toBe(0);
+  });
+
+  it("리뷰와 탭 흔적이 함께 있는 자격 밖 팝업은 두 항목에 각각 한 건씩 든다", () => {
+    db = createTestDb();
+    insertParticipant(db, "exp", "EXP");
+    insertPopup(db, {
+      anonymousId: "exp",
+      tabTodayClicks: 1,
+      todayFeedbackViewed: 1,
+      openedAt: IN_BASELINE,
+    });
+    const result = runQuietly(db);
+    expect(result.ineligiblePopupViews.total).toBe(1);
+    expect(result.ineligibleTabViews.total).toBe(1);
+  });
+
+  it("연 시각이 없는 탭 흔적은 판정 불가로 센다", () => {
+    db = createTestDb();
+    insertParticipant(db, "con", "CON");
+    insertPopup(db, { anonymousId: "con", tabWeekClicks: 1, openedAt: null });
+    const result = runQuietly(db);
+    expect(result.ineligibleTabViews.total).toBe(0);
+    expect(result.unjudgedPopupViews.newRows[0].item).toBe("tabWeekClicks");
   });
 });
 

@@ -6,10 +6,12 @@
  * 화면에서 막는 장치(팝업·서버의 자격 판정)가 실제로 막았는지 보는 사후 점검이다.
  * - 대조군 세션 피드백: 대조군 세션에 알림·열람·확인 시각이 있다(대조군은 세션 피드백 대상이 아니다)
  * - 실험군 기준선 중 세션 피드백: 알림·열람·확인 시각이 기준선 기간 안이다
- * - 자격 밖 팝업 열람: 오늘·기간·지난 날 리뷰를 본 팝업을, 연 시각에 자격이 없었다
+ * - 자격 밖 팝업 열람: 오늘·지난 날 리뷰를 본 팝업을, 연 시각에 자격이 없었다
  *   (실험군은 기준선 안, 대조군은 연구 종료 코드 검증 전)
+ * - 자격 밖 피드백 탭 노출: 오늘·주차별 탭 줄은 자격이 있을 때만 그려지는데, 자격이 없는 시각의 팝업에
+ *   탭 클릭이나 주차별 탭 체류가 남았다. 리뷰를 봤다는 근거는 아니지만 화면 차단에 빈틈이 있었다는 신호다
  * - 대조군 세션 리뷰 생성: 대조군 세션에 리뷰 문장이 있다
- * - 판정 불가: 리뷰를 본 팝업인데 연 시각이 없다(구버전 확장)
+ * - 판정 불가: 리뷰나 탭 흔적이 있는 팝업인데 연 시각이 없다(구버전 확장)
  *
  * 자격 판정은 서버가 리뷰를 내줄 때 쓰는 isTodayReviewEligible과 같은 규칙이다.
  * 기준선 날짜의 리뷰를 기준선이 끝난 뒤 보는 것은 의도된 동작이라, 날짜가 아니라 연 시각으로 판정한다.
@@ -60,11 +62,24 @@ const SESSION_FEEDBACK_COLUMNS = [
   { item: "feedbackConfirmedAt", at: "confirmedMs", arrival: "confirmedMs" },
 ];
 
+// 실제 리뷰 카드가 있어야 찍히는 표시
 const POPUP_VIEW_FLAGS = [
   { item: "todayFeedbackViewed", viewed: (p) => p.todayFeedbackViewed === 1 },
-  { item: "periodFeedbackViewed", viewed: (p) => p.periodFeedbackViewed === 1 },
   { item: "pastDayReviewViews", viewed: (p) => p.pastDayReviewViews > 0 },
 ];
+
+// 탭 줄이 그려져 있어야 찍히는 표시. periodFeedbackViewed는 주차별 탭에 머문 시간만 재서 리뷰 열람 근거는 아니다
+const POPUP_TAB_FLAGS = [
+  { item: "tabTodayClicks", viewed: (p) => p.tabTodayClicks > 0 },
+  { item: "tabWeekClicks", viewed: (p) => p.tabWeekClicks > 0 },
+  { item: "periodFeedbackViewed", viewed: (p) => p.periodFeedbackViewed === 1 },
+];
+
+const flagsOf = (flags, popup) =>
+  flags
+    .filter((f) => f.viewed(popup))
+    .map((f) => f.item)
+    .join(",");
 
 /**
  * TEST 그룹을 뺀 참여자와, 피드백 흔적이 있는 세션·팝업 기록을 읽는다. 시각은 ms로 바꿔 둔다.
@@ -99,9 +114,11 @@ function collectRecords(db) {
     .prepare(
       `SELECT anonymousId, eventId, ${toMs("openedAt")} AS openedMs,
               ${toMs("createdAt")} AS createdMs,
-              todayFeedbackViewed, periodFeedbackViewed, pastDayReviewViews
+              todayFeedbackViewed, pastDayReviewViews,
+              tabTodayClicks, tabWeekClicks, periodFeedbackViewed
          FROM popup_events
-        WHERE todayFeedbackViewed = 1 OR periodFeedbackViewed = 1 OR pastDayReviewViews > 0`,
+        WHERE todayFeedbackViewed = 1 OR pastDayReviewViews > 0
+           OR tabTodayClicks > 0 OR tabWeekClicks > 0 OR periodFeedbackViewed = 1`,
     )
     .all()
     .filter((p) => participants.has(p.anonymousId));
@@ -171,28 +188,32 @@ function findControlSessionReviews(sessions, participants) {
 }
 
 /**
- * 리뷰를 본 팝업 기록을 연 시각의 자격으로 나눈다.
- * @returns {{ineligible: object[], unjudged: object[]}} 자격 밖 열람, 연 시각이 없어 판정할 수 없는 기록
+ * 리뷰·탭 흔적이 있는 팝업 기록을 연 시각의 자격으로 나눈다.
+ * @returns {{ineligibleViews: object[], ineligibleTabs: object[], unjudged: object[]}}
+ *   자격 밖 리뷰 열람, 자격 밖 탭 노출, 연 시각이 없어 판정할 수 없는 기록
  */
 function classifyPopupViews(popups, participants) {
-  const ineligible = [];
+  const ineligibleViews = [];
+  const ineligibleTabs = [];
   const unjudged = [];
   for (const p of popups) {
-    const row = {
+    const row = (item) => ({
       anonymousId: p.anonymousId,
       popupEventId: p.eventId,
-      item: POPUP_VIEW_FLAGS.filter((f) => f.viewed(p))
-        .map((f) => f.item)
-        .join(","),
+      item,
       atMs: p.openedMs,
       arrivalMs: p.createdMs,
-    };
-    if (!Number.isFinite(p.openedMs)) unjudged.push(row);
-    else if (!isEligibleAt(participants.get(p.anonymousId), p.openedMs)) {
-      ineligible.push(row);
+    });
+    const views = flagsOf(POPUP_VIEW_FLAGS, p);
+    const tabs = flagsOf(POPUP_TAB_FLAGS, p);
+    if (!Number.isFinite(p.openedMs)) {
+      unjudged.push(row([views, tabs].filter(Boolean).join(",")));
+    } else if (!isEligibleAt(participants.get(p.anonymousId), p.openedMs)) {
+      if (views) ineligibleViews.push(row(views));
+      if (tabs) ineligibleTabs.push(row(tabs));
     }
   }
-  return { ineligible, unjudged };
+  return { ineligibleViews, ineligibleTabs, unjudged };
 }
 
 /**
@@ -214,8 +235,9 @@ const CHECK_LABELS = {
   controlSessionFeedback: "대조군 세션 피드백 알림·열람",
   baselineSessionFeedback: "실험군 기준선 중 세션 피드백",
   ineligiblePopupViews: "자격 밖 팝업 리뷰 열람",
+  ineligibleTabViews: "자격 밖 피드백 탭 노출",
   controlSessionReviews: "대조군 세션 리뷰 생성",
-  unjudgedPopupViews: "연 시각 없는 리뷰 열람 팝업(판정 불가)",
+  unjudgedPopupViews: "연 시각 없는 리뷰·탭 흔적 팝업(판정 불가)",
 };
 
 /** 신규 항목 한 줄. 참여자는 지문으로만 적는다. */
@@ -256,7 +278,8 @@ function run(db, { now = Date.now() } = {}) {
       sessions,
       participants,
     ),
-    ineligiblePopupViews: popupViews.ineligible,
+    ineligiblePopupViews: popupViews.ineligibleViews,
+    ineligibleTabViews: popupViews.ineligibleTabs,
     controlSessionReviews: findControlSessionReviews(sessions, participants),
     unjudgedPopupViews: popupViews.unjudged,
   };
@@ -290,6 +313,7 @@ const CHECK_TAGS = {
   controlSessionFeedback: "control_session_feedback",
   baselineSessionFeedback: "baseline_session_feedback",
   ineligiblePopupViews: "ineligible_popup_views",
+  ineligibleTabViews: "ineligible_tab_views",
   controlSessionReviews: "control_session_reviews",
   unjudgedPopupViews: "unjudged_popup_views",
 };
