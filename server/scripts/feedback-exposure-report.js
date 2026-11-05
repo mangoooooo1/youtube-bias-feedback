@@ -6,7 +6,7 @@
  * 화면에서 막는 장치(팝업·서버의 자격 판정)가 실제로 막았는지 보는 사후 점검이다.
  * - 대조군 세션 피드백: 대조군 세션에 알림·열람·확인 시각이 있다(대조군은 세션 피드백 대상이 아니다)
  * - 실험군 기준선 중 세션 피드백: 알림·열람·확인 시각이 기준선 기간 안이다
- * - 자격 밖 팝업 열람: 오늘·기간·지난 날 리뷰를 본 팝업을, 연 시각에 자격이 없었다
+ * - 자격 밖 팝업 열람: 오늘·지난 날 리뷰를 본 팝업을, 연 시각에 자격이 없었다
  *   (실험군은 기준선 안, 대조군은 연구 종료 코드 검증 전)
  * - 대조군 세션 리뷰 생성: 대조군 세션에 리뷰 문장이 있다
  * - 판정 불가: 리뷰를 본 팝업인데 연 시각이 없다(구버전 확장)
@@ -60,9 +60,10 @@ const SESSION_FEEDBACK_COLUMNS = [
   { item: "feedbackConfirmedAt", at: "confirmedMs", arrival: "confirmedMs" },
 ];
 
+// 실제 리뷰 카드가 있어야 찍히는 표시만 쓴다. periodFeedbackViewed는 주차별 탭에 머문 시간만 재서
+// 리뷰가 없는 잠금 화면에서도 찍히므로 노출 근거가 아니다
 const POPUP_VIEW_FLAGS = [
   { item: "todayFeedbackViewed", viewed: (p) => p.todayFeedbackViewed === 1 },
-  { item: "periodFeedbackViewed", viewed: (p) => p.periodFeedbackViewed === 1 },
   { item: "pastDayReviewViews", viewed: (p) => p.pastDayReviewViews > 0 },
 ];
 
@@ -99,9 +100,9 @@ function collectRecords(db) {
     .prepare(
       `SELECT anonymousId, eventId, ${toMs("openedAt")} AS openedMs,
               ${toMs("createdAt")} AS createdMs,
-              todayFeedbackViewed, periodFeedbackViewed, pastDayReviewViews
+              todayFeedbackViewed, pastDayReviewViews
          FROM popup_events
-        WHERE todayFeedbackViewed = 1 OR periodFeedbackViewed = 1 OR pastDayReviewViews > 0`,
+        WHERE todayFeedbackViewed = 1 OR pastDayReviewViews > 0`,
     )
     .all()
     .filter((p) => participants.has(p.anonymousId));

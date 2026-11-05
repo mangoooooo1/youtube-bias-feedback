@@ -196,7 +196,7 @@ describe("자격 밖 팝업 리뷰 열람", () => {
     expect(runQuietly(db).ineligiblePopupViews.total).toBe(0);
   });
 
-  it("대조군은 코드 검증 전에 본 기간·지난 날 리뷰가 위반이고, 검증 뒤에 본 것은 아니다", () => {
+  it("대조군은 코드 검증 전에 본 지난 날 리뷰가 위반이고, 검증 뒤에 본 것은 아니다", () => {
     db = createTestDb();
     insertParticipant(db, "con", "CON", VERIFIED);
     insertPopup(db, {
@@ -216,8 +216,19 @@ describe("자격 밖 팝업 리뷰 열람", () => {
     expect(ineligiblePopupViews.total).toBe(1);
     expect(ineligiblePopupViews.newRows[0]).toMatchObject({
       popupEventId: "before",
-      item: "periodFeedbackViewed,pastDayReviewViews",
+      item: "pastDayReviewViews",
     });
+  });
+
+  it("주차별 탭에 머물기만 한 기록은 리뷰를 본 것으로 치지 않는다(잠금 화면에서도 찍힘)", () => {
+    db = createTestDb();
+    insertParticipant(db, "con", "CON");
+    insertPopup(db, {
+      anonymousId: "con",
+      periodFeedbackViewed: 1,
+      openedAt: "2026-11-23T10:20:00+09:00",
+    });
+    expect(collectRecords(db).popups).toEqual([]);
   });
 
   it("리뷰를 보지 않은 팝업은 읽지 않는다", () => {
