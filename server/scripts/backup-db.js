@@ -18,10 +18,12 @@
  * - 로테이션  : RETENTION_DAYS(기본 30일, 1 이상 정수) 지난 백업 자동 삭제
  *               값이 잘못되면 백업은 남기고 로테이션만 건너뛴 뒤 실패(exit 1)로 끝낸다
  *
- * 오프사이트 복사(선택): E1_BACKUP_HOST가 설정된 경우에만, 백업 후 원격 서버로 scp 전송한다.
- * 단일 디스크 장애 대비. best-effort라 전송 실패해도 로컬 백업은 유효(스크립트 성공).
- * 원격 주소·키는 코드에 두지 않고 환경변수로만 받는다(레포·이력에 노출 방지).
- *   E1_BACKUP_HOST      원격 호스트(IP). 설정 시 오프사이트 활성화
+ * 오프사이트 복사: 백업 후 원격 서버로 scp 전송한다. 단일 디스크 장애 대비.
+ * best-effort라 전송 실패해도 로컬 백업은 유효(스크립트 성공). 대신 "오프사이트 전송 실패" 문구를
+ * 남겨 backup-checked.sh가 실패로 알린다. E1_BACKUP_HOST가 없을 때도 같다(조용히 꺼지지 않게).
+ * 원격 주소·키는 코드에 두지 않고 환경변수로만 받는다(레포·이력에 노출 방지). 값은 GitHub Secret →
+ * 배포 때 server/.env로 들어간다. 서버에서 .env를 직접 고치면 다음 배포 때 지워진다.
+ *   E1_BACKUP_HOST      원격 호스트(IP). 필수
  *   E1_BACKUP_USER      원격 사용자 (기본 ubuntu)
  *   E1_BACKUP_KEY       개인키 경로 (기본 ~/.ssh/e1_backup)
  *   E1_BACKUP_DIR       원격 저장 디렉터리 (기본 db-backups, 홈 기준 상대경로)
@@ -214,12 +216,18 @@ function rotateBackups(backupDir, retentionDays, now = Date.now()) {
     );
 }
 
-// 오프사이트 복사 — E1_BACKUP_HOST가 설정된 경우에만 동작.
+// 오프사이트 복사.
 // best-effort: 전송/원격정리 실패해도 로컬 백업은 이미 성공했으므로 경고만 남기고 넘어간다.
 // env·exec는 테스트에서 원격 명령을 가로채기 위한 주입점이다(서버 모듈은 vi.mock이 닿지 않음).
 function offsitePush(dest, { env = process.env, exec = execFileSync } = {}) {
   const host = env.E1_BACKUP_HOST;
-  if (!host) return; // 미설정 → 오프사이트 비활성화
+  // 설정이 빠진 채 조용히 넘어가 오프사이트가 꺼진 걸 모른 적이 있어, 실패 문구로 알린다
+  if (!host) {
+    console.warn(
+      "[backup] 오프사이트 전송 실패(설정 없음, 로컬 백업은 정상): E1_BACKUP_HOST가 없습니다.",
+    );
+    return;
+  }
 
   const user = env.E1_BACKUP_USER || "ubuntu";
   const key = env.E1_BACKUP_KEY || path.join(os.homedir(), ".ssh", "e1_backup");
