@@ -127,9 +127,24 @@ router.post("/", requireParticipant, async (req, res, next) => {
       // 함께 돌려준다. 그래야 클라이언트가 이번에도 로컬 카테고리 그래프를 채울 수 있다.
       const existing = db
         .prepare(
-          "SELECT categoryDistribution, entropy FROM sessions WHERE sessionId = ?",
+          "SELECT categoryDistribution, entropy FROM sessions WHERE sessionId = ? AND anonymousId = ?",
         )
-        .get(req.body.sessionId);
+        .get(req.body.sessionId, req.body.anonymousId);
+
+      // 같은 sessionId를 다른 참여자가 먼저 저장했다. 409는 확장이 "이미 저장됨"으로 확정하므로
+      // 400으로 이 세션만 실패시키고, 앞 참여자의 행은 건드리지 않는다
+      if (!existing) {
+        console.warn(
+          `[sessions] 다른 참여자가 쓰는 sessionId라 저장하지 않음 sessionId=${JSON.stringify(req.body.sessionId)}`,
+        );
+        return fail(
+          res,
+          400,
+          ERROR_CODES.SESSION_ID_CONFLICT,
+          "다른 참여자의 세션과 sessionId가 겹칩니다.",
+          req.body.sessionId,
+        );
+      }
       const existingDistribution = existing?.categoryDistribution
         ? JSON.parse(existing.categoryDistribution)
         : null;
@@ -142,7 +157,7 @@ router.post("/", requireParticipant, async (req, res, next) => {
         db.prepare(
           `UPDATE sessions SET categoryDistribution = ?, entropy = ?,
              weightedCategoryDistribution = ?, weightedEntropy = ?, validVideoCount = ?
-           WHERE sessionId = ?`,
+           WHERE sessionId = ? AND anonymousId = ?`,
         ).run(
           JSON.stringify(categoryDistribution),
           entropy,
@@ -152,6 +167,7 @@ router.post("/", requireParticipant, async (req, res, next) => {
           analysis.weightedEntropy,
           analysis.validVideoCount,
           req.body.sessionId,
+          req.body.anonymousId,
         );
       }
 
@@ -195,7 +211,7 @@ router.post("/", requireParticipant, async (req, res, next) => {
         });
     if (generated) {
       try {
-        recordSessionReview(db, req.body.sessionId, generated);
+        recordSessionReview(db, req.body.sessionId, anonymousId, generated);
       } catch (err) {
         console.error(
           "[sessions] 오늘 리뷰 생성 오류: 세션 행 기록 실패",

@@ -1675,6 +1675,104 @@ describe("content.js recordVideo — 10분이 지난 세션에는 새 영상을 
   });
 });
 
+// 서버의 sessionId는 참여자 구분 없이 UNIQUE라, 같은 밀리초에 시작한 두 참여자의 세션이 겹치면 뒤 세션 행이 저장되지 않는다
+describe("content.js 세션 ID — 참여자별 접미사", () => {
+  const MIN = 60 * 1000;
+  const A = "11111111-2222-4333-8444-555555555555";
+  const B = "66666666-7777-4888-9999-000000000000";
+
+  async function makeTab(sharedStorage) {
+    return loadRecordVideo(
+      {
+        runtime: { id: "fake-extension-id" },
+        storage: { local: sharedStorage },
+      },
+      () => Promise.resolve({ ok: true }),
+      { log: () => {}, warn: () => {} },
+    );
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("anonymousId가 있으면 시각 뒤에 해시 8자를 붙이고, 원본 ID와 __는 들어가지 않는다", async () => {
+    const { api } = await loadContent();
+    const id = api.makeSessionId(1700000000000, A);
+
+    expect(id).toMatch(/^1700000000000-[0-9a-f]{8}$/);
+    expect(id).not.toContain("__");
+    expect(id).not.toContain(A.slice(0, 8));
+    expect(api.makeSessionId(1700000000000, A)).toBe(id);
+    expect(api.makeSessionId(1700000000000, B)).not.toBe(id);
+  });
+
+  it("온보딩 전(anonymousId 없음)에는 지금처럼 시각만 쓴다", async () => {
+    const { api } = await loadContent();
+    expect(api.makeSessionId(1700000000000, undefined)).toBe("1700000000000");
+  });
+
+  it("두 참여자가 같은 밀리초에 세션을 시작해도 세션 ID가 다르고, 저장 키에서 세션 ID를 그대로 되찾을 수 있다", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1700000000000);
+    const storageA = createSharedStorage({ anonymousId: A });
+    const storageB = createSharedStorage({ anonymousId: B });
+    await (
+      await makeTab(storageA)
+    )("v1", "영상1");
+    await (
+      await makeTab(storageB)
+    )("v1", "영상1");
+
+    const idA = storageA.dump().currentSession.sessionId;
+    const idB = storageB.dump().currentSession.sessionId;
+    expect(idA).not.toBe(idB);
+    for (const [dump, id] of [
+      [storageA.dump(), idA],
+      [storageB.dump(), idB],
+    ]) {
+      const keys = Object.keys(dump).filter((k) => k.startsWith("video__"));
+      expect(keys).toHaveLength(1);
+      // storage.js sessionIdOf와 같은 방식으로 나눈다
+      expect(keys[0].slice("video__".length).split("__")[0]).toBe(id);
+    }
+  });
+
+  it("10분이 지난 세션을 이어받을 때도 접미사가 붙고, 두 탭이 동시에 기록해도 같은 새 세션으로 모인다", async () => {
+    const lastWatchedAt = new Date(
+      Date.now() - 2 * 24 * 60 * MIN,
+    ).toISOString();
+    const { api } = await loadContent();
+    const expected = api.makeSessionId(Date.parse(lastWatchedAt) + 10 * MIN, A);
+    const storage = createControllableStorage({
+      currentSession: { sessionId: "old", startTime: lastWatchedAt },
+      lastWatchedAt,
+      anonymousId: A,
+    });
+    const tabA = await makeTab(storage);
+    const tabB = await makeTab(storage);
+
+    const pA = tabA("vA", "탭A 영상");
+    const pB = tabB("vB", "탭B 영상");
+    await flushMicrotasks();
+    // 두 탭 모두 서로의 쓰기 전에 옛 세션을 읽는다
+    storage.release();
+    storage.release();
+    await flushMicrotasks();
+    storage.release();
+    await flushMicrotasks();
+    storage.release();
+    await Promise.all([pA, pB]);
+
+    const dump = storage.dump();
+    expect(dump.currentSession.sessionId).toBe(expected);
+    expect(
+      collectVideos(dump, expected)
+        .map((v) => v.videoId)
+        .sort(),
+    ).toEqual(["vA", "vB"]);
+  });
+});
+
 describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플래그로 남긴다", () => {
   async function makeTabWithFetch(sharedStorage, fetchMock) {
     const chromeMock = {

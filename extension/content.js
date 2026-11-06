@@ -214,6 +214,24 @@ let writeQueue = Promise.resolve();
 const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
+ * 세션 ID를 만든다. 서버의 sessionId는 참여자 구분 없이 UNIQUE라, 같은 밀리초에 시작한 다른 참여자와
+ * 겹치지 않게 anonymousId 해시(FNV-1a 32비트, 16진수 8자)를 붙인다. 원본 ID는 세션 ID에 드러나지 않는다.
+ * 저장 키 video__<세션>__<eventId>를 "__"로 나누므로 구분자는 "-"다. 온보딩 전(anonymousId 없음)은 시각만 쓴다
+ * @param {number} ms - 세션 시작 기준 시각
+ * @param {string|undefined} anonymousId
+ * @returns {string}
+ */
+function makeSessionId(ms, anonymousId) {
+  if (!anonymousId) return String(ms);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < anonymousId.length; i++) {
+    hash ^= anonymousId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `${ms}-${(hash >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+/**
  * 이 탭의 실행 컨텍스트 안에서만 사는 값이다. storage의 lastRecordedVideo는
  * background.js의 세션 타임아웃(endSession)이 전혀 다른 실행 컨텍스트에서
  * 언제든 null로 지울 수 있다. 한 영상을 끊기지 않고 10분 넘게 계속 보기만 해도
@@ -451,8 +469,9 @@ function recordVideo(
         currentSession && !isStale
           ? currentSession
           : {
-              sessionId: String(
+              sessionId: makeSessionId(
                 isStale ? lastMs + SESSION_TIMEOUT_MS : Date.now(),
+                anonymousId,
               ),
               startTime: now,
             };
@@ -985,6 +1004,7 @@ if (typeof module !== "undefined" && module.exports) {
     parseTitle,
     classifyNavigationTrigger,
     recordVideo,
+    makeSessionId,
     handleVideoChange,
     captureWatchStatsSnapshot,
     captureTrackedVideoIdentity,
