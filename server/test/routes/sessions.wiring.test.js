@@ -155,6 +155,73 @@ describe("실제 server/routes/sessions.js 라우터 배선", () => {
     expect(res.body.data.entropy).toBe(first.body.data.entropy);
   });
 
+  describe("다른 참여자가 같은 sessionId로 보내면", () => {
+    beforeEach(() => {
+      db.prepare(
+        `INSERT OR IGNORE INTO participants (anonymousId, group_code, installDate)
+         VALUES ('other-user', 'EXP', '2020-01-01T00:00:00+09:00')`,
+      ).run();
+    });
+
+    it("409가 아니라 400(SESSION_ID_CONFLICT)이고 앞 참여자의 분포를 돌려주지 않으며 뒤 참여자의 행은 생기지 않는다", async () => {
+      await request(app).post("/api/sessions").send(basePayload());
+      const res = await request(app)
+        .post("/api/sessions")
+        .send(basePayload({ anonymousId: "other-user" }));
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe("SESSION_ID_CONFLICT");
+      expect(res.body).not.toHaveProperty("data");
+      expect(
+        db
+          .prepare("SELECT anonymousId FROM sessions WHERE sessionId = ?")
+          .all("wiring-s1"),
+      ).toEqual([{ anonymousId: "wiring-user" }]);
+    });
+
+    it("앞 참여자의 분포가 비어 있어도 뒤 참여자의 계산값으로 덮어쓰지 않는다", async () => {
+      const videoIds = ["conflict-v1", "conflict-v2"];
+      await request(app).post("/api/sessions").send(basePayload({ videoIds }));
+      db.prepare(
+        `UPDATE sessions SET categoryDistribution = NULL, entropy = NULL,
+           weightedCategoryDistribution = NULL, weightedEntropy = NULL, validVideoCount = NULL
+         WHERE sessionId = ?`,
+      ).run("wiring-s1");
+      // 뒤 참여자 요청에서는 분포가 계산되게 해, 고치기 전의 보정 UPDATE 경로를 탄다
+      db.prepare(
+        `INSERT INTO video_metadata (videoId, categoryId, title)
+         VALUES ('conflict-v1', '20', 'v1'), ('conflict-v2', '20', 'v2')`,
+      ).run();
+
+      let res;
+      try {
+        res = await request(app)
+          .post("/api/sessions")
+          .send(basePayload({ anonymousId: "other-user", videoIds }));
+      } finally {
+        db.prepare(
+          "DELETE FROM video_metadata WHERE videoId IN ('conflict-v1', 'conflict-v2')",
+        ).run();
+      }
+
+      expect(
+        db
+          .prepare(
+            `SELECT categoryDistribution, entropy, weightedCategoryDistribution, weightedEntropy, validVideoCount
+             FROM sessions WHERE sessionId = ?`,
+          )
+          .get("wiring-s1"),
+      ).toEqual({
+        categoryDistribution: null,
+        entropy: null,
+        weightedCategoryDistribution: null,
+        weightedEntropy: null,
+        validVideoCount: null,
+      });
+      expect(res.status).toBe(400);
+    });
+  });
+
   it("POST /api/sessions — 영상 3000개(상한) 세션은 저장되고 3001개는 400이다", async () => {
     const ids = (n) => Array.from({ length: n }, (_, i) => `v${i}`);
     const ok = await request(app)

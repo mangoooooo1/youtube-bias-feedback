@@ -60,17 +60,19 @@ function insertSession(db, body) {
  * today_reviews는 날짜당 최신본만 남기므로, 생성마다의 성공·폴백과 노출 문장은 여기에만 남는다.
  * @param {import("better-sqlite3").Database} db - DB 커넥션
  * @param {string} sessionId - 이번 요청으로 저장한 세션 id
+ * @param {string} anonymousId - 세션 주인. sessionId는 참여자 사이에서 겹칠 수 있다
  * @param {object} generated - generateAndStoreTodayReview 반환값
  * @returns {void}
  */
-function recordSessionReview(db, sessionId, generated) {
+function recordSessionReview(db, sessionId, anonymousId, generated) {
   db.prepare(
     `UPDATE sessions SET geminiMs = @geminiMs, llmStatus = @llmStatus, failureReason = @failureReason,
        httpStatus = @httpStatus, timedOut = @timedOut, review = @review, reviewTopic = @reviewTopic,
        source = @source, promptVersion = @promptVersion
-     WHERE sessionId = @sessionId`,
+     WHERE sessionId = @sessionId AND anonymousId = @anonymousId`,
   ).run({
     sessionId,
+    anonymousId,
     geminiMs: generated.geminiMs ?? null,
     llmStatus: generated.llmStatus ?? null,
     failureReason: generated.failureReason ?? null,
