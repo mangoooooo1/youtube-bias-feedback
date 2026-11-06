@@ -737,7 +737,7 @@ async function drainQueue(name, items, processItem, markInvalid) {
 /**
  * 서버에 JSON 요청을 보내고 결과를 재시도 큐가 판단할 수 있는 형태로 분류한다.
  * - success: 2xx
- * - item: 400 — 이 항목만 서버가 영원히 거부한다
+ * - item: 400·413 — 이 항목만 서버가 영원히 거부한다(413은 본문이 커서 같은 요청은 계속 거부되고, 큐로 두면 뒤 항목까지 막는다)
  * - queue: 그 외 전부(403·404·429·5xx·네트워크·타임아웃) — 큐의 다른 항목도 같은 이유로 실패한다
  * @param {string} path - /api/... 경로
  * @param {string} method
@@ -773,7 +773,7 @@ export async function sendToServer(
     }
     return {
       ok: false,
-      kind: status === 400 ? "item" : "queue",
+      kind: status === 400 || status === 413 ? "item" : "queue",
       status,
       code,
       data,

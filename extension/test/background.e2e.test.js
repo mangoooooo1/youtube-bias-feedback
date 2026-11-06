@@ -1305,6 +1305,24 @@ describe("sendToServer — 재시도 큐가 판단할 수 있도록 전송 결�
     });
   });
 
+  it("413은 본문이 JSON이 아니어도(nginx 오류 페이지) 항목 레벨(item)로 분류한다", async () => {
+    const sendToServer = await loadSendToServer();
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 413,
+      json: async () => {
+        throw new SyntaxError("Unexpected token <");
+      },
+    }));
+
+    await expect(sendToServer("/api/x", "POST", {})).resolves.toMatchObject({
+      ok: false,
+      kind: "item",
+      status: 413,
+      code: null,
+    });
+  });
+
   it("404·403·429·5xx는 큐 레벨(queue)로 분류한다", async () => {
     const sendToServer = await loadSendToServer();
     for (const [status, code] of [
@@ -2233,6 +2251,38 @@ describe("400 영구 실패 — 서버가 영원히 거부할 항목은 표시�
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const { sessions } = await global.chrome.storage.local.get("sessions");
     expect(sessions[0].syncedToServer).toBe("invalid");
+  });
+
+  it("세션: 413을 받은 세션만 invalid가 되고 뒤 세션은 같은 틱에 전송된다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      sessions: [
+        {
+          sessionId: "big",
+          videos: [{ videoId: "v1" }],
+          syncedToServer: false,
+        },
+        { sessionId: "s2", videos: [{ videoId: "v2" }], syncedToServer: false },
+      ],
+    });
+    global.fetch = vi.fn(async (_url, { body }) =>
+      JSON.parse(body).sessionId === "big"
+        ? { ok: false, status: 413, json: async () => null }
+        : {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              success: true,
+              data: { categoryDistribution: { 10: 1 }, entropy: 0 },
+            }),
+          },
+    );
+
+    await mod.retryUnsyncedSessions();
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    expect(sessions.map((s) => s.syncedToServer)).toEqual(["invalid", true]);
   });
 
   it("영상 POST가 invalid인 항목의 시청시간은 대상에서 뺀다", async () => {
