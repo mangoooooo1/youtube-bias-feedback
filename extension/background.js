@@ -587,8 +587,12 @@ export function retryUnsyncedSessions() {
           ? { ...result, ok: true, kind: "success" }
           : result;
       },
-      (session) =>
-        saveAnalysis(session.sessionId, { syncedToServer: "invalid" }),
+      // 사유를 남겨, 서버가 더 큰 세션을 받게 되면 크기 때문에 거부된 세션만 다시 큐에 넣을 수 있게 한다
+      (session, { status, code, detail }) =>
+        saveAnalysis(session.sessionId, {
+          syncedToServer: "invalid",
+          invalidReason: { status, code, detail },
+        }),
     );
   });
 }
@@ -684,7 +688,7 @@ async function withQueueLock(name, run) {
  * @param {string} name - 로그용 큐 이름
  * @param {object[]} items - 전송 대기 항목
  * @param {(item: object) => ReturnType<typeof sendToServer>} processItem - 전송·성공 표시 후 결과 반환
- * @param {(item: object) => Promise<void>} markInvalid - 서버가 400으로 영원히 거부한 항목을 큐에서 뺀다
+ * @param {(item: object, result: Awaited<ReturnType<typeof sendToServer>>) => Promise<void>} markInvalid - 서버가 영원히 거부한 항목을 큐에서 뺀다
  * @returns {Promise<void>}
  */
 async function drainQueue(name, items, processItem, markInvalid) {
@@ -705,7 +709,7 @@ async function drainQueue(name, items, processItem, markInvalid) {
       abortedBy = result;
       break;
     } else {
-      await markInvalid(item);
+      await markInvalid(item, result);
       invalidThisTick += 1;
       console.warn(
         `[background] queue=${name} result=skip_item status=${result.status} code=${result.code} id=${item.eventId ?? item.sessionId}`,
@@ -771,11 +775,14 @@ export async function sendToServer(
     if (response.ok) {
       return { ok: true, kind: "success", status, code, data };
     }
+    // detail은 같은 code의 거부를 필드로 구분한다(예: 영상 수 초과 = videoIds)
+    const detail = typeof json?.detail === "string" ? json.detail : null;
     return {
       ok: false,
       kind: status === 400 || status === 413 ? "item" : "queue",
       status,
       code,
+      detail,
       data,
     };
   } catch (error) {

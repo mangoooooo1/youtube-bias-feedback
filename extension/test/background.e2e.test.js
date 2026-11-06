@@ -2283,6 +2283,42 @@ describe("400 영구 실패 — 서버가 영원히 거부할 항목은 표시�
     expect(global.fetch).toHaveBeenCalledTimes(2);
     const { sessions } = await global.chrome.storage.local.get("sessions");
     expect(sessions.map((s) => s.syncedToServer)).toEqual(["invalid", true]);
+    expect(sessions[0].invalidReason).toEqual({
+      status: 413,
+      code: null,
+      detail: null,
+    });
+    expect(sessions[1].invalidReason).toBeUndefined();
+  });
+
+  it("세션: 영상 수 초과로 거부되면 code·detail을 사유로 남겨 다른 400과 구분할 수 있다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      sessions: [
+        { sessionId: "s1", videos: [{ videoId: "v1" }], syncedToServer: false },
+      ],
+    });
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({
+        success: false,
+        code: "INVALID_FIELD_VALUE",
+        detail: "videoIds",
+      }),
+    }));
+
+    await mod.retryUnsyncedSessions();
+
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    expect(sessions[0]).toMatchObject({
+      syncedToServer: "invalid",
+      invalidReason: {
+        status: 400,
+        code: "INVALID_FIELD_VALUE",
+        detail: "videoIds",
+      },
+    });
   });
 
   it("영상 POST가 invalid인 항목의 시청시간은 대상에서 뺀다", async () => {
