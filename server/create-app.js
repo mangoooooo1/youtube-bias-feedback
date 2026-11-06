@@ -8,6 +8,8 @@ const { createAccessLog } = require("./middleware/accessLog");
 const { db } = require("./db");
 const { buildHealthPayload } = require("./routes/health");
 
+const SESSIONS_BODY_LIMIT = "256kb";
+
 function createApp() {
   const app = express();
 
@@ -27,6 +29,9 @@ function createApp() {
 
   app.use(createAccessLog(API_ROUTES.map(([mountPath]) => mountPath)));
 
+  // 세션 본문은 영상 수만큼 배열이 길어져 기본 한도(100kb)를 넘을 수 있다. 413은 확장의 세션 큐 전체를 멈추므로 이 경로만 넓힌다.
+  // 먼저 파싱된 요청은 아래 전역 파서가 건너뛴다
+  app.use("/api/sessions", express.json({ limit: SESSIONS_BODY_LIMIT }));
   app.use(express.json());
 
   app.get("/health", (_req, res) => {

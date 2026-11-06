@@ -587,8 +587,12 @@ export function retryUnsyncedSessions() {
           ? { ...result, ok: true, kind: "success" }
           : result;
       },
-      (session) =>
-        saveAnalysis(session.sessionId, { syncedToServer: "invalid" }),
+      // 사유를 남겨, 서버가 더 큰 세션을 받게 되면 크기 때문에 거부된 세션(413·TOO_MANY_VIDEO_IDS)만 다시 큐에 넣을 수 있게 한다
+      (session, { status, code }) =>
+        saveAnalysis(session.sessionId, {
+          syncedToServer: "invalid",
+          invalidReason: { status, code },
+        }),
     );
   });
 }
@@ -684,7 +688,7 @@ async function withQueueLock(name, run) {
  * @param {string} name - 로그용 큐 이름
  * @param {object[]} items - 전송 대기 항목
  * @param {(item: object) => ReturnType<typeof sendToServer>} processItem - 전송·성공 표시 후 결과 반환
- * @param {(item: object) => Promise<void>} markInvalid - 서버가 400으로 영원히 거부한 항목을 큐에서 뺀다
+ * @param {(item: object, result: Awaited<ReturnType<typeof sendToServer>>) => Promise<void>} markInvalid - 서버가 영원히 거부한 항목을 큐에서 뺀다
  * @returns {Promise<void>}
  */
 async function drainQueue(name, items, processItem, markInvalid) {
@@ -705,7 +709,7 @@ async function drainQueue(name, items, processItem, markInvalid) {
       abortedBy = result;
       break;
     } else {
-      await markInvalid(item);
+      await markInvalid(item, result);
       invalidThisTick += 1;
       console.warn(
         `[background] queue=${name} result=skip_item status=${result.status} code=${result.code} id=${item.eventId ?? item.sessionId}`,
@@ -737,7 +741,7 @@ async function drainQueue(name, items, processItem, markInvalid) {
 /**
  * 서버에 JSON 요청을 보내고 결과를 재시도 큐가 판단할 수 있는 형태로 분류한다.
  * - success: 2xx
- * - item: 400 — 이 항목만 서버가 영원히 거부한다
+ * - item: 400·413 — 이 항목만 서버가 영원히 거부한다(413은 본문이 커서 같은 요청은 계속 거부되고, 큐로 두면 뒤 항목까지 막는다)
  * - queue: 그 외 전부(403·404·429·5xx·네트워크·타임아웃) — 큐의 다른 항목도 같은 이유로 실패한다
  * @param {string} path - /api/... 경로
  * @param {string} method
@@ -773,7 +777,7 @@ export async function sendToServer(
     }
     return {
       ok: false,
-      kind: status === 400 ? "item" : "queue",
+      kind: status === 400 || status === 413 ? "item" : "queue",
       status,
       code,
       data,

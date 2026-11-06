@@ -183,6 +183,68 @@ describe("createApp — 접근 로그·오류 처리 순서", () => {
   });
 });
 
+describe("createApp — 본문 한도", () => {
+  // 길이만 맞춘 본문. 한도를 통과하면 라우터의 본문 검증(sessionId 누락 등)에 도착한다
+  const bodyOfKb = (kb) => ({
+    anonymousId: ANONYMOUS_ID,
+    pad: "x".repeat(kb * 1024),
+  });
+
+  it("/api/sessions는 기본 한도(100kb)를 넘는 본문도 라우터 검증에 도착한다", async () => {
+    const res = await request(app).post("/api/sessions").send(bodyOfKb(150));
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ success: false, detail: "sessionId" });
+  });
+
+  it("/api/sessions도 256kb를 넘으면 413이다", async () => {
+    const res = await request(app).post("/api/sessions").send(bodyOfKb(257));
+    expect(res.status).toBe(413);
+  });
+
+  it("영상 3000개(상한)의 최악 값 세션 본문도 한도 안이라 저장된다", async () => {
+    // 대조군이라 세션 저장 뒤 오늘 리뷰를 만들지 않아 다른 테스트의 리뷰 데이터를 건드리지 않는다
+    const controlId = "create-app-control";
+    db.prepare(
+      `INSERT INTO participants (anonymousId, group_code, installDate)
+       VALUES (?, 'TEST-CON', '2026-08-01T00:00:00.000Z')`,
+    ).run(controlId);
+    const n = 3000;
+    const body = {
+      anonymousId: controlId,
+      sessionId: "create-app-max-session",
+      startTime: "2026-08-02T00:00:00.000Z",
+      endTime: "2026-08-02T10:00:00.000Z",
+      videoCount: n,
+      videoIds: Array.from({ length: n }, (_, i) => `v${i}`.padStart(11, "x")),
+      // 부동소수 잔여 자릿수가 붙은 시청 초, 모든 기록이 앞 기록을 이어 봄
+      watchedSecondsList: Array.from({ length: n }, () => 12345.567000000001),
+      resumedFromIndexes: Array.from({ length: n }, (_, i) =>
+        i === 0 ? null : i - 1,
+      ),
+      totalMs: 12345,
+      feedbackNotifiedAt: "2026-08-02T10:00:00.000Z",
+    };
+    // 기본 한도(100kb)를 넘는 크기여야 세션 경로 한도를 검증하는 의미가 있다
+    expect(Buffer.byteLength(JSON.stringify(body))).toBeGreaterThan(100 * 1024);
+
+    const res = await request(app).post("/api/sessions").send(body);
+
+    expect(res.status).toBe(200);
+    expect(
+      db
+        .prepare("SELECT videoCount FROM sessions WHERE sessionId = ?")
+        .get("create-app-max-session"),
+    ).toEqual({ videoCount: n });
+  });
+
+  it("다른 경로는 기본 한도(100kb)를 그대로 쓴다", async () => {
+    const res = await request(app)
+      .post("/api/client-errors")
+      .send(bodyOfKb(150));
+    expect(res.status).toBe(413);
+  });
+});
+
 describe("createApp — /health·CORS", () => {
   it("GET /health는 실제 DB로 healthy를 응답한다", async () => {
     const res = await request(app).get("/health");

@@ -155,6 +155,31 @@ describe("실제 server/routes/sessions.js 라우터 배선", () => {
     expect(res.body.data.entropy).toBe(first.body.data.entropy);
   });
 
+  it("POST /api/sessions — 영상 3000개(상한) 세션은 저장되고 3001개는 400이다", async () => {
+    const ids = (n) => Array.from({ length: n }, (_, i) => `v${i}`);
+    const ok = await request(app)
+      .post("/api/sessions")
+      .send(basePayload({ videoCount: 3000, videoIds: ids(3000) }));
+    expect(ok.status).toBe(200);
+    expect(db.prepare("SELECT COUNT(*) AS c FROM sessions").get().c).toBe(1);
+
+    const over = await request(app)
+      .post("/api/sessions")
+      .send(
+        basePayload({
+          sessionId: "wiring-over",
+          videoCount: 3001,
+          videoIds: ids(3001),
+        }),
+      );
+    expect(over.status).toBe(400);
+    expect(over.body).toMatchObject({
+      code: "TOO_MANY_VIDEO_IDS",
+      detail: "videoIds",
+    });
+    expect(db.prepare("SELECT COUNT(*) AS c FROM sessions").get().c).toBe(1);
+  });
+
   it("PATCH /api/sessions/:sessionId/feedback-viewed — 실제 파일에 라우트가 등록돼 응답한다", async () => {
     await request(app).post("/api/sessions").send(basePayload());
     const res = await request(app)
