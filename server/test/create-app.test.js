@@ -183,6 +183,32 @@ describe("createApp — 접근 로그·오류 처리 순서", () => {
   });
 });
 
+describe("createApp — 본문 한도", () => {
+  // 길이만 맞춘 본문. 한도를 통과하면 라우터의 본문 검증(sessionId 누락 등)에 도착한다
+  const bodyOfKb = (kb) => ({
+    anonymousId: ANONYMOUS_ID,
+    pad: "x".repeat(kb * 1024),
+  });
+
+  it("/api/sessions는 기본 한도(100kb)를 넘는 본문도 라우터 검증에 도착한다", async () => {
+    const res = await request(app).post("/api/sessions").send(bodyOfKb(150));
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ success: false, detail: "sessionId" });
+  });
+
+  it("/api/sessions도 256kb를 넘으면 413이다", async () => {
+    const res = await request(app).post("/api/sessions").send(bodyOfKb(257));
+    expect(res.status).toBe(413);
+  });
+
+  it("다른 경로는 기본 한도(100kb)를 그대로 쓴다", async () => {
+    const res = await request(app)
+      .post("/api/client-errors")
+      .send(bodyOfKb(150));
+    expect(res.status).toBe(413);
+  });
+});
+
 describe("createApp — /health·CORS", () => {
   it("GET /health는 실제 DB로 healthy를 응답한다", async () => {
     const res = await request(app).get("/health");
