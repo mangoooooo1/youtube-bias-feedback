@@ -374,18 +374,17 @@ describe("validateSession — videoIds", () => {
     },
   );
 
-  // /api/sessions는 인증·rateLimiter가 없어, 개수 제한이 없으면
-  // 한 요청이 YouTube API를 수백 번 순차 호출하게 만들 수 있다(DoS/쿼터 낭비 벡터).
-  it("videoIds가 500개를 넘으면 INVALID_FIELD_VALUE로 거부한다", () => {
-    const videoIds = Array.from({ length: 501 }, (_, i) => `v${i}`);
+  // 개수 상한은 본문 크기와 YouTube 순차 조회 횟수를 묶는다
+  it("videoIds가 3000개를 넘으면 INVALID_FIELD_VALUE로 거부한다", () => {
+    const videoIds = Array.from({ length: 3001 }, (_, i) => `v${i}`);
     expect(validateSession(basePayload({ videoIds }))).toEqual({
       code: ERROR_CODES.INVALID_FIELD_VALUE,
       field: "videoIds",
     });
   });
 
-  it("videoIds가 정확히 500개면 통과한다(경계값)", () => {
-    const videoIds = Array.from({ length: 500 }, (_, i) => `v${i}`);
+  it("videoIds가 정확히 3000개면 통과한다(경계값)", () => {
+    const videoIds = Array.from({ length: 3000 }, (_, i) => `v${i}`);
     expect(validateSession(basePayload({ videoIds }))).toBeNull();
   });
 });

@@ -20,8 +20,9 @@ const FAILURE_REASONS = [
 // 피드백 텍스트 출처: llm.js generateReview/generateFallbackReview의 source와 1:1 대응
 const SOURCES = ["llm", "fallback"];
 
-// videoIds 개수 상한
-const MAX_VIDEO_IDS = 500;
+// videoIds 개수 상한. 넘으면 확장이 그 세션을 다시 보내지 않으므로 긴 쇼츠 시청(시간당 약 300개로 10시간)도 받는다.
+// 최악의 본문(약 113KB)이 세션 경로 본문 한도(256kb) 안이고, 캐시 없는 메타데이터 조회도 대부분 확장의 응답 대기(60초) 안에 끝난다.
+const MAX_VIDEO_IDS = 3000;
 
 /**
  * POST /api/sessions 요청 본문을 검증한다.
