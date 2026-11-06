@@ -375,10 +375,10 @@ describe("validateSession — videoIds", () => {
   );
 
   // 개수 상한은 본문 크기와 YouTube 순차 조회 횟수를 묶는다
-  it("videoIds가 3000개를 넘으면 INVALID_FIELD_VALUE로 거부한다", () => {
+  it("videoIds가 3000개를 넘으면 원소 오류와 구분되는 TOO_MANY_VIDEO_IDS로 거부한다", () => {
     const videoIds = Array.from({ length: 3001 }, (_, i) => `v${i}`);
     expect(validateSession(basePayload({ videoIds }))).toEqual({
-      code: ERROR_CODES.INVALID_FIELD_VALUE,
+      code: ERROR_CODES.TOO_MANY_VIDEO_IDS,
       field: "videoIds",
     });
   });

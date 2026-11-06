@@ -74,7 +74,7 @@ function validateSession(body) {
     return { code: ERROR_CODES.MISSING_REQUIRED_FIELD, field: "videoIds" };
   }
   if (videoIds.length > MAX_VIDEO_IDS) {
-    return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "videoIds" };
+    return { code: ERROR_CODES.TOO_MANY_VIDEO_IDS, field: "videoIds" };
   }
   if (videoIds.some((id) => typeof id !== "string" || id.trim() === "")) {
     return { code: ERROR_CODES.INVALID_FIELD_VALUE, field: "videoIds" };

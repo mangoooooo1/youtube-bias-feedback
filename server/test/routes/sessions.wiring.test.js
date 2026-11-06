@@ -174,7 +174,7 @@ describe("실제 server/routes/sessions.js 라우터 배선", () => {
       );
     expect(over.status).toBe(400);
     expect(over.body).toMatchObject({
-      code: "INVALID_FIELD_VALUE",
+      code: "TOO_MANY_VIDEO_IDS",
       detail: "videoIds",
     });
     expect(db.prepare("SELECT COUNT(*) AS c FROM sessions").get().c).toBe(1);

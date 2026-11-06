@@ -587,11 +587,11 @@ export function retryUnsyncedSessions() {
           ? { ...result, ok: true, kind: "success" }
           : result;
       },
-      // 사유를 남겨, 서버가 더 큰 세션을 받게 되면 크기 때문에 거부된 세션만 다시 큐에 넣을 수 있게 한다
-      (session, { status, code, detail }) =>
+      // 사유를 남겨, 서버가 더 큰 세션을 받게 되면 크기 때문에 거부된 세션(413·TOO_MANY_VIDEO_IDS)만 다시 큐에 넣을 수 있게 한다
+      (session, { status, code }) =>
         saveAnalysis(session.sessionId, {
           syncedToServer: "invalid",
-          invalidReason: { status, code, detail },
+          invalidReason: { status, code },
         }),
     );
   });
@@ -775,14 +775,11 @@ export async function sendToServer(
     if (response.ok) {
       return { ok: true, kind: "success", status, code, data };
     }
-    // detail은 같은 code의 거부를 필드로 구분한다(예: 영상 수 초과 = videoIds)
-    const detail = typeof json?.detail === "string" ? json.detail : null;
     return {
       ok: false,
       kind: status === 400 || status === 413 ? "item" : "queue",
       status,
       code,
-      detail,
       data,
     };
   } catch (error) {

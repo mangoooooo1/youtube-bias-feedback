@@ -2283,28 +2283,26 @@ describe("400 영구 실패 — 서버가 영원히 거부할 항목은 표시�
     expect(global.fetch).toHaveBeenCalledTimes(2);
     const { sessions } = await global.chrome.storage.local.get("sessions");
     expect(sessions.map((s) => s.syncedToServer)).toEqual(["invalid", true]);
-    expect(sessions[0].invalidReason).toEqual({
-      status: 413,
-      code: null,
-      detail: null,
-    });
+    expect(sessions[0].invalidReason).toEqual({ status: 413, code: null });
     expect(sessions[1].invalidReason).toBeUndefined();
   });
 
-  it("세션: 영상 수 초과로 거부되면 code·detail을 사유로 남겨 다른 400과 구분할 수 있다", async () => {
+  it("세션: 영상 수 초과로 거부되면 code를 사유로 남겨 다른 400과 구분할 수 있다", async () => {
     const mod = await loadBackground({
       ...BASE,
       sessions: [
         { sessionId: "s1", videos: [{ videoId: "v1" }], syncedToServer: false },
       ],
     });
+    // 운영 응답 형식: production에선 detail이 null이다
     global.fetch = vi.fn(async () => ({
       ok: false,
       status: 400,
       json: async () => ({
         success: false,
-        code: "INVALID_FIELD_VALUE",
-        detail: "videoIds",
+        message: "videoIds 필드가 올바르지 않습니다.",
+        code: "TOO_MANY_VIDEO_IDS",
+        detail: null,
       }),
     }));
 
@@ -2313,11 +2311,7 @@ describe("400 영구 실패 — 서버가 영원히 거부할 항목은 표시�
     const { sessions } = await global.chrome.storage.local.get("sessions");
     expect(sessions[0]).toMatchObject({
       syncedToServer: "invalid",
-      invalidReason: {
-        status: 400,
-        code: "INVALID_FIELD_VALUE",
-        detail: "videoIds",
-      },
+      invalidReason: { status: 400, code: "TOO_MANY_VIDEO_IDS" },
     });
   });
 
