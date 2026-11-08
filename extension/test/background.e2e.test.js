@@ -52,12 +52,25 @@ function createChromeMock() {
     },
     tabs: {
       onRemoved: { addListener: vi.fn() },
+      query: vi.fn(async () => []),
+    },
+    scripting: {
+      executeScript: vi.fn(async () => []),
     },
     runtime: {
       onMessage: { addListener: vi.fn() },
       onStartup: { addListener: vi.fn() },
+      onInstalled: { addListener: vi.fn() },
       getURL: (p) => `chrome-extension://fake/${p}`,
-      getManifest: () => ({ version: "2.4.1" }),
+      getManifest: () => ({
+        version: "2.4.1",
+        content_scripts: [
+          {
+            matches: ["*://*.youtube.com/*"],
+            js: ["study-schedule.js", "content.js"],
+          },
+        ],
+      }),
     },
     notifications: {
       create: vi.fn(),
@@ -3511,5 +3524,83 @@ describe("탭별 마지막 기록 — 탭 번호 응답과 정리", () => {
     expect(all.tabwatch__2).toEqual(
       expect.objectContaining({ videoId: "recent" }),
     );
+  });
+});
+
+// 업데이트 순간 열려 있던 유튜브 탭은 content script가 확장과 끊겨 기록을 멈춘다
+describe("확장 업데이트 — 열린 탭에 content script 재주입", () => {
+  async function loadBackground() {
+    global.chrome = createChromeMock();
+    global.fetch = vi.fn();
+    vi.resetModules();
+    return import("../background.js");
+  }
+
+  function installed(reason) {
+    const onInstalled =
+      global.chrome.runtime.onInstalled.addListener.mock.calls[0][0];
+    onInstalled({ reason });
+  }
+
+  it("업데이트되면 manifest의 주소에 맞는 탭마다 manifest 순서대로 스크립트를 넣는다", async () => {
+    await loadBackground();
+    global.chrome.tabs.query.mockResolvedValue([{ id: 1 }, { id: 2 }]);
+
+    installed("update");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(global.chrome.tabs.query).toHaveBeenCalledWith({
+      url: ["*://*.youtube.com/*"],
+    });
+    expect(global.chrome.scripting.executeScript.mock.calls).toEqual([
+      [{ target: { tabId: 1 }, files: ["study-schedule.js", "content.js"] }],
+      [{ target: { tabId: 2 }, files: ["study-schedule.js", "content.js"] }],
+    ]);
+  });
+
+  it.each(["install", "chrome_update"])(
+    "%s일 때는 넣지 않는다",
+    async (reason) => {
+      await loadBackground();
+      global.chrome.tabs.query.mockResolvedValue([{ id: 1 }]);
+
+      installed(reason);
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(global.chrome.tabs.query).not.toHaveBeenCalled();
+      expect(global.chrome.scripting.executeScript).not.toHaveBeenCalled();
+    },
+  );
+
+  it("한 탭에 넣지 못해도 나머지 탭에는 넣는다", async () => {
+    await loadBackground();
+    global.chrome.tabs.query.mockResolvedValue([{ id: 1 }, { id: 2 }]);
+    global.chrome.scripting.executeScript.mockImplementation(
+      async ({ target }) => {
+        if (target.tabId === 1) throw new Error("Cannot access contents");
+        return [];
+      },
+    );
+
+    installed("update");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(global.chrome.scripting.executeScript).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { tabId: 2 } }),
+    );
+  });
+
+  it("탭 조회가 실패해도 예외를 밖으로 던지지 않는다", async () => {
+    await loadBackground();
+    global.chrome.tabs.query.mockRejectedValue(new Error("query failed"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    installed("update");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("재주입 실패: query failed"),
+    );
+    warn.mockRestore();
   });
 });

@@ -166,6 +166,31 @@ chrome.runtime.onStartup.addListener(() => {
   runPeriodicTasks();
 });
 
+// 업데이트 순간 열려 있던 탭의 content script는 확장과 끊겨 새로고침 전까지 기록하지 않는다.
+// 새로 설치할 때는 온보딩 전이라 넣지 않는다
+chrome.runtime.onInstalled.addListener(({ reason }) => {
+  if (reason !== "update") return;
+  reinjectContentScripts().catch((error) =>
+    console.warn(`[background] 재주입 실패: ${error?.message}`),
+  );
+});
+
+/**
+ * manifest의 content_scripts를 이미 열려 있는 해당 탭에 다시 넣는다.
+ * @returns {Promise<void>}
+ */
+async function reinjectContentScripts() {
+  const contentScripts = chrome.runtime.getManifest().content_scripts ?? [];
+  for (const { matches, js } of contentScripts) {
+    for (const tab of await chrome.tabs.query({ url: matches })) {
+      // 버려진 탭 등은 실패해도 다시 열 때 manifest 규칙으로 들어간다
+      chrome.scripting
+        .executeScript({ target: { tabId: tab.id }, files: js })
+        .catch(() => {});
+    }
+  }
+}
+
 /**
  * 알람 틱마다, 그리고 크롬 시작 때 한 번 도는 작업.
  * @returns {void}
