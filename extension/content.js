@@ -534,6 +534,18 @@ function recordVideo(
           isShortsUrl: isShorts ? 1 : 0,
           resumedFromEventId,
         },
+        // 첫 체크포인트(15초) 전에 확장이 업데이트되면 옛 스크립트는 pagehide도 없이 끊긴다.
+        // 기록할 때 탭별 기록을 바로 남겨야 다시 넣은 스크립트가 이 기록에 이어 쓴다
+        ...(tabWatchKey && {
+          [tabWatchKey]: {
+            videoId,
+            sessionId: session.sessionId,
+            eventId,
+            watchedSeconds: 0,
+            wasBackgrounded: watchTracker?.sawHidden ? 1 : 0,
+            endedAt: Date.parse(now),
+          },
+        }),
       });
       console.log("[content] recorded:", { videoId, title });
 
