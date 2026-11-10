@@ -1431,17 +1431,27 @@ describe("content.js 탭별 마지막 기록 — 영상을 떠날 때 남긴다"
 
   it("다른 영상으로 가면 다음 영상을 기록하기 전에 떠나는 영상의 기록을 남긴다", async () => {
     const eventIdA = api.getTrackedVideoIdentity().eventId;
+    // 다음 영상을 기록할 때도 탭 기록을 바로 남기므로, 끝난 뒤가 아니라 쓰인 순서를 본다
+    const tabWatchWrites = [];
+    const set = storage.set;
+    storage.set = (obj) => {
+      if (obj.tabwatch__7) tabWatchWrites.push(obj.tabwatch__7);
+      return set(obj);
+    };
 
     locationMock.href = "https://www.youtube.com/watch?v=BBBB";
     documentMock.title = "영상 B - YouTube";
     await api.handleVideoChange();
 
-    expect(storage.dump().tabwatch__7).toMatchObject({
-      videoId: "AAAA",
-      eventId: eventIdA,
-      watchedSeconds: 30,
-      endedAt: 30000,
-    });
+    expect(tabWatchWrites).toEqual([
+      expect.objectContaining({
+        videoId: "AAAA",
+        eventId: eventIdA,
+        watchedSeconds: 30,
+        endedAt: 30000,
+      }),
+      expect.objectContaining({ videoId: "BBBB", watchedSeconds: 0 }),
+    ]);
   });
 });
 
@@ -2572,6 +2582,11 @@ function createTabBrowser({ initialStorage = {}, fetch: fetchImpl } = {}) {
         stopTimers();
         return openPage({ tabId, videoId: currentVideoId, ...options });
       },
+      // 확장 업데이트: 옛 스크립트는 확장과 끊겨 pagehide도 없이 멈추고, 같은 탭에 새 스크립트가 들어온다
+      async reinject() {
+        stopTimers();
+        return openPage({ tabId, videoId: currentVideoId });
+      },
     };
   }
 
@@ -2841,6 +2856,49 @@ describe("content.js 같은 탭에서 다시 연 영상 — 마지막 재생 후
     await page.goTo("AAAA");
 
     expect(browser.recordsOf("AAAA")).toHaveLength(2);
+  });
+});
+
+describe("content.js 확장 업데이트로 다시 넣은 스크립트 — 첫 체크포인트 전이어도 같은 기록에 이어 쓴다", () => {
+  let browser;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-26T10:00:00Z"));
+    browser = createTabBrowser();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("기록 후 15초 전에 다시 넣어도 같은 eventId에 다시 넣은 뒤 본 시간이 남는다", async () => {
+    let page = await browser.openPage({ videoId: "AAAA" });
+    const { eventId } = page.identity();
+    await page.play(10); // 첫 체크포인트(15초) 전
+
+    page = await page.reinject();
+    expect(page.identity()).toEqual(expect.objectContaining({ eventId }));
+    await page.play(60);
+    await page.goTo("BBBB");
+
+    // 업데이트 전 10초는 끊긴 스크립트가 쓰지 못해 잃는다
+    const records = browser.recordsOf("AAAA");
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ eventId, watchedSeconds: 60 });
+  });
+
+  it("다시 넣은 뒤 15초가 지나면 그 기록의 체크포인트를 쓴다", async () => {
+    let page = await browser.openPage({ videoId: "AAAA" });
+    const { eventId } = page.identity();
+    await page.play(5);
+
+    page = await page.reinject();
+    await page.play(20);
+
+    expect(browser.storage.dump()[`watchcp__${eventId}`]).toEqual(
+      expect.objectContaining({ eventId }),
+    );
   });
 });
 
