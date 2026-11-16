@@ -3160,6 +3160,51 @@ describe("content.js 일시정지 후 다시 재생해 나눌 때 — 세션 종
   });
 });
 
+describe("content.js 영상 기록의 탭 번호 — 세션을 닫을 때 다른 탭의 동시 기록만 합친다", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-26T10:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("같은 탭에서 10초 안에 A → B → 뒤로 가기 A를 해도 세션을 닫은 뒤 세 기록이 남고, 탭 번호는 서버로 보내지 않는다", async () => {
+    const posts = [];
+    const browser = createTabBrowser({
+      initialStorage: { anonymousId: "a1", serverUrl: "https://srv.example" },
+      fetch: (_url, options = {}) => {
+        if (options.method === "POST") posts.push(JSON.parse(options.body));
+        return Promise.resolve({ ok: true });
+      },
+    });
+    const page = await browser.openPage({ tabId: 7, videoId: "AAAA" });
+    await page.goTo("BBBB");
+    await page.goTo("AAAA");
+    const { endSession } = await import("../storage.js");
+    await endSession();
+
+    const videos = browser.storage.dump().sessions[0].videos;
+    expect(videos.map((v) => [v.videoId, v.tabId])).toEqual([
+      ["AAAA", 7],
+      ["BBBB", 7],
+      ["AAAA", 7],
+    ]);
+    expect(posts).toHaveLength(3);
+    for (const body of posts) expect(body).not.toHaveProperty("tabId");
+  });
+
+  it("탭 번호를 받지 못하면 기록의 탭 번호는 비어 있다", async () => {
+    const browser = createTabBrowser();
+    await browser.openPage({ videoId: "AAAA", tabIdFails: true });
+
+    expect(browser.recordsOf("AAAA")).toEqual([
+      expect.objectContaining({ tabId: null }),
+    ]);
+  });
+});
+
 describe("content.js 일시정지 후 다시 재생 — 재고 있지 않던 <video>가 재생을 시작하는 경로", () => {
   const MINUTE = 60 * 1000;
 

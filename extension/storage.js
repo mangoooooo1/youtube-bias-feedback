@@ -17,29 +17,39 @@ function enqueue(task) {
 // background.js의 종료 판정과 content.js의 새 세션 판정이 같은 값을 쓴다
 export const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 
-// 같은 영상이 이 값 안에 다시 감지되면 "같은 시청"으로 보고 합친다.
+// 다른 탭에서 같은 영상이 이 값 안에 다시 감지되면 "같은 시청"으로 보고 합친다.
 // 10초는 비동기 storage 왕복 시간차보다는 넉넉하고, 사람이 같은 영상을 일부러 다시 재생하는 데 걸리는 시간보다는 짧게 잡은 값이다.
 const NEAR_SIMULTANEOUS_MS = 10000;
 
 /**
- * NEAR_SIMULTANEOUS_MS 이내에 같은 videoId가 다시 나오면 같은 시청으로 보고 합친다.
- * @param {Array<{videoId: string, watchedAt: string}>} videos - watchedAt 오름차순으로 정렬된 목록
+ * 같은 탭의 기록인지. 같은 탭의 새 기록은 새로고침·이어 쓰기 검사를 거친 실제 이동이다.
+ * 탭 번호가 없는 기록(업데이트 전 기록, 탭 번호 조회 실패)은 같은 탭으로 보지 않는다.
+ */
+function isSameTab(a, b) {
+  return Number.isInteger(a) && Number.isInteger(b) && a === b;
+}
+
+/**
+ * NEAR_SIMULTANEOUS_MS 이내에 다른 탭에서 같은 videoId가 다시 나오면 같은 시청으로 보고 합친다.
+ * 같은 탭에서 다시 나온 것(A → B → 뒤로 가기 A)은 새 시청으로 남긴다.
+ * @param {Array<{videoId: string, watchedAt: string, tabId?: number|null}>} videos - watchedAt 오름차순으로 정렬된 목록
  * @returns {Array} 중복 제거된 목록
  */
 function dedupeNearSimultaneous(videos) {
-  const lastSeenAt = new Map(); // videoId -> 가장 최근에 "유지하기로 한" 항목의 ms
+  const lastSeen = new Map(); // videoId -> 직전에 나온 같은 영상의 { t, tabId }
   const result = [];
   for (const v of videos) {
     const t = new Date(v.watchedAt).getTime();
-    const prev = lastSeenAt.get(v.videoId);
-    if (prev !== undefined && t - prev <= NEAR_SIMULTANEOUS_MS) {
-      // 중복으로 보고 건너뛴다. lastSeenAt은 그래도 이 시각으로 갱신해, "임계값 안에서
-      // 계속 이어지는" 여러 건이 있어도(예: 세 탭) 전부 하나로 묶이게 한다(구간의 시작
-      // 시각과의 차이가 아니라, 바로 직전 판정 시각과의 차이로 매번 다시 비교).
-      lastSeenAt.set(v.videoId, t);
+    const prev = lastSeen.get(v.videoId);
+    // 건너뛴 기록도 직전 값으로 남겨, 임계값 안에서 이어지는 여러 건(예: 세 탭)을 전부 하나로 묶는다
+    lastSeen.set(v.videoId, { t, tabId: v.tabId });
+    if (
+      prev !== undefined &&
+      t - prev.t <= NEAR_SIMULTANEOUS_MS &&
+      !isSameTab(prev.tabId, v.tabId)
+    ) {
       continue;
     }
-    lastSeenAt.set(v.videoId, t);
     result.push(v);
   }
   return result;
@@ -114,7 +124,7 @@ function groupVideosBySession(videoEntries) {
  */
 function buildClosedSession(sessionId, videos, startTime, endTime) {
   videos.sort((a, b) => new Date(a.watchedAt) - new Date(b.watchedAt));
-  // 마지막 방어선: 같은 videoId가 짧은 시간 안에 다시 나오면(새로고침 중복 방지 값이
+  // 마지막 방어선: 같은 videoId가 짧은 시간 안에 다른 탭에서 다시 나오면(새로고침 중복 방지 값이
   // 탭 경합으로 드물게 못 걸렀거나, 같은 영상을 여러 탭에서 동시에 열어둔 경우) 하나로 합친다.
   const deduped = dedupeNearSimultaneous(videos);
   return {
@@ -142,6 +152,7 @@ function buildClosedSession(sessionId, videos, startTime, endTime) {
         watchStatsSent,
         watchStatsSource,
         checkpointAt,
+        tabId,
       }) => ({
         videoId,
         title,
@@ -163,6 +174,8 @@ function buildClosedSession(sessionId, videos, startTime, endTime) {
         // 체크포인트로 대신 보낸 값인지 — 세션이 닫힌 뒤에도 더 새로운 체크포인트를 보낼 수 있게 함께 옮긴다
         watchStatsSource,
         checkpointAt,
+        // 늦게 온 기록을 합칠 때 이 목록으로 중복 제거를 다시 하므로 함께 옮긴다
+        tabId,
       }),
     ),
   };
