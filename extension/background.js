@@ -15,6 +15,7 @@ import {
   TAB_WATCH_PREFIX,
   markWatchStatsSent,
   markWatchStatsInvalid,
+  patchVideoRecord,
   getParticipantSyncState,
   markParticipantSynced,
   recordParticipantSyncFailure,
@@ -145,6 +146,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "get-tab-id") {
     sendResponse(sender?.tab?.id ?? null);
     return;
+  }
+  // content는 저장 큐를 쓸 수 없어 영상 기록 고치기를 맡긴다. 실패하면 null을 돌려 content가 직접 쓰게 한다
+  if (message?.type === "patch-video-record") {
+    patchVideoRecord(message.target, message.patch)
+      .then((applied) => sendResponse({ applied }))
+      .catch(() => sendResponse(null));
+    return true;
   }
   if (message?.type !== "client-error") return;
   reportClientError(message.code, message.where);

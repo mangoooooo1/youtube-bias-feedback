@@ -677,6 +677,48 @@ async function _setWatchStatsSent(item, value) {
 }
 
 /**
+ * 탭 스크립트가 넘긴 패치를 영상 기록에 병합한다. 열린 키(video__)가 있으면 그쪽을,
+ * 세션이 닫혀 sessions[]로 옮겨졌으면 그 안의 항목을 고친다.
+ * 탭 스크립트가 직접 쓰면 세션 종료·보냄 표시와 겹쳐 한쪽 변경이 사라져 큐 안에서 쓴다.
+ * @param {{sessionId: string, eventId: string}} target
+ * @param {object} patch - 병합할 필드
+ * @returns {Promise<boolean>} 찾아서 고쳤으면 true
+ */
+export function patchVideoRecord(target, patch) {
+  return enqueue(() => _patchVideoRecord(target, patch));
+}
+
+async function _patchVideoRecord({ sessionId, eventId } = {}, patch) {
+  if (typeof sessionId !== "string" || typeof eventId !== "string") {
+    return false;
+  }
+  const videoKey = `video__${sessionId}__${eventId}`;
+  const { [videoKey]: live } = await chrome.storage.local.get(videoKey);
+  if (live) {
+    await chrome.storage.local.set({ [videoKey]: { ...live, ...patch } });
+    return true;
+  }
+
+  const { sessions } = await chrome.storage.local.get("sessions");
+  if (!Array.isArray(sessions)) return false;
+  let found = false;
+  const updated = sessions.map((session) => {
+    if (session.sessionId !== sessionId) return session;
+    return {
+      ...session,
+      videos: (session.videos ?? []).map((v) => {
+        if (v.eventId !== eventId) return v;
+        found = true;
+        return { ...v, ...patch };
+      }),
+    };
+  });
+  if (!found) return false;
+  await chrome.storage.local.set({ sessions: updated });
+  return true;
+}
+
+/**
  * getUnsentVideoEvents()가 돌려준 항목 하나를 sent:true로 표시한다. sessions 배열
  * 갱신은 다른 쓰기와 마찬가지로 queue를 거쳐 직렬화한다.
  * @param {object} event

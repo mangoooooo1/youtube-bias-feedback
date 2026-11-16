@@ -284,9 +284,30 @@ function clearTrackedVideo() {
  * 그쪽을, 이미 세션 종료로 sessions[]에 옮겨갔다면 그 안의 해당 영상 항목을 찾아 갱신한다.
  * @param {{sessionId: string, eventId: string}} target - 갱신 대상 식별 정보
  * @param {object} patch - 병합할 필드
+ * 직접 쓰면 background의 세션 종료·보냄 표시와 겹쳐 한쪽 변경이 사라져, background의 저장 큐에 맡긴다.
  * @returns {Promise<boolean>} 실제로 어딘가에서 찾아 갱신했으면 true
  */
 async function applyWatchStatsPatch(target, patch) {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "patch-video-record",
+      target: { sessionId: target.sessionId, eventId: target.eventId },
+      patch,
+    });
+    if (typeof response?.applied === "boolean") return response.applied;
+  } catch {
+    // background와 연결되지 않으면 아래에서 직접 쓴다
+  }
+  return writeWatchStatsPatch(target, patch);
+}
+
+/**
+ * 메시지를 넘기지 못했을 때 직접 병합한다. storage.js patchVideoRecord와 같은 규칙이다.
+ * @param {{sessionId: string, eventId: string}} target
+ * @param {object} patch
+ * @returns {Promise<boolean>}
+ */
+async function writeWatchStatsPatch(target, patch) {
   const videoKey = `video__${target.sessionId}__${target.eventId}`;
   const { [videoKey]: live } = await chrome.storage.local.get(videoKey);
   if (live) {

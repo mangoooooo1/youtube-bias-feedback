@@ -3604,20 +3604,26 @@ function createHoldableStorage(initial = {}) {
   };
 }
 
-// 한 탭의 content.js와 같은 저장소를 쓰는 background 쪽 storage.js를 함께 불러온다
+// 한 탭의 content.js와 같은 저장소를 쓰는 background 쪽 storage.js를 함께 불러온다.
+// 영상 기록 고치기 메시지는 background.js처럼 storage.js의 저장 큐로 넘긴다
 async function loadTabWithBackground(storage, { tabId = null } = {}) {
+  let background;
   const { api } = await loadContent({
     chrome: {
       runtime: {
         id: "fake-extension-id",
-        sendMessage: async (message) =>
-          message?.type === "get-tab-id" ? tabId : undefined,
+        sendMessage: async (message) => {
+          if (message?.type === "get-tab-id") return tabId;
+          if (message?.type !== "patch-video-record") return undefined;
+          const { target, patch } = structuredClone(message);
+          return { applied: await background.patchVideoRecord(target, patch) };
+        },
       },
       storage: { local: storage },
     },
     console: { log: () => {}, warn: () => {} },
   });
-  const background = await import("../storage.js");
+  background = await import("../storage.js");
   return { recordVideo: api.recordVideo, background };
 }
 
@@ -3631,7 +3637,7 @@ const minutesAgo = (minutes) =>
 const hasKeyWithPrefix = (prefix) => (keys) =>
   [].concat(keys ?? []).some((k) => k.startsWith(prefix));
 
-// 아래 세 묶음은 탭 스크립트가 저장 큐 밖에서 쓰는 버그를 재현한다. 고치기 전이라 it.fails로 둔다
+// 탭 스크립트가 저장 큐 밖에서 쓰던 버그의 재현. 아직 고치지 않은 "큐 밖 저장" 두 묶음은 it.fails로 둔다
 describe("content.js 시청 시간 확정과 background 저장이 겹칠 때 — 양쪽 변경이 모두 남는다", () => {
   const closedSession = () => ({
     sessionId: "s-old",
@@ -3652,225 +3658,207 @@ describe("content.js 시청 시간 확정과 background 저장이 겹칠 때 —
       .find((s) => s.sessionId === "s-old")
       .videos.find((v) => v.eventId === "evt-A");
 
-  it.fails(
-    "content가 닫힌 세션 목록을 읽은 뒤 background가 보냄 표시를 하면, 보냄 표시와 최종값이 모두 남는다",
-    async () => {
-      const storage = createHoldableStorage({
-        currentSession: { sessionId: "s-new", startTime: minutesAgo(1) },
-        lastWatchedAt: minutesAgo(1),
-        sessions: [closedSession()],
-      });
-      const { recordVideo, background } = await loadTabWithBackground(storage);
-      const contentWrite = storage.hold("set", (obj) => "sessions" in obj);
+  it("content가 닫힌 세션 목록을 읽은 뒤 background가 보냄 표시를 하면, 보냄 표시와 최종값이 모두 남는다", async () => {
+    const storage = createHoldableStorage({
+      currentSession: { sessionId: "s-new", startTime: minutesAgo(1) },
+      lastWatchedAt: minutesAgo(1),
+      sessions: [closedSession()],
+    });
+    const { recordVideo, background } = await loadTabWithBackground(storage);
+    const contentWrite = storage.hold("set", (obj) => "sessions" in obj);
 
-      recordVideo("vB", "영상B", null, null, null, null, LEFT_STATS, {
-        sessionId: "s-old",
-        eventId: "evt-A",
-      });
-      await contentWrite.reached;
-      const marking = background.markVideoEventSent({
-        location: "session",
-        sessionId: "s-old",
+    recordVideo("vB", "영상B", null, null, null, null, LEFT_STATS, {
+      sessionId: "s-old",
+      eventId: "evt-A",
+    });
+    await contentWrite.reached;
+    const marking = background.markVideoEventSent({
+      location: "session",
+      sessionId: "s-old",
+      videoId: "vA",
+      watchedAt: "2026-11-16T00:00:00.000Z",
+    });
+    await flushMicrotasks();
+    contentWrite.release();
+    await marking;
+    await flushMicrotasks();
+
+    expect(findA(storage.dump())).toMatchObject({
+      sent: true,
+      watchedSeconds: 55.5,
+      watchStatsSource: "final",
+    });
+  });
+
+  it("background가 닫힌 세션 목록을 읽은 뒤 content가 최종값을 쓰면, 최종값과 보냄 표시가 모두 남는다", async () => {
+    const storage = createHoldableStorage({
+      currentSession: { sessionId: "s-new", startTime: minutesAgo(1) },
+      lastWatchedAt: minutesAgo(1),
+      sessions: [closedSession()],
+    });
+    const { recordVideo, background } = await loadTabWithBackground(storage);
+    const backgroundWrite = storage.hold("set", (obj) => "sessions" in obj);
+
+    const marking = background.markVideoEventSent({
+      location: "session",
+      sessionId: "s-old",
+      videoId: "vA",
+      watchedAt: "2026-11-16T00:00:00.000Z",
+    });
+    await backgroundWrite.reached;
+    recordVideo("vB", "영상B", null, null, null, null, LEFT_STATS, {
+      sessionId: "s-old",
+      eventId: "evt-A",
+    });
+    await flushMicrotasks();
+    backgroundWrite.release();
+    await marking;
+    await flushMicrotasks();
+
+    expect(findA(storage.dump())).toMatchObject({
+      sent: true,
+      watchedSeconds: 55.5,
+      watchStatsSource: "final",
+    });
+  });
+
+  it("background가 열린 영상 기록을 읽은 뒤 content가 같은 기록에 최종값을 쓰면, 최종값과 보냄 표시가 모두 남는다", async () => {
+    const key = "video__s1__evt-A";
+    const storage = createHoldableStorage({
+      currentSession: { sessionId: "s1", startTime: minutesAgo(2) },
+      lastWatchedAt: minutesAgo(1),
+      [key]: {
         videoId: "vA",
-        watchedAt: "2026-11-16T00:00:00.000Z",
-      });
-      await flushMicrotasks();
-      contentWrite.release();
-      await marking;
-      await flushMicrotasks();
+        eventId: "evt-A",
+        watchedAt: minutesAgo(1),
+        sent: false,
+      },
+    });
+    const { recordVideo, background } = await loadTabWithBackground(storage);
+    const backgroundWrite = storage.hold("set", (obj) => key in obj);
 
-      expect(findA(storage.dump())).toMatchObject({
+    const marking = background.markVideoEventSent({ location: "live", key });
+    await backgroundWrite.reached;
+    recordVideo("vB", "영상B", null, null, null, null, LEFT_STATS, {
+      sessionId: "s1",
+      eventId: "evt-A",
+    });
+    await flushMicrotasks();
+    backgroundWrite.release();
+    await marking;
+    await flushMicrotasks();
+
+    expect(storage.dump()[key]).toMatchObject({
+      sent: true,
+      watchedSeconds: 55.5,
+      watchStatsSource: "final",
+    });
+  });
+
+  it("content가 닫힌 세션 목록을 읽은 뒤 background가 다른 세션을 닫으면, 닫은 세션과 최종값이 모두 남는다", async () => {
+    const storage = createHoldableStorage({
+      currentSession: { sessionId: "s1", startTime: minutesAgo(15) },
+      lastWatchedAt: minutesAgo(11),
+      "video__s1__evt-B": {
+        videoId: "vB",
+        eventId: "evt-B",
+        watchedAt: minutesAgo(11),
         sent: true,
-        watchedSeconds: 55.5,
-        watchStatsSource: "final",
-      });
-    },
-  );
+      },
+      sessions: [closedSession()],
+    });
+    const { recordVideo, background } = await loadTabWithBackground(storage);
+    const contentWrite = storage.hold("set", (obj) => "sessions" in obj);
 
-  it.fails(
-    "background가 닫힌 세션 목록을 읽은 뒤 content가 최종값을 쓰면, 최종값과 보냄 표시가 모두 남는다",
-    async () => {
-      const storage = createHoldableStorage({
-        currentSession: { sessionId: "s-new", startTime: minutesAgo(1) },
-        lastWatchedAt: minutesAgo(1),
-        sessions: [closedSession()],
-      });
-      const { recordVideo, background } = await loadTabWithBackground(storage);
-      const backgroundWrite = storage.hold("set", (obj) => "sessions" in obj);
+    recordVideo("vC", "영상C", null, null, null, null, LEFT_STATS, {
+      sessionId: "s-old",
+      eventId: "evt-A",
+    });
+    await contentWrite.reached;
+    const closing = background.endSession();
+    await flushMicrotasks();
+    contentWrite.release();
+    await closing;
+    await flushMicrotasks();
 
-      const marking = background.markVideoEventSent({
-        location: "session",
-        sessionId: "s-old",
+    const dump = storage.dump();
+    expect(dump.sessions.map((s) => s.sessionId)).toContain("s1");
+    expect(findA(dump)).toMatchObject({ watchedSeconds: 55.5 });
+  });
+
+  it("다시 재생으로 앞 기록을 확정하는 순간 background가 세션을 닫아도, 닫은 세션과 앞 기록의 최종값이 모두 남는다", async () => {
+    const storage = createHoldableStorage({
+      currentSession: { sessionId: "s1", startTime: minutesAgo(15) },
+      lastWatchedAt: minutesAgo(11),
+      "video__s1__evt-B": {
+        videoId: "vB",
+        eventId: "evt-B",
+        watchedAt: minutesAgo(11),
+        sent: true,
+      },
+      sessions: [closedSession()],
+    });
+    const { recordVideo, background } = await loadTabWithBackground(storage);
+    const contentWrite = storage.hold("set", (obj) => "sessions" in obj);
+
+    recordVideo(
+      "vA",
+      "영상A",
+      null,
+      null,
+      null,
+      null,
+      LEFT_STATS,
+      { sessionId: "s-old", eventId: "evt-A" },
+      "evt-A",
+    );
+    await contentWrite.reached;
+    const closing = background.endSession();
+    await flushMicrotasks();
+    contentWrite.release();
+    await closing;
+    await flushMicrotasks();
+
+    const dump = storage.dump();
+    expect(dump.sessions.map((s) => s.sessionId)).toContain("s1");
+    expect(findA(dump)).toMatchObject({ watchedSeconds: 55.5 });
+  });
+
+  it("세션을 닫는 도중 열린 영상 기록에 최종값을 쓰면, 그 값이 닫힌 세션에 반영된다", async () => {
+    const storage = createHoldableStorage({
+      currentSession: { sessionId: "s1", startTime: minutesAgo(15) },
+      lastWatchedAt: minutesAgo(11),
+      "video__s1__evt-A": {
         videoId: "vA",
-        watchedAt: "2026-11-16T00:00:00.000Z",
-      });
-      await backgroundWrite.reached;
-      recordVideo("vB", "영상B", null, null, null, null, LEFT_STATS, {
-        sessionId: "s-old",
         eventId: "evt-A",
-      });
-      await flushMicrotasks();
-      backgroundWrite.release();
-      await marking;
-      await flushMicrotasks();
-
-      expect(findA(storage.dump())).toMatchObject({
+        watchedAt: minutesAgo(11),
         sent: true,
-        watchedSeconds: 55.5,
-        watchStatsSource: "final",
-      });
-    },
-  );
+      },
+    });
+    const { recordVideo, background } = await loadTabWithBackground(storage);
+    // 세션 목록 저장은 끝났고 영상 기록 키를 지우기 직전
+    const removing = storage.hold("remove", hasKeyWithPrefix("video__s1__"));
 
-  it.fails(
-    "background가 열린 영상 기록을 읽은 뒤 content가 같은 기록에 최종값을 쓰면, 최종값과 보냄 표시가 모두 남는다",
-    async () => {
-      const key = "video__s1__evt-A";
-      const storage = createHoldableStorage({
-        currentSession: { sessionId: "s1", startTime: minutesAgo(2) },
-        lastWatchedAt: minutesAgo(1),
-        [key]: {
-          videoId: "vA",
-          eventId: "evt-A",
-          watchedAt: minutesAgo(1),
-          sent: false,
-        },
-      });
-      const { recordVideo, background } = await loadTabWithBackground(storage);
-      const backgroundWrite = storage.hold("set", (obj) => key in obj);
+    const closing = background.endSession();
+    await removing.reached;
+    await recordVideo("vB", "영상B", null, null, null, null, LEFT_STATS, {
+      sessionId: "s1",
+      eventId: "evt-A",
+    });
+    await flushMicrotasks();
+    removing.release();
+    await closing;
+    await flushMicrotasks();
 
-      const marking = background.markVideoEventSent({ location: "live", key });
-      await backgroundWrite.reached;
-      recordVideo("vB", "영상B", null, null, null, null, LEFT_STATS, {
-        sessionId: "s1",
-        eventId: "evt-A",
-      });
-      await flushMicrotasks();
-      backgroundWrite.release();
-      await marking;
-      await flushMicrotasks();
-
-      expect(storage.dump()[key]).toMatchObject({
-        sent: true,
-        watchedSeconds: 55.5,
-        watchStatsSource: "final",
-      });
-    },
-  );
-
-  it.fails(
-    "content가 닫힌 세션 목록을 읽은 뒤 background가 다른 세션을 닫으면, 닫은 세션과 최종값이 모두 남는다",
-    async () => {
-      const storage = createHoldableStorage({
-        currentSession: { sessionId: "s1", startTime: minutesAgo(15) },
-        lastWatchedAt: minutesAgo(11),
-        "video__s1__evt-B": {
-          videoId: "vB",
-          eventId: "evt-B",
-          watchedAt: minutesAgo(11),
-          sent: true,
-        },
-        sessions: [closedSession()],
-      });
-      const { recordVideo, background } = await loadTabWithBackground(storage);
-      const contentWrite = storage.hold("set", (obj) => "sessions" in obj);
-
-      recordVideo("vC", "영상C", null, null, null, null, LEFT_STATS, {
-        sessionId: "s-old",
-        eventId: "evt-A",
-      });
-      await contentWrite.reached;
-      const closing = background.endSession();
-      await flushMicrotasks();
-      contentWrite.release();
-      await closing;
-      await flushMicrotasks();
-
-      const dump = storage.dump();
-      expect(dump.sessions.map((s) => s.sessionId)).toContain("s1");
-      expect(findA(dump)).toMatchObject({ watchedSeconds: 55.5 });
-    },
-  );
-
-  it.fails(
-    "다시 재생으로 앞 기록을 확정하는 순간 background가 세션을 닫아도, 닫은 세션과 앞 기록의 최종값이 모두 남는다",
-    async () => {
-      const storage = createHoldableStorage({
-        currentSession: { sessionId: "s1", startTime: minutesAgo(15) },
-        lastWatchedAt: minutesAgo(11),
-        "video__s1__evt-B": {
-          videoId: "vB",
-          eventId: "evt-B",
-          watchedAt: minutesAgo(11),
-          sent: true,
-        },
-        sessions: [closedSession()],
-      });
-      const { recordVideo, background } = await loadTabWithBackground(storage);
-      const contentWrite = storage.hold("set", (obj) => "sessions" in obj);
-
-      recordVideo(
-        "vA",
-        "영상A",
-        null,
-        null,
-        null,
-        null,
-        LEFT_STATS,
-        { sessionId: "s-old", eventId: "evt-A" },
-        "evt-A",
-      );
-      await contentWrite.reached;
-      const closing = background.endSession();
-      await flushMicrotasks();
-      contentWrite.release();
-      await closing;
-      await flushMicrotasks();
-
-      const dump = storage.dump();
-      expect(dump.sessions.map((s) => s.sessionId)).toContain("s1");
-      expect(findA(dump)).toMatchObject({ watchedSeconds: 55.5 });
-    },
-  );
-
-  it.fails(
-    "세션을 닫는 도중 열린 영상 기록에 최종값을 쓰면, 그 값이 닫힌 세션에 반영된다",
-    async () => {
-      const storage = createHoldableStorage({
-        currentSession: { sessionId: "s1", startTime: minutesAgo(15) },
-        lastWatchedAt: minutesAgo(11),
-        "video__s1__evt-A": {
-          videoId: "vA",
-          eventId: "evt-A",
-          watchedAt: minutesAgo(11),
-          sent: true,
-        },
-      });
-      const { recordVideo, background } = await loadTabWithBackground(storage);
-      // 세션 목록 저장은 끝났고 영상 기록 키를 지우기 직전
-      const removing = storage.hold("remove", hasKeyWithPrefix("video__s1__"));
-
-      const closing = background.endSession();
-      await removing.reached;
-      await recordVideo("vB", "영상B", null, null, null, null, LEFT_STATS, {
-        sessionId: "s1",
-        eventId: "evt-A",
-      });
-      await flushMicrotasks();
-      removing.release();
-      await closing;
-      await flushMicrotasks();
-
-      const a = storage
-        .dump()
-        .sessions.find((s) => s.sessionId === "s1")
-        .videos.find((v) => v.eventId === "evt-A");
-      expect(a).toMatchObject({
-        watchedSeconds: 55.5,
-        watchStatsSource: "final",
-      });
-    },
-  );
+    const a = storage
+      .dump()
+      .sessions.find((s) => s.sessionId === "s1")
+      .videos.find((v) => v.eventId === "evt-A");
+    expect(a).toMatchObject({
+      watchedSeconds: 55.5,
+      watchStatsSource: "final",
+    });
+  });
 });
 
 describe("content.js 큐 밖 저장 — 세션 종료·정리 작업과 겹칠 때", () => {

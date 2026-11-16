@@ -3494,6 +3494,74 @@ describe("탭별 마지막 기록 — 탭 번호 응답과 정리", () => {
     expect(sendResponse).toHaveBeenCalledWith(null);
   });
 
+  it("content가 영상 기록 고치기를 맡기면 저장 큐에서 병합하고 찾았는지 돌려준다", async () => {
+    await loadBackground({
+      "video__s1__evt-A": { videoId: "vA", eventId: "evt-A", sent: true },
+    });
+    const sendResponse = vi.fn();
+
+    const keepsChannelOpen = messageListener()(
+      {
+        type: "patch-video-record",
+        target: { sessionId: "s1", eventId: "evt-A" },
+        patch: { watchedSeconds: 30, watchStatsSent: false },
+      },
+      { tab: { id: 7 } },
+      sendResponse,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 비동기로 답하므로 응답 채널을 열어 둔다
+    expect(keepsChannelOpen).toBe(true);
+    expect(sendResponse).toHaveBeenCalledWith({ applied: true });
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__evt-A"]).toEqual({
+      videoId: "vA",
+      eventId: "evt-A",
+      sent: true,
+      watchedSeconds: 30,
+      watchStatsSent: false,
+    });
+  });
+
+  it("고칠 영상 기록이 없으면 applied:false를 돌려준다", async () => {
+    await loadBackground();
+    const sendResponse = vi.fn();
+
+    messageListener()(
+      {
+        type: "patch-video-record",
+        target: { sessionId: "s1", eventId: "evt-missing" },
+        patch: { watchedSeconds: 30 },
+      },
+      { tab: { id: 7 } },
+      sendResponse,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(sendResponse).toHaveBeenCalledWith({ applied: false });
+  });
+
+  it("저장에 실패하면 null을 돌려 content가 직접 쓰게 한다", async () => {
+    await loadBackground();
+    global.chrome.storage.local.get = () =>
+      Promise.reject(new Error("QUOTA_BYTES quota exceeded"));
+    const sendResponse = vi.fn();
+
+    messageListener()(
+      {
+        type: "patch-video-record",
+        target: { sessionId: "s1", eventId: "evt-A" },
+        patch: { watchedSeconds: 30 },
+      },
+      { tab: { id: 7 } },
+      sendResponse,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(sendResponse).toHaveBeenCalledWith(null);
+  });
+
   it("탭이 닫히면 그 탭의 기록만 지운다", async () => {
     await loadBackground({
       tabwatch__1: { videoId: "v1", endedAt: Date.now() },
