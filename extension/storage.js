@@ -520,19 +520,37 @@ function isNewerCheckpoint(cp, v) {
 export async function pruneWatchCheckpoints(now = Date.now()) {
   const all = await chrome.storage.local.get(null);
   const entries = indexVideoEntries(all);
-  const done = Object.entries(all)
-    .filter(([key, cp]) => {
-      if (!key.startsWith(WATCH_CHECKPOINT_PREFIX)) return false;
-      const entry = entries.get(cp?.eventId);
-      if (!entry) return now - (cp?.at ?? 0) > ORPHAN_CHECKPOINT_MS;
-      return (
-        hasFinalWatchStats(entry.v) ||
-        entry.v.watchStatsSent === "invalid" ||
-        !isNewerCheckpoint(cp, entry.v)
-      );
-    })
+  const done = Object.entries(all).filter(([key, cp]) => {
+    if (!key.startsWith(WATCH_CHECKPOINT_PREFIX)) return false;
+    const entry = entries.get(cp?.eventId);
+    if (!entry) return now - (cp?.at ?? 0) > ORPHAN_CHECKPOINT_MS;
+    return (
+      hasFinalWatchStats(entry.v) ||
+      entry.v.watchStatsSent === "invalid" ||
+      !isNewerCheckpoint(cp, entry.v)
+    );
+  });
+  await removeUnchanged(done, "at");
+}
+
+/**
+ * 지우기로 정한 키를 지우기 직전에 다시 읽어, 그사이 탭이 새로 쓴 값은 남긴다.
+ * 탭은 쓸 때마다 시각 필드를 새로 넣으므로 그 값이 처음 읽은 값과 같은 키만 지운다.
+ * @param {Array<[string, object]>} entries - 처음 읽은 [키, 값]
+ * @param {string} stampField - 탭이 쓸 때마다 새로 넣는 시각 필드
+ * @returns {Promise<void>}
+ */
+async function removeUnchanged(entries, stampField) {
+  if (entries.length === 0) return;
+  const current = await chrome.storage.local.get(entries.map(([key]) => key));
+  const unchanged = entries
+    .filter(
+      ([key, before]) =>
+        current[key] !== undefined &&
+        current[key]?.[stampField] === before?.[stampField],
+    )
     .map(([key]) => key);
-  if (done.length > 0) await chrome.storage.local.remove(done);
+  if (unchanged.length > 0) await chrome.storage.local.remove(unchanged);
 }
 
 // content.js가 탭마다 남기는 마지막 기록 키 접두사.
@@ -547,14 +565,12 @@ export const TAB_WATCH_PREFIX = "tabwatch__";
  */
 export async function pruneTabWatches(now = Date.now()) {
   const all = await chrome.storage.local.get(null);
-  const expired = Object.entries(all)
-    .filter(([key, value]) => {
-      if (!key.startsWith(TAB_WATCH_PREFIX)) return false;
-      const endedAt = value?.endedAt;
-      return !Number.isFinite(endedAt) || now - endedAt >= SESSION_TIMEOUT_MS;
-    })
-    .map(([key]) => key);
-  if (expired.length > 0) await chrome.storage.local.remove(expired);
+  const expired = Object.entries(all).filter(([key, value]) => {
+    if (!key.startsWith(TAB_WATCH_PREFIX)) return false;
+    const endedAt = value?.endedAt;
+    return !Number.isFinite(endedAt) || now - endedAt >= SESSION_TIMEOUT_MS;
+  });
+  await removeUnchanged(expired, "endedAt");
 }
 
 /**

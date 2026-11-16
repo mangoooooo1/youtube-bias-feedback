@@ -3637,7 +3637,7 @@ const minutesAgo = (minutes) =>
 const hasKeyWithPrefix = (prefix) => (keys) =>
   [].concat(keys ?? []).some((k) => k.startsWith(prefix));
 
-// 탭 스크립트가 저장 큐 밖에서 쓰던 버그의 재현. 아직 고치지 않은 정리 작업과의 경합은 it.fails로 둔다
+// 탭 스크립트가 저장 큐 밖에서 쓰던 버그의 재현
 describe("content.js 시청 시간 확정과 background 저장이 겹칠 때 — 양쪽 변경이 모두 남는다", () => {
   const closedSession = () => ({
     sessionId: "s-old",
@@ -3951,35 +3951,30 @@ describe("content.js 큐 밖 저장 — 세션 종료·정리 작업과 겹칠 �
     expect(dump.lastRecordedVideo).toBeNull();
   });
 
-  it.fails(
-    "탭별 마지막 기록을 정리하는 사이 같은 탭이 새 영상을 기록하면, 새 탭 기록은 지워지지 않는다",
-    async () => {
-      const storage = createHoldableStorage({
-        tabwatch__7: {
-          videoId: "vOld",
-          sessionId: "s0",
-          eventId: "evt-old",
-          watchedSeconds: 10,
-          endedAt: Date.now() - 11 * 60 * 1000,
-        },
-      });
-      const { recordVideo, background } = await loadTabWithBackground(storage, {
-        tabId: 7,
-      });
-      const pruneRemove = storage.hold(
-        "remove",
-        hasKeyWithPrefix("tabwatch__"),
-      );
+  it("탭별 마지막 기록을 정리하는 사이 같은 탭이 새 영상을 기록하면, 새 탭 기록은 지워지지 않는다", async () => {
+    const storage = createHoldableStorage({
+      tabwatch__7: {
+        videoId: "vOld",
+        sessionId: "s0",
+        eventId: "evt-old",
+        watchedSeconds: 10,
+        endedAt: Date.now() - 11 * 60 * 1000,
+      },
+    });
+    const { recordVideo, background } = await loadTabWithBackground(storage, {
+      tabId: 7,
+    });
+    // 전체를 읽고 지울 키를 정한 뒤, 지우기 전 다시 읽는 순간을 붙잡는다
+    const pruneRecheck = storage.hold("get", hasKeyWithPrefix("tabwatch__"));
 
-      const pruning = background.pruneTabWatches();
-      await pruneRemove.reached;
-      await recordVideo("vNew", "새 영상");
-      pruneRemove.release();
-      await pruning;
+    const pruning = background.pruneTabWatches();
+    await pruneRecheck.reached;
+    await recordVideo("vNew", "새 영상");
+    pruneRecheck.release();
+    await pruning;
 
-      expect(storage.dump().tabwatch__7).toMatchObject({ videoId: "vNew" });
-    },
-  );
+    expect(storage.dump().tabwatch__7).toMatchObject({ videoId: "vNew" });
+  });
 });
 
 describe("content.js 큐 밖 저장 — 체크포인트 정리와 같은 탭 이어 쓰기가 겹칠 때", () => {
@@ -3992,36 +3987,34 @@ describe("content.js 큐 밖 저장 — 체크포인트 정리와 같은 탭 이
     vi.useRealTimers();
   });
 
-  it.fails(
-    "체크포인트를 지우기로 정한 뒤 새로고침한 탭이 이어 쓰며 새 체크포인트를 남기면, 그 체크포인트는 지워지지 않는다",
-    async () => {
-      const storage = createHoldableStorage();
-      const browser = createTabBrowser({ storage });
-      const page = await browser.openPage({ tabId: 7, videoId: "AAAA" });
-      await page.play(20);
-      // 새로고침 뒤 이어 쓴다는 표시(출처를 체크포인트로 되돌림)를 붙잡는다
-      const resumeMark = storage.hold("set", (obj) =>
-        Object.entries(obj).some(
-          ([k, v]) =>
-            k.startsWith("video__") && v?.watchStatsSource === "checkpoint",
-        ),
-      );
-      const reopened = await page.reload();
-      await resumeMark.reached;
+  it("체크포인트를 지우기로 정한 뒤 새로고침한 탭이 이어 쓰며 새 체크포인트를 남기면, 그 체크포인트는 지워지지 않는다", async () => {
+    const storage = createHoldableStorage();
+    const browser = createTabBrowser({ storage });
+    const page = await browser.openPage({ tabId: 7, videoId: "AAAA" });
+    await page.play(20);
+    // 새로고침 뒤 이어 쓴다는 표시(출처를 체크포인트로 되돌림)를 붙잡는다
+    const resumeMark = storage.hold("set", (obj) =>
+      Object.entries(obj).some(
+        ([k, v]) =>
+          k.startsWith("video__") && v?.watchStatsSource === "checkpoint",
+      ),
+    );
+    const reopened = await page.reload();
+    await resumeMark.reached;
 
-      // 정리는 최종값이 있는 기록을 보고 체크포인트를 지우기로 정한다
-      const { pruneWatchCheckpoints } = await import("../storage.js");
-      const pruneRemove = storage.hold("remove", hasKeyWithPrefix("watchcp__"));
-      const pruning = pruneWatchCheckpoints();
-      await pruneRemove.reached;
-      resumeMark.release();
-      await reopened.play(20);
-      pruneRemove.release();
-      await pruning;
+    // 정리는 최종값이 있는 기록을 보고 체크포인트를 지우기로 정한다
+    const { pruneWatchCheckpoints } = await import("../storage.js");
+    // 지우기 전 다시 읽는 순간을 붙잡는다
+    const pruneRecheck = storage.hold("get", hasKeyWithPrefix("watchcp__"));
+    const pruning = pruneWatchCheckpoints();
+    await pruneRecheck.reached;
+    resumeMark.release();
+    await reopened.play(20);
+    pruneRecheck.release();
+    await pruning;
 
-      const [record] = browser.recordsOf("AAAA");
-      expect(record.watchStatsSource).toBe("checkpoint");
-      expect(storage.dump()[`watchcp__${record.eventId}`]).toBeDefined();
-    },
-  );
+    const [record] = browser.recordsOf("AAAA");
+    expect(record.watchStatsSource).toBe("checkpoint");
+    expect(storage.dump()[`watchcp__${record.eventId}`]).toBeDefined();
+  });
 });
