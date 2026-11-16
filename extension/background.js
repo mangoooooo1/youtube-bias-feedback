@@ -397,8 +397,7 @@ async function sendSessionCheckpoints(session) {
     // 표시를 못 남겨도 2분 뒤 재시도 큐가 같은 값을 다시 보낸다
     await markWatchStatsSent(item).catch(() => {});
   }
-  if (sent.size === 0) return session;
-  // 보낸 사이 최종값이 들어왔으면 그 값이 실린다. 재전송도 같은 저장값을 읽는다
+  // 세션을 닫은 뒤 들어온 최종값이 실리도록 하나도 못 보냈어도 저장값을 다시 읽는다. 재전송도 같은 저장값을 읽는다
   const stored = (await getAllSessions().catch(() => [])).find(
     (s) => s.sessionId === session.sessionId,
   );

@@ -1720,6 +1720,25 @@ describe("알람 핸들러 — 세션을 닫을 때 체크포인트를 세션보
     },
   );
 
+  it("체크포인트를 하나도 못 보내도, 세션을 닫은 뒤 들어온 최종값을 저장소에서 다시 읽어 세션에 싣는다", async () => {
+    const { sessionPosts } = mockServer({
+      // PATCH가 나가는 사이 탭이 영상을 떠나며 최종값을 남기고, PATCH는 실패한다.
+      // background가 이미 불러온 storage.js라 같은 저장 큐를 쓴다
+      patch: async () => {
+        const { patchVideoRecord } = await import("../storage.js");
+        await patchVideoRecord(
+          { sessionId: "s1", eventId: "e1" },
+          { watchedSeconds: 640, playbackRate: 1, wasBackgrounded: 0 },
+        );
+        return { ok: false, status: 500 };
+      },
+    });
+    await closeSession({ ...playing("e1"), ...checkpoint("e1") });
+    await vi.waitFor(() => expect(sessionPosts).toHaveLength(1));
+
+    expect(sessionPosts[0].watchedSecondsList).toEqual([640]);
+  });
+
   it("최종값이 있는 영상과 영상 POST가 확정되지 않은 영상에는 체크포인트를 보내지 않는다", async () => {
     const { order, sessionPosts } = mockServer();
     await closeSession({
