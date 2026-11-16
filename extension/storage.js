@@ -99,6 +99,15 @@ export function endSession() {
 }
 
 /**
+ * 세션으로 아직 옮기지 않은 영상 기록(video__)이 남아 있는지.
+ * @returns {Promise<boolean>}
+ */
+export async function hasOpenVideoRecords() {
+  const all = await chrome.storage.local.get(null);
+  return Object.keys(all).some((key) => key.startsWith("video__"));
+}
+
+/**
  * "video__<sessionId>__<uuid>" 형식의 키에서 sessionId를 뽑는다.
  * @param {string} videoKey
  * @returns {string}
@@ -325,8 +334,8 @@ function sessionStartedWhileClosing(all, closedSessionIds) {
  */
 async function _endSession() {
   const all = await chrome.storage.local.get(null);
+  // 현재 세션 표시가 지워졌어도 남은 기록은 닫는다. 그 세션의 시작 시각은 첫 기록 시각으로 둔다
   const { currentSession, sessions } = all;
-  if (!currentSession) return [];
 
   const videoEntries = Object.entries(all).filter(([key]) =>
     key.startsWith("video__"),
@@ -347,7 +356,7 @@ async function _endSession() {
       continue;
     }
     const startTime =
-      sessionId === currentSession.sessionId
+      sessionId === currentSession?.sessionId
         ? currentSession.startTime
         : undefined;
     updatedSessions.push({

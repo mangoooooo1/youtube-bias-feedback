@@ -1474,6 +1474,79 @@ describe("알람 핸들러 — 시청시간 PATCH는 영상 POST 재시도가 �
   });
 });
 
+// 세션을 닫는 사이 탭이 새 세션을 시작하면 현재 세션 표시가 지워질 수 있다.
+// 표시가 없어도 남은 기록은 10분 뒤 닫아 보내야 한다
+describe("알람 핸들러 — 현재 세션 표시가 없어도 남은 기록을 닫는다", () => {
+  async function runAlarm(storage) {
+    global.chrome = createChromeMock();
+    const sessionPosts = [];
+    global.fetch = vi.fn(async (url, options = {}) => {
+      if (new URL(String(url)).pathname === "/api/sessions") {
+        sessionPosts.push(JSON.parse(options.body));
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          data: { categoryDistribution: { 음악: 1 }, entropy: 0 },
+        }),
+      };
+    });
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      participantSynced: true,
+      participantToken: "tok",
+      ...storage,
+    });
+    vi.resetModules();
+    await import("../background.js");
+    const onAlarm = global.chrome.alarms.onAlarm.addListener.mock.calls[0][0];
+    onAlarm({ name: "SESSION_TIMEOUT_CHECK" });
+    await vi.advanceTimersByTimeAsync(0);
+    return sessionPosts;
+  }
+  const minutesAgo = (m) =>
+    new Date(FIXED_NOW.getTime() - m * 60000).toISOString();
+
+  it("마지막 시청 후 10분이 지났으면 현재 세션 표시가 없어도 남은 기록을 세션으로 닫아 보낸다", async () => {
+    const watchedAt = minutesAgo(11);
+    const sessionPosts = await runAlarm({
+      lastWatchedAt: watchedAt,
+      video__orphan__e1: {
+        videoId: "v1",
+        watchedAt,
+        eventId: "e1",
+        sent: true,
+      },
+    });
+
+    expect(sessionPosts.map((b) => b.sessionId)).toEqual(["orphan"]);
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.video__orphan__e1).toBeUndefined();
+    expect(all.sessions.map((s) => s.sessionId)).toEqual(["orphan"]);
+  });
+
+  it("마지막 시청 후 10분이 지나지 않았으면 남은 기록을 닫지 않는다", async () => {
+    const watchedAt = minutesAgo(3);
+    const sessionPosts = await runAlarm({
+      lastWatchedAt: watchedAt,
+      video__orphan__e1: {
+        videoId: "v1",
+        watchedAt,
+        eventId: "e1",
+        sent: true,
+      },
+    });
+
+    expect(sessionPosts).toEqual([]);
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.video__orphan__e1).toBeDefined();
+  });
+});
+
 // 브라우저를 다시 켠 직후 옛 세션과 새 세션이 함께 닫히면, 둘 다 서버로 보내야 한다.
 // 현재 세션만 보내면 옛 세션은 syncedToServer가 비어 재시도 큐에서도 빠진다.
 describe("알람 핸들러 — 한 번에 닫힌 세션은 모두 서버로 보낸다", () => {

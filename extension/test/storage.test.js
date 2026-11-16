@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   endSession,
+  hasOpenVideoRecords,
   getCurrentSession,
   getAllSessions,
   getOnboarding,
@@ -80,9 +81,23 @@ function setVideo(sessionId, videoId, watchedAt, title = `제목-${videoId}`) {
 }
 
 describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
-  it("currentSession이 없으면 아무것도 하지 않는다", async () => {
+  it("currentSession도 남은 영상 기록도 없으면 아무것도 하지 않는다", async () => {
     await endSession();
     expect(await getAllSessions()).toEqual([]);
+  });
+
+  it("currentSession이 지워졌어도 남은 영상 기록은 세션으로 닫고, 시작 시각은 첫 기록 시각으로 둔다", async () => {
+    await setVideo("s1", "v1", "2026-01-01T00:00:00.000Z");
+    await setVideo("s1", "v2", "2026-01-01T00:03:00.000Z");
+    expect(await hasOpenVideoRecords()).toBe(true);
+
+    const closed = await endSession();
+
+    expect(closed.map((s) => s.sessionId)).toEqual(["s1"]);
+    const [session] = await getAllSessions();
+    expect(session.startTime).toBe("2026-01-01T00:00:00.000Z");
+    expect(session.videos.map((v) => v.videoId)).toEqual(["v1", "v2"]);
+    expect(await hasOpenVideoRecords()).toBe(false);
   });
 
   it("영상이 0개인 세션은 종료하지 않고 그대로 둔다", async () => {

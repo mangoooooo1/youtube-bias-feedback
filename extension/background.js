@@ -1,5 +1,6 @@
 import {
   endSession,
+  hasOpenVideoRecords,
   getLastWatchedAt,
   getCurrentSession,
   getAllSessions,
@@ -340,8 +341,10 @@ async function checkSessionTimeout() {
   const elapsed = Date.now() - new Date(lastWatchedAt).getTime();
   if (elapsed < SESSION_TIMEOUT_MS) return;
 
+  // 세션을 닫는 사이 탭이 새 세션을 시작하면 현재 세션 표시가 지워질 수 있다.
+  // 표시가 없어도 세션으로 옮기지 않은 기록이 남았으면 닫는다
   const currentSession = await getCurrentSession();
-  if (!currentSession) return;
+  if (!currentSession && !(await hasOpenVideoRecords())) return;
 
   console.log("[background] 10분 비활성 감지, 세션 종료");
   // 세션을 옮기는 저장보다 먼저 올려야 재시도 큐가 체크포인트보다 먼저 세션을 보내지 않는다
