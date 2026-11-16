@@ -3637,7 +3637,7 @@ const minutesAgo = (minutes) =>
 const hasKeyWithPrefix = (prefix) => (keys) =>
   [].concat(keys ?? []).some((k) => k.startsWith(prefix));
 
-// 탭 스크립트가 저장 큐 밖에서 쓰던 버그의 재현. 아직 고치지 않은 "큐 밖 저장" 두 묶음은 it.fails로 둔다
+// 탭 스크립트가 저장 큐 밖에서 쓰던 버그의 재현. 아직 고치지 않은 정리 작업과의 경합은 it.fails로 둔다
 describe("content.js 시청 시간 확정과 background 저장이 겹칠 때 — 양쪽 변경이 모두 남는다", () => {
   const closedSession = () => ({
     sessionId: "s-old",
@@ -3862,34 +3862,94 @@ describe("content.js 시청 시간 확정과 background 저장이 겹칠 때 —
 });
 
 describe("content.js 큐 밖 저장 — 세션 종료·정리 작업과 겹칠 때", () => {
-  it.fails(
-    "세션을 닫는 사이 새 영상이 새 세션을 시작하면, 그 새 세션이 현재 세션으로 남는다",
-    async () => {
-      const storage = createHoldableStorage({
-        currentSession: { sessionId: "s1", startTime: minutesAgo(15) },
-        lastWatchedAt: minutesAgo(11),
-        "video__s1__evt-A": {
-          videoId: "vA",
-          eventId: "evt-A",
-          watchedAt: minutesAgo(11),
-          sent: true,
-        },
-      });
-      const { recordVideo, background } = await loadTabWithBackground(storage);
-      // 전체를 읽었고 세션 목록·현재 세션을 저장하기 직전
-      const closingWrite = storage.hold("set", (obj) => "sessions" in obj);
+  it("세션을 닫는 사이 새 영상이 새 세션을 시작하면, 그 새 세션이 현재 세션으로 남는다", async () => {
+    const storage = createHoldableStorage({
+      currentSession: { sessionId: "s1", startTime: minutesAgo(15) },
+      lastWatchedAt: minutesAgo(11),
+      "video__s1__evt-A": {
+        videoId: "vA",
+        eventId: "evt-A",
+        watchedAt: minutesAgo(11),
+        sent: true,
+      },
+    });
+    const { recordVideo, background } = await loadTabWithBackground(storage);
+    // 전체를 읽었고 세션 목록·현재 세션을 저장하기 직전
+    const closingWrite = storage.hold("set", (obj) => "sessions" in obj);
 
-      const closing = background.endSession();
-      await closingWrite.reached;
-      await recordVideo("vB", "영상B");
-      const started = storage.dump().currentSession;
-      closingWrite.release();
-      await closing;
+    const closing = background.endSession();
+    await closingWrite.reached;
+    await recordVideo("vB", "영상B");
+    const started = storage.dump().currentSession;
+    closingWrite.release();
+    await closing;
 
-      expect(started.sessionId).not.toBe("s1");
-      expect(storage.dump().currentSession?.sessionId).toBe(started.sessionId);
-    },
-  );
+    expect(started.sessionId).not.toBe("s1");
+    expect(storage.dump().currentSession?.sessionId).toBe(started.sessionId);
+  });
+
+  it("되돌린 현재 세션으로 새로고침 중복 거르기와 다음 세션 종료가 이어진다", async () => {
+    const storage = createHoldableStorage({
+      currentSession: { sessionId: "s1", startTime: minutesAgo(15) },
+      lastWatchedAt: minutesAgo(11),
+      "video__s1__evt-A": {
+        videoId: "vA",
+        eventId: "evt-A",
+        watchedAt: minutesAgo(11),
+        sent: true,
+      },
+    });
+    const { recordVideo, background } = await loadTabWithBackground(storage);
+    const closingWrite = storage.hold("set", (obj) => "sessions" in obj);
+
+    const closing = background.endSession();
+    await closingWrite.reached;
+    await recordVideo("vB", "영상B");
+    const started = storage.dump().currentSession;
+    closingWrite.release();
+    await closing;
+
+    // 같은 영상이 다시 감지돼도(새로고침) 기록을 늘리지 않는다
+    await recordVideo("vB", "영상B");
+    const openKeys = Object.keys(storage.dump()).filter((k) =>
+      k.startsWith(`video__${started.sessionId}__`),
+    );
+    expect(openKeys).toHaveLength(1);
+    expect(storage.dump().lastRecordedVideo).toMatchObject({
+      videoId: "vB",
+      sessionId: started.sessionId,
+    });
+
+    // 다음 종료 때 새 세션도 닫힌다
+    await background.endSession();
+    const dump = storage.dump();
+    expect(dump.sessions.map((s) => s.sessionId)).toEqual([
+      "s1",
+      started.sessionId,
+    ]);
+    expect(dump.currentSession).toBeNull();
+  });
+
+  it("세션을 닫는 사이 새로 시작된 세션이 없으면 현재 세션을 비운 채로 둔다", async () => {
+    const storage = createHoldableStorage({
+      currentSession: { sessionId: "s1", startTime: minutesAgo(15) },
+      lastWatchedAt: minutesAgo(11),
+      lastRecordedVideo: { videoId: "vA", sessionId: "s1", eventId: "evt-A" },
+      "video__s1__evt-A": {
+        videoId: "vA",
+        eventId: "evt-A",
+        watchedAt: minutesAgo(11),
+        sent: true,
+      },
+    });
+    const { background } = await loadTabWithBackground(storage);
+
+    await background.endSession();
+
+    const dump = storage.dump();
+    expect(dump.currentSession).toBeNull();
+    expect(dump.lastRecordedVideo).toBeNull();
+  });
 
   it.fails(
     "탭별 마지막 기록을 정리하는 사이 같은 탭이 새 영상을 기록하면, 새 탭 기록은 지워지지 않는다",

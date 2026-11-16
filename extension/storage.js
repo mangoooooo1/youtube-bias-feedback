@@ -279,6 +279,44 @@ function mergeIntoSession(session, videos, nowMs) {
 }
 
 /**
+ * 세션을 닫는 사이 탭이 새 세션을 시작했으면, 닫으며 비운 현재 세션을 그 세션으로 되돌릴 값을 만든다.
+ * 열린 기록이 남았는데 현재 세션이 없으면 10분 종료 검사가 그 세션을 닫지 않는다.
+ * @param {object} all - 세션을 옮긴 뒤 다시 읽은 저장소 전체
+ * @param {Set<string>} closedSessionIds - 이번에 닫은 세션
+ * @returns {object|null} 저장할 currentSession·lastRecordedVideo(되돌릴 것이 없으면 null)
+ */
+function sessionStartedWhileClosing(all, closedSessionIds) {
+  if (all.currentSession) return null;
+  const open = Object.entries(all).filter(
+    ([key]) =>
+      key.startsWith("video__") && !closedSessionIds.has(sessionIdOf(key)),
+  );
+  if (open.length === 0) return null;
+
+  const watchedMs = ([, v]) => Date.parse(v?.watchedAt) || 0;
+  const [latestKey, latest] = open.reduce((a, b) =>
+    watchedMs(b) > watchedMs(a) ? b : a,
+  );
+  const sessionId = sessionIdOf(latestKey);
+  const videos = open.filter(([key]) => sessionIdOf(key) === sessionId);
+  const [, first] = videos.reduce((a, b) =>
+    watchedMs(b) < watchedMs(a) ? b : a,
+  );
+  return {
+    currentSession: {
+      sessionId,
+      startTime: first.watchedAt,
+      videoCount: videos.length,
+    },
+    lastRecordedVideo: {
+      videoId: latest.videoId,
+      sessionId,
+      eventId: latest.eventId,
+    },
+  };
+}
+
+/**
  * content.js가 video__ 키로 흩어 기록한 영상들을 세션 단위로 모아 sessions[]로 옮긴다.
  * 이후 늦게 도착한 같은 세션의 video__ 키가 있으면 재확인해 병합까지 처리한다.
  * 저장과 삭제를 한 번에 할 수 없어, 중간에 끊겨도 다시 실행하면 같은 결과가 되게 한다 —
@@ -341,6 +379,8 @@ async function _endSession() {
   // video__ 키를 새로 썼을 수 있다 — 그대로 두면 영원히 미반영되므로 즉시 재확인해
   // 병합한다. 이미 새로 시작된 *다른* sessionId의 키는 건드리지 않는다.
   const late = await chrome.storage.local.get(null);
+  const started = sessionStartedWhileClosing(late, closedSessionIds);
+  if (started) await chrome.storage.local.set(started);
   const lateEntries = Object.entries(late).filter(
     ([key]) =>
       key.startsWith("video__") && closedSessionIds.has(sessionIdOf(key)),
