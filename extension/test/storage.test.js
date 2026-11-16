@@ -321,6 +321,87 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     ]);
   });
 
+  // 닫힌 세션에 늦은 기록을 합칠 때 이미 저장된 기록은 다시 판정하지 않는다
+  const closeThenMergeLate = async (initial, late) => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      ...initial,
+    });
+    await endSession();
+    const afterFirst = (await getAllSessions())[0].videos.map((v) => v.eventId);
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s2", startTime: "2026-01-01T01:00:00Z" },
+      ...late,
+      video__s2__x: {
+        videoId: "X",
+        watchedAt: "2026-01-01T01:00:00.000Z",
+        eventId: "x",
+        sent: true,
+      },
+    });
+    await endSession();
+    const afterMerge = (await getAllSessions())[0].videos.map((v) => v.eventId);
+    return { afterFirst, afterMerge };
+  };
+
+  it("다른 탭 중복이 지워진 뒤 같은 탭에서 다시 본 기록은 늦은 기록을 합쳐도 남는다", async () => {
+    const { afterFirst, afterMerge } = await closeThenMergeLate(
+      {
+        ...tabVideo("a0", "A", 0, 7),
+        ...tabVideo("b1", "B", 1, 8),
+        ...tabVideo("a2", "A", 2, 8),
+        ...tabVideo("b3", "B", 3, 8),
+        ...tabVideo("a6", "A", 6, 8),
+      },
+      tabVideo("late", "C", 9, 8),
+    );
+
+    expect(afterFirst).toEqual(["a0", "b1", "b3", "a6"]);
+    expect(afterMerge).toEqual(["a0", "b1", "b3", "a6", "late"]);
+  });
+
+  it("늦게 온 기록이 저장된 기록과 다른 탭 중복이면 합친다", async () => {
+    const { afterMerge } = await closeThenMergeLate(
+      { ...tabVideo("a0", "A", 0, 7), ...tabVideo("b1", "B", 1, 7) },
+      tabVideo("late", "A", 2, 8),
+    );
+
+    expect(afterMerge).toEqual(["a0", "b1"]);
+  });
+
+  it("닫는 중 영상 키 삭제가 끊겨 같은 기록이 다시 들어와도 처음 닫은 결과와 같다", async () => {
+    const records = {
+      ...tabVideo("a0", "A", 0, 7),
+      ...tabVideo("b1", "B", 1, 8),
+      ...tabVideo("a2", "A", 2, 8),
+      ...tabVideo("b3", "B", 3, 8),
+      ...tabVideo("a6", "A", 6, 8),
+    };
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      ...records,
+    });
+    const { remove } = global.chrome.storage.local;
+    global.chrome.storage.local.remove = async () => {
+      global.chrome.storage.local.remove = remove;
+      throw new Error("QUOTA_BYTES quota exceeded");
+    };
+    await expect(endSession()).rejects.toThrow("QUOTA_BYTES");
+
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s2", startTime: "2026-01-01T01:00:00Z" },
+    });
+    await endSession();
+
+    const [session] = await getAllSessions();
+    expect(session.videos.map((v) => v.eventId)).toEqual([
+      "a0",
+      "b1",
+      "b3",
+      "a6",
+    ]);
+  });
+
   it("아주 드물게 두 탭이 동시에 다른 세션을 시작해도(세션 식별 경합) 두 세션 모두 데이터를 잃지 않고 각각 마감된다", async () => {
     // currentSession은 둘 중 나중에 쓴 쪽(s2)만 남아있는 상황을 재현 — 그래도
     // video__ 키는 s1 것도 s2 것도 그대로 남아 있다(영상마다 독립 키라 서로 안 지움).

@@ -32,10 +32,12 @@ function isSameTab(a, b) {
 /**
  * NEAR_SIMULTANEOUS_MS 이내에 다른 탭에서 같은 videoId가 다시 나오면 같은 시청으로 보고 합친다.
  * 같은 탭에서 다시 나온 것(A → B → 뒤로 가기 A)은 새 시청으로 남긴다.
- * @param {Array<{videoId: string, watchedAt: string, tabId?: number|null}>} videos - watchedAt 오름차순으로 정렬된 목록
+ * 이미 닫힌 세션에 남은 기록은 다시 판정하지 않는다. 지워진 기록이 목록에 없어 다시 판정하면 결과가 달라진다.
+ * @param {Array<{videoId: string, watchedAt: string, tabId?: number|null, eventId?: string}>} videos - watchedAt 오름차순으로 정렬된 목록
+ * @param {Set<string>} [keptEventIds] - 판정 없이 남길 기록의 eventId
  * @returns {Array} 중복 제거된 목록
  */
-function dedupeNearSimultaneous(videos) {
+function dedupeNearSimultaneous(videos, keptEventIds = new Set()) {
   const lastSeen = new Map(); // videoId -> 직전에 나온 같은 영상의 { t, tabId }
   const result = [];
   for (const v of videos) {
@@ -44,6 +46,7 @@ function dedupeNearSimultaneous(videos) {
     // 건너뛴 기록도 직전 값으로 남겨, 임계값 안에서 이어지는 여러 건(예: 세 탭)을 전부 하나로 묶는다
     lastSeen.set(v.videoId, { t, tabId: v.tabId });
     if (
+      !keptEventIds.has(v.eventId) &&
       prev !== undefined &&
       t - prev.t <= NEAR_SIMULTANEOUS_MS &&
       !isSameTab(prev.tabId, v.tabId)
@@ -120,13 +123,20 @@ function groupVideosBySession(videoEntries) {
  * @param {object[]} videos - 이 세션의 video__ 항목들
  * @param {string|undefined} startTime - 없으면 첫 영상의 watchedAt을 쓴다
  * @param {string} endTime
+ * @param {Set<string>} [keptEventIds] - 이미 닫힌 세션에 남은 기록의 eventId(다시 판정하지 않음)
  * @returns {object} { sessionId, startTime, endTime, videos }
  */
-function buildClosedSession(sessionId, videos, startTime, endTime) {
+function buildClosedSession(
+  sessionId,
+  videos,
+  startTime,
+  endTime,
+  keptEventIds,
+) {
   videos.sort((a, b) => new Date(a.watchedAt) - new Date(b.watchedAt));
   // 마지막 방어선: 같은 videoId가 짧은 시간 안에 다른 탭에서 다시 나오면(새로고침 중복 방지 값이
   // 탭 경합으로 드물게 못 걸렀거나, 같은 영상을 여러 탭에서 동시에 열어둔 경우) 하나로 합친다.
-  const deduped = dedupeNearSimultaneous(videos);
+  const deduped = dedupeNearSimultaneous(videos, keptEventIds);
   return {
     sessionId,
     startTime: startTime ?? deduped[0].watchedAt,
@@ -245,7 +255,10 @@ export function sessionWatchCount(videos) {
  * 아직 보내지 않은 세션은 재시도 큐가 찾도록 전송 대기로 둔다.
  */
 function mergeIntoSession(session, videos, nowMs) {
-  const merged = mergeVideos(session.videos ?? [], videos);
+  const existing = session.videos ?? [];
+  const merged = mergeVideos(existing, videos);
+  // eventId가 없는 옛 기록은 구분할 수 없어 예전처럼 다시 판정한다
+  const keptEventIds = new Set(existing.map((v) => v.eventId).filter(Boolean));
   return {
     ...session,
     ...buildClosedSession(
@@ -253,6 +266,7 @@ function mergeIntoSession(session, videos, nowMs) {
       merged,
       session.startTime,
       sessionEndTime(merged, session.startTime, nowMs),
+      keptEventIds,
     ),
     syncedToServer: session.syncedToServer ?? false,
   };
