@@ -1,5 +1,6 @@
 import {
   endSession,
+  hasOpenVideoRecords,
   getLastWatchedAt,
   getCurrentSession,
   getAllSessions,
@@ -15,6 +16,7 @@ import {
   TAB_WATCH_PREFIX,
   markWatchStatsSent,
   markWatchStatsInvalid,
+  patchVideoRecord,
   getParticipantSyncState,
   markParticipantSynced,
   recordParticipantSyncFailure,
@@ -145,6 +147,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "get-tab-id") {
     sendResponse(sender?.tab?.id ?? null);
     return;
+  }
+  // content는 저장 큐를 쓸 수 없어 영상 기록 고치기를 맡긴다. 실패하면 null을 돌려 content가 직접 쓰게 한다
+  if (message?.type === "patch-video-record") {
+    patchVideoRecord(message.target, message.patch)
+      .then((applied) => sendResponse({ applied }))
+      .catch(() => sendResponse(null));
+    return true;
   }
   if (message?.type !== "client-error") return;
   reportClientError(message.code, message.where);
@@ -332,14 +341,17 @@ async function checkSessionTimeout() {
   const elapsed = Date.now() - new Date(lastWatchedAt).getTime();
   if (elapsed < SESSION_TIMEOUT_MS) return;
 
+  // 세션을 닫는 사이 탭이 새 세션을 시작하면 현재 세션 표시가 지워질 수 있다.
+  // 표시가 없어도 세션으로 옮기지 않은 기록이 남았으면 닫는다
   const currentSession = await getCurrentSession();
-  if (!currentSession) return;
+  if (!currentSession && !(await hasOpenVideoRecords())) return;
 
   console.log("[background] 10분 비활성 감지, 세션 종료");
   // 세션을 옮기는 저장보다 먼저 올려야 재시도 큐가 체크포인트보다 먼저 세션을 보내지 않는다
   sessionClosesInFlight += 1;
   try {
-    const closedSessions = await endSession();
+    // 위 판정 뒤 탭이 새 세션을 시작했을 수 있어, 저장 큐 안에서 다시 판정한다
+    const closedSessions = await endSession({ minIdleMs: SESSION_TIMEOUT_MS });
 
     // 먼저 끝난 세션부터 보낸다
     const ordered = [...closedSessions].sort(
@@ -386,8 +398,7 @@ async function sendSessionCheckpoints(session) {
     // 표시를 못 남겨도 2분 뒤 재시도 큐가 같은 값을 다시 보낸다
     await markWatchStatsSent(item).catch(() => {});
   }
-  if (sent.size === 0) return session;
-  // 보낸 사이 최종값이 들어왔으면 그 값이 실린다. 재전송도 같은 저장값을 읽는다
+  // 세션을 닫은 뒤 들어온 최종값이 실리도록 하나도 못 보냈어도 저장값을 다시 읽는다. 재전송도 같은 저장값을 읽는다
   const stored = (await getAllSessions().catch(() => [])).find(
     (s) => s.sessionId === session.sessionId,
   );

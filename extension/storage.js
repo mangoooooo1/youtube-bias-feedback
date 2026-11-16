@@ -92,10 +92,20 @@ export async function clearCurrentSession() {
 
 /**
  * 세션 종료를 큐에 직렬화해 실행한다(동시 호출 시 경합 방지).
+ * @param {{minIdleMs?: number}} [options] - 주면 마지막 시청 후 이만큼 지나지 않았을 때 닫지 않는다
  * @returns {Promise<object[]>} 이번에 닫은 세션들(없으면 빈 배열)
  */
-export function endSession() {
-  return enqueue(() => _endSession());
+export function endSession(options = {}) {
+  return enqueue(() => _endSession(options));
+}
+
+/**
+ * 세션으로 아직 옮기지 않은 영상 기록(video__)이 남아 있는지.
+ * @returns {Promise<boolean>}
+ */
+export async function hasOpenVideoRecords() {
+  const all = await chrome.storage.local.get(null);
+  return Object.keys(all).some((key) => key.startsWith("video__"));
 }
 
 /**
@@ -279,24 +289,66 @@ function mergeIntoSession(session, videos, nowMs) {
 }
 
 /**
+ * 세션을 닫는 사이 탭이 새 세션을 시작했으면, 닫으며 비운 현재 세션을 그 세션으로 되돌릴 값을 만든다.
+ * 열린 기록이 남았는데 현재 세션이 없으면 10분 종료 검사가 그 세션을 닫지 않는다.
+ * @param {object} all - 세션을 옮긴 뒤 다시 읽은 저장소 전체
+ * @param {Set<string>} closedSessionIds - 이번에 닫은 세션
+ * @returns {object|null} 저장할 currentSession·lastRecordedVideo(되돌릴 것이 없으면 null)
+ */
+function sessionStartedWhileClosing(all, closedSessionIds) {
+  if (all.currentSession) return null;
+  const open = Object.entries(all).filter(
+    ([key]) =>
+      key.startsWith("video__") && !closedSessionIds.has(sessionIdOf(key)),
+  );
+  if (open.length === 0) return null;
+
+  const watchedMs = ([, v]) => Date.parse(v?.watchedAt) || 0;
+  const [latestKey, latest] = open.reduce((a, b) =>
+    watchedMs(b) > watchedMs(a) ? b : a,
+  );
+  const sessionId = sessionIdOf(latestKey);
+  const videos = open.filter(([key]) => sessionIdOf(key) === sessionId);
+  const [, first] = videos.reduce((a, b) =>
+    watchedMs(b) < watchedMs(a) ? b : a,
+  );
+  return {
+    currentSession: {
+      sessionId,
+      startTime: first.watchedAt,
+      videoCount: videos.length,
+    },
+    lastRecordedVideo: {
+      videoId: latest.videoId,
+      sessionId,
+      eventId: latest.eventId,
+    },
+  };
+}
+
+/**
  * content.js가 video__ 키로 흩어 기록한 영상들을 세션 단위로 모아 sessions[]로 옮긴다.
  * 이후 늦게 도착한 같은 세션의 video__ 키가 있으면 재확인해 병합까지 처리한다.
  * 저장과 삭제를 한 번에 할 수 없어, 중간에 끊겨도 다시 실행하면 같은 결과가 되게 한다 —
  * 이미 있는 세션이면 새로 붙이지 않고 합치고, 새로 닫은 세션은 옮기는 저장에서 바로 전송 대기로 둔다.
  * @returns {Promise<object[]>} 이번에 닫거나 합친 세션 중 아직 서버에 보내지 않은 것(없으면 빈 배열)
  */
-async function _endSession() {
+async function _endSession({ minIdleMs } = {}) {
   const all = await chrome.storage.local.get(null);
+  // 현재 세션 표시가 지워졌어도 남은 기록은 닫는다. 그 세션의 시작 시각은 첫 기록 시각으로 둔다
   const { currentSession, sessions } = all;
-  if (!currentSession) return [];
 
   const videoEntries = Object.entries(all).filter(([key]) =>
     key.startsWith("video__"),
   );
   if (videoEntries.length === 0) return [];
 
-  const bySession = groupVideosBySession(videoEntries);
+  // 탭은 새 기록과 마지막 시청 시각을 한 번에 쓴다. 판정 뒤 새 세션이 시작됐으면 여기서 걸러진다
   const nowMs = Date.now();
+  const lastWatchedMs = Date.parse(all.lastWatchedAt);
+  if (minIdleMs != null && nowMs - lastWatchedMs < minIdleMs) return [];
+
+  const bySession = groupVideosBySession(videoEntries);
   const updatedSessions = [...(sessions ?? [])];
   for (const [sessionId, videos] of bySession) {
     const index = updatedSessions.findIndex((s) => s.sessionId === sessionId);
@@ -309,7 +361,7 @@ async function _endSession() {
       continue;
     }
     const startTime =
-      sessionId === currentSession.sessionId
+      sessionId === currentSession?.sessionId
         ? currentSession.startTime
         : undefined;
     updatedSessions.push({
@@ -341,6 +393,8 @@ async function _endSession() {
   // video__ 키를 새로 썼을 수 있다 — 그대로 두면 영원히 미반영되므로 즉시 재확인해
   // 병합한다. 이미 새로 시작된 *다른* sessionId의 키는 건드리지 않는다.
   const late = await chrome.storage.local.get(null);
+  const started = sessionStartedWhileClosing(late, closedSessionIds);
+  if (started) await chrome.storage.local.set(started);
   const lateEntries = Object.entries(late).filter(
     ([key]) =>
       key.startsWith("video__") && closedSessionIds.has(sessionIdOf(key)),
@@ -480,19 +534,37 @@ function isNewerCheckpoint(cp, v) {
 export async function pruneWatchCheckpoints(now = Date.now()) {
   const all = await chrome.storage.local.get(null);
   const entries = indexVideoEntries(all);
-  const done = Object.entries(all)
-    .filter(([key, cp]) => {
-      if (!key.startsWith(WATCH_CHECKPOINT_PREFIX)) return false;
-      const entry = entries.get(cp?.eventId);
-      if (!entry) return now - (cp?.at ?? 0) > ORPHAN_CHECKPOINT_MS;
-      return (
-        hasFinalWatchStats(entry.v) ||
-        entry.v.watchStatsSent === "invalid" ||
-        !isNewerCheckpoint(cp, entry.v)
-      );
-    })
+  const done = Object.entries(all).filter(([key, cp]) => {
+    if (!key.startsWith(WATCH_CHECKPOINT_PREFIX)) return false;
+    const entry = entries.get(cp?.eventId);
+    if (!entry) return now - (cp?.at ?? 0) > ORPHAN_CHECKPOINT_MS;
+    return (
+      hasFinalWatchStats(entry.v) ||
+      entry.v.watchStatsSent === "invalid" ||
+      !isNewerCheckpoint(cp, entry.v)
+    );
+  });
+  await removeUnchanged(done, "at");
+}
+
+/**
+ * 지우기로 정한 키를 지우기 직전에 다시 읽어, 그사이 탭이 새로 쓴 값은 남긴다.
+ * 탭은 쓸 때마다 시각 필드를 새로 넣으므로 그 값이 처음 읽은 값과 같은 키만 지운다.
+ * @param {Array<[string, object]>} entries - 처음 읽은 [키, 값]
+ * @param {string} stampField - 탭이 쓸 때마다 새로 넣는 시각 필드
+ * @returns {Promise<void>}
+ */
+async function removeUnchanged(entries, stampField) {
+  if (entries.length === 0) return;
+  const current = await chrome.storage.local.get(entries.map(([key]) => key));
+  const unchanged = entries
+    .filter(
+      ([key, before]) =>
+        current[key] !== undefined &&
+        current[key]?.[stampField] === before?.[stampField],
+    )
     .map(([key]) => key);
-  if (done.length > 0) await chrome.storage.local.remove(done);
+  if (unchanged.length > 0) await chrome.storage.local.remove(unchanged);
 }
 
 // content.js가 탭마다 남기는 마지막 기록 키 접두사.
@@ -507,14 +579,12 @@ export const TAB_WATCH_PREFIX = "tabwatch__";
  */
 export async function pruneTabWatches(now = Date.now()) {
   const all = await chrome.storage.local.get(null);
-  const expired = Object.entries(all)
-    .filter(([key, value]) => {
-      if (!key.startsWith(TAB_WATCH_PREFIX)) return false;
-      const endedAt = value?.endedAt;
-      return !Number.isFinite(endedAt) || now - endedAt >= SESSION_TIMEOUT_MS;
-    })
-    .map(([key]) => key);
-  if (expired.length > 0) await chrome.storage.local.remove(expired);
+  const expired = Object.entries(all).filter(([key, value]) => {
+    if (!key.startsWith(TAB_WATCH_PREFIX)) return false;
+    const endedAt = value?.endedAt;
+    return !Number.isFinite(endedAt) || now - endedAt >= SESSION_TIMEOUT_MS;
+  });
+  await removeUnchanged(expired, "endedAt");
 }
 
 /**
@@ -674,6 +744,48 @@ async function _setWatchStatsSent(item, value) {
     };
   });
   if (changed) await chrome.storage.local.set({ sessions: updatedSessions });
+}
+
+/**
+ * 탭 스크립트가 넘긴 패치를 영상 기록에 병합한다. 열린 키(video__)가 있으면 그쪽을,
+ * 세션이 닫혀 sessions[]로 옮겨졌으면 그 안의 항목을 고친다.
+ * 탭 스크립트가 직접 쓰면 세션 종료·보냄 표시와 겹쳐 한쪽 변경이 사라져 큐 안에서 쓴다.
+ * @param {{sessionId: string, eventId: string}} target
+ * @param {object} patch - 병합할 필드
+ * @returns {Promise<boolean>} 찾아서 고쳤으면 true
+ */
+export function patchVideoRecord(target, patch) {
+  return enqueue(() => _patchVideoRecord(target, patch));
+}
+
+async function _patchVideoRecord({ sessionId, eventId } = {}, patch) {
+  if (typeof sessionId !== "string" || typeof eventId !== "string") {
+    return false;
+  }
+  const videoKey = `video__${sessionId}__${eventId}`;
+  const { [videoKey]: live } = await chrome.storage.local.get(videoKey);
+  if (live) {
+    await chrome.storage.local.set({ [videoKey]: { ...live, ...patch } });
+    return true;
+  }
+
+  const { sessions } = await chrome.storage.local.get("sessions");
+  if (!Array.isArray(sessions)) return false;
+  let found = false;
+  const updated = sessions.map((session) => {
+    if (session.sessionId !== sessionId) return session;
+    return {
+      ...session,
+      videos: (session.videos ?? []).map((v) => {
+        if (v.eventId !== eventId) return v;
+        found = true;
+        return { ...v, ...patch };
+      }),
+    };
+  });
+  if (!found) return false;
+  await chrome.storage.local.set({ sessions: updated });
+  return true;
 }
 
 /**

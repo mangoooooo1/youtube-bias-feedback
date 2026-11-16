@@ -1474,6 +1474,138 @@ describe("알람 핸들러 — 시청시간 PATCH는 영상 POST 재시도가 �
   });
 });
 
+// 세션을 닫는 사이 탭이 새 세션을 시작하면 현재 세션 표시가 지워질 수 있다.
+// 표시가 없어도 남은 기록은 10분 뒤 닫아 보내야 한다
+describe("알람 핸들러 — 현재 세션 표시가 없어도 남은 기록을 닫는다", () => {
+  async function runAlarm(storage) {
+    global.chrome = createChromeMock();
+    const sessionPosts = [];
+    global.fetch = vi.fn(async (url, options = {}) => {
+      if (new URL(String(url)).pathname === "/api/sessions") {
+        sessionPosts.push(JSON.parse(options.body));
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          data: { categoryDistribution: { 음악: 1 }, entropy: 0 },
+        }),
+      };
+    });
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      participantSynced: true,
+      participantToken: "tok",
+      ...storage,
+    });
+    vi.resetModules();
+    await import("../background.js");
+    const onAlarm = global.chrome.alarms.onAlarm.addListener.mock.calls[0][0];
+    onAlarm({ name: "SESSION_TIMEOUT_CHECK" });
+    await vi.advanceTimersByTimeAsync(0);
+    return sessionPosts;
+  }
+  const minutesAgo = (m) =>
+    new Date(FIXED_NOW.getTime() - m * 60000).toISOString();
+
+  it("마지막 시청 후 10분이 지났으면 현재 세션 표시가 없어도 남은 기록을 세션으로 닫아 보낸다", async () => {
+    const watchedAt = minutesAgo(11);
+    const sessionPosts = await runAlarm({
+      lastWatchedAt: watchedAt,
+      video__orphan__e1: {
+        videoId: "v1",
+        watchedAt,
+        eventId: "e1",
+        sent: true,
+      },
+    });
+
+    expect(sessionPosts.map((b) => b.sessionId)).toEqual(["orphan"]);
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.video__orphan__e1).toBeUndefined();
+    expect(all.sessions.map((s) => s.sessionId)).toEqual(["orphan"]);
+  });
+
+  it("마지막 시청 후 10분이 지나지 않았으면 남은 기록을 닫지 않는다", async () => {
+    const watchedAt = minutesAgo(3);
+    const sessionPosts = await runAlarm({
+      lastWatchedAt: watchedAt,
+      video__orphan__e1: {
+        videoId: "v1",
+        watchedAt,
+        eventId: "e1",
+        sent: true,
+      },
+    });
+
+    expect(sessionPosts).toEqual([]);
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.video__orphan__e1).toBeDefined();
+  });
+
+  it("10분이 지났다고 읽은 직후 탭이 새 세션을 시작하면 그 세션은 닫지 않는다", async () => {
+    global.chrome = createChromeMock();
+    const sessionPosts = [];
+    global.fetch = vi.fn(async (url, options = {}) => {
+      if (new URL(String(url)).pathname === "/api/sessions") {
+        sessionPosts.push(JSON.parse(options.body));
+      }
+      return { ok: true, status: 200, json: async () => ({ success: true }) };
+    });
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      participantSynced: true,
+      participantToken: "tok",
+      lastWatchedAt: minutesAgo(11),
+    });
+    // 알람이 마지막 시청 시각을 읽은 직후, 탭이 새 기록·현재 세션·마지막 시청 시각을 한 번에 쓴다
+    const local = global.chrome.storage.local;
+    const get = local.get;
+    let armed = false;
+    local.get = async (keys) => {
+      const result = await get(keys);
+      if (armed && keys === "lastWatchedAt") {
+        armed = false;
+        const now = FIXED_NOW.toISOString();
+        await local.set({
+          lastWatchedAt: now,
+          currentSession: { sessionId: "fresh", startTime: now, videoCount: 1 },
+          lastRecordedVideo: {
+            videoId: "v9",
+            sessionId: "fresh",
+            eventId: "e9",
+          },
+          video__fresh__e9: {
+            videoId: "v9",
+            watchedAt: now,
+            eventId: "e9",
+            sent: true,
+          },
+        });
+      }
+      return result;
+    };
+
+    vi.resetModules();
+    await import("../background.js");
+    const onAlarm = global.chrome.alarms.onAlarm.addListener.mock.calls[0][0];
+    armed = true;
+    onAlarm({ name: "SESSION_TIMEOUT_CHECK" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(armed).toBe(false);
+    expect(sessionPosts).toEqual([]);
+    const all = await get(null);
+    expect(all.video__fresh__e9).toBeDefined();
+    expect(all.currentSession).toMatchObject({ sessionId: "fresh" });
+  });
+});
+
 // 브라우저를 다시 켠 직후 옛 세션과 새 세션이 함께 닫히면, 둘 다 서버로 보내야 한다.
 // 현재 세션만 보내면 옛 세션은 syncedToServer가 비어 재시도 큐에서도 빠진다.
 describe("알람 핸들러 — 한 번에 닫힌 세션은 모두 서버로 보낸다", () => {
@@ -1646,6 +1778,25 @@ describe("알람 핸들러 — 세션을 닫을 때 체크포인트를 세션보
       expect(sessions[0].videos[0].watchStatsSent).toBeUndefined();
     },
   );
+
+  it("체크포인트를 하나도 못 보내도, 세션을 닫은 뒤 들어온 최종값을 저장소에서 다시 읽어 세션에 싣는다", async () => {
+    const { sessionPosts } = mockServer({
+      // PATCH가 나가는 사이 탭이 영상을 떠나며 최종값을 남기고, PATCH는 실패한다.
+      // background가 이미 불러온 storage.js라 같은 저장 큐를 쓴다
+      patch: async () => {
+        const { patchVideoRecord } = await import("../storage.js");
+        await patchVideoRecord(
+          { sessionId: "s1", eventId: "e1" },
+          { watchedSeconds: 640, playbackRate: 1, wasBackgrounded: 0 },
+        );
+        return { ok: false, status: 500 };
+      },
+    });
+    await closeSession({ ...playing("e1"), ...checkpoint("e1") });
+    await vi.waitFor(() => expect(sessionPosts).toHaveLength(1));
+
+    expect(sessionPosts[0].watchedSecondsList).toEqual([640]);
+  });
 
   it("최종값이 있는 영상과 영상 POST가 확정되지 않은 영상에는 체크포인트를 보내지 않는다", async () => {
     const { order, sessionPosts } = mockServer();
@@ -3490,6 +3641,74 @@ describe("탭별 마지막 기록 — 탭 번호 응답과 정리", () => {
     const sendResponse = vi.fn();
 
     messageListener()({ type: "get-tab-id" }, {}, sendResponse);
+
+    expect(sendResponse).toHaveBeenCalledWith(null);
+  });
+
+  it("content가 영상 기록 고치기를 맡기면 저장 큐에서 병합하고 찾았는지 돌려준다", async () => {
+    await loadBackground({
+      "video__s1__evt-A": { videoId: "vA", eventId: "evt-A", sent: true },
+    });
+    const sendResponse = vi.fn();
+
+    const keepsChannelOpen = messageListener()(
+      {
+        type: "patch-video-record",
+        target: { sessionId: "s1", eventId: "evt-A" },
+        patch: { watchedSeconds: 30, watchStatsSent: false },
+      },
+      { tab: { id: 7 } },
+      sendResponse,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 비동기로 답하므로 응답 채널을 열어 둔다
+    expect(keepsChannelOpen).toBe(true);
+    expect(sendResponse).toHaveBeenCalledWith({ applied: true });
+    const all = await global.chrome.storage.local.get(null);
+    expect(all["video__s1__evt-A"]).toEqual({
+      videoId: "vA",
+      eventId: "evt-A",
+      sent: true,
+      watchedSeconds: 30,
+      watchStatsSent: false,
+    });
+  });
+
+  it("고칠 영상 기록이 없으면 applied:false를 돌려준다", async () => {
+    await loadBackground();
+    const sendResponse = vi.fn();
+
+    messageListener()(
+      {
+        type: "patch-video-record",
+        target: { sessionId: "s1", eventId: "evt-missing" },
+        patch: { watchedSeconds: 30 },
+      },
+      { tab: { id: 7 } },
+      sendResponse,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(sendResponse).toHaveBeenCalledWith({ applied: false });
+  });
+
+  it("저장에 실패하면 null을 돌려 content가 직접 쓰게 한다", async () => {
+    await loadBackground();
+    global.chrome.storage.local.get = () =>
+      Promise.reject(new Error("QUOTA_BYTES quota exceeded"));
+    const sendResponse = vi.fn();
+
+    messageListener()(
+      {
+        type: "patch-video-record",
+        target: { sessionId: "s1", eventId: "evt-A" },
+        patch: { watchedSeconds: 30 },
+      },
+      { tab: { id: 7 } },
+      sendResponse,
+    );
+    await vi.advanceTimersByTimeAsync(0);
 
     expect(sendResponse).toHaveBeenCalledWith(null);
   });
