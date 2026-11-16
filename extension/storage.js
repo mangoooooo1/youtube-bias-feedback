@@ -22,34 +22,40 @@ export const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 const NEAR_SIMULTANEOUS_MS = 10000;
 
 /**
- * 같은 탭의 기록인지. 같은 탭의 새 기록은 새로고침·이어 쓰기 검사를 거친 실제 이동이다.
- * 탭 번호가 없는 기록(업데이트 전 기록, 탭 번호 조회 실패)은 같은 탭으로 보지 않는다.
+ * 영상·탭별 기록을 찾는 키. 같은 탭의 새 기록은 새로고침·이어 쓰기 검사를 거친 실제 이동이다.
+ * 탭 번호가 없는 기록(업데이트 전 기록, 탭 번호 조회 실패)은 같은 탭을 알 수 없어 null이다.
  */
-function isSameTab(a, b) {
-  return Number.isInteger(a) && Number.isInteger(b) && a === b;
+function tabVideoKey(v) {
+  return Number.isInteger(v.tabId) ? `${v.videoId}\n${v.tabId}` : null;
 }
 
 /**
  * NEAR_SIMULTANEOUS_MS 이내에 다른 탭에서 같은 videoId가 다시 나오면 같은 시청으로 보고 합친다.
- * 같은 탭에서 다시 나온 것(A → B → 뒤로 가기 A)은 새 시청으로 남긴다.
+ * 같은 탭이 이 시간 안에 같은 영상을 기록한 적이 있으면(A → B → 뒤로 가기 A) 사이에 다른 탭 기록이 끼어도 새 시청으로 남긴다.
  * 이미 닫힌 세션에 남은 기록은 다시 판정하지 않는다. 지워진 기록이 목록에 없어 다시 판정하면 결과가 달라진다.
  * @param {Array<{videoId: string, watchedAt: string, tabId?: number|null, eventId?: string}>} videos - watchedAt 오름차순으로 정렬된 목록
  * @param {Set<string>} [keptEventIds] - 판정 없이 남길 기록의 eventId
  * @returns {Array} 중복 제거된 목록
  */
 function dedupeNearSimultaneous(videos, keptEventIds = new Set()) {
-  const lastSeen = new Map(); // videoId -> 직전에 나온 같은 영상의 { t, tabId }
+  const lastSeenAt = new Map(); // videoId -> 탭과 관계없이 직전에 나온 같은 영상의 ms
+  const lastSeenInTabAt = new Map(); // 영상·탭 키 -> 그 탭이 직전에 기록한 같은 영상의 ms
   const result = [];
   for (const v of videos) {
     const t = new Date(v.watchedAt).getTime();
-    const prev = lastSeen.get(v.videoId);
+    const prev = lastSeenAt.get(v.videoId);
+    const tabKey = tabVideoKey(v);
+    const prevInTab = tabKey ? lastSeenInTabAt.get(tabKey) : undefined;
     // 건너뛴 기록도 직전 값으로 남겨, 임계값 안에서 이어지는 여러 건(예: 세 탭)을 전부 하나로 묶는다
-    lastSeen.set(v.videoId, { t, tabId: v.tabId });
+    lastSeenAt.set(v.videoId, t);
+    if (tabKey) lastSeenInTabAt.set(tabKey, t);
+    const rewatchedInTab =
+      prevInTab !== undefined && t - prevInTab <= NEAR_SIMULTANEOUS_MS;
     if (
       !keptEventIds.has(v.eventId) &&
+      !rewatchedInTab &&
       prev !== undefined &&
-      t - prev.t <= NEAR_SIMULTANEOUS_MS &&
-      !isSameTab(prev.tabId, v.tabId)
+      t - prev <= NEAR_SIMULTANEOUS_MS
     ) {
       continue;
     }

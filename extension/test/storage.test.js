@@ -321,6 +321,67 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     ]);
   });
 
+  it("다른 탭 기록이 사이에 끼어도 같은 탭에서 10초 안에 다시 본 영상은 남긴다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      ...tabVideo("a0", "A", 0, 7),
+      ...tabVideo("b1", "B", 1, 8),
+      ...tabVideo("a2", "A", 2, 8),
+      ...tabVideo("b3", "B", 3, 7),
+      ...tabVideo("a6", "A", 6, 7),
+    });
+    await endSession();
+
+    // 탭8의 A·탭7의 B는 다른 탭에 같은 영상이 열린 중복이라 합친다
+    const [session] = await getAllSessions();
+    expect(session.videos.map((v) => v.eventId)).toEqual(["a0", "b1", "a6"]);
+  });
+
+  it("다른 탭이 같은 영상을 기록한 뒤 같은 탭에서 A → B → 뒤로 가기 A를 해도 두 번째 A는 남긴다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      ...tabVideo("a0", "A", 0, 1),
+      ...tabVideo("a1", "A", 1, 2),
+      ...tabVideo("b3", "B", 3, 1),
+      ...tabVideo("a6", "A", 6, 1),
+    });
+    await endSession();
+
+    const [session] = await getAllSessions();
+    expect(session.videos.map((v) => v.eventId)).toEqual(["a0", "b3", "a6"]);
+  });
+
+  it("같은 탭의 같은 영상 기록이 10초보다 오래됐으면 다른 탭 중복은 지금처럼 합친다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      video__s1__old: {
+        videoId: "A",
+        watchedAt: "2026-01-01T00:00:00.000Z",
+        eventId: "old",
+        sent: true,
+        tabId: 8,
+      },
+      video__s1__other: {
+        videoId: "A",
+        watchedAt: "2026-01-01T00:05:00.000Z",
+        eventId: "other",
+        sent: true,
+        tabId: 7,
+      },
+      video__s1__again: {
+        videoId: "A",
+        watchedAt: "2026-01-01T00:05:01.000Z",
+        eventId: "again",
+        sent: true,
+        tabId: 8,
+      },
+    });
+    await endSession();
+
+    const [session] = await getAllSessions();
+    expect(session.videos.map((v) => v.eventId)).toEqual(["old", "other"]);
+  });
+
   // 닫힌 세션에 늦은 기록을 합칠 때 이미 저장된 기록은 다시 판정하지 않는다
   const closeThenMergeLate = async (initial, late) => {
     await global.chrome.storage.local.set({
