@@ -92,10 +92,11 @@ export async function clearCurrentSession() {
 
 /**
  * 세션 종료를 큐에 직렬화해 실행한다(동시 호출 시 경합 방지).
+ * @param {{minIdleMs?: number}} [options] - 주면 마지막 시청 후 이만큼 지나지 않았을 때 닫지 않는다
  * @returns {Promise<object[]>} 이번에 닫은 세션들(없으면 빈 배열)
  */
-export function endSession() {
-  return enqueue(() => _endSession());
+export function endSession(options = {}) {
+  return enqueue(() => _endSession(options));
 }
 
 /**
@@ -332,7 +333,7 @@ function sessionStartedWhileClosing(all, closedSessionIds) {
  * 이미 있는 세션이면 새로 붙이지 않고 합치고, 새로 닫은 세션은 옮기는 저장에서 바로 전송 대기로 둔다.
  * @returns {Promise<object[]>} 이번에 닫거나 합친 세션 중 아직 서버에 보내지 않은 것(없으면 빈 배열)
  */
-async function _endSession() {
+async function _endSession({ minIdleMs } = {}) {
   const all = await chrome.storage.local.get(null);
   // 현재 세션 표시가 지워졌어도 남은 기록은 닫는다. 그 세션의 시작 시각은 첫 기록 시각으로 둔다
   const { currentSession, sessions } = all;
@@ -342,8 +343,12 @@ async function _endSession() {
   );
   if (videoEntries.length === 0) return [];
 
-  const bySession = groupVideosBySession(videoEntries);
+  // 탭은 새 기록과 마지막 시청 시각을 한 번에 쓴다. 판정 뒤 새 세션이 시작됐으면 여기서 걸러진다
   const nowMs = Date.now();
+  const lastWatchedMs = Date.parse(all.lastWatchedAt);
+  if (minIdleMs != null && nowMs - lastWatchedMs < minIdleMs) return [];
+
+  const bySession = groupVideosBySession(videoEntries);
   const updatedSessions = [...(sessions ?? [])];
   for (const [sessionId, videos] of bySession) {
     const index = updatedSessions.findIndex((s) => s.sessionId === sessionId);

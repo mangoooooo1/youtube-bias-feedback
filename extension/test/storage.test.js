@@ -100,6 +100,55 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     expect(await hasOpenVideoRecords()).toBe(false);
   });
 
+  describe("minIdleMs — 저장 큐 안에서 읽은 마지막 시청 시각으로 다시 판정한다", () => {
+    const NOW = new Date("2026-01-01T01:00:00.000Z");
+    const minutesAgo = (m) => new Date(NOW.getTime() - m * 60000).toISOString();
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+    });
+
+    it("마지막 시청이 기준보다 최근이면 닫지 않고 현재 세션과 기록을 그대로 둔다", async () => {
+      await global.chrome.storage.local.set({
+        currentSession: { sessionId: "s1", startTime: minutesAgo(3) },
+        lastWatchedAt: minutesAgo(3),
+      });
+      await setVideo("s1", "v1", minutesAgo(3));
+
+      const closed = await endSession({ minIdleMs: SESSION_TIMEOUT_MS });
+
+      expect(closed).toEqual([]);
+      expect(await getAllSessions()).toEqual([]);
+      expect(await getCurrentSession()).toMatchObject({ sessionId: "s1" });
+      expect(await hasOpenVideoRecords()).toBe(true);
+    });
+
+    it("마지막 시청이 기준보다 오래됐으면 닫는다", async () => {
+      await global.chrome.storage.local.set({
+        currentSession: { sessionId: "s1", startTime: minutesAgo(11) },
+        lastWatchedAt: minutesAgo(11),
+      });
+      await setVideo("s1", "v1", minutesAgo(11));
+
+      const closed = await endSession({ minIdleMs: SESSION_TIMEOUT_MS });
+
+      expect(closed.map((s) => s.sessionId)).toEqual(["s1"]);
+    });
+
+    it("옵션이 없으면 마지막 시청이 최근이어도 지금처럼 닫는다", async () => {
+      await global.chrome.storage.local.set({
+        currentSession: { sessionId: "s1", startTime: minutesAgo(3) },
+        lastWatchedAt: minutesAgo(3),
+      });
+      await setVideo("s1", "v1", minutesAgo(3));
+
+      const closed = await endSession();
+
+      expect(closed.map((s) => s.sessionId)).toEqual(["s1"]);
+    });
+  });
+
   it("영상이 0개인 세션은 종료하지 않고 그대로 둔다", async () => {
     await global.chrome.storage.local.set({
       currentSession: { sessionId: "s1", startTime: "t" },

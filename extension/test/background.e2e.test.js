@@ -1545,6 +1545,65 @@ describe("알람 핸들러 — 현재 세션 표시가 없어도 남은 기록�
     const all = await global.chrome.storage.local.get(null);
     expect(all.video__orphan__e1).toBeDefined();
   });
+
+  it("10분이 지났다고 읽은 직후 탭이 새 세션을 시작하면 그 세션은 닫지 않는다", async () => {
+    global.chrome = createChromeMock();
+    const sessionPosts = [];
+    global.fetch = vi.fn(async (url, options = {}) => {
+      if (new URL(String(url)).pathname === "/api/sessions") {
+        sessionPosts.push(JSON.parse(options.body));
+      }
+      return { ok: true, status: 200, json: async () => ({ success: true }) };
+    });
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      participantSynced: true,
+      participantToken: "tok",
+      lastWatchedAt: minutesAgo(11),
+    });
+    // 알람이 마지막 시청 시각을 읽은 직후, 탭이 새 기록·현재 세션·마지막 시청 시각을 한 번에 쓴다
+    const local = global.chrome.storage.local;
+    const get = local.get;
+    let armed = false;
+    local.get = async (keys) => {
+      const result = await get(keys);
+      if (armed && keys === "lastWatchedAt") {
+        armed = false;
+        const now = FIXED_NOW.toISOString();
+        await local.set({
+          lastWatchedAt: now,
+          currentSession: { sessionId: "fresh", startTime: now, videoCount: 1 },
+          lastRecordedVideo: {
+            videoId: "v9",
+            sessionId: "fresh",
+            eventId: "e9",
+          },
+          video__fresh__e9: {
+            videoId: "v9",
+            watchedAt: now,
+            eventId: "e9",
+            sent: true,
+          },
+        });
+      }
+      return result;
+    };
+
+    vi.resetModules();
+    await import("../background.js");
+    const onAlarm = global.chrome.alarms.onAlarm.addListener.mock.calls[0][0];
+    armed = true;
+    onAlarm({ name: "SESSION_TIMEOUT_CHECK" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(armed).toBe(false);
+    expect(sessionPosts).toEqual([]);
+    const all = await get(null);
+    expect(all.video__fresh__e9).toBeDefined();
+    expect(all.currentSession).toMatchObject({ sessionId: "fresh" });
+  });
 });
 
 // 브라우저를 다시 켠 직후 옛 세션과 새 세션이 함께 닫히면, 둘 다 서버로 보내야 한다.

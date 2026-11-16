@@ -350,7 +350,8 @@ async function checkSessionTimeout() {
   // 세션을 옮기는 저장보다 먼저 올려야 재시도 큐가 체크포인트보다 먼저 세션을 보내지 않는다
   sessionClosesInFlight += 1;
   try {
-    const closedSessions = await endSession();
+    // 위 판정 뒤 탭이 새 세션을 시작했을 수 있어, 저장 큐 안에서 다시 판정한다
+    const closedSessions = await endSession({ minIdleMs: SESSION_TIMEOUT_MS });
 
     // 먼저 끝난 세션부터 보낸다
     const ordered = [...closedSessions].sort(
