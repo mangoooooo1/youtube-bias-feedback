@@ -8,6 +8,8 @@
  * - 분포 미확정: 분포가 비어 있는 세션
  * - 같은 영상 10초 중복: 같은 참여자·같은 영상이 10초 안에 다시 기록됐다
  * - 세션 시청 수 불일치: 세션 영상 수 ≠ 기록 수 − 같은 세션 안에서 앞 기록에 이어진 기록 수
+ * - 도착 지연: 영상 기록이 시청 뒤 24시간 넘게 지나 서버에 도착했다. 확장의 정체 보고는 같은 서버로 가
+ *   전송이 막히면 함께 막히므로, 서버 쪽에서 따로 본다. 도착한 뒤에야 보이므로 기준 시각은 도착 시각이다
  *
  * 늦게 도착하는 세션·기록을 기다리도록 기준 시각이 하루 지난 것만 센다.
  * 매일 실행하면 각 이상은 "지금 − 2일 ~ 지금 − 1일" 창에서 한 번만 신규로 잡힌다.
@@ -41,6 +43,8 @@ const SETTLE_MS = DAY_MS;
 const RUN_INTERVAL_MS = DAY_MS;
 // extension/storage.js의 NEAR_SIMULTANEOUS_MS와 같은 값
 const NEAR_DUPLICATE_MS = 10000;
+// 영상 기록은 볼 때 바로 보내므로, 이보다 늦게 도착하면 전송이 막혔던 것으로 본다
+const LATE_ARRIVAL_MS = DAY_MS;
 
 // 저장 형식이 섞여 있어도(오프셋 포함 ISO, datetime('now')) 같은 기준의 ms로 바꾼다. 읽을 수 없으면 NULL
 const toMs = (column) => `(julianday(${column}) - 2440587.5) * 86400000.0`;
@@ -56,7 +60,7 @@ function collectRecords(db) {
   const events = db
     .prepare(
       `SELECT e.anonymousId, e.eventId, e.sessionId, e.videoId, e.resumedFromEventId,
-              ${toMs("e.watchedAt")} AS watchedMs
+              ${toMs("e.watchedAt")} AS watchedMs, ${toMs("e.createdAt")} AS arrivedMs
          FROM video_events e
          JOIN participants p ON p.anonymousId = e.anonymousId
         WHERE p.group_code NOT IN (${placeholders})`,
@@ -209,6 +213,25 @@ function findSessionCountMismatches(events, sessions) {
 }
 
 /**
+ * 시청 뒤 LATE_ARRIVAL_MS 넘게 지나 도착한 영상 기록. 기준 시각은 도착 시각이다.
+ * 재전송은 INSERT OR IGNORE라 도착 시각(createdAt)은 처음 도착한 때로 남는다.
+ */
+function findLateArrivals(events) {
+  return events
+    .filter(
+      (e) =>
+        Number.isFinite(e.arrivedMs) &&
+        e.arrivedMs - e.watchedMs > LATE_ARRIVAL_MS,
+    )
+    .map((e) => ({
+      anonymousId: e.anonymousId,
+      sessionId: e.sessionId,
+      delayMs: e.arrivedMs - e.watchedMs,
+      refMs: e.arrivedMs,
+    }));
+}
+
+/**
  * 기준 시각이 SETTLE_MS 넘게 지난 것만 세고, 그중 직전 실행 이후 창에 든 것을 신규로 센다.
  * 기준 시각을 읽을 수 없는 행(SQLite가 NULL을 돌려준 값 등)은 세지 않는다. null < 숫자는 참이라 따로 막는다.
  * @returns {{total: number, newCount: number, newRows: object[]}}
@@ -231,6 +254,7 @@ const CHECK_LABELS = {
   undeterminedDistribution: "분포 미확정 세션",
   nearDuplicates: "같은 영상 10초 중복",
   sessionCountMismatches: "세션 시청 수 불일치",
+  lateArrivals: "도착 지연 24시간 초과 영상 기록",
 };
 
 /** 신규 항목 한 줄. 참여자는 지문으로만 적는다. */
@@ -245,6 +269,9 @@ function describeRow(name, row) {
   }
   if (name === "sessionCountMismatches") {
     return `${who} 세션 영상 수=${row.videoCount} 기록 기준 시청 수=${row.watches} 기준시각=${at}`;
+  }
+  if (name === "lateArrivals") {
+    return `${who} 지연=${(row.delayMs / 3600000).toFixed(1)}시간 도착시각=${at}`;
   }
   if (name.startsWith("missing")) {
     return `${who} 영상 ${row.videoCount}건 기준시각=${at}`;
@@ -277,6 +304,7 @@ function run(db, { now = Date.now() } = {}) {
     undeterminedDistribution: findUndeterminedSessions(sessions),
     nearDuplicates: findNearDuplicates(events),
     sessionCountMismatches: findSessionCountMismatches(events, sessions),
+    lateArrivals: findLateArrivals(events),
   };
   const result = Object.fromEntries(
     Object.entries(checks).map(([name, rows]) => [name, classify(rows, now)]),
@@ -311,6 +339,7 @@ const CHECK_TAGS = {
   undeterminedDistribution: "undetermined_distribution",
   nearDuplicates: "near_duplicates",
   sessionCountMismatches: "session_count_mismatches",
+  lateArrivals: "late_arrivals",
 };
 const ALLOWED_TAGS = { check: new Set(Object.values(CHECK_TAGS)) };
 const GAUGES = {
@@ -368,9 +397,11 @@ module.exports = {
   findUndeterminedSessions,
   findNearDuplicates,
   findSessionCountMismatches,
+  findLateArrivals,
   classify,
   CHECK_LABELS,
   SETTLE_MS,
   RUN_INTERVAL_MS,
   NEAR_DUPLICATE_MS,
+  LATE_ARRIVAL_MS,
 };

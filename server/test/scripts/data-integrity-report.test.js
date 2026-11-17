@@ -8,11 +8,13 @@ import {
   findUndeterminedSessions,
   findNearDuplicates,
   findSessionCountMismatches,
+  findLateArrivals,
   classify,
   CHECK_LABELS,
   SETTLE_MS,
   RUN_INTERVAL_MS,
   NEAR_DUPLICATE_MS,
+  LATE_ARRIVAL_MS,
   formatIntegritySummary,
   reportToHealthchecks,
   sendIntegrityGauges,
@@ -286,6 +288,34 @@ describe("findSessionCountMismatches — 세션 영상 수와 기록 기준 시�
   });
 });
 
+describe("findLateArrivals — 시청 뒤 24시간 넘게 늦게 도착한 영상 기록", () => {
+  it("도착이 시청보다 24시간 넘게 늦으면 잡고, 기준 시각은 도착 시각이다", () => {
+    const watchedMs = NOW - 5 * DAY;
+    const arrivedMs = watchedMs + LATE_ARRIVAL_MS + 1;
+    expect(findLateArrivals([event({ watchedMs, arrivedMs })])).toEqual([
+      {
+        anonymousId: "u1",
+        sessionId: "s1",
+        delayMs: LATE_ARRIVAL_MS + 1,
+        refMs: arrivedMs,
+      },
+    ]);
+  });
+
+  it("정확히 24시간 늦은 기록은 잡지 않는다", () => {
+    const watchedMs = NOW - 5 * DAY;
+    expect(
+      findLateArrivals([
+        event({ watchedMs, arrivedMs: watchedMs + LATE_ARRIVAL_MS }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("도착 시각을 읽을 수 없는 기록은 세지 않는다", () => {
+    expect(findLateArrivals([event({ arrivedMs: null })])).toEqual([]);
+  });
+});
+
 function createTestDb() {
   const db = new Database(":memory:");
   db.exec(`
@@ -301,7 +331,8 @@ function createTestDb() {
       videoId TEXT NOT NULL,
       watchedAt TEXT NOT NULL,
       sessionId TEXT,
-      resumedFromEventId TEXT
+      resumedFromEventId TEXT,
+      createdAt TEXT
     );
     CREATE TABLE sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -322,11 +353,18 @@ function insertParticipant(db, anonymousId, groupCode = "EXP") {
   ).run(anonymousId, groupCode);
 }
 
+// 도착 시각을 주지 않으면 시청 시각에 바로 도착한 것으로 둔다
 function insertEvent(db, row) {
   db.prepare(
-    `INSERT INTO video_events (eventId, anonymousId, videoId, watchedAt, sessionId, resumedFromEventId)
-     VALUES (@eventId, @anonymousId, @videoId, @watchedAt, @sessionId, @resumedFromEventId)`,
-  ).run({ resumedFromEventId: null, sessionId: "s1", videoId: "v1", ...row });
+    `INSERT INTO video_events (eventId, anonymousId, videoId, watchedAt, sessionId, resumedFromEventId, createdAt)
+     VALUES (@eventId, @anonymousId, @videoId, @watchedAt, @sessionId, @resumedFromEventId, @createdAt)`,
+  ).run({
+    resumedFromEventId: null,
+    sessionId: "s1",
+    videoId: "v1",
+    createdAt: row.watchedAt,
+    ...row,
+  });
 }
 
 function insertSession(db, row) {
@@ -402,6 +440,58 @@ describe("collectRecords — DB 조회", () => {
       watchedAt: "not-a-date",
     });
     expect(collectRecords(db).events).toEqual([]);
+  });
+
+  it("영상 기록의 도착 시각을 datetime('now') 형식이어도 시청 시각과 같은 기준으로 읽는다", () => {
+    db = createTestDb();
+    insertParticipant(db, "u1");
+    insertEvent(db, {
+      eventId: "late",
+      anonymousId: "u1",
+      watchedAt: "2026-11-01T18:00:00+09:00",
+      createdAt: "2026-11-02 09:00:01",
+    });
+    const [e] = collectRecords(db).events;
+    expect(Math.round(e.arrivedMs - e.watchedMs)).toBe(DAY + 1000);
+  });
+});
+
+describe("run — 도착 지연", () => {
+  let db;
+  afterEach(() => {
+    db?.close();
+    vi.restoreAllMocks();
+  });
+
+  it("신규 창 안에 도착한 지연 기록을 세고, TEST 그룹은 빼며, 출력에 anonymousId 원본을 남기지 않는다", () => {
+    db = createTestDb();
+    const secretId = "11111111-2222-3333-4444-555555555555";
+    insertParticipant(db, secretId);
+    insertParticipant(db, "tester", "TEST-EXP");
+    // 5일 전에 본 기록이 신규 창(지금−2일 ~ 지금−1일) 안에 도착
+    const late = {
+      watchedAt: "2026-11-03T12:00:00.000Z",
+      createdAt: "2026-11-08 12:00:00",
+    };
+    insertEvent(db, { eventId: "l1", anonymousId: secretId, ...late });
+    insertEvent(db, { eventId: "t1", anonymousId: "tester", ...late });
+    insertSession(db, {
+      anonymousId: secretId,
+      sessionId: "s1",
+      endTime: "2026-11-03T12:10:00.000Z",
+      createdAt: "2026-11-08 12:00:05",
+    });
+
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const result = run(db, { now: NOW });
+
+    expect(result.lateArrivals).toMatchObject({ total: 1, newCount: 1 });
+    const output = log.mock.calls.flat().join("\n");
+    expect(output).toContain(
+      "도착 지연 24시간 초과 영상 기록: 전체 1건, 신규 1건",
+    );
+    expect(output).toContain("지연=120.0시간");
+    expect(output).not.toContain(secretId);
   });
 });
 
