@@ -39,8 +39,8 @@ const REQUEST_TIMEOUT_MS = 5000;
 const SESSION_REQUEST_TIMEOUT_MS = 60000;
 const MAX_ITEMS_PER_TICK = 50;
 
-// 분석 완료 알림 대상 판정. EXP 그룹이면서 베이스라인 기간(BASELINE_DAYS)이
-// 끝난 경우에만 알림·배지를 노출한다.
+// 분석 완료 알림 대상 판정. EXP는 베이스라인 기간(BASELINE_DAYS)이 끝난 뒤에만,
+// TEST-EXP(연구자 모드)는 베이스라인과 관계없이 알림·배지를 노출한다.
 const FEEDBACK_ELIGIBLE_GROUPS = new Set(["EXP", "TEST-EXP"]);
 
 /**
@@ -54,7 +54,8 @@ function isTestGroup(group) {
 }
 
 /**
- * 분석 완료 알림 대상인지 판정한다. EXP 계열이면서 베이스라인 기간이 끝난 경우에만 true.
+ * 분석 완료 알림 대상인지 판정한다. EXP는 베이스라인 기간이 끝난 뒤에만,
+ * TEST-EXP는 베이스라인 중에도 true.
  * @param {string} group - 참여자 그룹 코드
  * @param {string} installDate - 설치일(ISO)
  * @returns {boolean}
