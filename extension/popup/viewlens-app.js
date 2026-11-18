@@ -102,6 +102,20 @@ function _installDateForDay(day) {
   return new Date(Date.now() - (day - 1) * 86400000).toISOString();
 }
 
+// Studio 전용 시점 — 연구 종료 다음 날 리뷰 공개(09:00 KST) 뒤. VL.TIMELINE은 실제 팝업도 쓰므로 따로 둔다
+const STUDIO_REVIEW_RELEASED_KEY = "review_released";
+
+// 시점에 맞는 설치일. 리뷰 공개 시점은 9시간을 더 빼서 접속 시각과 관계없이 공개 뒤가 되게 한다
+function _studioInstallDate(timelineKey) {
+  if (timelineKey === STUDIO_REVIEW_RELEASED_KEY) {
+    return new Date(
+      Date.now() - VL.TOTAL_DAYS * 86400000 - 9 * 3600000,
+    ).toISOString();
+  }
+  const tl = VL.TIMELINE[timelineKey] || VL.TIMELINE.w1_mid;
+  return _installDateForDay(tl.day);
+}
+
 // 수집이 멈췄는지(마지막 날 다음 날 00:00 KST부터) — 수집 관련 표시를 거두고 종료 안내 배너를 띄우는 기준
 function _isCollectionEnded(installDate) {
   return ViewLensStudy.getParticipationState(installDate) !== "active";
@@ -140,22 +154,31 @@ function _studyEndBackRow(withTabs) {
 function _popupHeader(
   groupCfg,
   day,
-  { participantCode, collectionEnded } = {},
+  { participantCode, collectionEnded, endedNotice } = {},
 ) {
   const isTest = groupCfg.code.startsWith("TEST");
   const statusLabel = collectionEnded ? "참여 기간 종료" : "참여 중";
   const dayText = collectionEnded
     ? `${day}일 참여 완료`
     : `설치 ${day}일째 · 종료 D-${Math.max(0, VL.TOTAL_DAYS - day)}`;
-  const badge = isTest
-    ? vlBadge({ text: "연구자 모드", tone: "accent", size: "sm" })
+  // 수집이 멈추면 배지 앞에 깜빡이는 점을 달고, 올리거나 포커스하면 다음 단계 안내를 띄운다
+  const endedDot = endedNotice
+    ? `<span style="width:6px;height:6px;border-radius:50%;background:var(--vl-accent);flex-shrink:0;animation:vlBlink 1.6s ease-in-out infinite"></span>`
+    : "";
+  const badgeHTML = isTest
+    ? vlBadge({ text: `${endedDot}연구자 모드`, tone: "accent", size: "sm" })
     : vlBadge({
-        text: participantCode
-          ? `${statusLabel} · ${vlEscapeHtml(participantCode)}`
-          : statusLabel,
+        text: `${endedDot}${
+          participantCode
+            ? `${statusLabel} · ${vlEscapeHtml(participantCode)}`
+            : statusLabel
+        }`,
         tone: "neutral",
         size: "sm",
       });
+  const badge = endedNotice
+    ? `<span id="vl-participation-ended-banner" class="vl-tip vl-tip-right vl-tip-keep" tabindex="0" role="note" aria-label="${vlEscapeHtml(endedNotice.replace(/\n/g, " "))}" data-tip="${vlEscapeHtml(endedNotice)}" style="display:inline-flex;cursor:help;outline-offset:2px;border-radius:999px">${badgeHTML}</span>`
+    : badgeHTML;
   const rightArea = isTest
     ? `<div style="display:flex;align-items:center;gap:7px">
         <button id="vl-researcher-reset" class="vl-press" style="padding:3px 8px;border:none;border-radius:6px;background:var(--vl-card-2);cursor:pointer;font-family:inherit;font-size:var(--vl-fs-2);font-weight:600;color:var(--vl-ink-2);line-height:1.7;white-space:nowrap">↩ 온보딩</button>
@@ -462,16 +485,20 @@ class ViewLensPopup {
     };
 
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
-      ${_popupHeader(groupCfg, day, { participantCode: this._participantCode, collectionEnded })}
+      ${_popupHeader(groupCfg, day, {
+        participantCode: this._participantCode,
+        collectionEnded,
+        endedNotice: collectionEnded
+          ? participationEndedNotice({
+              isControl: VL.isConGroup(groupCfg.code),
+              codeVerified: !!VL._studyEndCodeVerified,
+            })
+          : null,
+      })}
       ${
         studyEndReviewOpen
           ? _studyEndBackRow(this._studyEndTabsActive(groupCfg))
-          : collectionEnded
-            ? screenParticipationEndedBanner({
-                isControl: VL.isConGroup(groupCfg.code),
-                codeVerified: !!VL._studyEndCodeVerified,
-              })
-            : ""
+          : ""
       }
       ${
         feedbackActive || this._studyEndTabsActive(groupCfg)
@@ -753,6 +780,8 @@ class Studio {
     };
     this._popup = null;
     this._panel = null;
+    // 서버가 없으므로 종료 확인 코드는 아무 값이나 통과시킨다
+    window.validateStudyEndCode = async () => ({ ok: true });
     this._render();
     this._buildPanel();
     this._applyTokens();
@@ -762,12 +791,11 @@ class Studio {
     Object.assign(this._state, updates);
     this._applyTokens();
     if (this._popup) {
-      const tl = VL.TIMELINE[this._state.timeline] || VL.TIMELINE.w1_mid;
       this._popup.update({
         onboarded: this._state.onboarded,
         group: this._state.group,
         timelineKey: this._state.timeline,
-        installDate: _installDateForDay(tl.day),
+        installDate: _studioInstallDate(this._state.timeline),
       });
     }
   }
@@ -876,12 +904,11 @@ class Studio {
     // mount popup
     const popEl = document.getElementById("vl-popup-root");
     this._popup = new ViewLensPopup(popEl);
-    const initialTl = VL.TIMELINE[this._state.timeline] || VL.TIMELINE.w1_mid;
     this._popup.mount({
       onboarded: this._state.onboarded,
       group: this._state.group,
       timelineKey: this._state.timeline,
-      installDate: _installDateForDay(initialTl.day),
+      installDate: _studioInstallDate(this._state.timeline),
       onChange: ({ onboarded, group }) => {
         this._state.onboarded = onboarded;
         this._state.group = group;
@@ -918,11 +945,13 @@ class Studio {
         true,
       )
       .addSection("실험 시점")
-      .addSelect(
-        "시점",
-        "timeline",
-        Object.entries(tl).map(([k, v]) => ({ value: k, label: v.label })),
-      )
+      .addSelect("시점", "timeline", [
+        ...Object.entries(tl).map(([k, v]) => ({ value: k, label: v.label })),
+        {
+          value: STUDIO_REVIEW_RELEASED_KEY,
+          label: "연구 종료 다음 날 · 리뷰 공개",
+        },
+      ])
       .addHint("시점에 따라 열리는 기간 탭과 설문 팝업이 달라집니다.");
 
     this._panel.open();
