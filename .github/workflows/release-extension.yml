@@ -1,34 +1,43 @@
 name: Release Extension
 
 on:
-  workflow_run:
-    workflows: ["Release Drafter"]
-    types: [completed]
+  release:
+    types: [published]
+  # 이미 게시한 릴리스에 zip을 다시 붙일 때
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "zip을 붙일 릴리스 태그 (예: v3.4.0)"
+        required: true
 
 jobs:
   release:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: main
-          fetch-depth: 2
+          ref: refs/tags/${{ env.TAG }}
 
-      - name: Check if extension files changed
-        id: check
+      - name: Check tag matches manifest version
         run: |
-          if git diff --name-only HEAD~1 HEAD | grep -q '^extension/'; then
-            echo "changed=true" >> $GITHUB_OUTPUT
-          else
-            echo "changed=false" >> $GITHUB_OUTPUT
+          version=$(node -p "require('./extension/manifest.json').version")
+          if [ "${TAG#[vV]}" != "$version" ]; then
+            echo "::error::태그 $TAG 와 manifest 버전 $version 이 다릅니다."
+            exit 1
           fi
 
       - name: Create config.js and patch manifest.json
-        if: steps.check.outputs.changed == 'true'
         env:
           SERVER_URL: ${{ secrets.SERVER_URL }}
         run: |
+          if [ -z "$SERVER_URL" ]; then
+            echo "::error::SERVER_URL secret이 비어 있습니다."
+            exit 1
+          fi
           printf "export const SERVER_URL = '%s';\n" "$SERVER_URL" > extension/config.js
 
           node -e "
@@ -42,23 +51,17 @@ jobs:
           "
 
       - name: Zip Extension
-        if: steps.check.outputs.changed == 'true'
         run: |
           cd extension
           zip -r ../youtube-bias-feedback.zip . \
             --exclude "*.md" \
             --exclude "config.example.js" \
-            --exclude "studio/*"
+            --exclude "studio/*" \
+            --exclude "test/*"
 
-      - name: Upload to Draft Release
-        if: steps.check.outputs.changed == 'true'
+      - name: Upload to Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          draft_tag=$(gh release list --json tagName,isDraft \
-            --jq '.[] | select(.isDraft) | .tagName' | head -1)
-          if [ -z "$draft_tag" ]; then
-            echo "No draft release found. Skipping upload."
-            exit 0
-          fi
-          gh release upload "$draft_tag" youtube-bias-feedback.zip --clobber
+          gh release upload "$TAG" youtube-bias-feedback.zip --clobber
+          echo "zip을 $TAG 릴리스에 붙였습니다."
