@@ -290,11 +290,14 @@ body {
 
 /* 기간 선택 버튼(1구간/2구간…): 날짜 이동 버튼과 같은 원칙 — 평소엔 배경 없음,
    호버할 때만 은은한 배경. 선택 상태는 버튼 안의 밑줄(색+너비)로만 표현한다. */
+/* 호버 배경은 글자 부분만 감싸 밑줄은 상자 밖 아래에 남긴다 */
 .vl-period-btn {
   background: transparent;
+}
+.vl-period-label {
   transition: background-color 0.15s ease;
 }
-.vl-period-btn:hover:not(:disabled) {
+.vl-period-btn:hover:not(:disabled) .vl-period-label {
   background: var(--vl-card-2);
 }
 
@@ -334,6 +337,11 @@ body {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
+}
+/* 여러 문장 안내: 낱말 중간에서 줄이 바뀌지 않게 하고 폭을 조금 넓힌다 */
+.vl-tip-keep::after {
+  max-width: 240px;
+  word-break: keep-all;
 }
 /* 차트 오른쪽 절반의 점처럼, 기준점이 카드 오른쪽 가장자리에 가까우면 툴팁이 왼쪽으로
    펼쳐지게 한다(그대로 두면 카드 밖으로 잘림). */
