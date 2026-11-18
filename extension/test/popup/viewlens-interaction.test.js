@@ -298,6 +298,23 @@ describe("대조군 연구 종료 코드 입력", () => {
     expect([after.selectionStart, after.selectionEnd]).toEqual([2, 2]);
   });
 
+  it("종료 안내 배지에 포커스한 채 화면을 다시 그려도 새 배지에 포커스가 남는다", async () => {
+    const { root, emitChange } = await bootReady(
+      participant({ group: "CON", installDate: STUDY_ENDED() }),
+    );
+    const badge = root.querySelector("#vl-participation-ended-banner");
+    badge.focus();
+    await emitChange({
+      video__s9__e1: {
+        oldValue: { videoId: "v1", sent: false },
+        newValue: { videoId: "v1", sent: true },
+      },
+    });
+    const after = root.querySelector("#vl-participation-ended-banner");
+    expect(after).not.toBe(badge);
+    expect(after.ownerDocument.activeElement).toBe(after);
+  });
+
   it.each([
     [
       "틀린 코드",
