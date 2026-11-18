@@ -1,7 +1,7 @@
 // 베이스라인·참여 기간 종료 판정
 (() => {
   const TOTAL_DAYS = 12;
-  // 실험 첫 4일은 그룹 무관하게 전원 피드백·알림을 받지 않는 베이스라인(첫 기간 전체)
+  // 첫 BASELINE_DAYS일은 집단과 무관하게 전원 피드백·알림을 받지 않는 베이스라인이다
   const BASELINE_DAYS = 4;
   const END_GRACE_DAYS = 14;
   const DAY_MS = 86400000;

@@ -457,9 +457,9 @@ const weeks = [
       "3주 동안 정말 꾸준히 해오셨어요. 시청 다양성이 기준선보다 눈에 띄게 높아졌고, 어느 한 카테고리에 치우치지 않는 균형이 보여요. 지금의 리듬을 가볍게 이어가시면 충분해요.",
   },
 ];
-// 총 실험 기간 12일(베이스라인 4일 + 4일씩 2개 기간)
+// 총 실험 일수(server/pipeline/study-constants.js와 같아야 한다)
 const TOTAL_DAYS = 12;
-// 탭을 며칠 단위로 나눌지 — 4일 단위로 기간을 구분한다.
+// 기간 탭 하나의 일수
 const DAYS_PER_PERIOD = 4;
 const TOTAL_WEEKS = Math.ceil(TOTAL_DAYS / DAYS_PER_PERIOD);
 
@@ -475,10 +475,7 @@ function periodLabel(n) {
 }
 
 // Studio "실험 시점" 프리셋 — TOTAL_DAYS/DAYS_PER_PERIOD로부터 매 기간의 "진행 중"/"종료"
-// 체크포인트를 동적으로 생성한다. 예전엔 이걸 12개 통째로 하드코딩해뒀는데, 본조사(42일)
-// 기준값이라 파일럿(6일)으로 바꿀 때마다 따로 손대야 했다(실제 화면엔 영향 없지만 Studio
-// 프리뷰만 안 맞는 문제). 실제 화면 상수를 그대로 따라가게 만들어
-// 이 동기화 문제 자체를 없앤다.
+// 체크포인트를 동적으로 생성한다. 상수가 바뀌어도 Studio 프리뷰가 실제 화면과 어긋나지 않게 한다.
 function buildTimeline() {
   const entries = {};
   for (let p = 1; p <= TOTAL_WEEKS; p++) {

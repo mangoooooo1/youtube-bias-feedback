@@ -39,7 +39,7 @@ const REQUEST_TIMEOUT_MS = 5000;
 const SESSION_REQUEST_TIMEOUT_MS = 60000;
 const MAX_ITEMS_PER_TICK = 50;
 
-// 분석 완료 알림 대상 판정. EXP 그룹이면서 베이스라인 기간(설치 후 14일)이
+// 분석 완료 알림 대상 판정. EXP 그룹이면서 베이스라인 기간(BASELINE_DAYS)이
 // 끝난 경우에만 알림·배지를 노출한다.
 const FEEDBACK_ELIGIBLE_GROUPS = new Set(["EXP", "TEST-EXP"]);
 

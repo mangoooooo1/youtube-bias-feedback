@@ -286,7 +286,7 @@ class ViewLensPopup {
     this.render();
   }
 
-  // 10-8: 그룹이 EXP여도 베이스라인 기간(설치 후 14일 미만)에는 피드백을 노출하지 않는다.
+  // 그룹이 EXP여도 베이스라인 기간(BASELINE_DAYS)에는 피드백을 노출하지 않는다.
   // TEST-EXP(연구자 모드)는 예외(VL.isTestGroup). 실제 팝업과 Studio 프리뷰가
   // 이 하나의 구현을 공유한다 — Studio는 선택한 타임라인 시점에 맞는 installDate를 계산해
   // mount/update에 넘겨줘서(_installDateForDay), 실제 사용자가 그 시점에 보는 화면을 그대로 재현한다.
@@ -396,7 +396,7 @@ class ViewLensPopup {
     }
 
     const feedbackActive = this._isFeedbackActive(groupCfg);
-    // 대조군 종료 후 6주 리뷰 열람(Story 10-10) — _isFeedbackActive와 독립된 축이라
+    // 대조군 종료 후 전체 기간 리뷰 열람 — _isFeedbackActive와 독립된 축이라
     // feedbackActive가 false인 경로 안에서만 추가로 분기한다.
     const studyEndReady = _isStudyEndReviewReady(groupCfg, this._installDate);
     // 그룹 무관(EXP+CON) 리뷰 공개 시각 판정 — 종료 안내 모달이 참조한다.
@@ -652,7 +652,7 @@ class ViewLensPopup {
       });
     }
     this._bindStudyEndCodeInput();
-    // 대조군 6주 리뷰 화면 → 대기 화면으로 돌아가기
+    // 대조군 전체 기간 리뷰 화면 → 대기 화면으로 돌아가기
     const studyEndBack = this.container.querySelector("#vl-study-end-back");
     if (studyEndBack) {
       studyEndBack.addEventListener("click", () => {

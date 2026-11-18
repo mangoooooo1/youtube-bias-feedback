@@ -13,7 +13,7 @@
 | ------------- | ----------------------------------------------- |
 | 확장 프로그램 | Chrome Extension Manifest V3                    |
 | 분석          | Shannon Entropy, YouTube Data API v3            |
-| 피드백        | Gemini 2.5 Flash API                            |
+| 피드백        | Gemini 3.8 Flash API                            |
 | 백엔드        | Node.js · Express 5 · better-sqlite3            |
 | UI            | Vanilla JS · Pretendard · CSS Custom Properties |
 

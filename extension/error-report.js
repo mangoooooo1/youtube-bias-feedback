@@ -85,7 +85,7 @@ export function buildClientErrorPayload(entries, anonymousId, version) {
 
 /**
  * 모인 오류를 최소 간격을 지켜 서버로 보낸다.
- * 400(서버가 영원히 거부)이면 버리고, 그 외 실패는 남겨 다음 틱에 다시 보낸다.
+ * 400·413(서버가 영원히 거부)이면 버리고, 그 외 실패는 남겨 다음 틱에 다시 보낸다.
  * @param {(path: string, method: string, body: object) => Promise<{ok: boolean, kind: string, code: string|null}>} send - background의 sendToServer
  * @param {string|null} anonymousId
  * @param {Date} [now]
