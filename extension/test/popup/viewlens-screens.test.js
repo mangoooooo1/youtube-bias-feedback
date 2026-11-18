@@ -566,15 +566,15 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
     expect(keys).toHaveLength(4);
   });
 
-  it("날짜 범위 아래에 분야 수(그래프 분야)와 영상 수(시청 시간 확인된 영상)를 보인다", () => {
+  it("날짜 범위 옆에 카테고리 수(그래프 카테고리)와 영상 수(시청 시간 확인된 영상)를 보인다", () => {
     const html = render();
-    expect(html).toContain("분야 5개 · 영상 9개");
+    expect(html).toContain("카테고리 5개 · 영상 9개");
     expect(html.indexOf("6/5 ~ 6/8")).toBeLessThan(
-      html.indexOf("분야 5개 · 영상 9개"),
+      html.indexOf("카테고리 5개 · 영상 9개"),
     );
   });
 
-  it("그래프에 넣을 기록이 없는 구간에는 분야·영상 수 줄이 없다", () => {
+  it("그래프에 넣을 기록이 없는 구간에는 카테고리·영상 수 줄이 없다", () => {
     const html = render({
       ...PERIOD,
       timeDistribution: {},
@@ -583,8 +583,8 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
     });
     expect(html).toContain("6/5 ~ 6/8");
     expect(html).not.toContain("가장 많이");
-    expect(html).not.toContain("분야 0개");
-    expect(html).not.toMatch(/분야 \d+개 · 영상/);
+    expect(html).not.toContain("카테고리 0개");
+    expect(html).not.toMatch(/카테고리 \d+개 · 영상/);
   });
 
   it("꺾은선·구간 전체 도넛 2개·안내 문구를 그리고, 리뷰 카드 제목은 직전 구간 비교 질문", () => {
