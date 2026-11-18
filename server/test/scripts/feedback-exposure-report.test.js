@@ -15,15 +15,21 @@ import {
   GAUGES,
 } from "../../scripts/feedback-exposure-report.js";
 import { formatMetric } from "../../monitoring/dogstatsd.js";
+import { BASELINE_DAYS } from "../../pipeline/study-constants.js";
+import { kstDay } from "../study-schedule-fixtures.js";
 
-// 11-23 KST 설치 → 기준선은 11-23~11-26(KST), 11-27 00:00 KST부터 피드백 기간
+// 11-23 KST 설치 → 기준선은 설치일부터 BASELINE_DAYS일, 그다음 날 00:00 KST부터 피드백 기간
 const INSTALL = "2026-11-23T10:00:00+09:00";
-const IN_BASELINE = "2026-11-26T23:00:00+09:00";
-const AFTER_BASELINE = "2026-11-27T00:30:00+09:00";
+const IN_BASELINE = `${kstDay(INSTALL, BASELINE_DAYS - 1)}T23:00:00+09:00`;
+const AFTER_BASELINE = `${kstDay(INSTALL, BASELINE_DAYS)}T00:30:00+09:00`;
 const VERIFIED = "2027-01-05T10:00:00+09:00";
-// 실행 시각. 신규 창은 그 전 하루다
-const NOW = Date.parse("2026-11-28T09:30:00+09:00");
-const IN_WINDOW = "2026-11-28 00:00:00"; // datetime('now') 형식(UTC)
+// 실행 시각(기준선이 끝난 다음 날 09:30). 신규 창은 그 전 하루다
+const NOW = Date.parse(`${kstDay(INSTALL, BASELINE_DAYS + 1)}T09:30:00+09:00`);
+// 실행 30분 전, datetime('now') 형식(UTC)
+const IN_WINDOW = new Date(NOW - 30 * 60 * 1000)
+  .toISOString()
+  .slice(0, 19)
+  .replace("T", " ");
 const BEFORE_WINDOW = "2026-11-20 00:00:00";
 
 function createTestDb() {
@@ -140,7 +146,8 @@ describe("대조군 세션 피드백 알림·열람", () => {
     insertSession(db, {
       anonymousId: "con",
       feedbackNotifiedAt: AFTER_BASELINE,
-      feedbackViewedAt: "2026-11-25T01:00:00.000Z",
+      // 설치 당일 — 기준선 길이와 관계없이 신규 창(실행 전 하루)보다 앞선다
+      feedbackViewedAt: "2026-11-23T12:00:00+09:00",
     });
     const result = runQuietly(db);
     expect(result.controlSessionFeedback.total).toBe(2);

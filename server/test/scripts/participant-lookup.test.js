@@ -7,6 +7,8 @@ import {
   formatDetail,
   printResult,
 } from "../../scripts/participant-lookup.js";
+import { TOTAL_DAYS } from "../../pipeline/study-constants.js";
+import { kstMidnight } from "../study-schedule-fixtures.js";
 
 const UUID = "3f1c2b9a-7d4e-4c1a-9b2f-1e2d3c4b5a6f";
 const NOW = new Date("2026-06-05T03:00:00Z"); // 2026-06-05 12:00 KST
@@ -245,8 +247,9 @@ describe("formatDetail·printResult — 터미널 출력", () => {
 
   it("참여 코드가 없으면 (없음), 연구 기간이 지났으면 연구 종료를 표시한다", () => {
     insertParticipant(db, { code: null });
+    // 6/1 설치 기준, 연구 기간(TOTAL_DAYS)이 끝나고 며칠 지난 시각
     const [d] = lookup(db, UUID, {
-      now: new Date("2026-07-01T03:00:00Z"),
+      now: new Date(kstMidnight("2026-06-01T00:00:00.000Z", TOTAL_DAYS + 5)),
     }).matches;
 
     const text = formatDetail(d);

@@ -12,6 +12,16 @@ import {
   DEFAULT_GROUPS,
 } from "../../scripts/compute-h2-referrer-sensitivity.js";
 import { aggregateViewing } from "../../pipeline/viewing-aggregate.js";
+import {
+  BASELINE_DAYS,
+  DAYS_PER_PERIOD,
+} from "../../pipeline/study-constants.js";
+import { TOTAL_PERIODS, periodDay } from "../study-schedule-fixtures.js";
+
+// KST 09-01 설치. p구간 offsetDays일째 KST 시각
+const INSTALL = "2026-08-31T15:00:00.000Z";
+const at = (p, offsetDays, time) =>
+  `${periodDay(INSTALL, p, offsetDays)}T${time}+09:00`;
 
 // 유효 시청(30초 이상), 카테고리·길이 있음
 const entry = (categoryId, extra = {}) => ({
@@ -108,25 +118,16 @@ describe("computePeriodSensitivity — 기간 하나의 계산", () => {
 
 describe("completedPeriods", () => {
   it("오늘(KST) 이전에 끝난 기간만 돌려준다", () => {
-    // KST 09-01 설치, 4일 단위 → 1구간 09-01~09-04, 2구간 09-05~09-08
-    const periods = completedPeriods(
-      "2026-08-31T15:00:00.000Z",
-      new Date("2026-09-10T00:00:00+09:00"),
+    // 3구간 둘째 날 00:00이면 1·2구간만 끝났다
+    const periods = completedPeriods(INSTALL, new Date(at(3, 1, "00:00:00")));
+    expect(periods).toEqual(
+      [1, 2].map((p) => ({
+        periodIndex: p,
+        periodStart: periodDay(INSTALL, p),
+        periodEnd: periodDay(INSTALL, p, DAYS_PER_PERIOD - 1),
+        isBaseline: (p - 1) * DAYS_PER_PERIOD < BASELINE_DAYS ? 1 : 0,
+      })),
     );
-    expect(periods).toEqual([
-      {
-        periodIndex: 1,
-        periodStart: "2026-09-01",
-        periodEnd: "2026-09-04",
-        isBaseline: 1,
-      },
-      {
-        periodIndex: 2,
-        periodStart: "2026-09-05",
-        periodEnd: "2026-09-08",
-        isBaseline: 0,
-      },
-    ]);
   });
 });
 
@@ -144,8 +145,8 @@ describe("run — DB 조회", () => {
       CREATE TABLE video_metadata (videoId TEXT PRIMARY KEY, categoryId TEXT, durationSeconds INTEGER);
     `);
     const addP = db.prepare("INSERT INTO participants VALUES (?,?,?)");
-    addP.run("anon-exp", "EXP", "2026-08-31T15:00:00.000Z");
-    addP.run("anon-test", "TEST-EXP", "2026-08-31T15:00:00.000Z");
+    addP.run("anon-exp", "EXP", INSTALL);
+    addP.run("anon-test", "TEST-EXP", INSTALL);
     const addM = db.prepare("INSERT INTO video_metadata VALUES (?,?,?)");
     addM.run("v10", "10", 600);
     addM.run("v20", "20", 600);
@@ -156,7 +157,7 @@ describe("run — DB 조회", () => {
     addE.run(
       "anon-exp",
       "v10",
-      "2026-09-02T10:00:00+09:00",
+      at(1, 0, "10:00:00"),
       100,
       0,
       "home_feed",
@@ -165,17 +166,17 @@ describe("run — DB 조회", () => {
     addE.run(
       "anon-exp",
       "v20",
-      "2026-09-03T10:00:00+09:00",
+      at(1, 1, "10:00:00"),
       100,
       1,
       "related",
       "autoplay",
     );
-    // KST로는 09-05(2구간). UTC 날짜만 보면 09-04로 잘못 들어간다
+    // KST로는 2구간 첫날 01:00. UTC 날짜만 보면 전날(1구간)로 잘못 들어간다
     addE.run(
       "anon-exp",
       "v10",
-      "2026-09-04T16:00:00Z",
+      new Date(at(2, 0, "01:00:00")).toISOString(),
       100,
       0,
       "direct_search",
@@ -185,7 +186,7 @@ describe("run — DB 조회", () => {
     addE.run(
       "anon-exp",
       "v20",
-      "2026-09-10T10:00:00+09:00",
+      at(3, 1, "10:00:00"),
       100,
       0,
       "home_feed",
@@ -194,7 +195,7 @@ describe("run — DB 조회", () => {
     addE.run(
       "anon-test",
       "v10",
-      "2026-09-02T10:00:00+09:00",
+      at(1, 0, "10:00:00"),
       100,
       0,
       "home_feed",
@@ -206,7 +207,7 @@ describe("run — DB 조회", () => {
   const report = () =>
     run(db, {
       groups: DEFAULT_GROUPS,
-      now: new Date("2026-09-10T12:00:00+09:00"),
+      now: new Date(at(3, 1, "12:00:00")),
     });
 
   it("대상 그룹 참여자의 완료된 기간만 행으로 만든다", () => {
@@ -277,9 +278,9 @@ describe("main — 암호화 DB 파일로 실행", () => {
     const report = JSON.parse(fs.readFileSync(outPath, "utf8"));
     expect(report.groups).toEqual(["EXP", "CON"]);
     // 설치일이 오래전이라 모든 구간이 완료됨
-    expect(report.rows).toHaveLength(3);
+    expect(report.rows).toHaveLength(TOTAL_PERIODS);
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining("참여자 1명, 기간 3행"),
+      expect.stringContaining(`참여자 1명, 기간 ${TOTAL_PERIODS}행`),
     );
   });
 

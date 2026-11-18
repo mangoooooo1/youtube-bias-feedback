@@ -17,6 +17,11 @@ export function kstDay(base, days) {
   return new Date(ms).toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
 }
 
+/** 설치일 기준 p구간의 offsetDays일째(0이면 첫날) KST 날짜(YYYY-MM-DD) */
+export function periodDay(installDate, p, offsetDays = 0) {
+  return kstDay(installDate, (p - 1) * DAYS_PER_PERIOD + offsetDays);
+}
+
 /** kstDay가 가리키는 날의 00:00 KST(ISO 문자열) */
 export function kstMidnight(base, days) {
   return `${kstDay(base, days)}T00:00:00+09:00`;
