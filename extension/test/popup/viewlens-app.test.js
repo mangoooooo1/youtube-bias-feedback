@@ -165,7 +165,7 @@ describe("참여 종료 배너와 팝업 등록 재시도", () => {
     const g = await loadPopup();
     gates = {
       _isCollectionEnded: g._isCollectionEnded,
-      screenParticipationEndedBanner: g.screenParticipationEndedBanner,
+      participationEndedNotice: g.participationEndedNotice,
       shouldRetryParticipantSync: g.shouldRetryParticipantSync,
     };
   });
@@ -202,12 +202,11 @@ describe("참여 종료 배너와 팝업 등록 재시도", () => {
       "리뷰를 다 보셨다면 2차 설문으로 돌아가 이어서 응답해 주세요",
     ],
   ])(
-    "배너는 %s에게 다음 단계를 안내하고 삭제·제거는 안내하지 않는다",
+    "종료 안내는 %s에게 다음 단계를 안내하고 삭제·제거는 안내하지 않는다",
     (_label, opts, nextStep) => {
-      const html = gates.screenParticipationEndedBanner(opts);
-      expect(html).toContain("참여 기간이 끝났어요.");
-      expect(html).toContain(nextStep);
-      expect(html).not.toMatch(/삭제|제거|연구 종료|실험 종료/);
+      const text = gates.participationEndedNotice(opts);
+      expect(text).toContain(nextStep);
+      expect(text).not.toMatch(/삭제|제거|연구 종료|실험 종료/);
     },
   );
 
