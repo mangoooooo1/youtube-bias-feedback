@@ -475,11 +475,11 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
       const locked = wk.week > currentWeek;
       const active = wk.week === selWeek && !locked;
       return `<button data-week="${wk.week}" class="vl-press vl-period-btn" ${locked ? "disabled" : ""}
-      style="flex:0 0 56px;padding:5px 4px 6px;border:none;border-radius:8px;cursor:${locked ? "default" : "pointer"};
+      style="flex:0 1 56px;min-width:0;padding:2px 0 4px;border:none;cursor:${locked ? "default" : "pointer"};
         color:${locked ? "var(--vl-ink-3)" : active ? "var(--vl-accent)" : "var(--vl-ink-2)"};
         font-family:inherit;font-weight:${active ? 800 : 600};font-size:var(--vl-fs-3);opacity:${locked ? 0.55 : 1};
-        display:flex;flex-direction:column;align-items:center;gap:4px">
-      <span style="display:flex;align-items:center;gap:4px;white-space:nowrap">
+        display:flex;flex-direction:column;align-items:center;gap:3px">
+      <span class="vl-period-label" style="display:flex;align-items:center;gap:4px;padding:3px ${locked ? 0 : 6}px;border-radius:8px;white-space:nowrap">
         ${locked ? _lockIcon(10) : ""}${wk.label}
       </span>
       <span ${active ? 'id="vl-period-indicator" ' : ""}style="width:${active ? 16 : 0}px;height:3px;border-radius:999px;background:var(--vl-accent)"></span>
@@ -543,15 +543,16 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
   return `<div style="padding:16px 16px 22px;display:flex;flex-direction:column;gap:14px">
     <!-- 버튼 라벨이 가운데 정렬이라 박스 왼쪽 끝보다 더 오른쪽에서 시작한다(실측
     약 13.6px) — 아래 제목과 맞추려고 줄 전체를 그만큼 왼쪽으로 당긴다. -->
-    <div style="display:flex;align-items:flex-start;gap:4px;margin-left:-14px">
-      <div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:2px;min-width:0" id="vl-week-btns">${weekBtns}</div>
-      <div style="margin-left:auto;padding-top:6px;display:flex;flex-direction:column;align-items:flex-end;gap:1px;font-size:var(--vl-fs-2);line-height:1.3;white-space:nowrap">
-        <span style="font-weight:600;color:var(--vl-ink-2)">${range}</span>
-        ${timeDist.length > 0 ? `<span style="font-weight:500;color:var(--vl-ink-3)">분야 ${timeDist.length}개 · 영상 ${period.confirmedCount ?? 0}개</span>` : ""}
+    <!-- 세로 스크롤바가 생겨 폭이 줄어도 탭이 줄어들어 한 줄에 다 보인다 -->
+    <div style="display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px;margin-left:-14px" id="vl-week-btns">${weekBtns}</div>
+
+    <!-- 날짜 범위·카테고리 수는 제목 아래 한 줄의 보조 정보로 둔다 -->
+    <div style="display:flex;flex-direction:column;gap:6px">
+      ${_titleBlock(title)}
+      <div style="font-size:var(--vl-fs-2);line-height:1.4;white-space:nowrap">
+        <span style="font-weight:600;color:var(--vl-ink-2)">${range}</span>${timeDist.length > 0 ? `<span style="font-weight:500;color:var(--vl-ink-3)"> · 카테고리 ${timeDist.length}개 · 영상 ${period.confirmedCount ?? 0}개</span>` : ""}
       </div>
     </div>
-
-    ${_titleBlock(title)}
 
     ${chartCards}
 
@@ -680,31 +681,28 @@ function screenStudyEndCodeInput() {
 // 종료 안내(그룹 무관) — 리뷰 공개 시각(마지막 날 다음 날 09:00 KST)에 최초 1회만 노출된다.
 function screenStudyEndNoticeModal() {
   return vlConfirmModal({
-    icon: markSVG({ size: 26, filled: false, accent: "var(--vl-accent)" }),
+    icon: markSVG({ size: 34, filled: false, accent: "var(--vl-accent)" }),
     title: "참여 기간이 끝났어요",
+    // 문장마다 줄을 바꿔 읽기 쉽게 한다
     message:
-      "그동안 참여해 주셔서 감사해요. 연구자가 설문을 보내 드릴 예정이에요. 설문을 마치고 보상 기준을 충족하면 보상을 드려요.",
+      "그동안 연구에 참여해 주셔서 감사해요.<br>곧 연구자가 설문 링크를 보내 드릴 예정이에요.<br>설문 응답을 완료해 주시면 지급 기준에 따라 보상을 받으실 수 있어요.",
     confirmLabel: "확인",
     confirmId: "vl-study-end-notice-confirm",
   });
 }
 
-// ── Participation ended banner ────────────────────────────────────────────────
+// ── Participation ended notice ────────────────────────────────────────────────
 
-// 수집이 멈춘 참여자에게 상단에 계속 보이는 종료 안내. 집단별 다음 단계를 여기 한 곳에서 알려 준다.
-// 설문 중에도 리뷰를 다시 볼 수 있어야 해 아래 화면은 가리지 않는다.
-function screenParticipationEndedBanner({
+// 수집이 멈춘 참여자에게 "참여 기간 종료" 배지 툴팁으로 보이는 다음 단계 안내. 집단별 문구를 여기 한 곳에서 정한다
+function participationEndedNotice({
   isControl = false,
   codeVerified = false,
 } = {}) {
-  const body = !isControl
-    ? "참여해 주셔서 감사해요. 연구자가 보내 드릴 설문 안내를 기다려 주세요."
+  return !isControl
+    ? "참여해 주셔서 감사해요.\n연구자가 보내 드릴 설문 안내를 기다려 주세요."
     : codeVerified
       ? "리뷰를 다 보셨다면 2차 설문으로 돌아가 이어서 응답해 주세요."
       : "1차 설문을 마치면 받는 코드로 참여 기간의 시청 리뷰를 볼 수 있어요.";
-  return `<div id="vl-participation-ended-banner" role="status" style="margin:10px 16px;padding:10px 12px;border-radius:12px;background:var(--vl-accent-soft);color:var(--vl-ink);font-size:var(--vl-fs-3);line-height:1.5">
-    <strong>참여 기간이 끝났어요.</strong><br>${body}
-  </div>`;
 }
 
 // ── Recover confirm modal ─────────────────────────────────
@@ -739,6 +737,6 @@ window.screenFeedback = screenFeedback;
 window.screenControlHome = screenControlHome;
 window.screenStudyEndCodeInput = screenStudyEndCodeInput;
 window.screenStudyEndNoticeModal = screenStudyEndNoticeModal;
-window.screenParticipationEndedBanner = screenParticipationEndedBanner;
+window.participationEndedNotice = participationEndedNotice;
 window.screenRecoverConfirmModal = screenRecoverConfirmModal;
 window.parseParticipantCode = parseParticipantCode;
