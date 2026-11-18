@@ -119,7 +119,7 @@ describe("generate-period-reviews.js — run()", () => {
     vi.restoreAllMocks();
   });
 
-  it("대조군(CON, TEST-CON)도 실험군과 동일하게 처리 대상에 포함된다 (Story 10-10 사전 생성)", async () => {
+  it("대조군(CON, TEST-CON)도 실험군과 동일하게 처리 대상에 포함된다", async () => {
     db.prepare(
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'CON', ?)",
     ).run("con-user", INSTALL_DATE);

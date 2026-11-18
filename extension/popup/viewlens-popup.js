@@ -121,7 +121,7 @@ function buildDataForDate(allSessions, targetDate) {
   const reviewGeneratedAt = serverRow?.generatedAt ?? null;
   // "피드백 확인하기" 블러 해제 버튼이 어느 세션을 확인 처리할지 알아야 해서 함께 넘긴다.
   const sessionId = sourceSessions.at(-1)?.sessionId ?? null;
-  // 오늘 누적 리뷰(Story 11-2)의 신선도(staleness) 판정용 — 마지막 세션 하나가 아니라
+  // 오늘 누적 리뷰의 신선도(staleness) 판정용 — 마지막 세션 하나가 아니라
   // 오늘 전체 세션 id 목록이 필요하다.
   const sessionIds = sourceSessions.map((s) => s.sessionId);
 

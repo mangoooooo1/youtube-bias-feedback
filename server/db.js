@@ -92,7 +92,7 @@ function execSchema() {
       -- isValidWatch() 필터를 통과한(클릭성 이탈로 판정되지 않은) 영상 수 — entropy/weightedEntropy
       -- 계산에 실제로 쓰인 영상 개수를 투명하게 남겨, 소표본 왜곡 여부를 사후에 판별할 수 있게 한다.
       validVideoCount              INTEGER,
-      -- 실제 생성된 피드백 텍스트 (Story 10-11) — 면담·로그·설문 삼각검증 및 처치 충실도 판정에 필요.
+      -- 실제 생성된 피드백 텍스트 — 면담·로그·설문 삼각검증 및 처치 충실도 판정에 필요.
       -- 자격(그룹·베이스라인)과 무관하게 항상 기록되므로, 실제 노출 여부는 그룹·기간과 함께 판정한다.
       -- "오늘" 탭 리뷰 카드 통합 이후로는 이 세션 하나만의 격리된 관찰치가 아니라,
       -- 그 세션 종료 시점까지의 "오늘 누적" 스냅샷이다(세션 경계마다 찍힌 시계열) — 생성 당시
@@ -104,7 +104,7 @@ function execSchema() {
       reviewTopic          TEXT,     -- 같은 응답의 topic
       source               TEXT,     -- 'llm' | 'fallback' — 어느 경로로 생성됐는지
       promptVersion        TEXT,     -- server/pipeline/today-review-llm.js TODAY_PROMPT_VERSION — 파일럿/본조사 처치 동일성 추적용
-      -- 피드백 알림·열람·확인 시점 (Story 10-6) — 측정 퍼널: 생성 → 알림(feedbackNotifiedAt)
+      -- 피드백 알림·열람·확인 시점 — 측정 퍼널: 생성 → 알림(feedbackNotifiedAt)
       -- → 클릭(feedbackViewedAt, 알림 클릭 기준) → 확인(feedbackConfirmedAt, 블러 해제 버튼 클릭 기준 — 가장 엄격한 신호)
       feedbackNotifiedAt   TEXT,     -- 분석 완료 알림을 표시한 시각 (미대상/미전달이면 NULL)
       feedbackViewedAt     TEXT,     -- 알림 클릭 등으로 피드백을 실제로 연 시각 (NULL이면 아직 미열람)
@@ -118,7 +118,7 @@ function execSchema() {
       participantCode TEXT,
       group_code      TEXT    NOT NULL,
       installDate     TEXT    NOT NULL,
-      -- 대조군 연구 종료 후 리뷰 열람 이벤트 (Story 10-10) — 최초 1회만 기록(recordStudyEndReviewEvent)
+      -- 대조군 연구 종료 후 리뷰 열람 이벤트 — 최초 1회만 기록(recordStudyEndReviewEvent)
       studyEndModalShownAt   TEXT,  -- 종료 안내 모달을 처음 노출한 시각
       studyEndReviewViewedAt TEXT,  -- 전체 기간 누적 리뷰 화면에 처음 진입한 시각
       -- 설문 연동 코드 검증 통과 시각 (최초 1회만, verifyAndRecordStudyEndCode) —

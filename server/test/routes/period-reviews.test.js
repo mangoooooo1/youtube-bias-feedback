@@ -149,7 +149,7 @@ describe("getPeriodReviews", () => {
   });
 
   // 대조군(CON, TEST-CON) — 연구 종료 + 전체 기간(파일럿 TOTAL_PERIODS=3) 리뷰 생성 완료
-  // 여부에 따라 조건부로만 열람을 허용한다. Story 10-10, 명세서 2·7절.
+  // 여부에 따라 조건부로만 열람을 허용한다.
   describe("대조군(CON, TEST-CON) 종료 후 조건부 열람", () => {
     const FIXED_NOW = new Date("2026-06-10T10:00:00+09:00");
     // +12일(TOTAL_DAYS) = 2026-06-06 → FIXED_NOW(6/10) 이전이라 종료된 것으로 판정된다.
