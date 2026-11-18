@@ -670,8 +670,11 @@ describe("참여 기간이 끝난 뒤 — 머리말과 하루 탭", () => {
     expect(root.querySelector("#vl-study-end-code-input")).not.toBeNull();
   });
 
+  // 종료 안내는 헤더 배지의 툴팁 문구로 보인다
   const banner = (root) =>
-    root.querySelector("#vl-participation-ended-banner")?.textContent ?? null;
+    root
+      .querySelector("#vl-participation-ended-banner")
+      ?.getAttribute("data-tip") ?? null;
 
   it.each(["EXP", "CON"])(
     "%s: 연구 중에는 종료 안내 배너가 없다",
@@ -711,7 +714,6 @@ describe("참여 기간이 끝난 뒤 — 머리말과 하루 탭", () => {
         participant({ installDate: INSTALL, ...over }),
         { now: COLLECTION_ENDS_AT() + hoursAfter * 3600000 },
       );
-      expect(banner(root)).toContain("참여 기간이 끝났어요.");
       expect(banner(root)).toContain(nextStep);
     },
   );
@@ -724,7 +726,7 @@ describe("참여 기간이 끝난 뒤 — 머리말과 하루 탭", () => {
     ["코드 입력 전", false, "가 준비됐어요", "#vl-study-end-code-input"],
     ["코드 확인 후", true, " 다시 보기", "[data-tab]"],
   ])(
-    "대조군(%s): 리뷰 화면에서는 배너 대신 머리말 아래에 홈으로 줄을 두고, 홈으로 돌아오면 배너가 다시 보인다",
+    "대조군(%s): 리뷰 화면에서는 머리말 아래에 홈으로 줄을 두고, 종료 안내 배지는 그대로 남는다",
     async (_label, verified, ctaSuffix, screenSelector) => {
       const { root } = await bootReady(
         participant({
@@ -740,7 +742,7 @@ describe("참여 기간이 끝난 뒤 — 머리말과 하루 탭", () => {
 
       click(root, "#vl-study-end-cta");
       expect(root.querySelector(screenSelector)).not.toBeNull();
-      expect(banner(root)).toBeNull();
+      expect(banner(root)).not.toBeNull();
       expect(backRowUnderHeader(root)).not.toBeNull();
 
       click(root, "#vl-study-end-back");
