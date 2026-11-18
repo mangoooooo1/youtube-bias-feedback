@@ -171,7 +171,7 @@ function kstDate(date) {
 // 서버가 영상별로 알려 준 "그래프에서 뺀 사유" → 목록 표시
 const PLAYED_VIDEO_MARKS = {
   short: "거의 안 봄",
-  uncategorized: "분야 미확인",
+  uncategorized: "카테고리 미확인",
   pending_time: "확인 중",
   unconfirmed: "시청 시간 미확인",
 };
