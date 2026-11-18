@@ -129,17 +129,17 @@ describe("isBaselinePeriod — 베이스라인 경계", () => {
   it.each(["UTC", "America/Los_Angeles"])(
     "실행 환경 시간대가 %s여도 KST 기준으로 판정한다",
     (tz) => {
-      const { isBaselinePeriod } = ViewLensStudy;
+      const { BASELINE_DAYS, isBaselinePeriod } = ViewLensStudy;
+      const install = "2026-01-01T14:00:00.000Z"; // 23:00 KST
+      // BASELINE_DAYS + 1일째 00:00 KST
+      const endsAt = Date.parse(
+        `${dayFromInstall(install, BASELINE_DAYS)}T00:00:00+09:00`,
+      );
       const original = process.env.TZ;
       process.env.TZ = tz;
       try {
-        const install = "2026-01-01T14:00:00.000Z"; // 23:00 KST
-        expect(
-          isBaselinePeriod(install, new Date("2026-01-04T14:59:59.999Z")),
-        ).toBe(true);
-        expect(
-          isBaselinePeriod(install, new Date("2026-01-04T15:00:00.000Z")),
-        ).toBe(false);
+        expect(isBaselinePeriod(install, new Date(endsAt - 1))).toBe(true);
+        expect(isBaselinePeriod(install, new Date(endsAt))).toBe(false);
       } finally {
         if (original === undefined) delete process.env.TZ;
         else process.env.TZ = original;
@@ -224,6 +224,13 @@ describe("연구 기간 상수 — 서버·팝업과 같은 값", () => {
     expect(popupConstant("FALLBACK_RETRY_WINDOW_DAYS")).toBe(
       serverConstants.FALLBACK_RETRY_WINDOW_DAYS,
     );
+  });
+
+  // 배수가 아니면 한 기간이 기준선과 개입에 걸치거나 마지막 기간이 잘린다
+  it("BASELINE_DAYS와 TOTAL_DAYS가 DAYS_PER_PERIOD의 배수다", () => {
+    const { TOTAL_DAYS, DAYS_PER_PERIOD, BASELINE_DAYS } = serverConstants;
+    expect(BASELINE_DAYS % DAYS_PER_PERIOD).toBe(0);
+    expect(TOTAL_DAYS % DAYS_PER_PERIOD).toBe(0);
   });
 
   it("END_GRACE_DAYS는 14일이다", () => {

@@ -49,6 +49,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// 설치일(KST)에서 TOTAL_DAYS일 뒤 00:00 KST — 확장이 수집을 멈추는 시각
+function collectionEndsAtFor(installDate) {
+  const day = new Date(
+    Date.parse(installDate) + globalThis.ViewLensStudy.TOTAL_DAYS * 86400000,
+  ).toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+  return Date.parse(`${day}T00:00:00+09:00`);
+}
+
 describe("content.js extractVideoId", () => {
   let extractVideoId;
 
@@ -3068,8 +3076,8 @@ describe("content.js 일시정지 후 다시 재생해 나눌 때 — 세션 종
   });
 
   it("멈춘 사이 수집 기간이 끝났으면 새 기록을 만들지 않고 앞 기록만 확정하며, 다시 재생한 시간이 앞 기록에 붙지 않는다", async () => {
-    // installDate 1970-01-01T09:00 KST → 수집 종료 1970-01-13 00:00 KST
-    const collectionEndsAt = Date.parse("1970-01-13T00:00:00+09:00");
+    // installDate 1970-01-01T09:00 KST → 수집 종료는 설치+TOTAL_DAYS일 00:00 KST
+    const collectionEndsAt = collectionEndsAtFor("1970-01-01T00:00:00.000Z");
     vi.setSystemTime(collectionEndsAt - 2 * MINUTE);
     const browser = createTabBrowser({
       initialStorage: { installDate: "1970-01-01T00:00:00.000Z" },
@@ -3344,9 +3352,9 @@ describe("content.js recordVideo — 다시 재생해 나누는 기록(resumedFr
 });
 
 describe("content.js 참여 기간 종료 — 새 수집 중단", () => {
-  // installDate 1970-01-01T09:00 KST → 수집 종료 1970-01-13 00:00 KST, 전송 종료 END_GRACE_DAYS일 뒤
+  // installDate 1970-01-01T09:00 KST → 수집 종료는 설치+TOTAL_DAYS일 00:00 KST, 전송 종료 END_GRACE_DAYS일 뒤
   const INSTALL_DATE = "1970-01-01T00:00:00.000Z";
-  const COLLECTION_ENDS_AT = Date.parse("1970-01-13T00:00:00+09:00");
+  const COLLECTION_ENDS_AT = collectionEndsAtFor(INSTALL_DATE);
   const TRANSMISSION_ENDS_AT =
     COLLECTION_ENDS_AT + globalThis.ViewLensStudy.END_GRACE_DAYS * 86400000;
 

@@ -152,9 +152,10 @@ describe("_isStudyEndReviewReady — 대조군(CON)에게만, 연구 종료 후�
 describe("참여 종료 배너와 팝업 등록 재시도", () => {
   const DAY = 86400000;
   const NOW = Date.parse("2026-01-20T03:00:00Z");
-  const ACTIVE = new Date(NOW - 5 * DAY).toISOString();
-  const GRACE = new Date(NOW - 13 * DAY).toISOString();
   const { TOTAL_DAYS, END_GRACE_DAYS } = globalThis.ViewLensStudy;
+  const ACTIVE = new Date(NOW - 2 * DAY).toISOString();
+  // 수집이 멈추고 하루쯤 지난 전송 유예 중
+  const GRACE = new Date(NOW - (TOTAL_DAYS + 1) * DAY).toISOString();
   const ENDED = new Date(
     NOW - (TOTAL_DAYS + END_GRACE_DAYS + 2) * DAY,
   ).toISOString();

@@ -116,9 +116,14 @@ function createFetchMock({
 }
 
 const FIXED_NOW = new Date(2026, 0, 10, 12, 0, 0);
-const ACTIVE_INSTALL_DATE = new Date(2026, 0, 5).toISOString();
+const { TOTAL_DAYS, BASELINE_DAYS, END_GRACE_DAYS } = globalThis.ViewLensStudy;
+// 기준선이 끝난 다음 날 — 실험군 알림 대상이고 아직 수집 중
+const ACTIVE_INSTALL_DATE = new Date(
+  2026,
+  0,
+  10 - (BASELINE_DAYS + 1),
+).toISOString();
 // 전송 기간까지 끝난 설치일
-const { TOTAL_DAYS, END_GRACE_DAYS } = globalThis.ViewLensStudy;
 const ENDED_INSTALL_DATE = new Date(
   FIXED_NOW - (TOTAL_DAYS + END_GRACE_DAYS + 2) * 86400000,
 ).toISOString();
@@ -3104,8 +3109,10 @@ describe("영구 실패는 그 요청 내용에만 적용된다 — 재온보딩
 
 describe("참여 기간 종료 — 전송 기간이 끝나면 서버 요청을 보내지 않는다", () => {
   const DAY = 86400000;
-  // 수집 종료(설치+12일이 속한 KST 날짜의 00:00)로부터 FIXED_NOW까지 1~2일 → grace
-  const GRACE_INSTALL_DATE = new Date(FIXED_NOW - 13 * DAY).toISOString();
+  // 수집 종료(설치+TOTAL_DAYS일이 속한 KST 날짜의 00:00)로부터 FIXED_NOW까지 1~2일 → grace
+  const GRACE_INSTALL_DATE = new Date(
+    FIXED_NOW - (TOTAL_DAYS + 1) * DAY,
+  ).toISOString();
 
   function backlog(installDate) {
     return {
@@ -3226,9 +3233,12 @@ describe("참여 기간 종료 — 전송 기간이 끝나면 서버 요청을 �
   });
 
   describe("전송 유예 중 리뷰 공개 시각(09:00 KST)의 종료 알림", () => {
-    // 수집은 2026-01-13 00:00 KST에 멈추고, 리뷰는 같은 날 09:00 KST에 공개된다
+    // 수집은 설치+TOTAL_DAYS일 00:00 KST에 멈추고, 리뷰는 같은 날 09:00 KST에 공개된다
     const INSTALL = "2026-01-01T10:00:00+09:00";
-    const RELEASE_AT = Date.parse("2026-01-13T09:00:00+09:00");
+    const releaseDay = new Date(
+      Date.parse(INSTALL) + TOTAL_DAYS * DAY,
+    ).toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+    const RELEASE_AT = Date.parse(`${releaseDay}T09:00:00+09:00`);
 
     it("09:00 전에는 알림을 띄우지 않고 서버 작업은 그대로 돈다", async () => {
       vi.setSystemTime(RELEASE_AT - 1);
@@ -3299,7 +3309,7 @@ describe("참여 기간 종료 — 전송 기간이 끝나면 서버 요청을 �
   // 마지막 날 수집 종료 1시간 전에 보던 세션을 열어 둔 채 크롬을 끈 상태
   function openLastDaySession(installDate) {
     const lastDay = new Date(
-      Date.parse(installDate) + 12 * DAY,
+      Date.parse(installDate) + TOTAL_DAYS * DAY,
     ).toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
     const lastWatchedAt = new Date(
       Date.parse(`${lastDay}T00:00:00+09:00`) - 60 * 60000,
