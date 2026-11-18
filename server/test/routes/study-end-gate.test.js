@@ -13,6 +13,7 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { periodIndexes, endedInstallDate } from "../study-schedule-fixtures.js";
 
 // 대조군 종료 게이트 통합 흐름 — 코드 검증(study-end-code.js) 후 기간 리뷰 조회(period-reviews.js)가
 // 실제로 열리는지를 두 실제 라우터와 실제 db.js 스키마로 검증한다.
@@ -47,9 +48,8 @@ function buildApp() {
 
 const app = buildApp();
 
-// +12일(TOTAL_DAYS) = 6/6 → FIXED_NOW 기준 이미 종료됨
-const ENDED_INSTALL_DATE = "2026-05-25T00:00:00+09:00";
 const FIXED_NOW = new Date("2026-06-10T10:00:00+09:00");
+const ENDED_INSTALL_DATE = endedInstallDate(FIXED_NOW);
 
 // 레이트리밋 상태가 라우터 모듈 단위라 테스트끼리 한도를 나누지 않게 테스트마다 IP를 다르게 준다
 let ipSeq = 0;
@@ -101,9 +101,7 @@ afterEach(() => {
 describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", () => {
   it("연구 종료 + 전체 기간 완성이어도, 코드 검증 전에는 POST /api/period-reviews가 빈 배열을 반환한다", async () => {
     insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
-    insertPeriodReview("con-user", 1);
-    insertPeriodReview("con-user", 2);
-    insertPeriodReview("con-user", 3);
+    for (const p of periodIndexes()) insertPeriodReview("con-user", p);
 
     const res = await request(app)
       .post("/api/period-reviews")
@@ -114,9 +112,7 @@ describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", ()
 
   it("틀린 코드로 검증을 시도하면 valid:false이고, 이후 조회해도 여전히 잠겨 있다", async () => {
     insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
-    insertPeriodReview("con-user", 1);
-    insertPeriodReview("con-user", 2);
-    insertPeriodReview("con-user", 3);
+    for (const p of periodIndexes()) insertPeriodReview("con-user", p);
 
     const validateRes = await request(app)
       .post("/api/study-end-code/validate")
@@ -133,9 +129,7 @@ describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", ()
 
   it("올바른 코드로 검증하면 이후 POST /api/period-reviews가 실제로 열린다(핵심 흐름)", async () => {
     insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
-    insertPeriodReview("con-user", 1);
-    insertPeriodReview("con-user", 2);
-    insertPeriodReview("con-user", 3);
+    for (const p of periodIndexes()) insertPeriodReview("con-user", p);
 
     const validateRes = await request(app)
       .post("/api/study-end-code/validate")
@@ -153,16 +147,16 @@ describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", ()
     const reviewsRes = await request(app)
       .post("/api/period-reviews")
       .send({ anonymousId: "con-user" });
-    expect(reviewsRes.body.data.map((r) => r.periodIndex)).toEqual([1, 2, 3]);
+    expect(reviewsRes.body.data.map((r) => r.periodIndex)).toEqual(
+      periodIndexes(),
+    );
   });
 
   // 운영과 같은 조건: 등록 때 받은 participantToken을 매 요청에 함께 보낸다
   it("PARTICIPANT_TOKEN_SECRET이 설정돼 있어도 토큰을 함께 보내면 같은 흐름으로 열린다", async () => {
     process.env.PARTICIPANT_TOKEN_SECRET = "study-end-gate-secret";
     insertParticipant("con-user", "CON", ENDED_INSTALL_DATE);
-    insertPeriodReview("con-user", 1);
-    insertPeriodReview("con-user", 2);
-    insertPeriodReview("con-user", 3);
+    for (const p of periodIndexes()) insertPeriodReview("con-user", p);
     const participantToken = issueParticipantToken("con-user");
 
     // secret이 실제로 적용되는지 확인. 토큰 없이 조회하면 거부된다
@@ -182,6 +176,8 @@ describe("대조군 종료 게이트 — 코드 검증 전후 통합 흐름", ()
       .post("/api/period-reviews")
       .send({ anonymousId: "con-user", participantToken });
     expect(reviewsRes.status).toBe(200);
-    expect(reviewsRes.body.data.map((r) => r.periodIndex)).toEqual([1, 2, 3]);
+    expect(reviewsRes.body.data.map((r) => r.periodIndex)).toEqual(
+      periodIndexes(),
+    );
   });
 });

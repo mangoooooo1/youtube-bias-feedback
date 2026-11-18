@@ -1,6 +1,12 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import Database from "better-sqlite3-multiple-ciphers";
 import { recordStudyEndReviewEvent } from "../../routes/study-end-review-event.js";
+import {
+  TOTAL_PERIODS,
+  periodIndexes,
+  endedInstallDate,
+  notEndedInstallDate,
+} from "../study-schedule-fixtures.js";
 
 function createTestDb() {
   const db = new Database(":memory:");
@@ -45,8 +51,8 @@ function getParticipant(db, anonymousId) {
 describe("recordStudyEndReviewEvent", () => {
   let db;
   const FIXED_NOW = new Date("2026-06-10T10:00:00+09:00");
-  const ENDED_INSTALL_DATE = "2026-05-25T00:00:00+09:00"; // +12일(TOTAL_DAYS) = 6/6 → 종료됨
-  const NOT_ENDED_INSTALL_DATE = "2026-06-08T00:00:00+09:00"; // +12일 = 6/20 → 진행 중
+  const ENDED_INSTALL_DATE = endedInstallDate(FIXED_NOW);
+  const NOT_ENDED_INSTALL_DATE = notEndedInstallDate(FIXED_NOW);
 
   beforeEach(() => {
     db = createTestDb();
@@ -79,8 +85,10 @@ describe("recordStudyEndReviewEvent", () => {
 
   it("종료됐지만 전체 기간 리뷰가 아직 다 생성되지 않은 CON은 not_eligible을 반환한다", () => {
     insertParticipant(db, "con-incomplete", "CON", ENDED_INSTALL_DATE);
-    insertPeriodReview(db, "con-incomplete", 1);
-    insertPeriodReview(db, "con-incomplete", 2); // 3구간 중 2개만 — 아직 미완성
+    // 마지막 기간 하나가 빠짐 — 아직 미완성
+    for (const p of periodIndexes(TOTAL_PERIODS - 1)) {
+      insertPeriodReview(db, "con-incomplete", p);
+    }
 
     const result = recordStudyEndReviewEvent(
       db,
@@ -96,9 +104,7 @@ describe("recordStudyEndReviewEvent", () => {
 
   it("EXP는 종료·완성 상태여도 not_eligible을 반환한다(이 이벤트는 대조군 전용)", () => {
     insertParticipant(db, "exp-user", "EXP", ENDED_INSTALL_DATE);
-    insertPeriodReview(db, "exp-user", 1);
-    insertPeriodReview(db, "exp-user", 2);
-    insertPeriodReview(db, "exp-user", 3);
+    for (const p of periodIndexes()) insertPeriodReview(db, "exp-user", p);
 
     const result = recordStudyEndReviewEvent(db, "exp-user", "modal_shown");
 
@@ -108,9 +114,7 @@ describe("recordStudyEndReviewEvent", () => {
 
   it("종료 + 전체 기간 완성 상태의 CON은 modal_shown을 기록한다", () => {
     insertParticipant(db, "con-complete", "CON", ENDED_INSTALL_DATE);
-    insertPeriodReview(db, "con-complete", 1);
-    insertPeriodReview(db, "con-complete", 2);
-    insertPeriodReview(db, "con-complete", 3);
+    for (const p of periodIndexes()) insertPeriodReview(db, "con-complete", p);
 
     const result = recordStudyEndReviewEvent(db, "con-complete", "modal_shown");
 
@@ -122,9 +126,8 @@ describe("recordStudyEndReviewEvent", () => {
 
   it("TEST-CON도 동일한 조건에서 review_viewed를 기록한다", () => {
     insertParticipant(db, "test-con-complete", "TEST-CON", ENDED_INSTALL_DATE);
-    insertPeriodReview(db, "test-con-complete", 1);
-    insertPeriodReview(db, "test-con-complete", 2);
-    insertPeriodReview(db, "test-con-complete", 3);
+    for (const p of periodIndexes())
+      insertPeriodReview(db, "test-con-complete", p);
 
     const result = recordStudyEndReviewEvent(
       db,
@@ -140,9 +143,7 @@ describe("recordStudyEndReviewEvent", () => {
 
   it("이미 기록된 이벤트는 재호출해도 덮어쓰지 않는다(최초 1회만)", () => {
     insertParticipant(db, "con-complete", "CON", ENDED_INSTALL_DATE);
-    insertPeriodReview(db, "con-complete", 1);
-    insertPeriodReview(db, "con-complete", 2);
-    insertPeriodReview(db, "con-complete", 3);
+    for (const p of periodIndexes()) insertPeriodReview(db, "con-complete", p);
 
     recordStudyEndReviewEvent(db, "con-complete", "modal_shown");
     const first = getParticipant(db, "con-complete").studyEndModalShownAt;
@@ -159,9 +160,7 @@ describe("recordStudyEndReviewEvent", () => {
 
   it("두 이벤트는 서로 독립적으로 기록된다", () => {
     insertParticipant(db, "con-complete", "CON", ENDED_INSTALL_DATE);
-    insertPeriodReview(db, "con-complete", 1);
-    insertPeriodReview(db, "con-complete", 2);
-    insertPeriodReview(db, "con-complete", 3);
+    for (const p of periodIndexes()) insertPeriodReview(db, "con-complete", p);
 
     recordStudyEndReviewEvent(db, "con-complete", "modal_shown");
     recordStudyEndReviewEvent(db, "con-complete", "review_viewed");

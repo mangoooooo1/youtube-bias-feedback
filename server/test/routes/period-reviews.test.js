@@ -6,6 +6,12 @@ import {
   isStudyEnded,
 } from "../../routes/period-reviews-query.js";
 import { TOTAL_DAYS } from "../../pipeline/study-constants.js";
+import {
+  TOTAL_PERIODS,
+  periodIndexes,
+  endedInstallDate,
+  notEndedInstallDate,
+} from "../study-schedule-fixtures.js";
 
 // 대조군 케이스와 무관한 기존 EXP/미등록 테스트에서 채워 넣는 자리표시 installDate.
 // EXP 경로는 isStudyEndUnlocked를 호출하지 않으므로 값 자체는 결과에 영향을 주지 않는다.
@@ -85,6 +91,10 @@ function insertReview(db, anonymousId, periodIndex, overrides = {}) {
   });
 }
 
+function insertReviews(db, anonymousId, indexes) {
+  for (const periodIndex of indexes) insertReview(db, anonymousId, periodIndex);
+}
+
 describe("getPeriodReviews", () => {
   let db;
 
@@ -139,7 +149,7 @@ describe("getPeriodReviews", () => {
     expect(getPeriodReviews(db, "user-b").length).toBe(2);
   });
 
-  it("TOTAL_PERIODS(파일럿=3) 범위 밖의 periodIndex는 응답에서 제외한다(상수 변경 후 남은 옛 행 방어)", () => {
+  it("TOTAL_PERIODS 범위 밖의 periodIndex는 응답에서 제외한다(상수 변경 후 남은 옛 행 방어)", () => {
     insertParticipant(db, "exp-user", "EXP");
     insertReview(db, "exp-user", 1);
     insertReview(db, "exp-user", 99); // 옛 설정으로 생성된 범위 밖 행 가정
@@ -148,14 +158,13 @@ describe("getPeriodReviews", () => {
     expect(result.map((r) => r.periodIndex)).toEqual([1]);
   });
 
-  // 대조군(CON, TEST-CON) — 연구 종료 + 전체 기간(파일럿 TOTAL_PERIODS=3) 리뷰 생성 완료
+  // 대조군(CON, TEST-CON) — 연구 종료 + 전체 기간(TOTAL_PERIODS) 리뷰 생성 완료
   // 여부에 따라 조건부로만 열람을 허용한다.
   describe("대조군(CON, TEST-CON) 종료 후 조건부 열람", () => {
     const FIXED_NOW = new Date("2026-06-10T10:00:00+09:00");
-    // +12일(TOTAL_DAYS) = 2026-06-06 → FIXED_NOW(6/10) 이전이라 종료된 것으로 판정된다.
-    const ENDED_INSTALL_DATE = "2026-05-25T00:00:00+09:00";
-    // +12일 = 2026-06-20 → FIXED_NOW(6/10) 이후라 아직 진행 중으로 판정된다.
-    const NOT_ENDED_INSTALL_DATE = "2026-06-08T00:00:00+09:00";
+    // 마지막 기간이 6/6에 끝나 FIXED_NOW(6/10)에는 종료된 것으로 판정된다.
+    const ENDED_INSTALL_DATE = endedInstallDate(FIXED_NOW);
+    const NOT_ENDED_INSTALL_DATE = notEndedInstallDate(FIXED_NOW);
 
     beforeEach(() => {
       vi.useFakeTimers();
@@ -168,17 +177,15 @@ describe("getPeriodReviews", () => {
 
     it("연구 종료 전이면 리뷰가 이미 쌓여 있어도 빈 배열을 반환한다", () => {
       insertParticipant(db, "con-not-ended", "CON", NOT_ENDED_INSTALL_DATE);
-      insertReview(db, "con-not-ended", 1);
-      insertReview(db, "con-not-ended", 2);
-      insertReview(db, "con-not-ended", 3);
+      insertReviews(db, "con-not-ended", periodIndexes());
 
       expect(getPeriodReviews(db, "con-not-ended")).toEqual([]);
     });
 
     it("종료됐지만 전체 기간 리뷰가 아직 다 생성되지 않았으면 빈 배열을 반환한다", () => {
       insertParticipant(db, "con-incomplete", "CON", ENDED_INSTALL_DATE);
-      insertReview(db, "con-incomplete", 1);
-      insertReview(db, "con-incomplete", 2); // 3구간 중 2개만 — 아직 미완성
+      // 마지막 기간 하나가 빠짐 — 아직 미완성
+      insertReviews(db, "con-incomplete", periodIndexes(TOTAL_PERIODS - 1));
 
       expect(getPeriodReviews(db, "con-incomplete")).toEqual([]);
     });
@@ -191,30 +198,28 @@ describe("getPeriodReviews", () => {
         ENDED_INSTALL_DATE,
         "2026-06-07T09:05:00+09:00",
       );
-      insertReview(db, "con-complete", 1);
-      insertReview(db, "con-complete", 2);
-      insertReview(db, "con-complete", 3);
+      insertReviews(db, "con-complete", periodIndexes());
       insertReview(db, "con-complete", 99); // 범위 밖 옛 행 — 응답에 섞이면 안 됨
 
       const result = getPeriodReviews(db, "con-complete");
-      expect(result.map((r) => r.periodIndex)).toEqual([1, 2, 3]);
+      expect(result.map((r) => r.periodIndex)).toEqual(periodIndexes());
     });
 
     it("종료 + 전체 기간 완성이어도 코드 검증을 통과한 적 없으면 빈 배열을 반환한다", () => {
       insertParticipant(db, "con-unverified", "CON", ENDED_INSTALL_DATE);
-      insertReview(db, "con-unverified", 1);
-      insertReview(db, "con-unverified", 2);
-      insertReview(db, "con-unverified", 3);
+      insertReviews(db, "con-unverified", periodIndexes());
 
       expect(getPeriodReviews(db, "con-unverified")).toEqual([]);
     });
 
     it("periodIndex가 1을 포함하지 않으면 개수가 맞아도 잠금이 풀리지 않는다", () => {
-      // count=3=TOTAL_PERIODS지만 1구간이 없음 — 범위를 안 보면 잘못 풀리는 경우.
+      // 개수는 TOTAL_PERIODS지만 1구간이 없음(2..TOTAL_PERIODS+1) — 범위를 안 보면 잘못 풀리는 경우.
       insertParticipant(db, "con-gap", "CON", ENDED_INSTALL_DATE);
-      insertReview(db, "con-gap", 2);
-      insertReview(db, "con-gap", 3);
-      insertReview(db, "con-gap", 4);
+      insertReviews(
+        db,
+        "con-gap",
+        periodIndexes().map((p) => p + 1),
+      );
 
       expect(getPeriodReviews(db, "con-gap")).toEqual([]);
     });
@@ -227,11 +232,11 @@ describe("getPeriodReviews", () => {
         ENDED_INSTALL_DATE,
         "2026-06-07T09:05:00+09:00",
       );
-      insertReview(db, "test-con-complete", 1);
-      insertReview(db, "test-con-complete", 2);
-      insertReview(db, "test-con-complete", 3);
+      insertReviews(db, "test-con-complete", periodIndexes());
 
-      expect(getPeriodReviews(db, "test-con-complete").length).toBe(3);
+      expect(getPeriodReviews(db, "test-con-complete").length).toBe(
+        TOTAL_PERIODS,
+      );
     });
 
     it("EXP는 연구 종료 여부와 무관하게 항상 열람 가능하다(회귀 확인)", () => {
@@ -246,8 +251,8 @@ describe("getPeriodReviews", () => {
 describe("isStudyEnded / isStudyEndUnlocked", () => {
   let db;
   const FIXED_NOW = new Date("2026-06-10T10:00:00+09:00");
-  const ENDED_INSTALL_DATE = "2026-05-25T00:00:00+09:00"; // +12일 = 6/6 → 종료됨
-  const NOT_ENDED_INSTALL_DATE = "2026-06-08T00:00:00+09:00"; // +12일 = 6/20 → 진행 중
+  const ENDED_INSTALL_DATE = endedInstallDate(FIXED_NOW);
+  const NOT_ENDED_INSTALL_DATE = notEndedInstallDate(FIXED_NOW);
 
   beforeEach(() => {
     db = createTestDb();
@@ -269,9 +274,7 @@ describe("isStudyEnded / isStudyEndUnlocked", () => {
   });
 
   it("isStudyEndUnlocked — 종료 전이면 리뷰 존재 여부와 무관하게 false", () => {
-    insertReview(db, "con-user", 1);
-    insertReview(db, "con-user", 2);
-    insertReview(db, "con-user", 3);
+    insertReviews(db, "con-user", periodIndexes());
 
     expect(isStudyEndUnlocked(db, "con-user", NOT_ENDED_INSTALL_DATE)).toBe(
       false,
@@ -279,25 +282,24 @@ describe("isStudyEnded / isStudyEndUnlocked", () => {
   });
 
   it("isStudyEndUnlocked — 종료 후·미완성이면 false", () => {
-    insertReview(db, "con-user", 1);
-    insertReview(db, "con-user", 2);
+    insertReviews(db, "con-user", periodIndexes(TOTAL_PERIODS - 1));
 
     expect(isStudyEndUnlocked(db, "con-user", ENDED_INSTALL_DATE)).toBe(false);
   });
 
   it("isStudyEndUnlocked — 종료 후·전체 기간 완성이면 true", () => {
-    insertReview(db, "con-user", 1);
-    insertReview(db, "con-user", 2);
-    insertReview(db, "con-user", 3);
+    insertReviews(db, "con-user", periodIndexes());
 
     expect(isStudyEndUnlocked(db, "con-user", ENDED_INSTALL_DATE)).toBe(true);
   });
 
   it("isStudyEndUnlocked — periodIndex가 1..TOTAL_PERIODS 범위를 벗어나면 개수가 맞아도 false", () => {
-    // count=3=TOTAL_PERIODS지만 1구간이 없음(2,3,4) — 단순 COUNT(*)만 보면 잘못 true가 됨.
-    insertReview(db, "con-user", 2);
-    insertReview(db, "con-user", 3);
-    insertReview(db, "con-user", 4);
+    // 개수는 TOTAL_PERIODS지만 1구간이 없음(2..TOTAL_PERIODS+1) — 단순 COUNT(*)만 보면 잘못 true가 됨.
+    insertReviews(
+      db,
+      "con-user",
+      periodIndexes().map((p) => p + 1),
+    );
 
     expect(isStudyEndUnlocked(db, "con-user", ENDED_INSTALL_DATE)).toBe(false);
   });

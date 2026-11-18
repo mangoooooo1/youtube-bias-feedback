@@ -6,8 +6,16 @@ import {
 } from "../../routes/today-reviews-query.js";
 // 확장 백그라운드와 같은 방식(side-effect import)으로 ViewLensStudy를 전역에 붙인다
 import "../../../extension/study-schedule.js";
+import { BASELINE_DAYS } from "../../pipeline/study-constants.js";
+import { kstDay, kstMidnight } from "../study-schedule-fixtures.js";
 
 const { isBaselinePeriod: isBaselinePeriodClient } = globalThis.ViewLensStudy;
+
+// 3/10 00:00 KST에 기준선이 끝난 지 5일 지난 EXP의 설치일
+const POST_BASELINE_INSTALL = kstMidnight(
+  "2026-03-10T00:00:00+09:00",
+  -(BASELINE_DAYS + 5),
+);
 
 function createTestDb() {
   const db = new Database(":memory:");
@@ -104,24 +112,24 @@ describe("isBaselinePeriod — extension/study-schedule.js와 동치성", () => 
     ],
     ["1일 경과", "2026-01-01T00:00:00+09:00", "2026-01-02T00:00:00+09:00"],
     [
-      "정확히 베이스라인 경계",
+      "정확히 베이스라인 경계(BASELINE_DAYS + 1일째 00:00)",
       "2026-01-01T00:00:00+09:00",
-      "2026-01-03T00:00:00+09:00",
+      kstMidnight("2026-01-01T00:00:00+09:00", BASELINE_DAYS),
     ],
     [
       "베이스라인 이후",
       "2026-01-01T00:00:00+09:00",
-      "2026-01-05T00:00:00+09:00",
+      kstMidnight("2026-01-01T00:00:00+09:00", BASELINE_DAYS + 2),
     ],
     [
-      "23:00 설치, 4일째 마지막 순간",
+      "23:00 설치, BASELINE_DAYS일째 마지막 순간",
       "2026-01-01T23:00:00+09:00",
-      "2026-01-04T23:59:59+09:00",
+      `${kstDay("2026-01-01T23:00:00+09:00", BASELINE_DAYS - 1)}T23:59:59+09:00`,
     ],
     [
-      "23:00 설치, 5일째 00:00",
+      "23:00 설치, BASELINE_DAYS + 1일째 00:00",
       "2026-01-01T23:00:00+09:00",
-      "2026-01-05T00:00:00+09:00",
+      kstMidnight("2026-01-01T23:00:00+09:00", BASELINE_DAYS),
     ],
   ])("%s — 두 구현이 동일한 결과를 낸다", (_label, installDate, nowStr) => {
     const now = new Date(nowStr);
@@ -141,7 +149,9 @@ describe("isBaselinePeriod — extension/study-schedule.js와 동치성", () => 
 
 describe("isTodayReviewEligible — 그룹·자격별 판정", () => {
   const BASELINE_INSTALL = "2026-03-01T00:00:00+09:00";
-  const POST_BASELINE_NOW = new Date("2026-03-10T00:00:00+09:00");
+  const POST_BASELINE_NOW = new Date(
+    kstMidnight(BASELINE_INSTALL, BASELINE_DAYS + 5),
+  );
   const BASELINE_NOW = new Date("2026-03-01T01:00:00+09:00");
 
   it("참여자 자체가 없으면(undefined) 자격 없음", () => {
@@ -250,7 +260,7 @@ describe("getTodayReviews — DB 통합", () => {
     db = createTestDb();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-10T00:00:00+09:00"));
-    insertParticipant(db, "exp-active", "EXP", "2026-03-01T00:00:00+09:00");
+    insertParticipant(db, "exp-active", "EXP", POST_BASELINE_INSTALL);
     insertTodayReview(db, "exp-active", "2026-03-05");
     insertTodayReview(db, "exp-active", "2026-03-03");
 
@@ -297,7 +307,7 @@ describe("getTodayReviews — 리뷰를 받은 세션과 확인 여부", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-10T00:00:00+09:00"));
     db = createTestDb();
-    insertParticipant(db, "u1", "EXP", "2026-03-01T00:00:00+09:00");
+    insertParticipant(db, "u1", "EXP", POST_BASELINE_INSTALL);
   });
   afterEach(() => {
     db.close();

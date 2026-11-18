@@ -14,6 +14,7 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { periodIndexes } from "../study-schedule-fixtures.js";
 
 // server/test/routes/participants.test.js는 실제 server/routes/participants.js를 import하지
 // 않고, 그 안의 일부 라우트(POST /, GET /validate)만 흉내 낸 테스트 전용 라우터로 검증한다.
@@ -377,7 +378,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
 // 연구 종료 리뷰 이벤트의 결과별 경로. 핸들러의 not_found 분기와 catch는 requireParticipant가
 // 미등록 참여자를 먼저 거르고 DB 오류가 나야만 실행되므로 HTTP로는 도달하지 않는다.
 describe("실제 server/routes/participants.js — POST /study-end-review-event 결과별 경로", () => {
-  // 설치일 + 12일 다음 날 09:00 KST가 이미 지났다. 리뷰 3구간이 모두 있으면 잠금 해제
+  // 설치일 + TOTAL_DAYS 다음 날 09:00 KST가 이미 지났다. 모든 기간의 리뷰가 있으면 잠금 해제
   const ENDED_INSTALL_DATE = "2026-01-01T00:00:00+09:00";
   const NOT_ENDED_INSTALL_DATE = "2099-01-01T00:00:00+09:00";
 
@@ -388,7 +389,7 @@ describe("실제 server/routes/participants.js — POST /study-end-review-event 
   }
 
   function insertAllPeriodReviews(anonymousId) {
-    for (const periodIndex of [1, 2, 3]) {
+    for (const periodIndex of periodIndexes()) {
       db.prepare(
         `INSERT INTO period_reviews
           (anonymousId, periodIndex, periodStart, periodEnd, isBaseline, generatedAt)

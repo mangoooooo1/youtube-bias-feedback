@@ -14,6 +14,7 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { periodIndexes } from "../study-schedule-fixtures.js";
 
 // study-end-gate.test.js는 requireParticipant가 빠진 복제 라우터를 쓴다.
 // 여기서는 실제 server/routes/study-end-code.js를 로드해 미들웨어 순서·응답 코드·env 읽는 시점을 검증한다.
@@ -43,7 +44,7 @@ function buildApp() {
 const app = buildApp();
 
 const REVEAL_CODE = "SURVEY2026";
-// 설치일 + 12일 다음 날 09:00 KST가 이미 지났다. 리뷰 3구간이 모두 있으면 잠금 해제
+// 설치일 + TOTAL_DAYS 다음 날 09:00 KST가 이미 지났다. 모든 기간의 리뷰가 있으면 잠금 해제
 const ENDED_INSTALL_DATE = "2026-01-01T00:00:00+09:00";
 const NOT_ENDED_INSTALL_DATE = "2099-01-01T00:00:00+09:00";
 
@@ -58,7 +59,7 @@ function insertParticipant(anonymousId, groupCode, installDate) {
 }
 
 function insertAllPeriodReviews(anonymousId) {
-  for (const periodIndex of [1, 2, 3]) {
+  for (const periodIndex of periodIndexes()) {
     db.prepare(
       `INSERT INTO period_reviews
         (anonymousId, periodIndex, periodStart, periodEnd, isBaseline, generatedAt)
