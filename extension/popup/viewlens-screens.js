@@ -246,7 +246,7 @@ function screenTodayEmpty(
 const SHORT_WATCH_TIP =
   "30초 이상 보거나 영상 길이의 4분의 1 이상 본 영상만 셌어요. 그보다 짧게 본 영상은 잘못 눌렀거나 바로 넘긴 영상으로 판단하고 시청 기록이 확인되면 빼요.";
 const UNCATEGORIZED_TIP =
-  "유튜브에서 분야 정보를 가져오지 못한 영상이에요. 정보를 다시 가져오면 그래프에 들어가요.";
+  "유튜브에서 카테고리 정보를 가져오지 못한 영상이에요. 정보를 다시 가져오면 그래프에 들어가요.";
 
 // 키보드(Tab)로도 가서 툴팁을 띄우고, 스크린 리더는 "i" 대신 안내 문구를 읽는다
 function _infoTip(tip) {
@@ -290,7 +290,8 @@ function _summaryStatusText(status) {
 function _todayChartCard(view, isToday) {
   if (view.timeDist.length === 0) {
     const text =
-      _summaryStatusText(view.status) ?? "분야를 확인한 영상이 아직 없어요.";
+      _summaryStatusText(view.status) ??
+      "카테고리를 확인한 영상이 아직 없어요.";
     return vlCard({
       pad: 16,
       children: `<div style="font-size:var(--vl-fs-3);color:var(--vl-ink-2);text-align:center">${text}</div>`,
@@ -300,7 +301,7 @@ function _todayChartCard(view, isToday) {
   return vlCard({
     pad: 16,
     children: `
-      <div style="font-size:var(--vl-fs-2);font-weight:700;color:var(--vl-ink-2);margin-bottom:10px">${isToday ? "오늘" : "이 날"} 유튜브 시청 분야별 비중</div>
+      <div style="font-size:var(--vl-fs-2);font-weight:700;color:var(--vl-ink-2);margin-bottom:10px">${isToday ? "오늘" : "이 날"} 유튜브 시청 카테고리별 비중</div>
       <div style="display:flex;justify-content:space-around;gap:8px">
         ${vlDonut({ data: time, size: 116, label: "시청 시간" })}
         ${vlDonut({ data: count, size: 116, label: "영상 개수" })}
@@ -310,7 +311,7 @@ function _todayChartCard(view, isToday) {
       ${
         view.uncategorizedConfirmedCount > 0
           ? _footNote(
-              `분야를 확인하지 못한 영상 ${view.uncategorizedConfirmedCount}개는 그래프에서 뺐어요`,
+              `카테고리를 확인하지 못한 영상 ${view.uncategorizedConfirmedCount}개는 그래프에서 뺐어요`,
               UNCATEGORIZED_TIP,
             )
           : ""
@@ -513,12 +514,12 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
       : `${vlCard({
           pad: 16,
           children: `
-        <div style="font-size:var(--vl-fs-2);font-weight:700;color:var(--vl-ink-2);margin-bottom:10px">날마다 유튜브 시청 시간 중 분야별 비중</div>
+        <div style="font-size:var(--vl-fs-2);font-weight:700;color:var(--vl-ink-2);margin-bottom:10px">날마다 유튜브 시청 시간 중 카테고리별 비중</div>
         <!-- 꺾은선 범례(상위 3개 + 그 밖) — 누르면 그 분야 선만 강조 -->
         <div style="margin-bottom:8px">${vlLegend({ items: chart.lines, focus: focus ?? null, id: "vl-period-legend" })}</div>
         ${vlShareLines({ ...chart, focus })}
         ${period.shortCount > 0 ? _footNote(`잠깐 본 영상 ${period.shortCount}개는 세지 않았어요`, SHORT_WATCH_TIP) : ""}
-        ${uncategorizedConfirmed > 0 ? _footNote(`분야를 확인하지 못한 영상 ${uncategorizedConfirmed}개는 그래프에서 뺐어요`, UNCATEGORIZED_TIP) : ""}
+        ${uncategorizedConfirmed > 0 ? _footNote(`카테고리를 확인하지 못한 영상 ${uncategorizedConfirmed}개는 그래프에서 뺐어요`, UNCATEGORIZED_TIP) : ""}
       `,
         })}
       ${(() => {
@@ -531,7 +532,7 @@ function screenFeedback(currentWeek, selWeek, periodView, focus = null) {
         return vlCard({
           pad: 16,
           children: `
-        <div style="font-size:var(--vl-fs-2);font-weight:700;color:var(--vl-ink-2);margin-bottom:10px">${w.label} 전체 분야별 비중</div>
+        <div style="font-size:var(--vl-fs-2);font-weight:700;color:var(--vl-ink-2);margin-bottom:10px">${w.label} 전체 카테고리별 비중</div>
         <div style="display:flex;justify-content:space-around;gap:8px">
           ${vlDonut({ data: time, size: 116, label: "시청 시간" })}
           ${vlDonut({ data: count, size: 116, label: "영상 개수" })}
