@@ -483,6 +483,10 @@ class ViewLensPopup {
       start: typing.selectionStart,
       end: typing.selectionEnd,
     };
+    // 키보드로 종료 안내 배지를 읽던 중이면 다시 그린 뒤에도 툴팁이 닫히지 않게 포커스를 옮긴다
+    const endedBadgeFocused =
+      this.container.ownerDocument?.activeElement?.id ===
+      "vl-participation-ended-banner";
 
     this.container.innerHTML = `<div style="position:relative;height:100%;display:flex;flex-direction:column;background:var(--vl-bg)">
       ${_popupHeader(groupCfg, day, {
@@ -521,6 +525,9 @@ class ViewLensPopup {
         input.focus();
         input.setSelectionRange(typed.start, typed.end);
       }
+    }
+    if (endedBadgeFocused) {
+      this.container.querySelector("#vl-participation-ended-banner")?.focus();
     }
   }
 
@@ -788,6 +795,14 @@ class Studio {
   }
 
   _setState(updates) {
+    // 그룹이나 시점을 바꾸면 종료 안내·코드 확인을 처음부터 다시 볼 수 있게 한다(테마 변경은 유지)
+    const resetStudyEnd =
+      ("group" in updates && updates.group !== this._state.group) ||
+      ("timeline" in updates && updates.timeline !== this._state.timeline);
+    if (resetStudyEnd) {
+      VL._studyEndNoticeShown = false;
+      VL._studyEndCodeVerified = false;
+    }
     Object.assign(this._state, updates);
     this._applyTokens();
     if (this._popup) {
