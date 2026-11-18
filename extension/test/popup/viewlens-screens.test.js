@@ -68,13 +68,13 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
     expect(html).toContain("영상 13개");
     expect(html).toContain("시청 시간 확인 중 1개");
     // 예전 표시(영상 수 기준 분야 수)는 없다
-    expect(html).not.toContain("개 분야");
+    expect(html).not.toContain("개 카테고리");
   });
 
   it("제목 문장이 영상 수 줄보다 위, 범례는 도넛 카드 안 도넛 아래", () => {
     const html = render();
     const title = html.indexOf("에 시간을 가장 많이 썼어요");
-    const card = html.indexOf("유튜브 시청 분야별 비중");
+    const card = html.indexOf("유튜브 시청 카테고리별 비중");
     expect(title).toBeLessThan(html.indexOf("영상 13개"));
     expect(html.indexOf("영상 13개")).toBeLessThan(card);
     expect(html.indexOf(">음악</span>")).toBeGreaterThan(card);
@@ -179,13 +179,15 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
   it("잠깐 본 영상과 분야를 확인하지 못한 영상(영상 수 − 도넛 개수)을 안내한다", () => {
     const html = render();
     expect(html).toContain("잠깐 본 영상 3개는 세지 않았어요");
-    expect(html).toContain("분야를 확인하지 못한 영상 1개는 그래프에서 뺐어요");
+    expect(html).toContain(
+      "카테고리를 확인하지 못한 영상 1개는 그래프에서 뺐어요",
+    );
   });
 
   it("0개인 안내는 숨긴다", () => {
     const html = render({ shortCount: 0, chartCount: 13 });
     expect(html).not.toContain("잠깐 본 영상");
-    expect(html).not.toContain("분야를 확인하지 못한 영상");
+    expect(html).not.toContain("카테고리를 확인하지 못한 영상");
   });
 
   // 저장본은 마지막 서버 값이라 따로 알리지 않는다
@@ -291,7 +293,7 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
   });
 
   it("지난 날짜는 '이 날'로 표시한다", () => {
-    expect(render()).toContain("이 날 유튜브 시청 분야별 비중");
+    expect(render()).toContain("이 날 유튜브 시청 카테고리별 비중");
   });
 
   it("서버에도 로컬에도 기록이 없으면 빈 화면", () => {
@@ -305,7 +307,7 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
       "ok",
       { isEmpty: true },
     );
-    expect(html).not.toContain("유튜브 시청 분야별 비중");
+    expect(html).not.toContain("유튜브 시청 카테고리별 비중");
   });
 });
 
@@ -589,11 +591,13 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
 
   it("꺾은선·구간 전체 도넛 2개·안내 문구를 그리고, 리뷰 카드 제목은 직전 구간 비교 질문", () => {
     const html = render();
-    expect(html).toContain("날마다 유튜브 시청 시간 중 분야별 비중");
+    expect(html).toContain("날마다 유튜브 시청 시간 중 카테고리별 비중");
     expect(html).toContain("vl-share-lines");
-    expect(html).toContain("2구간 전체 분야별 비중");
+    expect(html).toContain("2구간 전체 카테고리별 비중");
     expect(html).toContain("잠깐 본 영상 2개는 세지 않았어요");
-    expect(html).toContain("분야를 확인하지 못한 영상 1개는 그래프에서 뺐어요");
+    expect(html).toContain(
+      "카테고리를 확인하지 못한 영상 1개는 그래프에서 뺐어요",
+    );
     expect(html).toContain("이번 구간, 시청은 어떻게 달라졌나요?");
     expect(html).toContain("직전 구간보다 게임 비중이 늘었어요.");
     // 리뷰 위 코드 비교 문장·생성 시각은 없다
@@ -612,7 +616,7 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
 
   it("도넛 카드에는 모든 분야 범례, 꺾은선 칩은 상위 3개 + 그 밖", () => {
     const html = render();
-    const donutCard = html.slice(html.indexOf("2구간 전체 분야별 비중"));
+    const donutCard = html.slice(html.indexOf("2구간 전체 카테고리별 비중"));
     expect(donutCard).toContain(">교육</span>");
     expect(donutCard).toContain(">코미디</span>");
     expect(donutCard).not.toContain("data-legend-key");
