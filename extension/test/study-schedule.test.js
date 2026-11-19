@@ -233,6 +233,11 @@ describe("연구 기간 상수 — 서버·팝업과 같은 값", () => {
     expect(TOTAL_DAYS % DAYS_PER_PERIOD).toBe(0);
   });
 
+  // 1일 구간은 지원하지 않는다. 테스트 날짜 픽스처가 구간이 2일 이상이라고 전제한다
+  it("DAYS_PER_PERIOD는 2 이상이다", () => {
+    expect(serverConstants.DAYS_PER_PERIOD).toBeGreaterThanOrEqual(2);
+  });
+
   it("END_GRACE_DAYS는 14일이다", () => {
     expect(ViewLensStudy.END_GRACE_DAYS).toBe(14);
   });
