@@ -2746,17 +2746,19 @@ describe("content.js 같은 탭에서 다시 연 영상 — 마지막 재생 후
     expect(browser.recordsOf("AAAA")[0].watchedSeconds).toBe(30);
   });
 
-  it("다른 탭(저장값이 없는 탭)에서 같은 영상을 열면 그 탭의 기록에 이어 쓰지 않고 지금 동작과 같다", async () => {
+  it("다른 탭(저장값이 없는 탭)에서 같은 영상을 열면 앞 탭의 기록에 이어 쓰지 않고 그 탭의 기록을 따로 남긴다", async () => {
     const page = await browser.openPage({ tabId: 7, videoId: "AAAA" });
     await page.play(30);
     browser.stopTimers();
 
     const otherTab = await browser.openPage({ tabId: 8, videoId: "AAAA" });
 
-    // 지금 동작: 같은 세션의 새로고침 중복 거르기에 걸려 새 기록도, 이어 쓸 대상도 없다
-    expect(otherTab.identity()).toBeNull();
-    expect(browser.recordsOf("AAAA")).toHaveLength(1);
-    expect(browser.storage.dump().tabwatch__8).toBeUndefined();
+    const records = browser.recordsOf("AAAA");
+    expect(records.map((r) => r.tabId)).toEqual([7, 8]);
+    expect(otherTab.identity().eventId).toBe(records[1].eventId);
+    expect(browser.storage.dump().tabwatch__8.eventId).toBe(records[1].eventId);
+    // 앞 탭의 기록은 그대로다
+    expect(page.identity().eventId).toBe(records[0].eventId);
   });
 
   it("탭 번호를 받지 못하면 지금 동작과 같다(이어 쓰지 않음)", async () => {
@@ -2868,6 +2870,86 @@ describe("content.js 같은 탭에서 다시 연 영상 — 마지막 재생 후
     await page.goTo("AAAA");
 
     expect(browser.recordsOf("AAAA")).toHaveLength(2);
+  });
+});
+
+// 다른 탭이 같은 세션에 방금 기록한 영상으로 옮겨 가도 직전 영상 확정과 이 탭의 기록이 빠지지 않는다.
+// 페이지를 열 때마다 전역(document·location)이 그 페이지 것으로 바뀌므로, 다른 탭의 기록은
+// 먼저 열어 둔 탭의 recordVideo를 직접 불러 만든다(전역을 바꾸지 않는다)
+describe("content.js 다중 탭 — 다른 탭이 방금 기록한 영상으로 옮겨 갈 때", () => {
+  let browser;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-26T10:00:00Z"));
+    browser = createTabBrowser();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function recordInOtherTab(otherTab, videoId) {
+    await otherTab.api.recordVideo(
+      videoId,
+      `영상 ${videoId}`,
+      null,
+      null,
+      null,
+      false,
+      null,
+      null,
+    );
+  }
+
+  it("직전 영상의 시청 시간을 확정하고, 이 탭의 기록을 따로 남긴다", async () => {
+    const otherTab = await browser.openPage({ tabId: 7 });
+    const page = await browser.openPage({ tabId: 8, videoId: "V0" });
+    await page.play(20);
+    await recordInOtherTab(otherTab, "V1");
+
+    await page.goTo("V1");
+
+    expect(browser.recordsOf("V0")[0].watchedSeconds).toBe(20);
+    const v1 = browser.recordsOf("V1");
+    expect(v1.map((r) => r.tabId)).toEqual([7, 8]);
+    expect(page.identity().eventId).toBe(v1[1].eventId);
+  });
+
+  it("이어서 다음 영상으로 가면 이 탭의 기록에 시간이 붙고, 앞 영상과 다른 탭의 기록은 그대로다", async () => {
+    const otherTab = await browser.openPage({ tabId: 7 });
+    const page = await browser.openPage({ tabId: 8, videoId: "V0" });
+    await page.play(20);
+    await recordInOtherTab(otherTab, "V1");
+    await page.goTo("V1");
+
+    await page.play(15);
+    await page.goTo("V2");
+
+    expect(browser.recordsOf("V0")[0].watchedSeconds).toBe(20);
+    const [fromOtherTab, fromThisTab] = browser.recordsOf("V1");
+    expect(fromThisTab.watchedSeconds).toBe(15);
+    expect(fromOtherTab.watchedSeconds).toBeUndefined();
+    expect(browser.recordsOf("V2")).toHaveLength(1);
+  });
+
+  it("탭 번호를 모르면 같은 영상은 새로 기록하지 않지만, 직전 영상은 확정하고 그 뒤 시간이 거기에 다시 붙지 않는다", async () => {
+    const otherTab = await browser.openPage({ tabId: 7 });
+    const page = await browser.openPage({ videoId: "V0", tabIdFails: true });
+    await page.play(20);
+    await recordInOtherTab(otherTab, "V1");
+
+    await page.goTo("V1");
+
+    expect(browser.recordsOf("V1")).toHaveLength(1);
+    expect(browser.recordsOf("V0")[0].watchedSeconds).toBe(20);
+    expect(page.identity()).toBeNull();
+
+    await page.play(15);
+    await page.goTo("V2");
+
+    expect(browser.recordsOf("V0")[0].watchedSeconds).toBe(20);
+    expect(browser.recordsOf("V2")).toHaveLength(1);
   });
 });
 
