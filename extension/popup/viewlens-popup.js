@@ -883,9 +883,29 @@ async function markFeedbackConfirmedLocally(sessionId) {
   });
 }
 
+/**
+ * 처치 노출 기록을 background 재시도 큐에 맡긴다. 전송이 실패해도 background가 다시 보낸다.
+ * @param {{kind: string, sessionId?: string, event?: string}} event
+ * @returns {Promise<boolean>} 맡겼으면 true. false면 부른 쪽이 직접 보낸다
+ */
+async function handOffExposureEvent(event) {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "queue-exposure-event",
+      event,
+    });
+    return response?.queued === true;
+  } catch {
+    return false;
+  }
+}
+
 // 서버에 feedbackConfirmedAt 기록 — 실패해도 로컬 확인 상태(위)는 이미 반영돼 있어
-// 사용자 경험에는 영향 없고, 연구 데이터 쪽만 유실될 수 있다(다른 서버 전송들과 동일한 정책).
+// 사용자 경험에는 영향 없다. background에 맡기지 못했을 때만 한 번 직접 보낸다.
 async function postFeedbackConfirmed(sessionId) {
+  if (await handOffExposureEvent({ kind: "feedback_confirmed", sessionId })) {
+    return;
+  }
   const { serverUrl, anonymousId, participantToken } =
     await chrome.storage.local.get([
       "serverUrl",
@@ -908,8 +928,9 @@ async function postFeedbackConfirmed(sessionId) {
   }
 }
 
-// 대조군 종료 안내 모달 노출/전체 기간 리뷰 열람 이벤트 기록
+// 대조군 종료 안내 모달 노출/전체 기간 리뷰 열람 이벤트 기록. background에 맡기지 못했을 때만 직접 보낸다
 async function postStudyEndReviewEvent(event) {
+  if (await handOffExposureEvent({ kind: "study_end", event })) return;
   const { serverUrl, anonymousId, participantToken } =
     await chrome.storage.local.get([
       "serverUrl",
