@@ -165,6 +165,8 @@ describe("getPeriodReviews", () => {
     // 마지막 기간이 6/6에 끝나 FIXED_NOW(6/10)에는 종료된 것으로 판정된다.
     const ENDED_INSTALL_DATE = endedInstallDate(FIXED_NOW);
     const NOT_ENDED_INSTALL_DATE = notEndedInstallDate(FIXED_NOW);
+    // 코드 검증을 통과한 상태로 두어, 확인하려는 조건 하나만으로 막히는지 본다
+    const VERIFIED_AT = "2026-06-07T09:05:00+09:00";
 
     beforeEach(() => {
       vi.useFakeTimers();
@@ -176,14 +178,26 @@ describe("getPeriodReviews", () => {
     });
 
     it("연구 종료 전이면 리뷰가 이미 쌓여 있어도 빈 배열을 반환한다", () => {
-      insertParticipant(db, "con-not-ended", "CON", NOT_ENDED_INSTALL_DATE);
+      insertParticipant(
+        db,
+        "con-not-ended",
+        "CON",
+        NOT_ENDED_INSTALL_DATE,
+        VERIFIED_AT,
+      );
       insertReviews(db, "con-not-ended", periodIndexes());
 
       expect(getPeriodReviews(db, "con-not-ended")).toEqual([]);
     });
 
     it("종료됐지만 전체 기간 리뷰가 아직 다 생성되지 않았으면 빈 배열을 반환한다", () => {
-      insertParticipant(db, "con-incomplete", "CON", ENDED_INSTALL_DATE);
+      insertParticipant(
+        db,
+        "con-incomplete",
+        "CON",
+        ENDED_INSTALL_DATE,
+        VERIFIED_AT,
+      );
       // 마지막 기간 하나가 빠짐 — 아직 미완성
       insertReviews(db, "con-incomplete", periodIndexes(TOTAL_PERIODS - 1));
 
@@ -214,7 +228,7 @@ describe("getPeriodReviews", () => {
 
     it("periodIndex가 1을 포함하지 않으면 개수가 맞아도 잠금이 풀리지 않는다", () => {
       // 개수는 TOTAL_PERIODS지만 1구간이 없음(2..TOTAL_PERIODS+1) — 범위를 안 보면 잘못 풀리는 경우.
-      insertParticipant(db, "con-gap", "CON", ENDED_INSTALL_DATE);
+      insertParticipant(db, "con-gap", "CON", ENDED_INSTALL_DATE, VERIFIED_AT);
       insertReviews(
         db,
         "con-gap",
