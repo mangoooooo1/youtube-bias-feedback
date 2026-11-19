@@ -356,13 +356,13 @@ function vlConfirmModal({
   cancelId = "",
 } = {}) {
   return `<div style="position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:24px;background:color-mix(in oklab,var(--vl-ink) 45%,transparent)">
-    <div style="width:100%;background:var(--vl-card);border-radius:18px;padding:22px 20px 18px;box-shadow:0 24px 60px -12px rgba(0,0,0,.4);text-align:center">
+    <div role="dialog" aria-modal="true" aria-labelledby="${confirmId}-title" style="width:100%;background:var(--vl-card);border-radius:18px;padding:22px 20px 18px;box-shadow:0 24px 60px -12px rgba(0,0,0,.4);text-align:center">
       ${
         icon
           ? `<div style="width:44px;height:44px;margin:0 auto;display:grid;place-items:center">${icon}</div>`
           : ""
       }
-      <div style="margin-top:${icon ? 12 : 0}px;font-size:var(--vl-fs-4);font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${title}</div>
+      <div id="${confirmId}-title" style="margin-top:${icon ? 12 : 0}px;font-size:var(--vl-fs-4);font-weight:800;color:var(--vl-ink);letter-spacing:-0.02em">${title}</div>
       <p style="margin:7px 0 0;font-size:var(--vl-fs-2);line-height:1.6;color:var(--vl-ink-2);text-wrap:pretty;word-break:keep-all">${message}</p>
       <div style="margin-top:16px;display:flex;flex-direction:column;gap:6px">
         <button id="${confirmId}" class="vl-press" style="padding:11px;border:none;border-radius:12px;background:var(--vl-accent);color:var(--vl-on-accent);font-size:var(--vl-fs-3);font-weight:700;cursor:pointer;font-family:inherit">${confirmLabel}</button>
