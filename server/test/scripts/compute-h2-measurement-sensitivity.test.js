@@ -10,6 +10,7 @@ import {
   main,
 } from "../../scripts/compute-h2-measurement-sensitivity.js";
 import { aggregateViewing } from "../../pipeline/viewing-aggregate.js";
+import { TOTAL_PERIODS, periodDay } from "../study-schedule-fixtures.js";
 
 const entry = (categoryId, watchedSeconds, durationSeconds = 100) => ({
   categoryId,
@@ -96,7 +97,10 @@ describe("run — DB 조회", () => {
   it("완료된 기간마다 행을 만들고 영상에 길이를 붙여 판정한다", () => {
     const { rows } = run(db, {
       groups: ["EXP", "CON"],
-      now: new Date("2026-09-10T12:00:00+09:00"),
+      // 3구간 둘째 날이면 1·2구간만 끝났다
+      now: new Date(
+        `${periodDay("2026-08-31T15:00:00.000Z", 3, 1)}T12:00:00+09:00`,
+      ),
     });
     expect(rows.map((r) => r.periodIndex)).toEqual([1, 2]);
     // 길이 100초 중 20초 → 25% 기준은 무효, 10% 기준은 유효
@@ -139,9 +143,9 @@ describe("main — 암호화 DB 파일로 실행", () => {
     });
     const report = JSON.parse(fs.readFileSync(outPath, "utf8"));
     expect(report.groups).toEqual(["EXP", "CON"]);
-    expect(report.rows).toHaveLength(3);
+    expect(report.rows).toHaveLength(TOTAL_PERIODS);
     expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining("참여자 1명, 기간 3행"),
+      expect.stringContaining(`참여자 1명, 기간 ${TOTAL_PERIODS}행`),
     );
   });
 

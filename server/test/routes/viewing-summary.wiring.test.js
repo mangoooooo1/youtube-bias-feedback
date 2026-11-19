@@ -6,6 +6,11 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {
+  BASELINE_DAYS,
+  DAYS_PER_PERIOD,
+} from "../../pipeline/study-constants.js";
+import { kstDay, kstMidnight } from "../study-schedule-fixtures.js";
 
 // 실제 server/routes/viewing-summary.js와 db.js를 그대로 로드해 배선·자격·응답 형태를 검증한다.
 const require = createRequire(import.meta.url);
@@ -38,6 +43,13 @@ const app = buildApp();
 
 const DAY_MS = 86400000;
 const kstDate = (d) => d.toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
+
+// 3/5가 항상 2구간 첫날이 되도록 설치일을 거꾸로 잡는다(DAYS_PER_PERIOD가 2 이상이면 3/6도 2구간)
+const PERIOD2_START = "2026-03-05";
+const PERIOD2_INSTALL = kstMidnight(
+  `${PERIOD2_START}T00:00:00+09:00`,
+  -DAYS_PER_PERIOD,
+);
 
 function addParticipant(anonymousId, group, installDate, extra = {}) {
   db.prepare(
@@ -77,7 +89,9 @@ beforeEach(() => {
 
 describe("POST /api/viewing-summary — 배선·자격", () => {
   it("자격 있는 참여자(베이스라인 이후 EXP)는 날짜별·구간별 집계를 받는다", async () => {
-    const installDate = new Date(Date.now() - 6 * DAY_MS).toISOString();
+    const installDate = new Date(
+      Date.now() - (BASELINE_DAYS + 2) * DAY_MS,
+    ).toISOString();
     addParticipant("exp-eligible", "EXP", installDate);
     addVideo("exp-eligible", { watchedAt: new Date().toISOString() });
 
@@ -255,8 +269,8 @@ describe("POST /api/viewing-summary — PARTICIPANT_TOKEN_SECRET 설정 시 소�
 });
 
 describe("getViewingSummary — 날짜·구간 나눔과 화면용 값", () => {
-  // 설치 2026-03-01 KST, 4일 구간(study-constants) → 1구간 3/1~3/4, 2구간 3/5~3/8, 3구간 3/9~3/12
-  const INSTALL = "2026-03-01T00:00:00+09:00";
+  // 1구간은 설치일~3/4, 2구간은 3/5부터 DAYS_PER_PERIOD일
+  const INSTALL = PERIOD2_INSTALL;
   const NOW = new Date("2026-03-06T12:00:00+09:00");
 
   it("영상을 본 시각(KST) 기준으로 날짜를 나누고, 시작된 구간까지만 돌려준다", () => {
@@ -272,10 +286,10 @@ describe("getViewingSummary — 날짜·구간 나눔과 화면용 값", () => {
     expect(days.map((d) => d.date)).toEqual(["2026-03-04", "2026-03-05"]);
     expect(days[0].countDistribution).toEqual({ 음악: 1 });
     expect(days[1].countDistribution).toEqual({ 게임: 1 });
-    // 3구간(3/9 시작)은 아직 시작 전이라 없다
+    // 3구간은 아직 시작 전이라 없다
     expect(periods.map((p) => [p.periodIndex, p.start, p.end])).toEqual([
-      [1, "2026-03-01", "2026-03-04"],
-      [2, "2026-03-05", "2026-03-08"],
+      [1, kstDay(INSTALL, 0), "2026-03-04"],
+      [2, PERIOD2_START, kstDay(PERIOD2_START, DAYS_PER_PERIOD - 1)],
     ]);
     expect(periods[0].countDistribution).toEqual({ 음악: 1 });
     expect(periods[1].countDistribution).toEqual({ 게임: 1 });
@@ -621,7 +635,7 @@ describe("getDayVideos — 날짜 하나의 영상 목록", () => {
 });
 
 describe("멈췄다 이어 본 기록 — 팝업 집계·날짜별 개수·그날 목록에서 한 시청으로 센다", () => {
-  const INSTALL = "2026-03-01T00:00:00+09:00";
+  const INSTALL = PERIOD2_INSTALL;
   const NOW = new Date("2026-03-06T12:00:00+09:00");
 
   // 같은 영상을 같은 탭에서 멈췄다 다시 재생해 두 기록으로 나뉜 경우. 조각마다 20초라 따로 보면 잠깐 본 영상이다

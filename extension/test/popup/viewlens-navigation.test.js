@@ -320,12 +320,15 @@ describe("오늘 리뷰 — 기기에 리뷰를 받은 세션이 없을 때", ()
 });
 
 describe("기간 탭", () => {
-  // 2구간 진행 중, 2구간에 분야 4개 → 상위 3개 + "그 밖" 범례
+  // 기준선 바로 다음 구간(지금 진행 중인 구간) 번호
+  const currentWeek = () => BASELINE_DAYS / DAYS_PER_PERIOD + 1;
+
+  // 기준선 다음 구간 진행 중, 그 구간에 분야 4개 → 상위 3개 + "그 밖" 범례
   async function bootFeedbackTab() {
     const installDate = daysAgo(BASELINE_DAYS + 1);
-    const firstDay = Date.parse(installDate) + DAYS_PER_PERIOD * DAY;
+    const firstDay = Date.parse(installDate) + BASELINE_DAYS * DAY;
     const period = {
-      periodIndex: 2,
+      periodIndex: currentWeek(),
       start: kst(firstDay),
       end: kst(firstDay + (DAYS_PER_PERIOD - 1) * DAY),
       timeDistribution: { 뉴스: 0.4, 게임: 0.3, 음악: 0.2, 교육: 0.1 },
@@ -368,14 +371,15 @@ describe("기간 탭", () => {
     return root;
   }
 
-  it("2구간 진행 중이면 2구간으로 열리고, 1구간 버튼을 누르면 1구간을 보여 준다", async () => {
+  it("진행 중인 구간으로 열리고, 직전 구간 버튼을 누르면 직전 구간을 보여 준다", async () => {
     const { root } = await bootFeedbackTab();
     const { VL } = globalThis;
-    expect(selectedWeek(root)).toBe("2");
+    const prev = currentWeek() - 1;
+    expect(selectedWeek(root)).toBe(String(currentWeek()));
 
-    click(root, '#vl-week-btns [data-week="1"]');
-    expect(selectedWeek(root)).toBe("1");
-    expect(root.textContent).toContain(VL.weeks[0].range);
+    click(root, `#vl-week-btns [data-week="${prev}"]`);
+    expect(selectedWeek(root)).toBe(String(prev));
+    expect(root.textContent).toContain(VL.weeks[prev - 1].range);
   });
 
   it("1구간 진행 중이면 1구간으로 열린다", async () => {
@@ -400,19 +404,21 @@ describe("기간 탭", () => {
   it("지난 기간 버튼을 누르면 그 기간을 보여 주고 강조를 푼다. 아직 안 온 기간은 누를 수 없다", async () => {
     const { root } = await bootFeedbackTab();
     const { VL } = globalThis;
+    const prev = currentWeek() - 1;
     click(root, '[data-legend-key="뉴스"]');
 
-    click(root, '#vl-week-btns [data-week="1"]');
-    expect(root.textContent).toContain(VL.weeks[0].range);
+    click(root, `#vl-week-btns [data-week="${prev}"]`);
+    expect(root.textContent).toContain(VL.weeks[prev - 1].range);
     expect(root.querySelector("#vl-period-legend")).toBeNull();
 
-    click(root, '#vl-week-btns [data-week="2"]');
+    click(root, `#vl-week-btns [data-week="${currentWeek()}"]`);
     expect(pressed(root)).toEqual([]);
 
-    const future = root.querySelector(
+    // 마지막 구간은 아직 오지 않았으면 잠기고, 지금 진행 중인 구간이면 누를 수 있다
+    const last = root.querySelector(
       `#vl-week-btns [data-week="${VL.TOTAL_WEEKS}"]`,
     );
-    expect(future.disabled).toBe(true);
+    expect(last.disabled).toBe(currentWeek() < VL.TOTAL_WEEKS);
   });
 
   it("기간 버튼을 누르면 밑줄이 이전 기간 위치에서 새 기간으로 미끄러진다", async () => {
@@ -425,10 +431,11 @@ describe("기간 탭", () => {
         return { left: week * 60 };
       });
     try {
-      click(root, '#vl-week-btns [data-week="1"]');
+      const prev = currentWeek() - 1;
+      click(root, `#vl-week-btns [data-week="${prev}"]`);
       const indicator = root.querySelector("#vl-period-indicator");
-      expect(indicator.closest("[data-week]").dataset.week).toBe("1");
-      // 1구간 밑줄을 2구간 자리(+60px)에 두었다가
+      expect(indicator.closest("[data-week]").dataset.week).toBe(String(prev));
+      // 직전 구간 밑줄을 진행 중인 구간 자리(+60px)에 두었다가
       expect(indicator.style.transform).toContain("translateX(60px)");
       // 다음 프레임에 제자리로 옮긴다
       runFrames();
@@ -467,16 +474,18 @@ describe("설치 일차 — KST 달력 기준", () => {
     expect(root.textContent).toContain("1일 뒤부터 나만의 시청 분석");
   });
 
-  it("2구간 첫날이면 기간 탭이 2구간으로 열린다", async () => {
+  it("기준선 다음 구간 첫날이면 기간 탭이 그 구간으로 열린다", async () => {
     const { root } = await boot(
       participant({
         group: "EXP",
-        installDate: installBeforeMidnight(DAYS_PER_PERIOD - 1),
+        installDate: installBeforeMidnight(BASELINE_DAYS - 1),
       }),
     );
     click(root, '[data-tab="feedback"]');
     const indicator = root.querySelector("#vl-period-indicator");
-    expect(indicator.closest("[data-week]").dataset.week).toBe("2");
+    expect(indicator.closest("[data-week]").dataset.week).toBe(
+      String(BASELINE_DAYS / DAYS_PER_PERIOD + 1),
+    );
   });
 });
 
@@ -662,8 +671,11 @@ describe("참여 기간이 끝난 뒤 — 머리말과 하루 탭", () => {
     expect(root.querySelector("#vl-study-end-code-input")).not.toBeNull();
   });
 
+  // 종료 안내는 헤더 배지의 툴팁 문구로 보인다
   const banner = (root) =>
-    root.querySelector("#vl-participation-ended-banner")?.textContent ?? null;
+    root
+      .querySelector("#vl-participation-ended-banner")
+      ?.getAttribute("data-tip") ?? null;
 
   it.each(["EXP", "CON"])(
     "%s: 연구 중에는 종료 안내 배너가 없다",
@@ -703,7 +715,6 @@ describe("참여 기간이 끝난 뒤 — 머리말과 하루 탭", () => {
         participant({ installDate: INSTALL, ...over }),
         { now: COLLECTION_ENDS_AT() + hoursAfter * 3600000 },
       );
-      expect(banner(root)).toContain("참여 기간이 끝났어요.");
       expect(banner(root)).toContain(nextStep);
     },
   );
@@ -716,7 +727,7 @@ describe("참여 기간이 끝난 뒤 — 머리말과 하루 탭", () => {
     ["코드 입력 전", false, "가 준비됐어요", "#vl-study-end-code-input"],
     ["코드 확인 후", true, " 다시 보기", "[data-tab]"],
   ])(
-    "대조군(%s): 리뷰 화면에서는 배너 대신 머리말 아래에 홈으로 줄을 두고, 홈으로 돌아오면 배너가 다시 보인다",
+    "대조군(%s): 리뷰 화면에서는 머리말 아래에 홈으로 줄을 두고, 종료 안내 배지는 그대로 남는다",
     async (_label, verified, ctaSuffix, screenSelector) => {
       const { root } = await bootReady(
         participant({
@@ -732,7 +743,7 @@ describe("참여 기간이 끝난 뒤 — 머리말과 하루 탭", () => {
 
       click(root, "#vl-study-end-cta");
       expect(root.querySelector(screenSelector)).not.toBeNull();
-      expect(banner(root)).toBeNull();
+      expect(banner(root)).not.toBeNull();
       expect(backRowUnderHeader(root)).not.toBeNull();
 
       click(root, "#vl-study-end-back");

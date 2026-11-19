@@ -14,9 +14,12 @@ import {
   DEFAULT_THRESHOLD_DAYS,
 } from "../../scripts/participant-silence-report.js";
 import { formatMetric } from "../../monitoring/dogstatsd.js";
+import { TOTAL_DAYS } from "../../pipeline/study-constants.js";
+import { kstDay } from "../study-schedule-fixtures.js";
 
 const DAY = 24 * 60 * 60 * 1000;
-const TOTAL_DAYS = 12; // server/pipeline/study-constants.js의 값과 동일
+// 임계값 판정만 보는 테스트는 연구 종료에 걸리지 않게 연구 기간을 넉넉히 준다
+const LONG_STUDY_DAYS = 30;
 
 function sha10(value) {
   return crypto
@@ -29,7 +32,9 @@ function sha10(value) {
 describe("evaluateParticipantSilence — 연구 종료는 확장의 수집 종료 시점", () => {
   // 22:00 KST 설치 → 확장은 TOTAL_DAYS번째 날 다음 날 00:00 KST에 수집을 멈춘다
   const installDateMs = Date.parse("2026-09-01T22:00:00+09:00");
-  const collectionEndsAt = Date.parse("2026-09-13T00:00:00+09:00");
+  const collectionEndsAt = Date.parse(
+    `${kstDay("2026-09-01T22:00:00+09:00", TOTAL_DAYS)}T00:00:00+09:00`,
+  );
 
   it("수집이 멈춘 순간부터는 조용해도 정상(study_ended)으로 본다", () => {
     const result = evaluateParticipantSilence({
@@ -129,6 +134,7 @@ describe("evaluateParticipantSilence — 순수 판정 로직", () => {
       now,
       installDateMs: now - 6 * DAY,
       lastActivityMs: now - 4.5 * DAY,
+      totalDays: LONG_STUDY_DAYS,
       thresholdDays: 4,
     });
     expect(result).toMatchObject({ flagged: true, newlyFlagged: true });
@@ -140,6 +146,7 @@ describe("evaluateParticipantSilence — 순수 판정 로직", () => {
       now,
       installDateMs: now - 8 * DAY,
       lastActivityMs: now - 5 * DAY, // 정확히 4 + 1일 → 신규 아님(<)
+      totalDays: LONG_STUDY_DAYS,
       thresholdDays: 4,
     });
     expect(result).toMatchObject({ flagged: true, newlyFlagged: false });
@@ -152,6 +159,7 @@ describe("evaluateParticipantSilence — 순수 판정 로직", () => {
         now: d * DAY,
         installDateMs: -1 * DAY,
         lastActivityMs,
+        totalDays: LONG_STUDY_DAYS,
         thresholdDays: 4,
       }),
     );
@@ -165,6 +173,7 @@ describe("evaluateParticipantSilence — 순수 판정 로직", () => {
       now,
       installDateMs: now - 4.2 * DAY,
       lastActivityMs: null,
+      totalDays: LONG_STUDY_DAYS,
       thresholdDays: 4,
     });
     expect(result).toMatchObject({
@@ -374,20 +383,21 @@ describe("run", () => {
 
   it("이번 실행에서 처음 임계값을 넘은 참여자만 신규로 세고 로그에 표시한다", () => {
     const now = Date.now();
+    // run()은 실제 연구 기간으로 종료를 판정하므로 짧은 일정(6일)에서도 연구 중이도록 날짜를 잡는다
     insertParticipant(db, {
       anonymousId: "new-silent",
       groupCode: "EXP",
-      installDate: new Date(now - 6 * DAY).toISOString(),
+      installDate: new Date(now - 3 * DAY).toISOString(),
     });
-    insertVideoEvent(db, "new-silent", new Date(now - 4.5 * DAY).toISOString());
+    insertVideoEvent(db, "new-silent", new Date(now - 2.5 * DAY).toISOString());
     insertParticipant(db, {
       anonymousId: "old-silent",
       groupCode: "EXP",
-      installDate: new Date(now - 8 * DAY).toISOString(),
+      installDate: new Date(now - 4 * DAY).toISOString(),
     });
-    insertVideoEvent(db, "old-silent", new Date(now - 6 * DAY).toISOString());
+    insertVideoEvent(db, "old-silent", new Date(now - 3.5 * DAY).toISOString());
 
-    const result = run(db, { now, thresholdDays: 4 });
+    const result = run(db, { now, thresholdDays: 2 });
 
     expect(result).toMatchObject({ flaggedCount: 2, newCount: 1 });
     expect(loggedOutput().match(/신규\(이번 실행/g)).toHaveLength(1);

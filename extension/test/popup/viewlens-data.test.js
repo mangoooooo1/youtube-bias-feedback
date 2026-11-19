@@ -467,7 +467,7 @@ describe("VL.playedVideos — 그날 재생한 영상 목록", () => {
 
     expect(list.map((x) => [x.eventId, x.mark])).toEqual([
       ["short", "거의 안 봄"],
-      ["uncat", "분야 미확인"],
+      ["uncat", "카테고리 미확인"],
       ["pending", "확인 중"],
       ["local-null", "확인 중"],
       ["ok", null],

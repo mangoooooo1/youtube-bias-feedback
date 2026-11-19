@@ -171,7 +171,7 @@ function kstDate(date) {
 // 서버가 영상별로 알려 준 "그래프에서 뺀 사유" → 목록 표시
 const PLAYED_VIDEO_MARKS = {
   short: "거의 안 봄",
-  uncategorized: "분야 미확인",
+  uncategorized: "카테고리 미확인",
   pending_time: "확인 중",
   unconfirmed: "시청 시간 미확인",
 };
@@ -434,32 +434,9 @@ const today = {
   }),
 };
 
-const weeks = [
-  {
-    week: 1,
-    label: "1주차",
-    range: "6/1 – 6/7",
-    review:
-      "첫 주 동안의 시청 습관을 기준선으로 담아 두었어요. 게임이 절반 가까이를 차지했지만, 이건 평가가 아니라 출발점이에요. 다음 주부터 어떤 변화가 생기는지 저와 함께 천천히 지켜봐요.",
-  },
-  {
-    week: 2,
-    label: "2주차",
-    range: "6/8 – 6/14",
-    review:
-      "베이스라인 기간의 두 번째 주예요. 교육과 과학·기술 영상이 조금 늘었지만, 이 시기는 평가가 아니라 계속 기준선을 담아 두는 과정이에요.",
-  },
-  {
-    week: 3,
-    label: "3주차",
-    range: "6/15 – 6/21",
-    review:
-      "3주 동안 정말 꾸준히 해오셨어요. 시청 다양성이 기준선보다 눈에 띄게 높아졌고, 어느 한 카테고리에 치우치지 않는 균형이 보여요. 지금의 리듬을 가볍게 이어가시면 충분해요.",
-  },
-];
-// 총 실험 기간 12일(베이스라인 4일 + 4일씩 2개 기간)
+// 총 실험 일수(server/pipeline/study-constants.js와 같아야 한다)
 const TOTAL_DAYS = 12;
-// 탭을 며칠 단위로 나눌지 — 4일 단위로 기간을 구분한다.
+// 기간 탭 하나의 일수
 const DAYS_PER_PERIOD = 4;
 const TOTAL_WEEKS = Math.ceil(TOTAL_DAYS / DAYS_PER_PERIOD);
 
@@ -474,11 +451,25 @@ function periodLabel(n) {
   return `${n}구간`;
 }
 
+// Studio 미리보기용 기간 예시(실제 팝업은 buildWeeksData()로 덮어쓴다). 예시 시작일은 6/1
+const weeks = Array.from({ length: TOTAL_WEEKS }, (_, i) => {
+  const week = i + 1;
+  const md = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+  const start = new Date(2026, 5, 1 + i * DAYS_PER_PERIOD);
+  const end = new Date(2026, 5, week * DAYS_PER_PERIOD);
+  const baseline = week * DAYS_PER_PERIOD <= ViewLensStudy.BASELINE_DAYS;
+  return {
+    week,
+    label: periodLabel(week),
+    range: `${md(start)} – ${md(end)}`,
+    review: baseline
+      ? "이 기간의 시청 습관을 기준선으로 담아 두었어요. 게임이 절반 가까이를 차지했지만, 이건 평가가 아니라 출발점이에요."
+      : "꾸준히 해오셨어요. 시청 다양성이 기준선보다 눈에 띄게 높아졌고, 어느 한 카테고리에 치우치지 않는 균형이 보여요. 지금의 리듬을 가볍게 이어가시면 충분해요.",
+  };
+});
+
 // Studio "실험 시점" 프리셋 — TOTAL_DAYS/DAYS_PER_PERIOD로부터 매 기간의 "진행 중"/"종료"
-// 체크포인트를 동적으로 생성한다. 예전엔 이걸 12개 통째로 하드코딩해뒀는데, 본조사(42일)
-// 기준값이라 파일럿(6일)으로 바꿀 때마다 따로 손대야 했다(실제 화면엔 영향 없지만 Studio
-// 프리뷰만 안 맞는 문제). 실제 화면 상수를 그대로 따라가게 만들어
-// 이 동기화 문제 자체를 없앤다.
+// 체크포인트를 동적으로 생성한다. 상수가 바뀌어도 Studio 프리뷰가 실제 화면과 어긋나지 않게 한다.
 function buildTimeline() {
   const entries = {};
   for (let p = 1; p <= TOTAL_WEEKS; p++) {

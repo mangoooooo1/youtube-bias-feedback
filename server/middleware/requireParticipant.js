@@ -48,9 +48,9 @@ function checkParticipant(db, secret, anonymousId, token) {
 }
 
 /**
- * Express 미들웨어. req.body의 anonymousId/participantToken을 확인해 등록된 참여자만,
- * PARTICIPANT_TOKEN_SECRET이 설정돼 있고 토큰까지 왔다면 그 토큰이 유효한 소유자인지까지
- * 확인한다. 실패 시 fail() 응답을 직접 보내고 next()를 호출하지 않는다.
+ * Express 미들웨어. req.body의 anonymousId/participantToken을 확인해 등록된 참여자만 통과시킨다.
+ * PARTICIPANT_TOKEN_SECRET이 설정돼 있으면 토큰이 있고 유효해야 통과한다(없으면 거부).
+ * 실패 시 fail() 응답을 직접 보내고 next()를 호출하지 않는다.
  *
  * 통과 시 req.body.anonymousId를 정규화된 값으로 덮어쓴다 — 그래야 이 미들웨어 뒤에 오는
  * 라우트 핸들러가 req.body.anonymousId를 다시 꺼내 자체 DB 조회(recordFeedbackTimestamp,

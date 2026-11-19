@@ -1,5 +1,13 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterEach,
+  vi,
+} from "vitest";
 import { loadPopup } from "./load-popup.js";
 import {
   SERVER,
@@ -14,11 +22,11 @@ import {
 
 // 팝업을 열면 boot()가 저장소 상태를 읽어 화면을 고르고 서버 요청을 보낸다.
 // 저장소·서버를 가짜로 두고 실제 팝업 파일을 불러와, 상태별로 화면과 요청이 맞는지 확인한다.
-let BASELINE_DAYS, TOTAL_DAYS, END_GRACE_DAYS;
+let BASELINE_DAYS, TOTAL_DAYS, DAYS_PER_PERIOD, END_GRACE_DAYS;
 
 beforeAll(async () => {
   const g = await loadPopup();
-  ({ BASELINE_DAYS, TOTAL_DAYS } = g.VL);
+  ({ BASELINE_DAYS, TOTAL_DAYS, DAYS_PER_PERIOD } = g.VL);
   ({ END_GRACE_DAYS } = g.ViewLensStudy);
   vi.unstubAllGlobals();
 });
@@ -321,7 +329,13 @@ describe("boot — 홈 시청 영상 수", () => {
 // 서버는 끝난 구간의 리뷰를 매일 04:00 KST에 만든다. 그 전에 연 팝업이 "리뷰 없음"을 오늘 캐시로
 // 남겨도, 끝난 구간의 리뷰가 빠져 있으면 다시 물어 같은 날 리뷰가 보이게 한다.
 describe("boot — 기간 리뷰 캐시", () => {
-  const DAYS_PER_PERIOD = 4;
+  // 캐시·설치일을 만들 때부터 boot()가 끝날 때까지 같은 시각을 써서 KST 자정을 넘기지 않게 한다
+  // (시계 복원은 cleanupPopup이 한다)
+  const NOW = Date.parse("2026-06-10T12:00:00+09:00");
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
   const todayKst = () =>
     new Date().toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
   const cache = (reviews) => ({
@@ -329,11 +343,21 @@ describe("boot — 기간 리뷰 캐시", () => {
     dateStr: todayKst(),
     reviews,
   });
-  const review1 = { periodIndex: 1, review: "1구간 리뷰" };
+  // 기준선이 끝난 다음 날 설치 기준 — 실험군 피드백이 열리고, 기준선 구간들이 끝나 있다
+  const afterBaseline = () => daysAgo(BASELINE_DAYS + 1);
+  // 끝난 구간 전부의 리뷰. last를 주면 마지막 구간 리뷰를 그것으로 바꾼다
+  const endedReviews = (last) => {
+    const count = BASELINE_DAYS / DAYS_PER_PERIOD;
+    return Array.from({ length: count }, (_, i) =>
+      i === count - 1 && last
+        ? { ...last, periodIndex: count }
+        : { periodIndex: i + 1, review: `${i + 1}구간 리뷰` },
+    );
+  };
 
   // 기간 리뷰 조회는 첫 화면을 그리기 전에 끝나므로, 화면이 그려지면 조회 여부가 정해진 것이다
   async function bootWithCache(over, responses) {
-    const booted = await bootPopup(participant(over), { responses });
+    const booted = await bootPopup(participant(over), { responses, now: NOW });
     await vi.waitFor(() =>
       expect(booted.root.textContent.length).toBeGreaterThan(0),
     );
@@ -344,14 +368,14 @@ describe("boot — 기간 리뷰 캐시", () => {
     const { data, server } = await bootWithCache(
       {
         group: "EXP",
-        installDate: daysAgo(DAYS_PER_PERIOD + 1),
+        installDate: afterBaseline(),
         periodReviewsCache: cache([]),
       },
-      { "/api/period-reviews": { data: [review1] } },
+      { "/api/period-reviews": { data: endedReviews() } },
     );
 
     await vi.waitFor(() =>
-      expect(data.periodReviewsCache.reviews).toEqual([review1]),
+      expect(data.periodReviewsCache.reviews).toEqual(endedReviews()),
     );
     expect(server.count("/api/period-reviews")).toBe(1);
   });
@@ -359,8 +383,8 @@ describe("boot — 기간 리뷰 캐시", () => {
   it("끝난 구간의 리뷰가 모두 있는 오늘 캐시면 서버에 묻지 않는다", async () => {
     const { root, server } = await bootWithCache({
       group: "EXP",
-      installDate: daysAgo(DAYS_PER_PERIOD + 1),
-      periodReviewsCache: cache([review1]),
+      installDate: afterBaseline(),
+      periodReviewsCache: cache(endedReviews()),
     });
 
     expect(hasFeedbackTabs(root)).toBe(true);
@@ -372,8 +396,8 @@ describe("boot — 기간 리뷰 캐시", () => {
     new Date(Date.now() - n * 86400000).toLocaleDateString("sv", {
       timeZone: "Asia/Seoul",
     });
-  const fallback1 = (periodEnd) => ({
-    periodIndex: 1,
+  // 마지막 끝난 구간의 fallback 리뷰(periodIndex는 endedReviews가 채운다)
+  const fallback = (periodEnd) => ({
     periodEnd,
     review: "고정 문구",
     source: "fallback",
@@ -381,21 +405,21 @@ describe("boot — 기간 리뷰 캐시", () => {
 
   it("재시도 중인 fallback 리뷰가 있는 오늘 캐시면 다시 묻고, 정상 리뷰로 바뀌었으면 캐시를 바꾼다", async () => {
     const llm1 = {
-      ...fallback1(kstDaysAgo(2)),
+      ...fallback(kstDaysAgo(2)),
       review: "정상 리뷰",
       source: "llm",
     };
     const { data, server } = await bootWithCache(
       {
         group: "EXP",
-        installDate: daysAgo(DAYS_PER_PERIOD + 1),
-        periodReviewsCache: cache([fallback1(kstDaysAgo(2))]),
+        installDate: afterBaseline(),
+        periodReviewsCache: cache(endedReviews(fallback(kstDaysAgo(2)))),
       },
-      { "/api/period-reviews": { data: [llm1] } },
+      { "/api/period-reviews": { data: endedReviews(llm1) } },
     );
 
     await vi.waitFor(() =>
-      expect(data.periodReviewsCache.reviews).toEqual([llm1]),
+      expect(data.periodReviewsCache.reviews).toEqual(endedReviews(llm1)),
     );
     expect(server.count("/api/period-reviews")).toBe(1);
   });
@@ -403,8 +427,8 @@ describe("boot — 기간 리뷰 캐시", () => {
   it("구간이 끝난 지 재시도 일수째인 날까지는 다시 묻는다(서버도 그날까지 재시도)", async () => {
     const { server } = await bootWithCache({
       group: "EXP",
-      installDate: daysAgo(DAYS_PER_PERIOD + 1),
-      periodReviewsCache: cache([fallback1(kstDaysAgo(3))]),
+      installDate: afterBaseline(),
+      periodReviewsCache: cache(endedReviews(fallback(kstDaysAgo(3)))),
     });
 
     await vi.waitFor(() => expect(server.count("/api/period-reviews")).toBe(1));
@@ -413,8 +437,8 @@ describe("boot — 기간 리뷰 캐시", () => {
   it("재시도 기간이 지난 fallback 리뷰만 있는 오늘 캐시면 다시 묻지 않는다", async () => {
     const { server } = await bootWithCache({
       group: "EXP",
-      installDate: daysAgo(DAYS_PER_PERIOD + 1),
-      periodReviewsCache: cache([fallback1(kstDaysAgo(4))]),
+      installDate: afterBaseline(),
+      periodReviewsCache: cache(endedReviews(fallback(kstDaysAgo(4)))),
     });
 
     expect(server.count("/api/period-reviews")).toBe(0);
@@ -434,7 +458,7 @@ describe("boot — 기간 리뷰 캐시", () => {
     const { root, data, server } = await bootWithCache(
       {
         group: "EXP",
-        installDate: daysAgo(DAYS_PER_PERIOD + 1),
+        installDate: afterBaseline(),
         periodReviewsCache: cache([]),
       },
       { "/api/period-reviews": () => ({ status: 500, body: {} }) },
@@ -449,12 +473,13 @@ describe("boot — 기간 리뷰 캐시", () => {
     const { root, data } = await bootPopup(
       participant({
         group: "EXP",
-        installDate: daysAgo(DAYS_PER_PERIOD + 1),
+        installDate: afterBaseline(),
         periodReviewsCache: cache([]),
       }),
       {
-        responses: { "/api/period-reviews": { data: [review1] } },
+        responses: { "/api/period-reviews": { data: endedReviews() } },
         failSet: (obj) => "periodReviewsCache" in obj,
+        now: NOW,
       },
     );
 
@@ -466,10 +491,10 @@ describe("boot — 기간 리뷰 캐시", () => {
     const { root, data, server } = await bootWithCache(
       {
         group: "CON",
-        installDate: daysAgo(DAYS_PER_PERIOD + 1),
+        installDate: afterBaseline(),
         periodReviewsCache: cache([]),
       },
-      { "/api/period-reviews": { data: [review1] } },
+      { "/api/period-reviews": { data: endedReviews() } },
     );
 
     expect(hasHome(root)).toBe(true);

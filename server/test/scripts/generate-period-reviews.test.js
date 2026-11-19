@@ -1,6 +1,24 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import Database from "better-sqlite3-multiple-ciphers";
 import { run, shouldFail } from "../../scripts/generate-period-reviews.js";
+import {
+  TOTAL_DAYS,
+  DAYS_PER_PERIOD,
+  FALLBACK_RETRY_WINDOW_DAYS,
+  minValidVideosForPeriod,
+} from "../../pipeline/study-constants.js";
+import {
+  TOTAL_PERIODS,
+  periodIndexes,
+  kstDay,
+  periodDay,
+} from "../study-schedule-fixtures.js";
+
+// 기간 리뷰가 "영상이 적다"고 보지 않는 최소 개수
+const ENOUGH_VIDEOS = minValidVideosForPeriod(DAYS_PER_PERIOD);
+/** p구간 offsetDays일째의 KST 시각(ISO) */
+const periodDayAt = (p, offsetDays, time) =>
+  `${periodDay(INSTALL_DATE, p, offsetDays)}T${time}+09:00`;
 
 function createTestDb() {
   const db = new Database(":memory:");
@@ -97,10 +115,11 @@ function insertWatchedVideo(db, anonymousId, watchedAt) {
   ).run(anonymousId, watchedAt);
 }
 
-// 설치일로부터 이미 12일이 지난 것으로 고정 — 현재 구성(DAYS_PER_PERIOD=4, TOTAL_DAYS=12)
-// 기준으로 3개 기간(베이스라인 1구간 + 일반 2구간) 전부 완료 대상이 된다.
+// 설치일로부터 TOTAL_DAYS일이 지난 다음 날로 고정 — 모든 기간(TOTAL_PERIODS)이 완료 대상이 된다.
 const INSTALL_DATE = "2026-06-01T00:00:00+09:00";
-const FIXED_NOW = new Date("2026-06-13T10:00:00+09:00");
+const FIXED_NOW = new Date(
+  `${kstDay(INSTALL_DATE, TOTAL_DAYS)}T10:00:00+09:00`,
+);
 
 describe("generate-period-reviews.js — run()", () => {
   let db;
@@ -119,7 +138,7 @@ describe("generate-period-reviews.js — run()", () => {
     vi.restoreAllMocks();
   });
 
-  it("대조군(CON, TEST-CON)도 실험군과 동일하게 처리 대상에 포함된다 (Story 10-10 사전 생성)", async () => {
+  it("대조군(CON, TEST-CON)도 실험군과 동일하게 처리 대상에 포함된다", async () => {
     db.prepare(
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'CON', ?)",
     ).run("con-user", INSTALL_DATE);
@@ -136,7 +155,7 @@ describe("generate-period-reviews.js — run()", () => {
           "SELECT * FROM period_reviews WHERE anonymousId = ? ORDER BY periodIndex",
         )
         .all(anonymousId);
-      expect(rows.length).toBe(3); // 1~3구간 — EXP와 동일하게 전부 생성됨
+      expect(rows.length).toBe(TOTAL_PERIODS); // EXP와 동일하게 전 기간 생성됨
       expect(rows.every((r) => r.source === "fallback")).toBe(true);
     }
     // 세션이 없는 케이스라 Gemini 호출은 여전히 생략된다(기존 fallback 경로 재사용).
@@ -156,7 +175,7 @@ describe("generate-period-reviews.js — run()", () => {
         "SELECT * FROM period_reviews WHERE anonymousId = ? ORDER BY periodIndex",
       )
       .all("empty-user");
-    expect(rows.length).toBe(3); // 1~3일차
+    expect(rows.length).toBe(TOTAL_PERIODS);
     expect(rows.every((r) => r.source === "fallback")).toBe(true);
     expect(
       rows.every((r) => r.review.includes("분석할 시청 기록이 없어요")),
@@ -167,7 +186,7 @@ describe("generate-period-reviews.js — run()", () => {
     // 참여자가 그 기간에 안 본 것뿐이라 실패로 볼 이유가 없다(shouldFail 참고).
     expect(summary).toEqual({
       created: 0,
-      fallback: 3,
+      fallback: TOTAL_PERIODS,
       llmFailures: 0,
       skipped: 0,
     });
@@ -466,7 +485,10 @@ describe("generate-period-reviews.js — run()", () => {
   describe("직전 구간 비교", () => {
     const userId = "compare-user";
 
-    // 1구간(6/1~6/4) 음악만, 2구간(6/5~6/8) 음악·게임 반반, 3구간은 기록 없음
+    // 1구간 음악만, 2구간 음악·게임 반반, 3구간부터는 기록 없음. 영상 수는 "적다"고 보지 않는 최소 개수
+    const half = ENOUGH_VIDEOS / 2;
+    const p2Start = kstDay(INSTALL_DATE, DAYS_PER_PERIOD);
+    const p2Label = `${Number(p2Start.slice(5, 7))}/${Number(p2Start.slice(8))}`;
     function seedTwoPeriods() {
       db.prepare(
         "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
@@ -479,25 +501,25 @@ describe("generate-period-reviews.js — run()", () => {
       const insertEvent = db.prepare(
         "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, ?, ?, ?, 300)",
       );
-      for (let i = 0; i < 8; i++)
+      for (let i = 0; i < ENOUGH_VIDEOS; i++)
         insertEvent.run(
           userId,
           "c-music",
           `음악 ${i}`,
-          "2026-06-01T10:00:00+09:00",
+          periodDayAt(1, 0, "10:00:00"),
         );
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < half; i++) {
         insertEvent.run(
           userId,
           "c-music",
           `음악 ${i}`,
-          "2026-06-05T10:00:00+09:00",
+          periodDayAt(2, 0, "10:00:00"),
         );
         insertEvent.run(
           userId,
           "c-game",
           `게임 ${i}`,
-          "2026-06-06T10:00:00+09:00",
+          periodDayAt(2, 1, "10:00:00"),
         );
       }
     }
@@ -545,7 +567,7 @@ describe("generate-period-reviews.js — run()", () => {
       expect(prompts).toHaveLength(2); // 3구간은 기록이 없어 Gemini를 부르지 않는다
       expect(prompts[0]).not.toContain("[이전 구간과 비교]");
       expect(prompts[1]).toContain(
-        "- 직전 구간(1구간) 시청 시간 비중: 음악 100% (영상 8개)",
+        `- 직전 구간(1구간) 시청 시간 비중: 음악 100% (영상 ${ENOUGH_VIDEOS}개)`,
       );
       expect(prompts[1]).toContain(
         "- 직전 구간 대비 변화(크기 순): 게임 +50%p (0% → 50%), 음악 -50%p (100% → 50%)",
@@ -553,10 +575,12 @@ describe("generate-period-reviews.js — run()", () => {
       expect(prompts[1]).toContain("- 새로 본 분야: 게임");
       // 이전 구간이 1구간 하나뿐이라 "이전 구간 전체" 목록은 넣지 않는다(직전 구간 줄과 중복)
       expect(prompts[1]).not.toContain("- 이전 구간 전체:");
-      expect(prompts[1]).toContain("[이번 구간 날짜별 시청 시간 비중]\n- 6/5(");
+      expect(prompts[1]).toContain(
+        `[이번 구간 날짜별 시청 시간 비중]\n- ${p2Label}(`,
+      );
       // 같은 분야 안의 소재 변화를 짚을 수 있게 직전 구간 제목도 넘긴다
       expect(prompts[1]).toContain(
-        "- 직전 구간 분야별 영상 제목 (시청 시간이 많은 분야부터, 최근 본 순서, 괄호는 본 횟수):\n  [음악] 영상 8개",
+        `- 직전 구간 분야별 영상 제목 (시청 시간이 많은 분야부터, 최근 본 순서, 괄호는 본 횟수):\n  [음악] 영상 ${ENOUGH_VIDEOS}개`,
       );
 
       expect(rows()).toEqual([
@@ -573,13 +597,15 @@ describe("generate-period-reviews.js — run()", () => {
           review:
             "직전 구간보다 게임 비중이 50%p 늘었어요. 시청 시간의 50%가 게임이었어요.",
         },
-        {
-          periodIndex: 3,
-          llmStatus: "fallback",
-          failureReason: null,
-          review:
-            "이 기간엔 분석할 시청 기록이 없어요. 다음 기간을 기대해 주세요!",
-        },
+        ...periodIndexes()
+          .slice(2)
+          .map((periodIndex) => ({
+            periodIndex,
+            llmStatus: "fallback",
+            failureReason: null,
+            review:
+              "이 기간엔 분석할 시청 기록이 없어요. 다음 기간을 기대해 주세요!",
+          })),
       ]);
     });
 
@@ -596,8 +622,7 @@ describe("generate-period-reviews.js — run()", () => {
         periodIndex: 2,
         llmStatus: "fallback",
         failureReason: "number_mismatch",
-        review:
-          "직전 구간에는 보지 않았던 게임이 이번엔 시청 시간의 50%였어요. 이 기간에는 영상 8개를 보셨고, 전체 시청 시간 중 음악과 게임이 각각 50%로 가장 많았어요.",
+        review: `직전 구간에는 보지 않았던 게임이 이번엔 시청 시간의 50%였어요. 이 기간에는 영상 ${ENOUGH_VIDEOS}개를 보셨고, 전체 시청 시간 중 음악과 게임이 각각 50%로 가장 많았어요.`,
       });
       // Gemini를 불렀다가 실패한 것으로 센다(1구간 성공이 있어 전량 실패는 아님)
       expect(summary.llmFailures).toBe(1);
@@ -613,7 +638,12 @@ describe("generate-period-reviews.js — run()", () => {
     ).run(userId, INSTALL_DATE);
     db.prepare(
       "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
-    ).run(userId, JSON.stringify({ 음악: 1 }), 13, "2026-06-02T11:00:00+09:00");
+    ).run(
+      userId,
+      JSON.stringify({ 음악: 1 }),
+      Math.max(12, ENOUGH_VIDEOS + 4) + 1,
+      "2026-06-02T11:00:00+09:00",
+    );
     const insertMeta = db.prepare(
       "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, 600)",
     );
@@ -622,8 +652,9 @@ describe("generate-period-reviews.js — run()", () => {
     const insertEvent = db.prepare(
       "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds) VALUES (?, ?, ?, ?, ?)",
     );
-    // 이전 프롬프트는 앞 10개만 넘겼다 — 12개를 넣어 전부 넘어가는지 본다
-    for (let i = 0; i < 12; i++)
+    // 이전 프롬프트는 앞 10개만 넘겼다 — 10개보다 많고 "영상이 적다" 기준 이상인 수를 넣어 전부 넘어가는지 본다
+    const count = Math.max(12, ENOUGH_VIDEOS + 4);
+    for (let i = 0; i < count; i++)
       insertEvent.run(
         userId,
         "p-music",
@@ -656,12 +687,14 @@ describe("generate-period-reviews.js — run()", () => {
 
     const prompt = JSON.parse(global.fetch.mock.calls[0][1].body).contents[0]
       .parts[0].text;
-    expect(prompt).toContain("이 기간(4일)에 시청한 영상 수: 12개");
+    expect(prompt).toContain(
+      `이 기간(${DAYS_PER_PERIOD}일)에 시청한 영상 수: ${count}개`,
+    );
     expect(prompt).toContain("분야별 시청 시간 비중:\n  · 음악: 100%");
-    expect(prompt).toContain("  [음악] 영상 12개");
-    for (let i = 0; i < 12; i++) expect(prompt).toContain(`  · 음악 ${i}\n`);
+    expect(prompt).toContain(`  [음악] 영상 ${count}개`);
+    for (let i = 0; i < count; i++) expect(prompt).toContain(`  · 음악 ${i}\n`);
     expect(prompt).not.toContain("잘못 누른 게임");
-    // 4일 구간 기준(8개) 이상이라 "영상이 적다" 지침이 없다
+    // 구간 기준 개수 이상이라 "영상이 적다" 지침이 없다
     expect(prompt).not.toContain("시청한 영상이 적어");
 
     const row = db
@@ -670,8 +703,8 @@ describe("generate-period-reviews.js — run()", () => {
       )
       .get(userId);
     // 저장값은 그대로 — 영상 기록 수는 잠깐 본 영상 포함
-    expect(row.videoCount).toBe(13);
-    expect(row.validVideoCount).toBe(12);
+    expect(row.videoCount).toBe(count + 1);
+    expect(row.validVideoCount).toBe(count);
   });
 
   it("기간 제목 상한은 하루 상한 × 구간 일수라, 하루 상한(100)을 넘는 150개도 전부 넘긴다", async () => {
@@ -779,7 +812,9 @@ describe("generate-period-reviews.js — run()", () => {
 
     const prompt = JSON.parse(global.fetch.mock.calls[0][1].body).contents[0]
       .parts[0].text;
-    expect(prompt).toContain("이 기간(4일)에 시청한 영상 수: 8개");
+    expect(prompt).toContain(
+      `이 기간(${DAYS_PER_PERIOD}일)에 시청한 영상 수: 8개`,
+    );
     expect(prompt).not.toContain("시간 모르는 영상");
     const row = db
       .prepare(
@@ -920,13 +955,11 @@ describe("generate-period-reviews.js — run()", () => {
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
     ).run("active-user", INSTALL_DATE);
 
-    // DAYS_PER_PERIOD=4 기준 각 기간(1구간 6/1-6/4, 2구간 6/5-6/8, 3구간 6/9-6/12)에
-    // 하나씩 세션을 심어 3개 기간 모두 데이터가 있는 상태로 만든다.
-    for (const [day, count] of [
-      ["2026-06-01T10:00:00+09:00", 5],
-      ["2026-06-05T10:00:00+09:00", 5],
-      ["2026-06-09T10:00:00+09:00", 5],
-    ]) {
+    // 각 기간 첫날에 하나씩 세션을 심어 모든 기간에 데이터가 있는 상태로 만든다.
+    for (const [day, count] of periodIndexes().map((p) => [
+      periodDayAt(p, 0, "10:00:00"),
+      5,
+    ])) {
       db.prepare(
         "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
       ).run("active-user", JSON.stringify({ 음악: 1 }), count, day);
@@ -960,18 +993,18 @@ describe("generate-period-reviews.js — run()", () => {
     const summary = await run(db, "fake-key");
 
     expect(maxConcurrent).toBe(1); // 병렬 호출 없음 — 항상 하나씩만 진행 중
-    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(global.fetch).toHaveBeenCalledTimes(TOTAL_PERIODS);
 
     const rows = db
       .prepare(
         "SELECT * FROM period_reviews WHERE anonymousId = ? ORDER BY periodIndex",
       )
       .all("active-user");
-    expect(rows.map((r) => r.periodIndex)).toEqual([1, 2, 3]);
+    expect(rows.map((r) => r.periodIndex)).toEqual(periodIndexes());
     expect(rows.every((r) => r.source === "llm")).toBe(true);
 
     expect(summary).toEqual({
-      created: 3,
+      created: TOTAL_PERIODS,
       fallback: 0,
       llmFailures: 0,
       skipped: 0,
@@ -1011,10 +1044,10 @@ describe("generate-period-reviews.js — run()", () => {
     const rows = db
       .prepare("SELECT * FROM period_reviews WHERE anonymousId = ?")
       .all("repeat-user");
-    // 1~3일차 각각 정확히 1건씩만 존재 (재실행으로 중복 생성되지 않음)
-    expect(rows.length).toBe(3);
+    // 기간마다 정확히 1건씩만 존재 (재실행으로 중복 생성되지 않음)
+    expect(rows.length).toBe(TOTAL_PERIODS);
     const indexes = rows.map((r) => r.periodIndex).sort((a, b) => a - b);
-    expect(indexes).toEqual([1, 2, 3]);
+    expect(indexes).toEqual(periodIndexes());
   });
 
   it("이력 기록이 실패하면 최신본도 저장하지 않는다(한 트랜잭션)", async () => {
@@ -1035,7 +1068,7 @@ describe("generate-period-reviews.js — run()", () => {
       .get("tx-user").c;
     expect(latest).toBe(0);
     // 실패한 기간은 처리 실패로 집계돼 cron이 실패로 끝난다
-    expect(summary.skipped).toBe(3);
+    expect(summary.skipped).toBe(TOTAL_PERIODS);
   });
 
   it("Gemini 호출 실패 시 fallback으로 대체 저장하고 failureReason을 기록한다", async () => {
@@ -1069,13 +1102,13 @@ describe("generate-period-reviews.js — run()", () => {
     expect(row.llmStatus).toBe("fallback");
     expect(row.failureReason).toBe("http_error");
 
-    // period 1은 세션이 있어 Gemini를 실제로 호출했다가 실패(llmFailures), 2·3은 세션이
+    // period 1은 세션이 있어 Gemini를 실제로 호출했다가 실패(llmFailures), 나머지는 세션이
     // 없어 애초에 호출을 생략한 정상 fallback. 이 참여자 하나뿐이라 created가 0이라,
     // "시도한 건 있는데 하나도 못 살렸다"는 패턴으로 실패 판정된다(P01·0 감사에서 찾은
     // 사각지대: 예전엔 이 경우도 exit code 0이었다).
     expect(summary).toEqual({
       created: 0,
-      fallback: 2,
+      fallback: TOTAL_PERIODS - 1,
       llmFailures: 1,
       skipped: 0,
     });
@@ -1105,7 +1138,7 @@ describe("generate-period-reviews.js — run()", () => {
 
     await run(db, "fake-key", { recordMetric });
 
-    // 1구간만 세션이 있어 호출했고, 2·3구간은 세션이 없어 호출을 생략했다
+    // 1구간만 세션이 있어 호출했고, 나머지 구간은 세션이 없어 호출을 생략했다
     expect(recordMetric).toHaveBeenCalledTimes(1);
     expect(recordMetric.mock.calls[0][0]).toEqual({
       kind: "period",
@@ -1117,13 +1150,18 @@ describe("generate-period-reviews.js — run()", () => {
   });
 
   describe("fallback 재시도 정책 (periodEnd 기준 3일 이내)", () => {
-    // 1구간(offset 0-3, periodEnd=2026-06-04) 하나만 완료되도록 고정 — 나머지 기간은
-    // 이 테스트들과 무관하니 아직 진행 중인 채로 둔다.
-    const P1_INSTALL_DATE = "2026-06-01T00:00:00+09:00";
+    // 1구간 하나만 완료되도록 고정 — 나머지 기간은 이 테스트들과 무관하니 아직 진행 중인 채로 둔다.
+    const P1_INSTALL_DATE = INSTALL_DATE;
     const P1_SESSION_AT = "2026-06-01T10:00:00+09:00";
+    // 1구간이 끝난 다음 날, 그다음 날(재시도 기한 안), 재시도 기한(periodEnd + 3일)이 지난 날
+    const DAY_AFTER_P1 = new Date(periodDayAt(2, 0, "10:00:00"));
+    const WITHIN_RETRY = new Date(periodDayAt(2, 1, "10:00:00"));
+    const AFTER_RETRY = new Date(
+      periodDayAt(2, FALLBACK_RETRY_WINDOW_DAYS, "10:00:00"),
+    );
 
     it("성공(llmStatus=success)한 기간은 재실행해도 다시 시도하지 않는다", async () => {
-      vi.setSystemTime(new Date("2026-06-05T10:00:00+09:00"));
+      vi.setSystemTime(DAY_AFTER_P1);
       db.prepare(
         "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
       ).run("locked-success-user", P1_INSTALL_DATE);
@@ -1172,7 +1210,7 @@ describe("generate-period-reviews.js — run()", () => {
     });
 
     it("fallback 기간은 periodEnd로부터 3일 이내면 재시도해 성공으로 갱신될 수 있다", async () => {
-      vi.setSystemTime(new Date("2026-06-05T10:00:00+09:00"));
+      vi.setSystemTime(DAY_AFTER_P1);
       db.prepare(
         "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
       ).run("retry-user", P1_INSTALL_DATE);
@@ -1186,7 +1224,7 @@ describe("generate-period-reviews.js — run()", () => {
         status: 500,
         text: async () => "server error",
       });
-      await run(db, "fake-key"); // 1회차 — 실패 → fallback 저장 (periodEnd=6/4, 재시도 기한 6/7)
+      await run(db, "fake-key"); // 1회차 — 실패 → fallback 저장 (재시도 기한은 periodEnd + 3일)
 
       let row = db
         .prepare(
@@ -1196,7 +1234,7 @@ describe("generate-period-reviews.js — run()", () => {
       expect(row.llmStatus).toBe("fallback");
 
       // 하루 뒤(재시도 기한 안) — 이번엔 성공하도록 변경 후 재실행
-      vi.setSystemTime(new Date("2026-06-06T10:00:00+09:00"));
+      vi.setSystemTime(WITHIN_RETRY);
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
@@ -1238,7 +1276,7 @@ describe("generate-period-reviews.js — run()", () => {
     });
 
     it("fallback 기간이 재시도 기한(periodEnd+3일)을 지나면 더 이상 재시도하지 않는다", async () => {
-      vi.setSystemTime(new Date("2026-06-05T10:00:00+09:00"));
+      vi.setSystemTime(DAY_AFTER_P1);
       db.prepare(
         "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
       ).run("expired-user", P1_INSTALL_DATE);
@@ -1252,10 +1290,10 @@ describe("generate-period-reviews.js — run()", () => {
         status: 500,
         text: async () => "server error",
       });
-      await run(db, "fake-key"); // periodEnd=6/4, 재시도 기한 6/7
+      await run(db, "fake-key"); // 재시도 기한은 periodEnd + 3일
 
-      // 기한(6/7)을 지난 시점 — 이제 성공하도록 바꿔도 더 이상 호출되면 안 된다.
-      vi.setSystemTime(new Date("2026-06-08T10:00:00+09:00"));
+      // 기한을 지난 시점 — 이제 성공하도록 바꿔도 더 이상 호출되면 안 된다.
+      vi.setSystemTime(AFTER_RETRY);
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({

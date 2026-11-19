@@ -121,7 +121,7 @@ function buildDataForDate(allSessions, targetDate) {
   const reviewGeneratedAt = serverRow?.generatedAt ?? null;
   // "피드백 확인하기" 블러 해제 버튼이 어느 세션을 확인 처리할지 알아야 해서 함께 넘긴다.
   const sessionId = sourceSessions.at(-1)?.sessionId ?? null;
-  // 오늘 누적 리뷰(Story 11-2)의 신선도(staleness) 판정용 — 마지막 세션 하나가 아니라
+  // 오늘 누적 리뷰의 신선도(staleness) 판정용 — 마지막 세션 하나가 아니라
   // 오늘 전체 세션 id 목록이 필요하다.
   const sessionIds = sourceSessions.map((s) => s.sessionId);
 
@@ -193,8 +193,7 @@ function applyTokens(el, toneName, dark) {
 // ── Timeline key from install date ────────────────────────────────────────────
 
 // VL.TIMELINE 항목 중 day가 경과일 이하인 것 중 가장 늦은(day가 가장 큰) 체크포인트를 고른다.
-// 6주(12개 체크포인트)로 늘어난 뒤로는 임계값을 나열하는 if 사슬 대신 VL.TIMELINE 자체를 순회해,
-// 이후 체크포인트가 더 늘어나도(예: 로드맵 변경) 이 함수를 다시 손볼 필요가 없게 한다.
+// 임계값을 나열하는 if 사슬 대신 VL.TIMELINE 자체를 순회해, 기간 수가 바뀌어도 이 함수를 고치지 않게 한다.
 function calcTimelineKey(installDate) {
   if (!installDate) return "w1_mid";
   const days = Math.max(1, ViewLensStudy.dayOfStudy(installDate));
@@ -908,7 +907,7 @@ async function postFeedbackConfirmed(sessionId) {
   }
 }
 
-// 대조군 종료 안내 모달 노출/6주 리뷰 열람 이벤트 기록
+// 대조군 종료 안내 모달 노출/전체 기간 리뷰 열람 이벤트 기록
 async function postStudyEndReviewEvent(event) {
   const { serverUrl, anonymousId, participantToken } =
     await chrome.storage.local.get([
@@ -1253,7 +1252,7 @@ async function boot() {
   realToday.collectingTimer = _computeTimerText(stored.lastWatchedAt);
   VL.today = realToday;
 
-  // 그룹 설정(EXP)만이 아니라 베이스라인 기간(14일 미만) 여부도 함께 봐야
+  // 그룹 설정(EXP)만이 아니라 베이스라인 기간(BASELINE_DAYS) 여부도 함께 봐야
   // "지금 실제로 피드백이 노출되는 상태"를 정확히 반영한다. ViewLensPopup._isFeedbackActive와 동일 규칙
   // (TEST-EXP 예외 포함).
   const feedbackActive =

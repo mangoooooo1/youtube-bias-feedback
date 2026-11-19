@@ -152,9 +152,10 @@ describe("_isStudyEndReviewReady — 대조군(CON)에게만, 연구 종료 후�
 describe("참여 종료 배너와 팝업 등록 재시도", () => {
   const DAY = 86400000;
   const NOW = Date.parse("2026-01-20T03:00:00Z");
-  const ACTIVE = new Date(NOW - 5 * DAY).toISOString();
-  const GRACE = new Date(NOW - 13 * DAY).toISOString();
   const { TOTAL_DAYS, END_GRACE_DAYS } = globalThis.ViewLensStudy;
+  const ACTIVE = new Date(NOW - 2 * DAY).toISOString();
+  // 수집이 멈추고 하루쯤 지난 전송 유예 중
+  const GRACE = new Date(NOW - (TOTAL_DAYS + 1) * DAY).toISOString();
   const ENDED = new Date(
     NOW - (TOTAL_DAYS + END_GRACE_DAYS + 2) * DAY,
   ).toISOString();
@@ -164,7 +165,7 @@ describe("참여 종료 배너와 팝업 등록 재시도", () => {
     const g = await loadPopup();
     gates = {
       _isCollectionEnded: g._isCollectionEnded,
-      screenParticipationEndedBanner: g.screenParticipationEndedBanner,
+      participationEndedNotice: g.participationEndedNotice,
       shouldRetryParticipantSync: g.shouldRetryParticipantSync,
     };
   });
@@ -201,12 +202,11 @@ describe("참여 종료 배너와 팝업 등록 재시도", () => {
       "리뷰를 다 보셨다면 2차 설문으로 돌아가 이어서 응답해 주세요",
     ],
   ])(
-    "배너는 %s에게 다음 단계를 안내하고 삭제·제거는 안내하지 않는다",
+    "종료 안내는 %s에게 다음 단계를 안내하고 삭제·제거는 안내하지 않는다",
     (_label, opts, nextStep) => {
-      const html = gates.screenParticipationEndedBanner(opts);
-      expect(html).toContain("참여 기간이 끝났어요.");
-      expect(html).toContain(nextStep);
-      expect(html).not.toMatch(/삭제|제거|연구 종료|실험 종료/);
+      const text = gates.participationEndedNotice(opts);
+      expect(text).toContain(nextStep);
+      expect(text).not.toMatch(/삭제|제거|연구 종료|실험 종료/);
     },
   );
 
