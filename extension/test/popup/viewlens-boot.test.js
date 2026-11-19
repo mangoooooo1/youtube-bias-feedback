@@ -1,5 +1,13 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterEach,
+  vi,
+} from "vitest";
 import { loadPopup } from "./load-popup.js";
 import {
   SERVER,
@@ -321,6 +329,13 @@ describe("boot — 홈 시청 영상 수", () => {
 // 서버는 끝난 구간의 리뷰를 매일 04:00 KST에 만든다. 그 전에 연 팝업이 "리뷰 없음"을 오늘 캐시로
 // 남겨도, 끝난 구간의 리뷰가 빠져 있으면 다시 물어 같은 날 리뷰가 보이게 한다.
 describe("boot — 기간 리뷰 캐시", () => {
+  // 캐시·설치일을 만들 때부터 boot()가 끝날 때까지 같은 시각을 써서 KST 자정을 넘기지 않게 한다
+  // (시계 복원은 cleanupPopup이 한다)
+  const NOW = Date.parse("2026-06-10T12:00:00+09:00");
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+  });
   const todayKst = () =>
     new Date().toLocaleDateString("sv", { timeZone: "Asia/Seoul" });
   const cache = (reviews) => ({
@@ -342,7 +357,7 @@ describe("boot — 기간 리뷰 캐시", () => {
 
   // 기간 리뷰 조회는 첫 화면을 그리기 전에 끝나므로, 화면이 그려지면 조회 여부가 정해진 것이다
   async function bootWithCache(over, responses) {
-    const booted = await bootPopup(participant(over), { responses });
+    const booted = await bootPopup(participant(over), { responses, now: NOW });
     await vi.waitFor(() =>
       expect(booted.root.textContent.length).toBeGreaterThan(0),
     );
@@ -464,6 +479,7 @@ describe("boot — 기간 리뷰 캐시", () => {
       {
         responses: { "/api/period-reviews": { data: endedReviews() } },
         failSet: (obj) => "periodReviewsCache" in obj,
+        now: NOW,
       },
     );
 
