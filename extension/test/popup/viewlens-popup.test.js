@@ -167,6 +167,36 @@ describe("flushPendingPopupEvents — 팝업 사용 기록 큐 전송", () => {
     expect(dump().participantSynced).toBe(true);
     expect(dump().pendingPopupEvents).toHaveLength(3);
   });
+
+  // 고치기 전이라 it.fails로 둔다. 지금은 400에서 멈춰 뒤 기록을 보내지 않는다
+  it.fails.each([
+    ["400", 400],
+    ["413", 413],
+  ])(
+    "%s을 받은 기록은 큐에서 빼고 같은 전송에서 뒤 기록을 계속 보낸다",
+    async (_label, status) => {
+      const { flush, sent, dump } = await load(
+        {
+          pendingPopupEvents: events(3),
+          anonymousId: ID,
+          participantToken: "tok",
+        },
+        (body) =>
+          body.eventId === "e0"
+            ? {
+                ok: false,
+                status,
+                json: async () => ({ code: "INVALID_FIELD_VALUE" }),
+              }
+            : ok(),
+      );
+
+      await flush("https://srv.example");
+
+      expect(sent.map((e) => e.eventId)).toEqual(["e0", "e1", "e2"]);
+      expect(dump().pendingPopupEvents).toEqual([]);
+    },
+  );
 });
 
 // boot().catch 블록과 보고 함수만 떼어 내고, boot는 인자로 바꿔 끼워 실패를 재현한다

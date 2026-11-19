@@ -3833,3 +3833,57 @@ describe("확장 업데이트 — 열린 탭에 content script 재주입", () =>
     warn.mockRestore();
   });
 });
+
+// 알림 클릭 열람(feedback-viewed)은 처치 노출 기록이다. 한 번 실패해도 다음 알람 틱에 다시 보내야 한다
+describe("처치 노출 기록 재시도 — 알림 클릭 열람", () => {
+  const BASE = {
+    anonymousId: "a1",
+    group: "EXP",
+    participantCode: "QWE-AB23",
+    installDate: ACTIVE_INSTALL_DATE,
+    participantSynced: true,
+    participantToken: "tok",
+  };
+
+  async function loadBackground(storage = BASE) {
+    global.chrome = createChromeMock();
+    global.chrome.tabs.create = vi.fn();
+    await global.chrome.storage.local.set(storage);
+    vi.resetModules();
+    return import("../background.js");
+  }
+
+  const viewedPaths = (fetchMock) =>
+    fetchMock.mock.calls
+      .map(([url]) => new URL(url).pathname)
+      .filter((p) => p.endsWith("/feedback-viewed"));
+
+  // 고치기 전이라 it.fails로 둔다. 지금은 실패하면 다시 보내지 않는다
+  it.fails(
+    "클릭할 때 네트워크가 실패해도 다음 틱에 열람 기록을 다시 보낸다",
+    async () => {
+      const mod = await loadBackground();
+      global.fetch = vi.fn(async () => {
+        throw new TypeError("network down");
+      });
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await mod.handleNotificationOpen("s1");
+      expect(viewedPaths(global.fetch)).toEqual([
+        "/api/sessions/s1/feedback-viewed",
+      ]);
+
+      global.fetch = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, data: null }),
+      }));
+      await mod.runServerTasks();
+
+      expect(viewedPaths(global.fetch)).toEqual([
+        "/api/sessions/s1/feedback-viewed",
+      ]);
+      warn.mockRestore();
+    },
+  );
+});
