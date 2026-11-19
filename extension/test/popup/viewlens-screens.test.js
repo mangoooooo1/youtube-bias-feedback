@@ -67,8 +67,8 @@ describe("screenToday — 서버 집계 기준 그래프 영역", () => {
     );
     expect(html).toContain("영상 13개");
     expect(html).toContain("시청 시간 확인 중 1개");
-    // 예전 표시(영상 수 기준 분야 수)는 없다
-    expect(html).not.toContain("개 카테고리");
+    // 하루 탭에는 카테고리 수를 어느 어순으로도 보이지 않는다
+    expect(html).not.toMatch(/카테고리\s*\d+개|\d+개\s*카테고리/);
   });
 
   it("제목 문장이 영상 수 줄보다 위, 범례는 도넛 카드 안 도넛 아래", () => {
@@ -571,6 +571,7 @@ describe("screenFeedback — 기간 탭(서버 집계 기준)", () => {
   it("날짜 범위 옆에 카테고리 수(그래프 카테고리)와 영상 수(시청 시간 확인된 영상)를 보인다", () => {
     const html = render();
     expect(html).toContain("카테고리 5개 · 영상 9개");
+    expect(html).toContain("6/5 ~ 6/8");
     expect(html.indexOf("6/5 ~ 6/8")).toBeLessThan(
       html.indexOf("카테고리 5개 · 영상 9개"),
     );
