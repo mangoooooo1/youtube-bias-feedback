@@ -2746,17 +2746,19 @@ describe("content.js 같은 탭에서 다시 연 영상 — 마지막 재생 후
     expect(browser.recordsOf("AAAA")[0].watchedSeconds).toBe(30);
   });
 
-  it("다른 탭(저장값이 없는 탭)에서 같은 영상을 열면 그 탭의 기록에 이어 쓰지 않고 지금 동작과 같다", async () => {
+  it("다른 탭(저장값이 없는 탭)에서 같은 영상을 열면 앞 탭의 기록에 이어 쓰지 않고 그 탭의 기록을 따로 남긴다", async () => {
     const page = await browser.openPage({ tabId: 7, videoId: "AAAA" });
     await page.play(30);
     browser.stopTimers();
 
     const otherTab = await browser.openPage({ tabId: 8, videoId: "AAAA" });
 
-    // 지금 동작: 같은 세션의 새로고침 중복 거르기에 걸려 새 기록도, 이어 쓸 대상도 없다
-    expect(otherTab.identity()).toBeNull();
-    expect(browser.recordsOf("AAAA")).toHaveLength(1);
-    expect(browser.storage.dump().tabwatch__8).toBeUndefined();
+    const records = browser.recordsOf("AAAA");
+    expect(records.map((r) => r.tabId)).toEqual([7, 8]);
+    expect(otherTab.identity().eventId).toBe(records[1].eventId);
+    expect(browser.storage.dump().tabwatch__8.eventId).toBe(records[1].eventId);
+    // 앞 탭의 기록은 그대로다
+    expect(page.identity().eventId).toBe(records[0].eventId);
   });
 
   it("탭 번호를 받지 못하면 지금 동작과 같다(이어 쓰지 않음)", async () => {

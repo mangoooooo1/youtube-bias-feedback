@@ -497,16 +497,7 @@ function recordVideo(
               startTime: now,
             };
 
-      // 새로고침(F5)으로 같은 영상이 다시 감지되는 경우를 막는다. 다시 재생해 나누는 기록은 일부러 만드는 것이라 거르지 않는다
-      if (
-        !resumedFromEventId &&
-        lastRecordedVideo?.videoId === videoId &&
-        lastRecordedVideo?.sessionId === session.sessionId
-      ) {
-        return;
-      }
-
-      // 직전 영상의 시청시간 스냅샷을 여기서 확정한다.
+      // 직전 영상의 시청시간 스냅샷을 여기서 확정한다. 아래 새로고침 검사로 돌아가도 확정은 해야 한다.
       // previousVideoIdentity(이 탭 자신의 메모리)만 신뢰한다.
       // storage의 lastRecordedVideo는 모든 탭이 공유해, 폴백으로 쓰면
       // 다른 탭이 마지막으로 쓴 eventId에 이 탭의 시청시간을 잘못 붙일 수 있다.
@@ -514,6 +505,20 @@ function recordVideo(
       // 다른 탭 데이터로 오염되는 건 눈에 안 보이므로, 유실 쪽이 안전하다.
       if (previousWatchStats && previousVideoIdentity?.eventId) {
         finalizePreviousWatchStats(previousVideoIdentity, previousWatchStats);
+      }
+
+      // 새로고침(F5)으로 같은 영상이 다시 감지되는 경우를 막는다. 탭 번호가 있으면 위 탭별 기록이 판단하므로,
+      // 모든 탭이 함께 쓰는 lastRecordedVideo는 탭 번호를 모를 때만 본다. 다른 탭이 방금 기록한 영상을 거르지 않기 위해서다.
+      // 다시 재생해 나누는 기록은 일부러 만드는 것이라 거르지 않는다
+      if (
+        !tabWatchKey &&
+        !resumedFromEventId &&
+        lastRecordedVideo?.videoId === videoId &&
+        lastRecordedVideo?.sessionId === session.sessionId
+      ) {
+        // 이미 확정한 직전 영상에 다음 영상의 시간이 다시 붙지 않게 한다
+        clearTrackedVideo();
+        return;
       }
 
       if (ViewLensStudy.getParticipationState(installDate) !== "active") {
