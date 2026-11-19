@@ -168,8 +168,8 @@ describe("flushPendingPopupEvents — 팝업 사용 기록 큐 전송", () => {
     expect(dump().pendingPopupEvents).toHaveLength(3);
   });
 
-  // 고치기 전이라 it.fails로 둔다. 지금은 400에서 멈춰 뒤 기록을 보내지 않는다
-  it.fails.each([
+  // 서버가 영원히 거부하는 기록 하나가 뒤 기록 전송을 모두 막지 않게 한다
+  it.each([
     ["400", 400],
     ["413", 413],
   ])(
@@ -197,6 +197,60 @@ describe("flushPendingPopupEvents — 팝업 사용 기록 큐 전송", () => {
       expect(dump().pendingPopupEvents).toEqual([]);
     },
   );
+});
+
+describe("drainPreviousPopupEvents — 이전 팝업 기록을 큐로 옮긴다", () => {
+  async function load(initialStorage) {
+    const { drainPreviousPopupEvents: drain } = await loadPopup();
+    let store = { ...initialStorage };
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: async (keys) =>
+            Object.fromEntries([].concat(keys).map((k) => [k, store[k]])),
+          set: async (obj) => {
+            store = { ...store, ...structuredClone(obj) };
+          },
+        },
+      },
+    });
+    const console = stubConsole();
+    return { drain, console, dump: () => store };
+  }
+
+  const queued = (n) =>
+    Array.from({ length: n }, (_, i) => ({ eventId: `e${i}` }));
+
+  it("큐가 500건이면 오래된 기록부터 버려 500건을 넘지 않게 한다", async () => {
+    const { drain, console, dump } = await load({
+      pendingPopupEvents: queued(500),
+      livePopupEvent: { eventId: "live" },
+    });
+
+    await drain();
+
+    const queue = dump().pendingPopupEvents;
+    expect(queue).toHaveLength(500);
+    expect(queue[0].eventId).toBe("e1");
+    expect(queue.at(-1).eventId).toBe("live");
+    expect(dump().livePopupEvent).toBeNull();
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("result=drop_oldest dropped=1"),
+    );
+  });
+
+  it("상한 아래면 아무것도 버리지 않는다", async () => {
+    const { drain, console, dump } = await load({
+      pendingPopupEvents: queued(499),
+      livePopupEvent: { eventId: "live" },
+    });
+
+    await drain();
+
+    expect(dump().pendingPopupEvents).toHaveLength(500);
+    expect(dump().pendingPopupEvents[0].eventId).toBe("e0");
+    expect(console.warn).not.toHaveBeenCalled();
+  });
 });
 
 // boot().catch 블록과 보고 함수만 떼어 내고, boot는 인자로 바꿔 끼워 실패를 재현한다
