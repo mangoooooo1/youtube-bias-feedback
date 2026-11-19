@@ -378,7 +378,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
 // 연구 종료 리뷰 이벤트의 결과별 경로. 핸들러의 not_found 분기와 catch는 requireParticipant가
 // 미등록 참여자를 먼저 거르고 DB 오류가 나야만 실행되므로 HTTP로는 도달하지 않는다.
 describe("실제 server/routes/participants.js — POST /study-end-review-event 결과별 경로", () => {
-  // 설치일 + TOTAL_DAYS 다음 날 09:00 KST가 이미 지났다. 모든 기간의 리뷰가 있으면 잠금 해제
+  // 설치일 + TOTAL_DAYS일(마지막 날 다음 날) 09:00 KST가 이미 지났다. 모든 기간의 리뷰가 있으면 잠금 해제
   const ENDED_INSTALL_DATE = "2026-01-01T00:00:00+09:00";
   const NOT_ENDED_INSTALL_DATE = "2099-01-01T00:00:00+09:00";
 
