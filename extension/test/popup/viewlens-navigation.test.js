@@ -414,10 +414,11 @@ describe("기간 탭", () => {
     click(root, `#vl-week-btns [data-week="${currentWeek()}"]`);
     expect(pressed(root)).toEqual([]);
 
-    const future = root.querySelector(
+    // 마지막 구간은 아직 오지 않았으면 잠기고, 지금 진행 중인 구간이면 누를 수 있다
+    const last = root.querySelector(
       `#vl-week-btns [data-week="${VL.TOTAL_WEEKS}"]`,
     );
-    expect(future.disabled).toBe(true);
+    expect(last.disabled).toBe(currentWeek() < VL.TOTAL_WEEKS);
   });
 
   it("기간 버튼을 누르면 밑줄이 이전 기간 위치에서 새 기간으로 미끄러진다", async () => {
