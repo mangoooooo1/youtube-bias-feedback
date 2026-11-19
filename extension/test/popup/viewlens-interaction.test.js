@@ -315,6 +315,33 @@ describe("대조군 연구 종료 코드 입력", () => {
     expect(after.ownerDocument.activeElement).toBe(after);
   });
 
+  it("종료 안내 모달이 뜨면 대화상자로 알리고 확인 버튼에 포커스를 두며, 배경은 포커스를 받지 않는다", async () => {
+    const { root } = await bootReady(
+      participant({
+        group: "CON",
+        installDate: STUDY_ENDED(),
+        studyEndNoticeShown: false,
+      }),
+    );
+    const dialog = root.querySelector('[role="dialog"]');
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    const titleId = dialog.getAttribute("aria-labelledby");
+    expect(root.querySelector(`#${titleId}`).textContent).toContain(
+      "참여 기간이 끝났어요",
+    );
+    const confirm = root.querySelector("#vl-study-end-notice-confirm");
+    expect(confirm.ownerDocument.activeElement).toBe(confirm);
+    const background = [...root.firstElementChild.children].filter(
+      (el) => !el.contains(dialog),
+    );
+    expect(background.length).toBeGreaterThan(0);
+    expect(background.every((el) => el.hasAttribute("inert"))).toBe(true);
+
+    click(root, "#vl-study-end-notice-confirm");
+    expect(root.querySelector('[role="dialog"]')).toBeNull();
+    expect(root.querySelector("[inert]")).toBeNull();
+  });
+
   it.each([
     [
       "틀린 코드",
