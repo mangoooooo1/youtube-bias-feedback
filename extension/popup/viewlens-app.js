@@ -529,6 +529,14 @@ class ViewLensPopup {
     if (endedBadgeFocused) {
       this.container.querySelector("#vl-participation-ended-banner")?.focus();
     }
+    // 종료 안내 모달이 떠 있으면 배경은 포커스를 받지 않게 하고 확인 버튼에 포커스를 둔다
+    if (showStudyEndNotice) {
+      const dialog = this.container.querySelector('[role="dialog"]');
+      for (const el of this.container.firstElementChild.children) {
+        if (!el.contains(dialog)) el.setAttribute("inert", "");
+      }
+      this.container.querySelector("#vl-study-end-notice-confirm")?.focus();
+    }
   }
 
   /**
