@@ -4098,6 +4098,41 @@ describe("처치 노출 기록 재시도 큐 — 규칙", () => {
     expect(await pending()).toEqual([]);
   });
 
+  // 재전송이 신원과 큐를 따로 읽는 사이에 신원이 바뀌고 새 신원의 기록이 들어오는 경우다.
+  // 고치기 전이라 it.fails로 둔다. 지금은 신원을 먼저 읽어, 새 신원의 기록을 옛 신원 기준으로 보고 지운다
+  it.fails(
+    "신원과 큐를 읽는 사이에 신원이 바뀌어도 새 신원의 기록은 지우지 않고 새 신원으로 보낸다",
+    async () => {
+      const mod = await loadBackground();
+      const get = global.chrome.storage.local.get;
+      let switched = false;
+      global.chrome.storage.local.get = async (keys) => {
+        if (keys === "pendingExposureEvents" && !switched) {
+          switched = true;
+          await global.chrome.storage.local.set({
+            anonymousId: "a2",
+            participantToken: "tok2",
+            pendingExposureEvents: [{ ...confirmItem, anonymousId: "a2" }],
+          });
+        }
+        return get(keys);
+      };
+      const server = serverFetch();
+      global.fetch = server.fn;
+
+      await mod.retryExposureEvents();
+
+      expect(server.calls).toEqual([
+        {
+          path: "/api/sessions/s1/feedback-confirmed",
+          method: "PATCH",
+          body: { anonymousId: "a2", participantToken: "tok2" },
+        },
+      ]);
+      expect(await pending()).toEqual([]);
+    },
+  );
+
   // 옛 신원의 같은 기록과 하나로 합치면, 옛 기록을 뺄 때 새 신원의 기록까지 사라진다
   it("옛 신원의 같은 종료 이벤트가 큐에 있어도 새 신원이 맡긴 기록은 따로 들어가 새 신원으로 나간다", async () => {
     const mod = await loadBackground({
