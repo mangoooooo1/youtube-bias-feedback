@@ -4077,6 +4077,30 @@ describe("처치 노출 기록 재시도 큐 — 규칙", () => {
     expect(await pending()).toEqual([]);
   });
 
+  // 연구자가 TEST 계정에서 "↩ 온보딩"으로 초기화한 뒤 다른 참여자로 복구하면 anonymousId가 바뀐다.
+  // 고치기 전이라 it.fails로 둔다. 지금은 큐의 옛 기록을 새 신원으로 보낸다
+  it.fails(
+    "신원이 바뀌면 옛 신원이 맡긴 종료 이벤트는 새 신원으로 보내지 않고 큐에서 뺀다",
+    async () => {
+      const mod = await loadBackground({ ...BASE, group: "CON" });
+      global.fetch = serverFetch(() => "network").fn;
+      handOff({ kind: "study_end", event: "modal_shown" });
+      await flush();
+      expect(await pending()).toHaveLength(1);
+
+      await global.chrome.storage.local.set({
+        anonymousId: "a2",
+        participantToken: "tok2",
+      });
+      const server = serverFetch();
+      global.fetch = server.fn;
+      await mod.retryExposureEvents();
+
+      expect(server.calls).toEqual([]);
+      expect(await pending()).toEqual([]);
+    },
+  );
+
   // 기간 리뷰가 아직 다 만들어지지 않으면 403 NOT_ELIGIBLE이 오고, 다음 배치 뒤에는 받는다
   it("대조군 종료 이벤트가 403 NOT_ELIGIBLE을 받으면 큐에 남기고, 다음 틱에 받으면 뺀다", async () => {
     const mod = await loadBackground({
