@@ -3897,6 +3897,7 @@ describe("처치 노출 기록 재시도 큐 — 규칙", () => {
   };
   const confirmItem = {
     id: "x1",
+    anonymousId: "a1",
     kind: "feedback_confirmed",
     sessionId: "s1",
     createdAt: "2026-01-10T11:00:00.000Z",
@@ -4078,28 +4079,63 @@ describe("처치 노출 기록 재시도 큐 — 규칙", () => {
   });
 
   // 연구자가 TEST 계정에서 "↩ 온보딩"으로 초기화한 뒤 다른 참여자로 복구하면 anonymousId가 바뀐다.
-  // 고치기 전이라 it.fails로 둔다. 지금은 큐의 옛 기록을 새 신원으로 보낸다
-  it.fails(
-    "신원이 바뀌면 옛 신원이 맡긴 종료 이벤트는 새 신원으로 보내지 않고 큐에서 뺀다",
-    async () => {
-      const mod = await loadBackground({ ...BASE, group: "CON" });
-      global.fetch = serverFetch(() => "network").fn;
-      handOff({ kind: "study_end", event: "modal_shown" });
-      await flush();
-      expect(await pending()).toHaveLength(1);
+  it("신원이 바뀌면 옛 신원이 맡긴 종료 이벤트는 새 신원으로 보내지 않고 큐에서 뺀다", async () => {
+    const mod = await loadBackground({ ...BASE, group: "CON" });
+    global.fetch = serverFetch(() => "network").fn;
+    handOff({ kind: "study_end", event: "modal_shown" });
+    await flush();
+    expect(await pending()).toHaveLength(1);
 
-      await global.chrome.storage.local.set({
-        anonymousId: "a2",
-        participantToken: "tok2",
-      });
-      const server = serverFetch();
-      global.fetch = server.fn;
-      await mod.retryExposureEvents();
+    await global.chrome.storage.local.set({
+      anonymousId: "a2",
+      participantToken: "tok2",
+    });
+    const server = serverFetch();
+    global.fetch = server.fn;
+    await mod.retryExposureEvents();
 
-      expect(server.calls).toEqual([]);
-      expect(await pending()).toEqual([]);
-    },
-  );
+    expect(server.calls).toEqual([]);
+    expect(await pending()).toEqual([]);
+  });
+
+  // 옛 신원의 같은 기록과 하나로 합치면, 옛 기록을 뺄 때 새 신원의 기록까지 사라진다
+  it("옛 신원의 같은 종료 이벤트가 큐에 있어도 새 신원이 맡긴 기록은 따로 들어가 새 신원으로 나간다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      group: "CON",
+      pendingExposureEvents: [
+        {
+          id: "old",
+          anonymousId: "a-old",
+          kind: "study_end",
+          event: "modal_shown",
+          createdAt: "2026-01-10T11:00:00.000Z",
+        },
+      ],
+    });
+    global.fetch = serverFetch(() => "network").fn;
+    handOff({ kind: "study_end", event: "modal_shown" });
+    await flush();
+    // 맡기자마자 한 번 보내며 옛 신원의 기록은 빠지고, 새 신원의 기록만 남는다
+    expect((await pending()).map((item) => item.anonymousId)).toEqual(["a1"]);
+
+    const server = serverFetch();
+    global.fetch = server.fn;
+    await mod.retryExposureEvents();
+
+    expect(server.calls).toEqual([
+      {
+        path: "/api/participants/study-end-review-event",
+        method: "POST",
+        body: {
+          anonymousId: "a1",
+          participantToken: "tok",
+          event: "modal_shown",
+        },
+      },
+    ]);
+    expect(await pending()).toEqual([]);
+  });
 
   // 기간 리뷰가 아직 다 만들어지지 않으면 403 NOT_ELIGIBLE이 오고, 다음 배치 뒤에는 받는다
   it("대조군 종료 이벤트가 403 NOT_ELIGIBLE을 받으면 큐에 남기고, 다음 틱에 받으면 뺀다", async () => {
@@ -4109,6 +4145,7 @@ describe("처치 노출 기록 재시도 큐 — 규칙", () => {
       pendingExposureEvents: [
         {
           id: "y1",
+          anonymousId: "a1",
           kind: "study_end",
           event: "modal_shown",
           createdAt: "2026-01-10T11:00:00.000Z",

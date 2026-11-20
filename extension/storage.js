@@ -1026,16 +1026,20 @@ export const EXPOSURE_EVENT_KINDS = new Set([
   "study_end",
 ]);
 
-// 서버는 같은 기록을 처음 한 번만 남겨, 같은 대상이면 한 번만 보내면 된다
+// 서버는 같은 기록을 처음 한 번만 남겨, 같은 대상이면 한 번만 보내면 된다.
+// 신원이 바뀌면 옛 기록은 보내지 않고 빼므로, 다른 신원의 기록은 같은 대상으로 보지 않는다
 function sameExposureTarget(a, b) {
   return (
-    a.kind === b.kind && a.sessionId === b.sessionId && a.event === b.event
+    a.anonymousId === b.anonymousId &&
+    a.kind === b.kind &&
+    a.sessionId === b.sessionId &&
+    a.event === b.event
   );
 }
 
 /**
  * 처치 노출 기록을 큐에 넣는다. 같은 대상이 이미 있으면 그 항목을 돌려준다.
- * @param {{kind: string, sessionId?: string, event?: string}} event
+ * @param {{anonymousId: string, kind: string, sessionId?: string, event?: string}} event - anonymousId는 기록한 참여자
  * @returns {Promise<object>} 큐에 있는 항목
  */
 export function addExposureEvent(event) {
@@ -1046,6 +1050,7 @@ export function addExposureEvent(event) {
     if (existing) return existing;
     const item = {
       id: crypto.randomUUID(),
+      anonymousId: event.anonymousId,
       kind: event.kind,
       ...(event.sessionId != null && { sessionId: event.sessionId }),
       ...(event.event != null && { event: event.event }),
