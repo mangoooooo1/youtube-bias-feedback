@@ -4048,6 +4048,39 @@ describe("처치 노출 기록 재시도 큐 — 규칙", () => {
     expect(await pending()).toEqual([]);
   });
 
+  // 요청이 서버에 닿을 때는 세션이 없어 404지만, 답을 받기 전에 세션 업로드가 끝나 보냄 상태가 된다.
+  // 고치기 전이라 it.fails로 둔다. 지금은 답을 받은 뒤의 상태만 봐 영구 404로 보고 지운다
+  it.fails(
+    "확인 기록 요청 중에 세션 업로드가 끝나 404를 받으면 큐에 남기고 다음 틱에 보낸다",
+    async () => {
+      const mod = await loadBackground({
+        ...BASE,
+        sessions: [{ sessionId: "s1", syncedToServer: false, videos: [] }],
+        pendingExposureEvents: [confirmItem],
+      });
+      global.fetch = vi.fn(async () => {
+        await global.chrome.storage.local.set({
+          sessions: [{ sessionId: "s1", syncedToServer: true, videos: [] }],
+        });
+        return {
+          ok: false,
+          status: 404,
+          json: async () => ({ success: false, code: "NOT_FOUND" }),
+        };
+      });
+
+      await mod.retryExposureEvents();
+      expect(await pending()).toHaveLength(1);
+
+      const server = serverFetch();
+      global.fetch = server.fn;
+      await mod.retryExposureEvents();
+
+      expect(server.paths()).toEqual(["/api/sessions/s1/feedback-confirmed"]);
+      expect(await pending()).toEqual([]);
+    },
+  );
+
   // 기간 리뷰가 아직 다 만들어지지 않으면 403 NOT_ELIGIBLE이 오고, 다음 배치 뒤에는 받는다
   it("대조군 종료 이벤트가 403 NOT_ELIGIBLE을 받으면 큐에 남기고, 다음 틱에 받으면 뺀다", async () => {
     const mod = await loadBackground({
