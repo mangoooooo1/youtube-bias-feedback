@@ -1017,3 +1017,71 @@ async function _saveAnalysis(sessionId, analysisResult) {
 
   await chrome.storage.local.set({ sessions: updatedSessions });
 }
+
+// 처치 노출 기록(알림 클릭 열람·피드백 확인·대조군 종료 이벤트) 재시도 큐
+const EXPOSURE_EVENTS_KEY = "pendingExposureEvents";
+export const EXPOSURE_EVENT_KINDS = new Set([
+  "feedback_viewed",
+  "feedback_confirmed",
+  "study_end",
+]);
+
+// 서버는 같은 기록을 처음 한 번만 남겨, 같은 대상이면 한 번만 보내면 된다.
+// 신원이 바뀌면 옛 기록은 보내지 않고 빼므로, 다른 신원의 기록은 같은 대상으로 보지 않는다
+function sameExposureTarget(a, b) {
+  return (
+    a.anonymousId === b.anonymousId &&
+    a.kind === b.kind &&
+    a.sessionId === b.sessionId &&
+    a.event === b.event
+  );
+}
+
+/**
+ * 처치 노출 기록을 큐에 넣는다. 같은 대상이 이미 있으면 그 항목을 돌려준다.
+ * @param {{anonymousId: string, kind: string, sessionId?: string, event?: string}} event - anonymousId는 기록한 참여자
+ * @returns {Promise<object>} 큐에 있는 항목
+ */
+export function addExposureEvent(event) {
+  return enqueue(async () => {
+    const { [EXPOSURE_EVENTS_KEY]: queue = [] } =
+      await chrome.storage.local.get(EXPOSURE_EVENTS_KEY);
+    const existing = queue.find((item) => sameExposureTarget(item, event));
+    if (existing) return existing;
+    const item = {
+      id: crypto.randomUUID(),
+      anonymousId: event.anonymousId,
+      kind: event.kind,
+      ...(event.sessionId != null && { sessionId: event.sessionId }),
+      ...(event.event != null && { event: event.event }),
+      createdAt: new Date().toISOString(),
+    };
+    await chrome.storage.local.set({ [EXPOSURE_EVENTS_KEY]: [...queue, item] });
+    return item;
+  });
+}
+
+/**
+ * 아직 보내지 못한 처치 노출 기록을 넣은 순서대로 읽는다.
+ * @returns {Promise<object[]>}
+ */
+export async function getPendingExposureEvents() {
+  const { [EXPOSURE_EVENTS_KEY]: queue = [] } =
+    await chrome.storage.local.get(EXPOSURE_EVENTS_KEY);
+  return queue;
+}
+
+/**
+ * 보냈거나 서버가 영원히 거부한 처치 노출 기록을 큐에서 뺀다.
+ * @param {{id: string}} item
+ * @returns {Promise<void>}
+ */
+export function removeExposureEvent(item) {
+  return enqueue(async () => {
+    const { [EXPOSURE_EVENTS_KEY]: queue = [] } =
+      await chrome.storage.local.get(EXPOSURE_EVENTS_KEY);
+    const rest = queue.filter((q) => q.id !== item.id);
+    if (rest.length === queue.length) return;
+    await chrome.storage.local.set({ [EXPOSURE_EVENTS_KEY]: rest });
+  });
+}

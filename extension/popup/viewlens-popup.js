@@ -7,6 +7,7 @@ window.dayFromInstall = dayFromInstall;
 window.localDateFromDateStr = localDateFromDateStr;
 window.shouldRetryParticipantSync = shouldRetryParticipantSync;
 window.flushPendingPopupEvents = flushPendingPopupEvents;
+window.drainPreviousPopupEvents = drainPreviousPopupEvents;
 window.loadViewingSummaryCache = loadViewingSummaryCache;
 window.refreshViewingSummary = refreshViewingSummary;
 window.fillMissingTitles = fillMissingTitles;
@@ -882,9 +883,29 @@ async function markFeedbackConfirmedLocally(sessionId) {
   });
 }
 
+/**
+ * 처치 노출 기록을 background 재시도 큐에 맡긴다. 전송이 실패해도 background가 다시 보낸다.
+ * @param {{kind: string, sessionId?: string, event?: string}} event
+ * @returns {Promise<boolean>} 맡겼으면 true. false면 부른 쪽이 직접 보낸다
+ */
+async function handOffExposureEvent(event) {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "queue-exposure-event",
+      event,
+    });
+    return response?.queued === true;
+  } catch {
+    return false;
+  }
+}
+
 // 서버에 feedbackConfirmedAt 기록 — 실패해도 로컬 확인 상태(위)는 이미 반영돼 있어
-// 사용자 경험에는 영향 없고, 연구 데이터 쪽만 유실될 수 있다(다른 서버 전송들과 동일한 정책).
+// 사용자 경험에는 영향 없다. background에 맡기지 못했을 때만 한 번 직접 보낸다.
 async function postFeedbackConfirmed(sessionId) {
+  if (await handOffExposureEvent({ kind: "feedback_confirmed", sessionId })) {
+    return;
+  }
   const { serverUrl, anonymousId, participantToken } =
     await chrome.storage.local.get([
       "serverUrl",
@@ -907,8 +928,9 @@ async function postFeedbackConfirmed(sessionId) {
   }
 }
 
-// 대조군 종료 안내 모달 노출/전체 기간 리뷰 열람 이벤트 기록
+// 대조군 종료 안내 모달 노출/전체 기간 리뷰 열람 이벤트 기록. background에 맡기지 못했을 때만 직접 보낸다
 async function postStudyEndReviewEvent(event) {
+  if (await handOffExposureEvent({ kind: "study_end", event })) return;
   const { serverUrl, anonymousId, participantToken } =
     await chrome.storage.local.get([
       "serverUrl",
@@ -1070,15 +1092,26 @@ async function postPopupEvent(serverUrl, event) {
   }
 }
 
+// 서버가 오래 받지 못해도 저장소가 끝없이 커지지 않게 한다. 정상 사용으로는 닿지 않는 값이다
+const MAX_PENDING_POPUP_EVENTS = 500;
+
 /**
  * 이전 팝업이 남긴 live 슬롯 이벤트를 확정 큐(pendingPopupEvents)로 승격하고 live 슬롯을 비운다.
  * 현재 세션이 live 슬롯을 새로 쓰기 전에 끝나야 하므로 호출부에서 반드시 await 해야 한다.
+ * 큐가 상한을 넘으면 앞에서부터 보내는 순서에 맞춰 오래된 기록부터 버린다.
  */
 async function drainPreviousPopupEvents() {
   const { pendingPopupEvents = [], livePopupEvent = null } =
     await chrome.storage.local.get(["pendingPopupEvents", "livePopupEvent"]);
   const queue = [...pendingPopupEvents];
   if (livePopupEvent) queue.push(livePopupEvent);
+  const overflow = queue.length - MAX_PENDING_POPUP_EVENTS;
+  if (overflow > 0) {
+    queue.splice(0, overflow);
+    console.warn(
+      `[popup] popup_events result=drop_oldest dropped=${overflow} max=${MAX_PENDING_POPUP_EVENTS}`,
+    );
+  }
   await chrome.storage.local.set({
     pendingPopupEvents: queue,
     livePopupEvent: null,
@@ -1088,6 +1121,7 @@ async function drainPreviousPopupEvents() {
 /**
  * 확정 큐(pendingPopupEvents)를 서버로 순서대로 전송한다. 실패한 항목부터는 중단하고
  * 큐에 남겨 다음 팝업 open 때 재시도한다. 렌더를 막지 않도록 백그라운드로 호출된다.
+ * 400·413은 그 기록만 서버가 영원히 거부하므로 큐에서 빼고 계속 보낸다(background 재시도 큐와 같은 규칙).
  *
  * @param {string} serverUrl
  */
@@ -1118,7 +1152,11 @@ async function flushPendingPopupEvents(serverUrl) {
       ...event,
       participantToken,
     });
-    if (!result.ok) {
+    if (!result.ok && (result.status === 400 || result.status === 413)) {
+      console.warn(
+        `[popup] popup_events result=skip_item status=${result.status} code=${result.code} eventId=${event.eventId}`,
+      );
+    } else if (!result.ok) {
       if (result.code === "INVALID_PARTICIPANT_TOKEN") {
         await chrome.storage.local.set({ participantSynced: false });
       }

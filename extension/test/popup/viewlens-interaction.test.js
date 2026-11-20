@@ -240,6 +240,64 @@ describe("피드백 확인하기", () => {
     });
   });
 
+  // 전송이 실패해도 background가 다시 보낼 수 있게 맡긴다
+  it("서버 전송이 실패해도 확인 기록을 background 재시도 큐에 맡긴다", async () => {
+    const { root, chrome } = await bootReady(
+      participant({
+        group: "EXP",
+        installDate: IN_PROGRESS(),
+        sessions: [session("s1", { review: "오늘 리뷰 문장" })],
+      }),
+      {
+        responses: {
+          "/api/today-reviews": { data: [todayReview("오늘 리뷰 문장")] },
+          "/api/sessions/s1/feedback-confirmed": () => ({ status: 500 }),
+        },
+      },
+    );
+    chrome.runtime.sendMessage = vi.fn(async () => undefined);
+
+    click(root, "#vl-feedback-confirm-btn");
+    await settle();
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "queue-exposure-event",
+        event: expect.objectContaining({
+          kind: "feedback_confirmed",
+          sessionId: "s1",
+        }),
+      }),
+    );
+  });
+
+  it("background가 맡았다고 답하면 팝업은 확인 기록을 직접 보내지 않는다", async () => {
+    const { root, server, chrome } = await bootReady(
+      participant({
+        group: "EXP",
+        installDate: IN_PROGRESS(),
+        sessions: [session("s1", { review: "오늘 리뷰 문장" })],
+      }),
+      {
+        responses: {
+          "/api/today-reviews": { data: [todayReview("오늘 리뷰 문장")] },
+        },
+      },
+    );
+    chrome.runtime.sendMessage = vi.fn(async (message) =>
+      message.type === "queue-exposure-event" ? { queued: true } : undefined,
+    );
+
+    click(root, "#vl-feedback-confirm-btn");
+    await settle();
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "queue-exposure-event" }),
+    );
+    expect(server.paths()).not.toContain("/api/sessions/s1/feedback-confirmed");
+    expect(root.querySelector("#vl-feedback-confirm-btn")).toBeNull();
+  });
+
   it("이미 확인한 세션의 리뷰는 다시 가리지 않는다", async () => {
     const { root, data } = await bootReady(
       participant({
@@ -611,6 +669,36 @@ describe("연구 종료 안내 확인", () => {
           (c) => c.path === "/api/participants/study-end-review-event",
         )?.body.event,
       ).toBe("modal_shown"),
+    );
+  });
+
+  // 전송이 실패해도 background가 다시 보낼 수 있게 맡긴다
+  it("대조군 안내 기록은 서버 전송이 실패해도 background 재시도 큐에 맡긴다", async () => {
+    const { root, chrome } = await bootReady(
+      participant({
+        group: "CON",
+        installDate: STUDY_ENDED(),
+        studyEndNoticeShown: false,
+      }),
+      {
+        responses: {
+          "/api/participants/study-end-review-event": () => ({ status: 500 }),
+        },
+      },
+    );
+    chrome.runtime.sendMessage = vi.fn(async () => undefined);
+
+    click(root, "#vl-study-end-notice-confirm");
+    await settle();
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "queue-exposure-event",
+        event: expect.objectContaining({
+          kind: "study_end",
+          event: "modal_shown",
+        }),
+      }),
     );
   });
 

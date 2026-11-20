@@ -3833,3 +3833,475 @@ describe("확장 업데이트 — 열린 탭에 content script 재주입", () =>
     warn.mockRestore();
   });
 });
+
+// 알림 클릭 열람(feedback-viewed)은 처치 노출 기록이다. 한 번 실패해도 다음 알람 틱에 다시 보내야 한다
+describe("처치 노출 기록 재시도 — 알림 클릭 열람", () => {
+  const BASE = {
+    anonymousId: "a1",
+    group: "EXP",
+    participantCode: "QWE-AB23",
+    installDate: ACTIVE_INSTALL_DATE,
+    participantSynced: true,
+    participantToken: "tok",
+  };
+
+  async function loadBackground(storage = BASE) {
+    global.chrome = createChromeMock();
+    global.chrome.tabs.create = vi.fn();
+    await global.chrome.storage.local.set(storage);
+    vi.resetModules();
+    return import("../background.js");
+  }
+
+  const viewedPaths = (fetchMock) =>
+    fetchMock.mock.calls
+      .map(([url]) => new URL(url).pathname)
+      .filter((p) => p.endsWith("/feedback-viewed"));
+
+  // 한 번 실패해도 처치 노출 기록이 빠지지 않게 다음 틱에 다시 보낸다
+  it("클릭할 때 네트워크가 실패해도 다음 틱에 열람 기록을 다시 보낸다", async () => {
+    const mod = await loadBackground();
+    global.fetch = vi.fn(async () => {
+      throw new TypeError("network down");
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await mod.handleNotificationOpen("s1");
+    expect(viewedPaths(global.fetch)).toEqual([
+      "/api/sessions/s1/feedback-viewed",
+    ]);
+
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, data: null }),
+    }));
+    await mod.runServerTasks();
+
+    expect(viewedPaths(global.fetch)).toEqual([
+      "/api/sessions/s1/feedback-viewed",
+    ]);
+    warn.mockRestore();
+  });
+});
+
+// 팝업이 맡긴 확인·종료 이벤트와 알림 클릭 열람을 같은 큐로 보낸다. 서버는 같은 기록을 처음 한 번만 남긴다
+describe("처치 노출 기록 재시도 큐 — 규칙", () => {
+  const BASE = {
+    anonymousId: "a1",
+    group: "EXP",
+    participantCode: "QWE-AB23",
+    installDate: ACTIVE_INSTALL_DATE,
+    participantSynced: true,
+    participantToken: "tok",
+  };
+  const confirmItem = {
+    id: "x1",
+    anonymousId: "a1",
+    kind: "feedback_confirmed",
+    sessionId: "s1",
+    createdAt: "2026-01-10T11:00:00.000Z",
+  };
+
+  async function loadBackground(storage = BASE) {
+    global.chrome = createChromeMock();
+    global.chrome.tabs.create = vi.fn();
+    await global.chrome.storage.local.set(storage);
+    vi.resetModules();
+    const mod = await import("../background.js");
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    return mod;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function messageListener() {
+    return global.chrome.runtime.onMessage.addListener.mock.calls[0][0];
+  }
+
+  // 경로별 상태 코드를 정하고, 보낸 요청을 순서대로 모은다
+  function serverFetch(statusOf = () => 200) {
+    const calls = [];
+    const fn = vi.fn(async (url, options = {}) => {
+      const path = new URL(url).pathname;
+      calls.push({
+        path,
+        method: options.method,
+        body: JSON.parse(options.body),
+      });
+      const status = statusOf(path);
+      if (status === "network") throw new TypeError("network down");
+      const code = { 403: "NOT_ELIGIBLE", 404: "NOT_FOUND" }[status] ?? null;
+      return {
+        ok: status < 300,
+        status,
+        json: async () => ({ success: status < 300, code, data: null }),
+      };
+    });
+    return { fn, calls, paths: () => calls.map((c) => c.path) };
+  }
+
+  const flush = async () => {
+    for (let i = 0; i < 20; i++) await vi.advanceTimersByTimeAsync(0);
+  };
+  const pending = async () =>
+    (await global.chrome.storage.local.get("pendingExposureEvents"))
+      .pendingExposureEvents ?? [];
+  const handOff = (event, sendResponse = vi.fn()) => {
+    const keepsChannelOpen = messageListener()(
+      { type: "queue-exposure-event", event },
+      {},
+      sendResponse,
+    );
+    return { keepsChannelOpen, sendResponse };
+  };
+
+  it("팝업이 맡긴 확인 기록을 큐에 넣었다고 답하고 바로 보내며, 성공하면 큐에서 뺀다", async () => {
+    await loadBackground();
+    const server = serverFetch();
+    global.fetch = server.fn;
+
+    const { keepsChannelOpen, sendResponse } = handOff({
+      kind: "feedback_confirmed",
+      sessionId: "s1",
+    });
+    await flush();
+
+    expect(keepsChannelOpen).toBe(true);
+    expect(sendResponse).toHaveBeenCalledWith({ queued: true });
+    expect(server.calls).toEqual([
+      {
+        path: "/api/sessions/s1/feedback-confirmed",
+        method: "PATCH",
+        body: { anonymousId: "a1", participantToken: "tok" },
+      },
+    ]);
+    expect(await pending()).toEqual([]);
+  });
+
+  it("전송이 실패하면 큐에 남기고 다음 틱에 다시 보낸다", async () => {
+    const mod = await loadBackground();
+    global.fetch = serverFetch(() => "network").fn;
+
+    handOff({ kind: "feedback_confirmed", sessionId: "s1" });
+    await flush();
+    expect(await pending()).toHaveLength(1);
+
+    const server = serverFetch();
+    global.fetch = server.fn;
+    await mod.runServerTasks();
+
+    expect(server.paths()).toContain("/api/sessions/s1/feedback-confirmed");
+    expect(await pending()).toEqual([]);
+  });
+
+  it("같은 기록을 두 번 맡겨도 큐에는 하나만 남는다", async () => {
+    await loadBackground();
+    global.fetch = serverFetch(() => "network").fn;
+
+    handOff({ kind: "feedback_confirmed", sessionId: "s1" });
+    await flush();
+    handOff({ kind: "feedback_confirmed", sessionId: "s1" });
+    await flush();
+
+    expect(await pending()).toHaveLength(1);
+  });
+
+  // 404는 세션이 아직 서버에 없다는 뜻이다. 올라가길 기다릴 세션이 아니면 다시 보내도 같은 404다
+  it.each([
+    ["업로드를 기다리는 세션이면 큐에 남긴다", false, 1],
+    ["이미 보낸 세션이면 그 기록만 뺀다", true, 0],
+    ["영구 실패한 세션이면 그 기록만 뺀다", "invalid", 0],
+  ])("확인 기록이 404를 받으면 %s", async (_label, syncedToServer, left) => {
+    const mod = await loadBackground({
+      ...BASE,
+      sessions: [{ sessionId: "s1", syncedToServer, videos: [] }],
+      pendingExposureEvents: [confirmItem],
+    });
+    global.fetch = serverFetch(() => 404).fn;
+
+    await mod.retryExposureEvents();
+
+    expect(await pending()).toHaveLength(left);
+  });
+
+  it("기기에 없는 세션의 확인 기록이 404를 받으면 그 기록만 빼고 뒤 기록을 보낸다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      sessions: [],
+      pendingExposureEvents: [
+        confirmItem,
+        { ...confirmItem, id: "x2", sessionId: "s2" },
+      ],
+    });
+    const server = serverFetch((path) => (path.includes("/s1/") ? 404 : 200));
+    global.fetch = server.fn;
+
+    await mod.retryExposureEvents();
+
+    expect(server.paths()).toEqual([
+      "/api/sessions/s1/feedback-confirmed",
+      "/api/sessions/s2/feedback-confirmed",
+    ]);
+    expect(await pending()).toEqual([]);
+  });
+
+  // 요청이 서버에 닿을 때는 세션이 없어 404지만, 답을 받기 전에 세션 업로드가 끝나 보냄 상태가 된다.
+  it("확인 기록 요청 중에 세션 업로드가 끝나 404를 받으면 큐에 남기고 다음 틱에 보낸다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      sessions: [{ sessionId: "s1", syncedToServer: false, videos: [] }],
+      pendingExposureEvents: [confirmItem],
+    });
+    global.fetch = vi.fn(async () => {
+      await global.chrome.storage.local.set({
+        sessions: [{ sessionId: "s1", syncedToServer: true, videos: [] }],
+      });
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ success: false, code: "NOT_FOUND" }),
+      };
+    });
+
+    await mod.retryExposureEvents();
+    expect(await pending()).toHaveLength(1);
+
+    const server = serverFetch();
+    global.fetch = server.fn;
+    await mod.retryExposureEvents();
+
+    expect(server.paths()).toEqual(["/api/sessions/s1/feedback-confirmed"]);
+    expect(await pending()).toEqual([]);
+  });
+
+  // 연구자가 TEST 계정에서 "↩ 온보딩"으로 초기화한 뒤 다른 참여자로 복구하면 anonymousId가 바뀐다.
+  it("신원이 바뀌면 옛 신원이 맡긴 종료 이벤트는 새 신원으로 보내지 않고 큐에서 뺀다", async () => {
+    const mod = await loadBackground({ ...BASE, group: "CON" });
+    global.fetch = serverFetch(() => "network").fn;
+    handOff({ kind: "study_end", event: "modal_shown" });
+    await flush();
+    expect(await pending()).toHaveLength(1);
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a2",
+      participantToken: "tok2",
+    });
+    const server = serverFetch();
+    global.fetch = server.fn;
+    await mod.retryExposureEvents();
+
+    expect(server.calls).toEqual([]);
+    expect(await pending()).toEqual([]);
+  });
+
+  // 재전송이 신원과 큐를 따로 읽는 사이에 신원이 바뀌고 새 신원의 기록이 들어오는 경우다.
+  it("신원과 큐를 읽는 사이에 신원이 바뀌어도 새 신원의 기록은 지우지 않고 새 신원으로 보낸다", async () => {
+    const mod = await loadBackground();
+    const get = global.chrome.storage.local.get;
+    let switched = false;
+    global.chrome.storage.local.get = async (keys) => {
+      if (keys === "pendingExposureEvents" && !switched) {
+        switched = true;
+        await global.chrome.storage.local.set({
+          anonymousId: "a2",
+          participantToken: "tok2",
+          pendingExposureEvents: [{ ...confirmItem, anonymousId: "a2" }],
+        });
+      }
+      return get(keys);
+    };
+    const server = serverFetch();
+    global.fetch = server.fn;
+
+    await mod.retryExposureEvents();
+
+    expect(server.calls).toEqual([
+      {
+        path: "/api/sessions/s1/feedback-confirmed",
+        method: "PATCH",
+        body: { anonymousId: "a2", participantToken: "tok2" },
+      },
+    ]);
+    expect(await pending()).toEqual([]);
+  });
+
+  // 옛 신원의 같은 기록과 하나로 합치면, 옛 기록을 뺄 때 새 신원의 기록까지 사라진다
+  it("옛 신원의 같은 종료 이벤트가 큐에 있어도 새 신원이 맡긴 기록은 따로 들어가 새 신원으로 나간다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      group: "CON",
+      pendingExposureEvents: [
+        {
+          id: "old",
+          anonymousId: "a-old",
+          kind: "study_end",
+          event: "modal_shown",
+          createdAt: "2026-01-10T11:00:00.000Z",
+        },
+      ],
+    });
+    global.fetch = serverFetch(() => "network").fn;
+    handOff({ kind: "study_end", event: "modal_shown" });
+    await flush();
+    // 맡기자마자 한 번 보내며 옛 신원의 기록은 빠지고, 새 신원의 기록만 남는다
+    expect((await pending()).map((item) => item.anonymousId)).toEqual(["a1"]);
+
+    const server = serverFetch();
+    global.fetch = server.fn;
+    await mod.retryExposureEvents();
+
+    expect(server.calls).toEqual([
+      {
+        path: "/api/participants/study-end-review-event",
+        method: "POST",
+        body: {
+          anonymousId: "a1",
+          participantToken: "tok",
+          event: "modal_shown",
+        },
+      },
+    ]);
+    expect(await pending()).toEqual([]);
+  });
+
+  // 기간 리뷰가 아직 다 만들어지지 않으면 403 NOT_ELIGIBLE이 오고, 다음 배치 뒤에는 받는다
+  it("대조군 종료 이벤트가 403 NOT_ELIGIBLE을 받으면 큐에 남기고, 다음 틱에 받으면 뺀다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      group: "CON",
+      pendingExposureEvents: [
+        {
+          id: "y1",
+          anonymousId: "a1",
+          kind: "study_end",
+          event: "modal_shown",
+          createdAt: "2026-01-10T11:00:00.000Z",
+        },
+      ],
+    });
+    global.fetch = serverFetch(() => 403).fn;
+    await mod.retryExposureEvents();
+    expect(await pending()).toHaveLength(1);
+    expect(
+      (await global.chrome.storage.local.get("participantSynced"))
+        .participantSynced,
+    ).toBe(true);
+
+    const server = serverFetch();
+    global.fetch = server.fn;
+    await mod.retryExposureEvents();
+
+    expect(server.calls).toEqual([
+      {
+        path: "/api/participants/study-end-review-event",
+        method: "POST",
+        body: {
+          anonymousId: "a1",
+          participantToken: "tok",
+          event: "modal_shown",
+        },
+      },
+    ]);
+    expect(await pending()).toEqual([]);
+  });
+
+  it("같은 틱에서는 세션을 먼저 보내고 그 세션의 확인 기록을 보낸다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      sessions: [
+        {
+          sessionId: "s1",
+          startTime: new Date(2026, 0, 10, 11, 50).toISOString(),
+          endTime: FIXED_NOW.toISOString(),
+          syncedToServer: false,
+          videos: [{ videoId: "v1", title: "노래 모음" }],
+        },
+      ],
+      pendingExposureEvents: [confirmItem],
+    });
+    // 세션 저장이 끝나기 전에 온 확인 기록은 실제 서버처럼 404로 답한다
+    let sessionStored = false;
+    const paths = [];
+    global.fetch = vi.fn(async (url) => {
+      const path = new URL(url).pathname;
+      paths.push(path);
+      if (path === "/api/sessions") {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        sessionStored = true;
+      }
+      const status =
+        path.endsWith("/feedback-confirmed") && !sessionStored ? 404 : 200;
+      return {
+        ok: status < 300,
+        status,
+        json: async () => ({ success: status < 300, data: null }),
+      };
+    });
+
+    const tick = mod.runServerTasks();
+    await vi.advanceTimersByTimeAsync(200);
+    await tick;
+
+    expect(paths.indexOf("/api/sessions")).toBeGreaterThanOrEqual(0);
+    expect(paths.indexOf("/api/sessions")).toBeLessThan(
+      paths.indexOf("/api/sessions/s1/feedback-confirmed"),
+    );
+    expect(paths.filter((p) => p.endsWith("/feedback-confirmed"))).toHaveLength(
+      1,
+    );
+    expect(await pending()).toEqual([]);
+  });
+
+  it("실험군의 종료 이벤트는 큐에 넣지 않고 null을 돌려 팝업이 지금처럼 처리하게 한다", async () => {
+    await loadBackground();
+    const server = serverFetch();
+    global.fetch = server.fn;
+
+    const { sendResponse } = handOff({
+      kind: "study_end",
+      event: "modal_shown",
+    });
+    await flush();
+
+    expect(sendResponse).toHaveBeenCalledWith(null);
+    expect(server.calls).toEqual([]);
+    expect(await pending()).toEqual([]);
+  });
+
+  it.each([
+    ["알 수 없는 종류", { kind: "other", sessionId: "s1" }],
+    ["세션 id가 없는 확인 기록", { kind: "feedback_confirmed" }],
+    ["허용되지 않은 종료 이벤트", { kind: "study_end", event: "other" }],
+  ])("%s는 큐에 넣지 않는다", async (_label, event) => {
+    await loadBackground({ ...BASE, group: "CON" });
+    global.fetch = serverFetch().fn;
+
+    const { sendResponse } = handOff(event);
+    await flush();
+
+    expect(sendResponse).toHaveBeenCalledWith(null);
+    expect(await pending()).toEqual([]);
+  });
+
+  it("큐에 저장하지 못하면 null을 돌려 팝업이 직접 보내게 한다", async () => {
+    await loadBackground();
+    const set = global.chrome.storage.local.set;
+    global.chrome.storage.local.set = async (obj) => {
+      if ("pendingExposureEvents" in obj) throw new Error("QUOTA_BYTES");
+      return set(obj);
+    };
+    global.fetch = serverFetch().fn;
+
+    const { sendResponse } = handOff({
+      kind: "feedback_confirmed",
+      sessionId: "s1",
+    });
+    await flush();
+
+    expect(sendResponse).toHaveBeenCalledWith(null);
+  });
+});

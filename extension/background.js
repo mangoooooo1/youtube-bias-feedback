@@ -17,6 +17,10 @@ import {
   markWatchStatsSent,
   markWatchStatsInvalid,
   patchVideoRecord,
+  addExposureEvent,
+  getPendingExposureEvents,
+  removeExposureEvent,
+  EXPOSURE_EVENT_KINDS,
   getParticipantSyncState,
   markParticipantSynced,
   recordParticipantSyncFailure,
@@ -156,6 +160,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(() => sendResponse(null));
     return true;
   }
+  // 팝업의 확인·종료 이벤트 기록을 재시도 큐에 맡는다. 넣지 못하면 null을 돌려 팝업이 직접 보내게 한다
+  if (message?.type === "queue-exposure-event") {
+    queueExposureEvent(message.event)
+      .then((queued) => {
+        sendResponse(queued ? { queued: true } : null);
+        if (queued) return retryExposureEvents();
+      })
+      .catch(() => sendResponse(null));
+    return true;
+  }
   if (message?.type !== "client-error") return;
   reportClientError(message.code, message.where);
 });
@@ -245,7 +259,8 @@ export async function runServerTasks() {
     flushClientErrors(sendToServer, onboarding?.anonymousId ?? null),
     ensureParticipantSynced().finally(() =>
       Promise.all([
-        retryUnsyncedSessions(),
+        // 확인·열람 기록은 세션이 서버에 있어야 받으므로 세션을 먼저 보낸다
+        retryUnsyncedSessions().finally(() => retryExposureEvents()),
         retryUnsentVideoEvents().finally(() => retryUnsentWatchStats()),
       ]),
     ),
@@ -294,39 +309,119 @@ export async function handleNotificationOpen(sessionId) {
   }
   clearUnviewedIconDot();
   chrome.tabs.create({ url: chrome.runtime.getURL("popup/popup.html") });
-  await markFeedbackViewed(sessionId);
+  // 알림 클릭은 "실제 열람 시작" 신호다. 알림을 거치지 않고 팝업만 연 경우는 기록하지 않는다
+  if (await queueExposureEvent({ kind: "feedback_viewed", sessionId })) {
+    await retryExposureEvents();
+  }
+}
+
+// 종료 단계 이벤트는 대조군만 서버가 받는다
+const CONTROL_GROUPS = new Set(["CON", "TEST-CON"]);
+const STUDY_END_EVENTS = new Set(["modal_shown", "review_viewed"]);
+
+function isValidExposureEvent(event) {
+  if (!EXPOSURE_EVENT_KINDS.has(event?.kind)) return false;
+  if (event.kind === "study_end") return STUDY_END_EVENTS.has(event.event);
+  return typeof event.sessionId === "string" && event.sessionId !== "";
 }
 
 /**
- * 알림 클릭을 "실제 열람 시작"으로 서버에 기록한다. 팝업 표시 기반 feedbackViewed보다
- * 엄격한 신호로, 알림을 거치지 않고 팝업만 연 경우는 기록하지 않는다.
- * @param {string} sessionId - 대상 세션 id
+ * 처치 노출 기록을 재시도 큐에 넣는다. 보내는 일은 retryExposureEvents가 한다.
+ * 대조군이 아닌 참여자의 종료 이벤트는 서버가 늘 거부해, 다른 기록을 막지 않게 넣지 않는다.
+ * @param {{kind: string, sessionId?: string, event?: string}} event
+ * @returns {Promise<boolean>} 큐에 넣었으면 true
+ */
+async function queueExposureEvent(event) {
+  if (!isValidExposureEvent(event)) return false;
+  const onboarding = await getOnboarding();
+  if (!onboarding?.anonymousId) return false;
+  if (event.kind === "study_end" && !CONTROL_GROUPS.has(onboarding.group)) {
+    return false;
+  }
+  await addExposureEvent({ ...event, anonymousId: onboarding.anonymousId });
+  return true;
+}
+
+function sendExposureEvent(onboarding, item) {
+  const auth = {
+    anonymousId: onboarding.anonymousId,
+    participantToken: onboarding.participantToken,
+  };
+  if (item.kind === "study_end") {
+    return sendToServer("/api/participants/study-end-review-event", "POST", {
+      ...auth,
+      event: item.event,
+    });
+  }
+  const action =
+    item.kind === "feedback_viewed" ? "feedback-viewed" : "feedback-confirmed";
+  return sendToServer(
+    `/api/sessions/${encodeURIComponent(item.sessionId)}/${action}`,
+    "PATCH",
+    auth,
+  );
+}
+
+/**
+ * 세션이 아직 서버에 올라가지 않아 생긴 404인가. 올라가길 기다렸다 다시 보낸다.
+ * 이미 보냈거나 영구 실패했거나 기기에 없는 세션이면 다시 보내도 같은 404다.
+ */
+async function isAwaitingSessionUpload(sessionId) {
+  const sessions = await getAllSessions();
+  return (
+    sessions.find((s) => s.sessionId === sessionId)?.syncedToServer === false
+  );
+}
+
+/**
+ * 처치 노출 기록(알림 클릭 열람·피드백 확인·대조군 종료 이벤트)을 서버로 보낸다.
+ * 한 번 실패하면 기록이 영구히 빠지던 문제를 다른 큐와 같은 재시도 규칙으로 막는다.
+ * 서버는 받은 시각을 기록하므로, 다시 보낸 기록은 실제 시각보다 늦게 찍힌다.
  * @returns {Promise<void>}
  */
-async function markFeedbackViewed(sessionId) {
-  if (!SERVER_URL || SERVER_URL.startsWith("YOUR_")) return;
-  const onboarding = await getOnboarding();
-  if (!onboarding?.anonymousId) return;
+export function retryExposureEvents() {
+  return withQueueLock("exposure_events", async () => {
+    // 새 신원의 기록은 신원이 바뀐 뒤에만 들어온다. 큐를 먼저 읽어야 그 기록을 옛 신원 기준으로 지우지 않는다
+    const items = await getPendingExposureEvents();
+    const onboarding = await getOnboarding();
+    if (!onboarding?.anonymousId) return;
 
-  const cleanUrl = SERVER_URL.replace(/\/$/, "");
-  try {
-    const response = await fetch(
-      `${cleanUrl}/api/sessions/${encodeURIComponent(sessionId)}/feedback-viewed`,
-      {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          anonymousId: onboarding.anonymousId,
-          participantToken: onboarding.participantToken,
-        }),
+    await drainQueue(
+      "exposure_events",
+      items,
+      async (item) => {
+        // 연구자 모드 초기화 뒤 다른 참여자로 복구하면 신원이 바뀐다. 옛 신원의 기록을 새 신원으로 보내지 않는다
+        if (item.anonymousId !== onboarding.anonymousId) {
+          return {
+            ok: false,
+            kind: "item",
+            status: null,
+            code: "foreign_identity",
+            data: null,
+          };
+        }
+        // 요청 중에 업로드가 끝나면 404를 받은 뒤엔 보냄 상태라, 요청 전 상태도 본다
+        const awaitingBefore =
+          item.kind !== "study_end" &&
+          (await isAwaitingSessionUpload(item.sessionId));
+        const result = await sendExposureEvent(onboarding, item);
+        if (result.ok) {
+          await removeExposureEvent(item);
+          return result;
+        }
+        if (
+          result.status === 404 &&
+          item.kind !== "study_end" &&
+          !awaitingBefore &&
+          !(await isAwaitingSessionUpload(item.sessionId))
+        ) {
+          return { ...result, kind: "item" };
+        }
+        return result;
       },
+      removeExposureEvent,
     );
-    if (!response.ok) {
-      console.warn("[background] 피드백 열람 기록 실패:", response.status);
-    }
-  } catch (error) {
-    console.warn("[background] 피드백 열람 기록 오류:", error);
-  }
+  });
 }
 
 /**

@@ -17,6 +17,7 @@ export const CLIENT_ERROR_WHERE = new Set([
   "background.queue.sessions",
   "background.queue.video_events",
   "background.queue.watch_stats",
+  "background.queue.exposure_events",
   "background.serverTasks",
   "background.sessionTimeout",
   "background.persistServerUrl",
