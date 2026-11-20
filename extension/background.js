@@ -381,10 +381,11 @@ async function isAwaitingSessionUpload(sessionId) {
  */
 export function retryExposureEvents() {
   return withQueueLock("exposure_events", async () => {
+    // 새 신원의 기록은 신원이 바뀐 뒤에만 들어온다. 큐를 먼저 읽어야 그 기록을 옛 신원 기준으로 지우지 않는다
+    const items = await getPendingExposureEvents();
     const onboarding = await getOnboarding();
     if (!onboarding?.anonymousId) return;
 
-    const items = await getPendingExposureEvents();
     await drainQueue(
       "exposure_events",
       items,
