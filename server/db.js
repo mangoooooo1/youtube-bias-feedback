@@ -36,6 +36,8 @@ function initializeDB() {
     addColumn("today_reviews", "timeSharePercents", "TEXT");
     addColumn("popup_events", "pastDayReviewViews", "INTEGER");
     addColumn("video_events", "resumedFromEventId", "TEXT");
+    addColumn("video_events", "extensionVersion", "TEXT");
+    addColumn("sessions", "extensionVersion", "TEXT");
     assertLatestColumns();
     backfillPeriodReviewVersions();
   } catch (err) {
@@ -109,6 +111,7 @@ function execSchema() {
       feedbackNotifiedAt   TEXT,     -- 분석 완료 알림을 표시한 시각 (미대상/미전달이면 NULL)
       feedbackViewedAt     TEXT,     -- 알림 클릭 등으로 피드백을 실제로 연 시각 (NULL이면 아직 미열람)
       feedbackConfirmedAt  TEXT,     -- "피드백 확인하기" 버튼으로 블러를 해제한 시각 (NULL이면 아직 미확인)
+      extensionVersion     TEXT,     -- 처음 도착한 요청의 확장 버전 (헤더가 없던 옛 확장이면 NULL)
       createdAt            TEXT    DEFAULT (datetime('now'))
     );
 
@@ -157,6 +160,8 @@ function execSchema() {
       isShortsUrl INTEGER,
       -- 같은 탭에서 10분 넘게 멈췄다가 다시 재생해 새로 만든 기록이면 앞 기록의 eventId, 아니면 NULL
       resumedFromEventId TEXT,
+      -- 처음 도착한 요청의 확장 버전 (헤더가 없던 옛 확장이면 NULL)
+      extensionVersion TEXT,
       createdAt   TEXT    DEFAULT (datetime('now'))
     );
 

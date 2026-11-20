@@ -329,6 +329,62 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
 
 // 시청시간 원시 데이터 확정 (클릭성 이탈 판별용) — 영상을 떠난 뒤에야 알 수
 // 있는 값이라 POST와 분리된 PATCH로 온다.
+describe("POST /api/video-events — 확장 버전 기록", () => {
+  function storedVersion(eventId) {
+    return db
+      .prepare("SELECT extensionVersion FROM video_events WHERE eventId = ?")
+      .get(eventId).extensionVersion;
+  }
+
+  it("X-Extension-Version 헤더의 버전을 저장한다", async () => {
+    const res = await request(app)
+      .post("/api/video-events")
+      .set("X-Extension-Version", "3.4.0")
+      .send(basePayload({ eventId: "ver-1" }));
+    expect(res.status).toBe(200);
+    expect(storedVersion("ver-1")).toBe("3.4.0");
+  });
+
+  it("헤더가 없는 옛 확장의 기록도 저장하고 버전은 null로 둔다", async () => {
+    const res = await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ eventId: "ver-2" }));
+    expect(res.status).toBe(200);
+    expect(storedVersion("ver-2")).toBeNull();
+  });
+
+  it.each([["3.4.0-beta"], ["v3.4"], ["1.2.3.4.5"], ["<script>"], [""]])(
+    "형식이 틀린 버전(%s)이면 기록은 저장하고 버전은 null로 둔다",
+    async (version) => {
+      const res = await request(app)
+        .post("/api/video-events")
+        .set("X-Extension-Version", version)
+        .send(basePayload({ eventId: "ver-3" }));
+      expect(res.status).toBe(200);
+      expect(storedVersion("ver-3")).toBeNull();
+    },
+  );
+
+  it("본문의 extensionVersion은 무시하고 헤더만 믿는다", async () => {
+    await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ eventId: "ver-4", extensionVersion: "9.9.9" }));
+    expect(storedVersion("ver-4")).toBeNull();
+  });
+
+  it("업데이트된 확장이 같은 기록을 다시 보내도 처음 도착한 버전을 유지한다", async () => {
+    await request(app)
+      .post("/api/video-events")
+      .set("X-Extension-Version", "3.3.1")
+      .send(basePayload({ eventId: "ver-5" }));
+    await request(app)
+      .post("/api/video-events")
+      .set("X-Extension-Version", "3.4.0")
+      .send(basePayload({ eventId: "ver-5" }));
+    expect(storedVersion("ver-5")).toBe("3.3.1");
+  });
+});
+
 describe("PATCH /api/video-events/:eventId — 시청시간 확정", () => {
   it("정상 요청이면 watchedSeconds/playbackRate/wasBackgrounded가 저장된다", async () => {
     await request(app)

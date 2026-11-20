@@ -8,14 +8,15 @@ const {
 const { classifyReferrerType } = require("./video-events-classify");
 const { normalizeIsoTimestamp } = require("./iso-timestamp");
 const { requireParticipant } = require("../middleware/requireParticipant");
+const { readExtensionVersion } = require("./extension-version");
 
 const router = express.Router();
 
 const insertEvent = db.prepare(`
   INSERT OR IGNORE INTO video_events
-    (eventId, anonymousId, videoId, title, watchedAt, sessionId, entryHost, entryPath, referrerType, relatedTrigger, isShortsUrl, resumedFromEventId)
+    (eventId, anonymousId, videoId, title, watchedAt, sessionId, entryHost, entryPath, referrerType, relatedTrigger, isShortsUrl, resumedFromEventId, extensionVersion)
   VALUES
-    (@eventId, @anonymousId, @videoId, @title, @watchedAt, @sessionId, @entryHost, @entryPath, @referrerType, @relatedTrigger, @isShortsUrl, @resumedFromEventId)
+    (@eventId, @anonymousId, @videoId, @title, @watchedAt, @sessionId, @entryHost, @entryPath, @referrerType, @relatedTrigger, @isShortsUrl, @resumedFromEventId, @extensionVersion)
 `);
 
 // entryPath를 저장해도 되는 referrerType 화이트리스트. 외부 사이트 경로(external)뿐 아니라,
@@ -82,6 +83,7 @@ router.post("/", requireParticipant, (req, res, next) => {
       relatedTrigger,
       isShortsUrl: isShortsUrl === undefined ? null : isShortsUrl,
       resumedFromEventId: resumedFromEventId ?? null,
+      extensionVersion: readExtensionVersion(req),
     });
   } catch (err) {
     return next(err);

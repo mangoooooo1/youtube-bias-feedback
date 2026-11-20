@@ -25,12 +25,13 @@ function insertSession(db, body) {
     totalMs,
     youtubeMs,
     feedbackNotifiedAt,
+    extensionVersion,
   } = body;
 
   db.prepare(
     `
-    INSERT INTO sessions (anonymousId, sessionId, startTime, endTime, videoCount, categoryDistribution, entropy, weightedEntropy, weightedCategoryDistribution, validVideoCount, totalMs, youtubeMs, feedbackNotifiedAt)
-    VALUES (@anonymousId, @sessionId, @startTime, @endTime, @videoCount, @categoryDistribution, @entropy, @weightedEntropy, @weightedCategoryDistribution, @validVideoCount, @totalMs, @youtubeMs, @feedbackNotifiedAt)
+    INSERT INTO sessions (anonymousId, sessionId, startTime, endTime, videoCount, categoryDistribution, entropy, weightedEntropy, weightedCategoryDistribution, validVideoCount, totalMs, youtubeMs, feedbackNotifiedAt, extensionVersion)
+    VALUES (@anonymousId, @sessionId, @startTime, @endTime, @videoCount, @categoryDistribution, @entropy, @weightedEntropy, @weightedCategoryDistribution, @validVideoCount, @totalMs, @youtubeMs, @feedbackNotifiedAt, @extensionVersion)
   `,
   ).run({
     anonymousId,
@@ -52,6 +53,7 @@ function insertSession(db, body) {
     totalMs: totalMs ?? null,
     youtubeMs: youtubeMs ?? null,
     feedbackNotifiedAt: normalizeIsoTimestamp(feedbackNotifiedAt),
+    extensionVersion: extensionVersion ?? null,
   });
 }
 

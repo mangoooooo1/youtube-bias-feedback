@@ -45,7 +45,8 @@ db.exec(`
     review TEXT,
     reviewTopic TEXT,
     source TEXT,
-    promptVersion TEXT
+    promptVersion TEXT,
+    extensionVersion TEXT
   );
 `);
 

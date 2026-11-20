@@ -283,6 +283,51 @@ describe("initializeDB — video_events.resumedFromEventId 소급 추가", () =>
   });
 });
 
+describe("initializeDB — extensionVersion 소급 추가", () => {
+  it.each([["video_events"], ["sessions"]])(
+    "열이 없는 기존 %s에 열을 추가하고, 기존 행은 값 없이 그대로 남긴다",
+    (table) => {
+      // 지금 스키마에서 이 열만 뺀 표 — 인덱스가 쓰는 열은 남겨야 initializeDB가 돈다
+      const keep = db
+        .prepare(`PRAGMA table_info(${table})`)
+        .all()
+        .map((c) => c.name)
+        .filter((name) => name !== "extensionVersion")
+        .join(", ");
+      db.exec(
+        `CREATE TABLE old_${table} AS SELECT ${keep} FROM ${table} WHERE 0`,
+      );
+      db.exec(`DROP TABLE ${table}`);
+      db.exec(`ALTER TABLE old_${table} RENAME TO ${table}`);
+      db.prepare(`INSERT INTO ${table} (anonymousId) VALUES ('a1')`).run();
+      try {
+        initializeDB();
+
+        expect(db.prepare(`SELECT * FROM ${table}`).all()).toEqual([
+          expect.objectContaining({
+            anonymousId: "a1",
+            extensionVersion: null,
+          }),
+        ]);
+      } finally {
+        db.exec(`DROP TABLE ${table}`);
+        initializeDB();
+      }
+    },
+  );
+
+  it.each([["video_events"], ["sessions"]])(
+    "새로 만든 DB의 %s에도 열이 있다",
+    (table) => {
+      const columns = db
+        .prepare(`PRAGMA table_info(${table})`)
+        .all()
+        .map((c) => c.name);
+      expect(columns).toContain("extensionVersion");
+    },
+  );
+});
+
 describe("initializeDB — 예전 스키마 DB 감지", () => {
   // 인덱스가 없는 새 열은 CREATE TABLE IF NOT EXISTS로 추가되지 않고 오류도 나지 않는다.
   // 재생성을 잊고 배포하면 서버는 뜨고 오늘 리뷰만 조용히 실패하므로, 시작 단계에서 막는다.
