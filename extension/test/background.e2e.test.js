@@ -1439,6 +1439,47 @@ describe("sendToServer — 재시도 큐가 판단할 수 있도록 전송 결�
   });
 });
 
+describe("sendToServer — 확장 버전 헤더", () => {
+  it("요청마다 manifest의 확장 버전을 X-Extension-Version 헤더로 보낸다", async () => {
+    global.chrome = createChromeMock();
+    vi.resetModules();
+    const { sendToServer } = await import("../background.js");
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    }));
+
+    await sendToServer("/api/x", "POST", {});
+
+    expect(global.fetch.mock.calls[0][1].headers).toEqual({
+      "Content-Type": "application/json",
+      "X-Extension-Version": "2.4.1",
+    });
+  });
+
+  it("버전을 읽지 못해도 헤더 없이 요청은 보낸다", async () => {
+    global.chrome = createChromeMock();
+    global.chrome.runtime.getManifest = () => {
+      throw new Error("Extension context invalidated.");
+    };
+    vi.resetModules();
+    const { sendToServer } = await import("../background.js");
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    }));
+
+    await expect(sendToServer("/api/x", "POST", {})).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(global.fetch.mock.calls[0][1].headers).toEqual({
+      "Content-Type": "application/json",
+    });
+  });
+});
+
 describe("알람 핸들러 — 시청시간 PATCH는 영상 POST 재시도가 끝난 뒤 보낸다", () => {
   it("같은 틱에서 POST가 확정된 영상의 시청시간을 곧바로 PATCH하고, POST보다 먼저 보내지 않는다", async () => {
     global.chrome = createChromeMock();

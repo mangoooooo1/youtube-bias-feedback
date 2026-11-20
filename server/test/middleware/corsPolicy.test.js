@@ -113,6 +113,23 @@ describe("createCorsPolicy — HTTP 응답 헤더", () => {
     expect(res.headers["access-control-allow-headers"]).toBe("Content-Type");
   });
 
+  // 확장은 요청마다 버전 헤더를 붙인다. 허용 헤더를 따로 정하지 않아 요청한 헤더를 그대로 허용해야 한다
+  it("유튜브 Origin의 preflight가 확장 버전 헤더를 요청하면 그 헤더를 허용한다", async () => {
+    const res = await request(buildApp())
+      .options("/api/video-events")
+      .set("Origin", YOUTUBE_ORIGIN)
+      .set("Access-Control-Request-Method", "POST")
+      .set(
+        "Access-Control-Request-Headers",
+        "content-type,x-extension-version",
+      );
+    expect(res.status).toBe(204);
+    expect(res.headers["access-control-allow-origin"]).toBe(YOUTUBE_ORIGIN);
+    expect(res.headers["access-control-allow-headers"]).toBe(
+      "content-type,x-extension-version",
+    );
+  });
+
   it("유튜브 Origin의 실제 POST 응답에도 허용 헤더가 붙는다", async () => {
     const res = await request(buildApp())
       .post("/api/video-events")

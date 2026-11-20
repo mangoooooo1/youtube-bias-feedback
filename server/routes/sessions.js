@@ -9,6 +9,7 @@ const {
   clearFeedbackNotifiedAt,
 } = require("./sessions-store");
 const { requireParticipant } = require("../middleware/requireParticipant");
+const { readExtensionVersion } = require("./extension-version");
 const { oneLine } = require("../log-line");
 const { generateAndStoreTodayReview } = require("./today-review-generate");
 const {
@@ -118,6 +119,7 @@ router.post("/", requireParticipant, async (req, res, next) => {
       ...req.body,
       ...analysis,
       youtubeMs,
+      extensionVersion: readExtensionVersion(req),
     });
   } catch (err) {
     if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {

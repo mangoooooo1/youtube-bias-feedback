@@ -281,6 +281,45 @@ describe("실제 server/routes/sessions.js 라우터 배선", () => {
 
 // YouTube API 실패로 categoryId를 확인 못 했을 때 {}·0(확정된 빈 값)
 // 대신 null(미확정)을 저장하고, 원인이 해소된 뒤 재시도(409 경로)에서 실제로 갱신되는지 검증
+describe("POST /api/sessions — 확장 버전 기록", () => {
+  function storedVersion() {
+    return db
+      .prepare("SELECT extensionVersion FROM sessions WHERE sessionId = ?")
+      .get("wiring-s1").extensionVersion;
+  }
+
+  it("X-Extension-Version 헤더의 버전을 저장한다", async () => {
+    const res = await request(app)
+      .post("/api/sessions")
+      .set("X-Extension-Version", "3.4.0")
+      .send(basePayload());
+    expect(res.status).toBe(200);
+    expect(storedVersion()).toBe("3.4.0");
+  });
+
+  it("헤더가 없거나 형식이 틀리면 세션은 저장하고 버전은 null로 둔다", async () => {
+    const res = await request(app)
+      .post("/api/sessions")
+      .set("X-Extension-Version", "3.4.0-beta")
+      .send(basePayload({ extensionVersion: "9.9.9" }));
+    expect(res.status).toBe(200);
+    expect(storedVersion()).toBeNull();
+  });
+
+  it("업데이트된 확장이 같은 세션을 다시 보내도(409) 처음 도착한 버전을 유지한다", async () => {
+    await request(app)
+      .post("/api/sessions")
+      .set("X-Extension-Version", "3.3.1")
+      .send(basePayload());
+    const res = await request(app)
+      .post("/api/sessions")
+      .set("X-Extension-Version", "3.4.0")
+      .send(basePayload());
+    expect(res.status).toBe(409);
+    expect(storedVersion()).toBe("3.3.1");
+  });
+});
+
 describe("POST /api/sessions — categoryDistribution 미확정(null) 처리 및 재시도 갱신", () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.YOUTUBE_API_KEY;
