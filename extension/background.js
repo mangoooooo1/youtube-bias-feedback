@@ -389,6 +389,10 @@ export function retryExposureEvents() {
       "exposure_events",
       items,
       async (item) => {
+        // 요청 중에 업로드가 끝나면 404를 받은 뒤엔 보냄 상태라, 요청 전 상태도 본다
+        const awaitingBefore =
+          item.kind !== "study_end" &&
+          (await isAwaitingSessionUpload(item.sessionId));
         const result = await sendExposureEvent(onboarding, item);
         if (result.ok) {
           await removeExposureEvent(item);
@@ -397,6 +401,7 @@ export function retryExposureEvents() {
         if (
           result.status === 404 &&
           item.kind !== "study_end" &&
+          !awaitingBefore &&
           !(await isAwaitingSessionUpload(item.sessionId))
         ) {
           return { ...result, kind: "item" };
