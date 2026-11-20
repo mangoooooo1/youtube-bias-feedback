@@ -896,7 +896,10 @@ export async function sendToServer(
   try {
     const response = await fetch(`${SERVER_URL.replace(/\/$/, "")}${path}`, {
       method,
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...extensionVersionHeader(),
+      },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -918,6 +921,15 @@ export async function sendToServer(
     return failure(null, error?.name === "AbortError" ? "timeout" : "network");
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// 어느 버전이 보낸 기록인지 서버가 남기도록 붙인다. 버전을 못 읽어도 전송은 막지 않는다
+function extensionVersionHeader() {
+  try {
+    return { "X-Extension-Version": chrome.runtime.getManifest().version };
+  } catch {
+    return {};
   }
 }
 

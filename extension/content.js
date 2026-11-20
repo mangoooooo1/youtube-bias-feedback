@@ -367,7 +367,10 @@ async function finalizePreviousWatchStats(target, stats) {
       `${serverUrl.replace(/\/$/, "")}/api/video-events/${encodeURIComponent(target.eventId)}`,
       {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...extensionVersionHeader(),
+        },
         body: JSON.stringify({ anonymousId, participantToken, ...stats }),
       },
     );
@@ -376,6 +379,16 @@ async function finalizePreviousWatchStats(target, stats) {
     }
   } catch {
     // 네트워크 오류 — watchStatsSent:false로 남아 재시도 큐 대상이 된다.
+  }
+}
+
+// 어느 버전이 보낸 기록인지 서버가 남기도록 붙인다. 업데이트로 컨텍스트가 무효화돼 버전을 못 읽어도
+// 전송은 그대로 보낸다
+function extensionVersionHeader() {
+  try {
+    return { "X-Extension-Version": chrome.runtime.getManifest().version };
+  } catch {
+    return {};
   }
 }
 
@@ -580,7 +593,10 @@ function recordVideo(
       if (anonymousId && serverUrl && !serverUrl.startsWith("YOUR_")) {
         fetch(`${serverUrl.replace(/\/$/, "")}/api/video-events`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...extensionVersionHeader(),
+          },
           body: JSON.stringify({
             anonymousId,
             participantToken,

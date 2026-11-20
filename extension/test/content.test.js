@@ -1878,6 +1878,68 @@ describe("content.js recordVideo — /api/video-events 전송 결과를 sent 플
     expect(videos[0].eventId).toEqual(expect.any(String));
     expect(sentBody.eventId).toBe(videos[0].eventId);
   });
+
+  it("확장 버전을 X-Extension-Version 헤더로 함께 보낸다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    let sentHeaders = null;
+    const recordVideo = await loadRecordVideo(
+      {
+        runtime: {
+          id: "fake-extension-id",
+          getManifest: () => ({ version: "3.4.0" }),
+        },
+        storage: { local: storage },
+      },
+      (_url, options) => {
+        sentHeaders = options.headers;
+        return Promise.resolve({ ok: true });
+      },
+      { log: () => {}, warn: () => {} },
+    );
+
+    await recordVideo("v1", "영상1");
+    await flushMicrotasks();
+
+    expect(sentHeaders).toEqual({
+      "Content-Type": "application/json",
+      "X-Extension-Version": "3.4.0",
+    });
+  });
+
+  // 업데이트 뒤 남은 옛 스크립트는 manifest를 못 읽는다. 그래도 기록은 서버로 가야 한다
+  it("버전을 읽지 못해도 헤더 없이 기록은 보낸다", async () => {
+    const storage = createSharedStorage({
+      currentSession: { sessionId: "s1", startTime: "t0" },
+      anonymousId: "a1",
+      serverUrl: "http://localhost:3000",
+    });
+    let sentHeaders = null;
+    const recordVideo = await loadRecordVideo(
+      {
+        runtime: {
+          id: "fake-extension-id",
+          getManifest: () => {
+            throw new Error("Extension context invalidated.");
+          },
+        },
+        storage: { local: storage },
+      },
+      (_url, options) => {
+        sentHeaders = options.headers;
+        return Promise.resolve({ ok: true });
+      },
+      { log: () => {}, warn: () => {} },
+    );
+
+    await recordVideo("v1", "영상1");
+    await flushMicrotasks();
+
+    expect(sentHeaders).toEqual({ "Content-Type": "application/json" });
+  });
 });
 
 // 시청시간 원시 데이터 — 다음 영상으로 전환될 때 직전 영상의 시청시간을
