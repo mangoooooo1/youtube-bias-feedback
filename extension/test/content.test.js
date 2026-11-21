@@ -2684,6 +2684,85 @@ function createTabBrowser({
   return { storage, errorReports, openPage, recordsOf, stopTimers };
 }
 
+// 고치기 전이라 it.fails로 둔다. 지금은 설치일이 없어도 active로 판정해 온보딩 전 시청을 기록한다
+describe("content.js 온보딩 전(설치일 없음)에는 기록하지 않는다", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-26T10:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function dumpKeys(browser) {
+    return Object.keys(browser.storage.dump());
+  }
+
+  it.fails(
+    "새로 설치해 아무 값도 없으면 영상 기록과 세션을 만들지 않는다",
+    async () => {
+      const browser = createTabBrowser();
+      const page = await browser.openPage({ videoId: "AAAA" });
+      await page.play(30);
+      await page.goTo("BBBB");
+
+      expect(dumpKeys(browser).filter((k) => k.startsWith("video__"))).toEqual(
+        [],
+      );
+      expect(browser.storage.dump().currentSession).toBeUndefined();
+    },
+  );
+
+  it.fails(
+    "anonymousId가 남아 있어도 설치일이 없으면 기록하지 않고 서버로 보내지 않는다",
+    async () => {
+      const fetchMock = vi.fn(() => Promise.resolve({ ok: true }));
+      const browser = createTabBrowser({
+        initialStorage: {
+          anonymousId: "a1",
+          participantToken: "t1",
+          serverUrl: "https://srv.example",
+        },
+        fetch: fetchMock,
+      });
+      const page = await browser.openPage({ videoId: "AAAA" });
+      await page.play(30);
+      await page.goTo("BBBB");
+
+      expect(dumpKeys(browser).filter((k) => k.startsWith("video__"))).toEqual(
+        [],
+      );
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.fails(
+    "온보딩을 되돌린 뒤 10분 안에 같은 영상을 다시 열어도 앞 기록에 이어 쓰지 않는다",
+    async () => {
+      const browser = createTabBrowser({
+        initialStorage: {
+          anonymousId: "a1",
+          group: "TEST-EXP",
+          installDate: "2026-10-26T09:00:00.000Z",
+        },
+      });
+      let page = await browser.openPage({ videoId: "AAAA" });
+      await page.play(60);
+      await browser.storage.remove(["group", "installDate"]);
+
+      page = await page.reload();
+      await page.play(30);
+      await page.goTo("BBBB");
+
+      expect(browser.recordsOf("AAAA").map((r) => r.watchedSeconds)).toEqual([
+        60,
+      ]);
+      expect(browser.recordsOf("BBBB")).toEqual([]);
+    },
+  );
+});
+
 describe("content.js 같은 탭에서 다시 연 영상 — 마지막 재생 후 10분 안이면 같은 기록에 이어 쓴다", () => {
   const MINUTE = 60 * 1000;
   let browser;
