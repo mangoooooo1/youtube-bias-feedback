@@ -34,15 +34,15 @@
   /**
    * 수집은 서버의 마지막 기간이 끝나는 순간(마지막 기간 다음 날 00:00 KST)에 멈추고,
    * 그로부터 END_GRACE_DAYS 동안만 남은 데이터를 전송한다.
+   * 설치일은 온보딩 때 집단과 함께 저장되므로, 없으면 아직 참여를 시작하지 않은 것이다.
    * @param {string|undefined} installDate
    * @param {Date} [now]
-   * @returns {"active"|"grace"|"ended"}
+   * @returns {"not_started"|"active"|"grace"|"ended"}
    */
   function getParticipationState(installDate, now = new Date()) {
-    // 없거나 손상된 설치일은 종료 신호로 보지 않는다 — NaN 비교가 전부 거짓이라 그대로 두면 ended가 된다
-    if (!installDate || !Number.isFinite(new Date(installDate).getTime())) {
-      return "active";
-    }
+    if (!installDate) return "not_started";
+    // 손상된 설치일은 종료 신호로 보지 않는다 — NaN 비교가 전부 거짓이라 그대로 두면 ended가 된다
+    if (!Number.isFinite(new Date(installDate).getTime())) return "active";
     const collectionEndsAt = Date.parse(
       `${kstDayFromInstall(installDate, TOTAL_DAYS)}T00:00:00+09:00`,
     );

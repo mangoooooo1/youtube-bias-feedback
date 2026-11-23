@@ -70,21 +70,10 @@ describe("getParticipationState — 참여 상태 경계", () => {
     },
   );
 
-  it("installDate가 없으면(온보딩 전) active로 둔다", () => {
-    expect(ViewLensStudy.getParticipationState(undefined)).toBe("active");
-    expect(ViewLensStudy.getParticipationState(null)).toBe("active");
+  it("installDate가 없으면(온보딩 전) 아직 시작하지 않은 not_started다", () => {
+    expect(ViewLensStudy.getParticipationState(undefined)).toBe("not_started");
+    expect(ViewLensStudy.getParticipationState(null)).toBe("not_started");
   });
-
-  // 고치기 전이라 it.fails로 둔다. 지금은 설치일이 없어도 active라 온보딩 전 시청이 기록된다
-  it.fails(
-    "installDate가 없으면(온보딩 전) 아직 시작하지 않은 not_started다",
-    () => {
-      expect(ViewLensStudy.getParticipationState(undefined)).toBe(
-        "not_started",
-      );
-      expect(ViewLensStudy.getParticipationState(null)).toBe("not_started");
-    },
-  );
 });
 
 // viewlens-data.js는 classic script라 import할 수 없어 소스에서 값을 읽는다

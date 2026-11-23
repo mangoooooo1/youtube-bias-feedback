@@ -263,11 +263,16 @@ async function loadRecordVideo(chromeMock, fetchMock, consoleMock) {
   return api.recordVideo;
 }
 
+// 설치일이 없으면 기록하지 않으므로 저장소는 온보딩을 마친 상태로 시작한다. 온보딩 전은 installDate: undefined로 시험한다
+function onboarded(initial) {
+  return { installDate: new Date().toISOString(), ...initial };
+}
+
 // 실제 chrome.storage.local과 동일하게 "탭이 몇 개든 저장소 자체는 하나"를 흉내 낸다.
 // get()은 실제 API처럼 항상 독립된 사본을 돌려준다(구조적 복제) — 참조를 그대로 넘기면
 // 여러 호출자가 같은 객체를 공유하는 비현실적인 상황이 된다.
 function createSharedStorage(initial = {}) {
-  let store = { ...initial };
+  let store = onboarded(initial);
   return {
     get(keys) {
       // 실제 chrome.storage.local.get()은 string|string[]|null 세 형태를 모두 받는다.
@@ -297,7 +302,7 @@ function createSharedStorage(initial = {}) {
 // get()/set() 응답을 테스트가 원하는 순서로 하나씩 풀어주는 저장소 — 두 탭의 요청이
 // 정확히 어떤 순서로 끼어드는지를 타이밍 운에 맡기지 않고 결정론적으로 재현하기 위함.
 function createControllableStorage(initial = {}) {
-  let store = { ...initial };
+  let store = onboarded(initial);
   const pending = [];
   function schedule(run) {
     return new Promise((resolve) => {
@@ -690,7 +695,7 @@ describe("content.js captureWatchStatsSnapshot", () => {
       location: { href: "https://www.youtube.com/watch?v=FIRST" },
       chrome: {
         runtime: { id: "fake-extension-id" },
-        storage: { local: { get: async () => ({}), set } },
+        storage: { local: { get: async () => onboarded({}), set } },
       },
     });
 
@@ -2684,7 +2689,6 @@ function createTabBrowser({
   return { storage, errorReports, openPage, recordsOf, stopTimers };
 }
 
-// 고치기 전이라 it.fails로 둔다. 지금은 설치일이 없어도 active로 판정해 온보딩 전 시청을 기록한다
 describe("content.js 온보딩 전(설치일 없음)에는 기록하지 않는다", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -2699,68 +2703,62 @@ describe("content.js 온보딩 전(설치일 없음)에는 기록하지 않는�
     return Object.keys(browser.storage.dump());
   }
 
-  it.fails(
-    "새로 설치해 아무 값도 없으면 영상 기록과 세션을 만들지 않는다",
-    async () => {
-      const browser = createTabBrowser();
-      const page = await browser.openPage({ videoId: "AAAA" });
-      await page.play(30);
-      await page.goTo("BBBB");
+  it("새로 설치해 아무 값도 없으면 영상 기록과 세션을 만들지 않는다", async () => {
+    const browser = createTabBrowser({
+      initialStorage: { installDate: undefined },
+    });
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(30);
+    await page.goTo("BBBB");
 
-      expect(dumpKeys(browser).filter((k) => k.startsWith("video__"))).toEqual(
-        [],
-      );
-      expect(browser.storage.dump().currentSession).toBeUndefined();
-    },
-  );
+    expect(dumpKeys(browser).filter((k) => k.startsWith("video__"))).toEqual(
+      [],
+    );
+    expect(browser.storage.dump().currentSession).toBeUndefined();
+  });
 
-  it.fails(
-    "anonymousId가 남아 있어도 설치일이 없으면 기록하지 않고 서버로 보내지 않는다",
-    async () => {
-      const fetchMock = vi.fn(() => Promise.resolve({ ok: true }));
-      const browser = createTabBrowser({
-        initialStorage: {
-          anonymousId: "a1",
-          participantToken: "t1",
-          serverUrl: "https://srv.example",
-        },
-        fetch: fetchMock,
-      });
-      const page = await browser.openPage({ videoId: "AAAA" });
-      await page.play(30);
-      await page.goTo("BBBB");
+  it("anonymousId가 남아 있어도 설치일이 없으면 기록하지 않고 서버로 보내지 않는다", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve({ ok: true }));
+    const browser = createTabBrowser({
+      initialStorage: {
+        anonymousId: "a1",
+        participantToken: "t1",
+        serverUrl: "https://srv.example",
+        installDate: undefined,
+      },
+      fetch: fetchMock,
+    });
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(30);
+    await page.goTo("BBBB");
 
-      expect(dumpKeys(browser).filter((k) => k.startsWith("video__"))).toEqual(
-        [],
-      );
-      expect(fetchMock).not.toHaveBeenCalled();
-    },
-  );
+    expect(dumpKeys(browser).filter((k) => k.startsWith("video__"))).toEqual(
+      [],
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 
-  it.fails(
-    "온보딩을 되돌린 뒤 10분 안에 같은 영상을 다시 열어도 앞 기록에 이어 쓰지 않는다",
-    async () => {
-      const browser = createTabBrowser({
-        initialStorage: {
-          anonymousId: "a1",
-          group: "TEST-EXP",
-          installDate: "2026-10-26T09:00:00.000Z",
-        },
-      });
-      let page = await browser.openPage({ videoId: "AAAA" });
-      await page.play(60);
-      await browser.storage.remove(["group", "installDate"]);
+  it("온보딩을 되돌린 뒤 10분 안에 같은 영상을 다시 열어도 앞 기록에 이어 쓰지 않는다", async () => {
+    const browser = createTabBrowser({
+      initialStorage: {
+        anonymousId: "a1",
+        group: "TEST-EXP",
+        installDate: "2026-10-26T09:00:00.000Z",
+      },
+    });
+    let page = await browser.openPage({ videoId: "AAAA" });
+    await page.play(60);
+    await browser.storage.remove(["group", "installDate"]);
 
-      page = await page.reload();
-      await page.play(30);
-      await page.goTo("BBBB");
+    page = await page.reload();
+    await page.play(30);
+    await page.goTo("BBBB");
 
-      expect(browser.recordsOf("AAAA").map((r) => r.watchedSeconds)).toEqual([
-        60,
-      ]);
-      expect(browser.recordsOf("BBBB")).toEqual([]);
-    },
-  );
+    expect(browser.recordsOf("AAAA").map((r) => r.watchedSeconds)).toEqual([
+      60,
+    ]);
+    expect(browser.recordsOf("BBBB")).toEqual([]);
+  });
 });
 
 describe("content.js 같은 탭에서 다시 연 영상 — 마지막 재생 후 10분 안이면 같은 기록에 이어 쓴다", () => {
