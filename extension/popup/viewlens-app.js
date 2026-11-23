@@ -118,7 +118,9 @@ function _studioInstallDate(timelineKey) {
 
 // 수집이 멈췄는지(마지막 날 다음 날 00:00 KST부터) — 수집 관련 표시를 거두고 종료 안내 배너를 띄우는 기준
 function _isCollectionEnded(installDate) {
-  return ViewLensStudy.getParticipationState(installDate) !== "active";
+  // 시작 전(not_started)은 끝난 것이 아니다. 코드 입력 직후 첫 화면은 설치일을 아직 모른다
+  const state = ViewLensStudy.getParticipationState(installDate);
+  return state === "grace" || state === "ended";
 }
 
 // 하루 탭에서 갈 수 있는 마지막 날짜. 수집이 멈췄으면 참여 마지막 날, 아니면 오늘

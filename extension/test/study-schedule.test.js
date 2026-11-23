@@ -70,9 +70,9 @@ describe("getParticipationState — 참여 상태 경계", () => {
     },
   );
 
-  it("installDate가 없으면(온보딩 전) active로 둔다", () => {
-    expect(ViewLensStudy.getParticipationState(undefined)).toBe("active");
-    expect(ViewLensStudy.getParticipationState(null)).toBe("active");
+  it("installDate가 없으면(온보딩 전) 아직 시작하지 않은 not_started다", () => {
+    expect(ViewLensStudy.getParticipationState(undefined)).toBe("not_started");
+    expect(ViewLensStudy.getParticipationState(null)).toBe("not_started");
   });
 });
 
