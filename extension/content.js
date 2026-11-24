@@ -499,15 +499,22 @@ function recordVideo(
         !!currentSession &&
         Number.isFinite(lastMs) &&
         Date.parse(now) - lastMs >= SESSION_TIMEOUT_MS;
+      // 신원이 바뀌었으면 앞 참여자의 세션에 새 기록을 넣지 않는다. 그 세션은 background 알람이 닫는다
+      const isForeignSession =
+        !!currentSession?.anonymousId &&
+        currentSession.anonymousId !== anonymousId;
       const session =
-        currentSession && !isStale
+        currentSession && !isStale && !isForeignSession
           ? currentSession
           : {
               sessionId: makeSessionId(
-                isStale ? lastMs + SESSION_TIMEOUT_MS : Date.now(),
+                isStale && !isForeignSession
+                  ? lastMs + SESSION_TIMEOUT_MS
+                  : Date.now(),
                 anonymousId,
               ),
               startTime: now,
+              ...(anonymousId && { anonymousId }),
             };
 
       // 직전 영상의 시청시간 스냅샷을 여기서 확정한다. 아래 새로고침 검사로 돌아가도 확정은 해야 한다.
@@ -573,6 +580,8 @@ function recordVideo(
           isShortsUrl: isShorts ? 1 : 0,
           resumedFromEventId,
           tabId,
+          // 신원이 바뀐 뒤 재시도 큐가 이 기록을 새 참여자 이름으로 보내지 않게 기록한 참여자를 남긴다
+          ...(anonymousId && { anonymousId }),
         },
         // 첫 체크포인트(15초) 전에 확장이 업데이트되면 옛 스크립트는 pagehide도 없이 끊긴다.
         // 기록할 때 탭별 기록을 바로 남겨야 다시 넣은 스크립트가 이 기록에 이어 쓴다

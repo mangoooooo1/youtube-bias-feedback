@@ -4348,7 +4348,6 @@ describe("처치 노출 기록 재시도 큐 — 규칙", () => {
 });
 
 // 연구자가 TEST 계정에서 "↩ 온보딩"으로 초기화한 뒤 다른 참여자로 들어가면 anonymousId가 바뀐다.
-// 고치기 전이라 it.fails로 둔다. 지금은 세 큐가 기록한 참여자를 보지 않고 지금 참여자 이름으로 보낸다
 describe("다른 참여자가 기록한 기록 — 영상·시청 시간·세션 큐는 보내지 않고 뺀다", () => {
   const BASE = {
     anonymousId: "a1",
@@ -4385,184 +4384,172 @@ describe("다른 참여자가 기록한 기록 — 영상·시청 시간·세션
     return { fn, calls };
   }
 
-  it.fails(
-    "영상 기록: 다른 참여자의 미전송 기록은 다음 틱에도 보내지 않고, 지금 참여자 기록은 보낸다",
-    async () => {
-      const mod = await loadBackground({
-        ...BASE,
-        video__s1__e1: {
-          videoId: "v1",
-          watchedAt: "2026-01-10T11:00:00Z",
-          eventId: "e1",
-          sent: false,
+  it("영상 기록: 다른 참여자의 미전송 기록은 다음 틱에도 보내지 않고, 지금 참여자 기록은 보낸다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      video__s1__e1: {
+        videoId: "v1",
+        watchedAt: "2026-01-10T11:00:00Z",
+        eventId: "e1",
+        sent: false,
+        anonymousId: "a-old",
+      },
+      video__s2__e2: {
+        videoId: "v2",
+        watchedAt: "2026-01-10T11:05:00Z",
+        eventId: "e2",
+        sent: false,
+        anonymousId: "a1",
+      },
+      sessions: [
+        {
+          sessionId: "s0",
+          videos: [
+            {
+              videoId: "v0",
+              watchedAt: "2026-01-10T10:00:00Z",
+              eventId: "e0",
+              sent: false,
+              anonymousId: "a-old",
+            },
+          ],
+        },
+      ],
+    });
+    const server = serverFetch();
+    global.fetch = server.fn;
+
+    await mod.retryUnsentVideoEvents();
+    await mod.retryUnsentVideoEvents();
+
+    expect(
+      server.calls.map((c) => [c.body.eventId, c.body.anonymousId]),
+    ).toEqual([["e2", "a1"]]);
+  });
+
+  it("시청 시간: 다른 참여자의 시청 시간과 체크포인트는 다음 틱에도 보내지 않고, 지금 참여자 것은 보낸다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      video__s1__e1: {
+        videoId: "v1",
+        eventId: "e1",
+        sent: true,
+        watchedSeconds: 42,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        watchStatsSent: false,
+        anonymousId: "a-old",
+      },
+      // 최종값 없이 오래된 체크포인트만 남은 기록
+      video__s1__e3: {
+        videoId: "v3",
+        eventId: "e3",
+        sent: true,
+        anonymousId: "a-old",
+      },
+      watchcp__e3: {
+        sessionId: "s1",
+        eventId: "e3",
+        watchedSeconds: 30,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        at: FIXED_NOW.getTime() - 5 * 60 * 1000,
+      },
+      video__s2__e2: {
+        videoId: "v2",
+        eventId: "e2",
+        sent: true,
+        watchedSeconds: 10,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        watchStatsSent: false,
+        anonymousId: "a1",
+      },
+    });
+    const server = serverFetch();
+    global.fetch = server.fn;
+
+    await mod.retryUnsentWatchStats();
+    await mod.retryUnsentWatchStats();
+
+    expect(server.calls.map((c) => [c.path, c.body.anonymousId])).toEqual([
+      ["/api/video-events/e2", "a1"],
+    ]);
+  });
+
+  it("세션: 재시도 큐는 다른 참여자의 세션을 다음 틱에도 보내지 않고, 지금 참여자 세션은 보낸다", async () => {
+    const mod = await loadBackground({
+      ...BASE,
+      sessions: [
+        {
+          sessionId: "s-old",
           anonymousId: "a-old",
+          videos: [{ videoId: "v1" }],
+          syncedToServer: false,
         },
-        video__s2__e2: {
-          videoId: "v2",
-          watchedAt: "2026-01-10T11:05:00Z",
-          eventId: "e2",
-          sent: false,
+        {
+          sessionId: "s-new",
           anonymousId: "a1",
+          videos: [{ videoId: "v2" }],
+          syncedToServer: false,
         },
-        sessions: [
-          {
-            sessionId: "s0",
-            videos: [
-              {
-                videoId: "v0",
-                watchedAt: "2026-01-10T10:00:00Z",
-                eventId: "e0",
-                sent: false,
-                anonymousId: "a-old",
-              },
-            ],
-          },
-        ],
-      });
-      const server = serverFetch();
-      global.fetch = server.fn;
+      ],
+    });
+    const server = serverFetch();
+    global.fetch = server.fn;
 
-      await mod.retryUnsentVideoEvents();
-      await mod.retryUnsentVideoEvents();
+    await mod.retryUnsyncedSessions();
+    await mod.retryUnsyncedSessions();
 
-      expect(
-        server.calls.map((c) => [c.body.eventId, c.body.anonymousId]),
-      ).toEqual([["e2", "a1"]]);
-    },
-  );
+    expect(
+      server.calls.map((c) => [c.body.sessionId, c.body.anonymousId]),
+    ).toEqual([["s-new", "a1"]]);
+  });
 
-  it.fails(
-    "시청 시간: 다른 참여자의 시청 시간과 체크포인트는 다음 틱에도 보내지 않고, 지금 참여자 것은 보낸다",
-    async () => {
-      const mod = await loadBackground({
-        ...BASE,
-        video__s1__e1: {
-          videoId: "v1",
-          eventId: "e1",
-          sent: true,
-          watchedSeconds: 42,
-          playbackRate: 1,
-          wasBackgrounded: 0,
-          watchStatsSent: false,
-          anonymousId: "a-old",
-        },
-        // 최종값 없이 오래된 체크포인트만 남은 기록
-        video__s1__e3: {
-          videoId: "v3",
-          eventId: "e3",
-          sent: true,
-          anonymousId: "a-old",
-        },
-        watchcp__e3: {
-          sessionId: "s1",
-          eventId: "e3",
-          watchedSeconds: 30,
-          playbackRate: 1,
-          wasBackgrounded: 0,
-          at: FIXED_NOW.getTime() - 5 * 60 * 1000,
-        },
-        video__s2__e2: {
-          videoId: "v2",
-          eventId: "e2",
-          sent: true,
-          watchedSeconds: 10,
-          playbackRate: 1,
-          wasBackgrounded: 0,
-          watchStatsSent: false,
-          anonymousId: "a1",
-        },
-      });
-      const server = serverFetch();
-      global.fetch = server.fn;
+  it("세션: 닫으면서 바로 보낼 때도 다른 참여자가 남긴 세션은 보내지 않는다", async () => {
+    const minutesAgo = (m) =>
+      new Date(FIXED_NOW.getTime() - m * 60000).toISOString();
+    const newWatchedAt = minutesAgo(11);
+    await loadBackground({
+      ...BASE,
+      currentSession: {
+        sessionId: "new",
+        startTime: newWatchedAt,
+        anonymousId: "a1",
+      },
+      lastWatchedAt: newWatchedAt,
+      // 신원이 바뀌기 전 참여자가 남긴, 아직 닫히지 않은 기록
+      video__old__e1: {
+        videoId: "v1",
+        watchedAt: "2026-01-08T10:00:00.000Z",
+        eventId: "e1",
+        sent: true,
+        anonymousId: "a-old",
+      },
+      video__new__e2: {
+        videoId: "v2",
+        watchedAt: newWatchedAt,
+        eventId: "e2",
+        sent: true,
+        anonymousId: "a1",
+      },
+    });
+    const server = serverFetch();
+    global.fetch = server.fn;
 
-      await mod.retryUnsentWatchStats();
-      await mod.retryUnsentWatchStats();
+    const onAlarm = global.chrome.alarms.onAlarm.addListener.mock.calls[0][0];
+    onAlarm({ name: "SESSION_TIMEOUT_CHECK" });
+    await vi.waitFor(async () => {
+      const { sessions } = await global.chrome.storage.local.get("sessions");
+      expect(sessions?.find((s) => s.sessionId === "new")?.syncedToServer).toBe(
+        true,
+      );
+    });
 
-      expect(server.calls.map((c) => [c.path, c.body.anonymousId])).toEqual([
-        ["/api/video-events/e2", "a1"],
-      ]);
-    },
-  );
-
-  it.fails(
-    "세션: 재시도 큐는 다른 참여자의 세션을 다음 틱에도 보내지 않고, 지금 참여자 세션은 보낸다",
-    async () => {
-      const mod = await loadBackground({
-        ...BASE,
-        sessions: [
-          {
-            sessionId: "s-old",
-            anonymousId: "a-old",
-            videos: [{ videoId: "v1" }],
-            syncedToServer: false,
-          },
-          {
-            sessionId: "s-new",
-            anonymousId: "a1",
-            videos: [{ videoId: "v2" }],
-            syncedToServer: false,
-          },
-        ],
-      });
-      const server = serverFetch();
-      global.fetch = server.fn;
-
-      await mod.retryUnsyncedSessions();
-      await mod.retryUnsyncedSessions();
-
-      expect(
-        server.calls.map((c) => [c.body.sessionId, c.body.anonymousId]),
-      ).toEqual([["s-new", "a1"]]);
-    },
-  );
-
-  it.fails(
-    "세션: 닫으면서 바로 보낼 때도 다른 참여자가 남긴 세션은 보내지 않는다",
-    async () => {
-      const minutesAgo = (m) =>
-        new Date(FIXED_NOW.getTime() - m * 60000).toISOString();
-      const newWatchedAt = minutesAgo(11);
-      await loadBackground({
-        ...BASE,
-        currentSession: {
-          sessionId: "new",
-          startTime: newWatchedAt,
-          anonymousId: "a1",
-        },
-        lastWatchedAt: newWatchedAt,
-        // 신원이 바뀌기 전 참여자가 남긴, 아직 닫히지 않은 기록
-        video__old__e1: {
-          videoId: "v1",
-          watchedAt: "2026-01-08T10:00:00.000Z",
-          eventId: "e1",
-          sent: true,
-          anonymousId: "a-old",
-        },
-        video__new__e2: {
-          videoId: "v2",
-          watchedAt: newWatchedAt,
-          eventId: "e2",
-          sent: true,
-          anonymousId: "a1",
-        },
-      });
-      const server = serverFetch();
-      global.fetch = server.fn;
-
-      const onAlarm = global.chrome.alarms.onAlarm.addListener.mock.calls[0][0];
-      onAlarm({ name: "SESSION_TIMEOUT_CHECK" });
-      await vi.waitFor(async () => {
-        const { sessions } = await global.chrome.storage.local.get("sessions");
-        expect(
-          sessions?.find((s) => s.sessionId === "new")?.syncedToServer,
-        ).toBe(true);
-      });
-
-      expect(
-        server.calls
-          .filter((c) => c.path === "/api/sessions")
-          .map((c) => c.body.sessionId),
-      ).toEqual(["new"]);
-    },
-  );
+    expect(
+      server.calls
+        .filter((c) => c.path === "/api/sessions")
+        .map((c) => c.body.sessionId),
+    ).toEqual(["new"]);
+  });
 });

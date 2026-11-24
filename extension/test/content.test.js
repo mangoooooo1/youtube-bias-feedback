@@ -2761,8 +2761,7 @@ describe("content.js 온보딩 전(설치일 없음)에는 기록하지 않는�
   });
 });
 
-// 고치기 전이라 it.fails로 둔다. 지금은 기록에 기록한 참여자를 남기지 않고,
-// 열린 탭은 신원이 바뀌거나 지워져도 보던 영상을 계속 재서 바뀐 신원으로 보낸다
+// 고치기 전인 테스트는 it.fails로 둔다. 지금은 열린 탭이 신원이 바뀌거나 지워져도 보던 영상을 계속 재서 바뀐 신원으로 보낸다
 describe("content.js 신원이 바뀌거나 지워지면 열린 탭은 앞 참여자의 기록을 더 재지 않는다", () => {
   const SERVER = "https://srv.example";
 
@@ -2807,7 +2806,7 @@ describe("content.js 신원이 바뀌거나 지워지면 열린 탭은 앞 참�
     expect(latest.watchedSeconds ?? 0).toBeLessThanOrEqual(seconds);
   }
 
-  it.fails("새 영상 기록과 현재 세션에 기록한 참여자를 남긴다", async () => {
+  it("새 영상 기록과 현재 세션에 기록한 참여자를 남긴다", async () => {
     const { browser } = createParticipantBrowser();
     await browser.openPage({ videoId: "AAAA" });
 

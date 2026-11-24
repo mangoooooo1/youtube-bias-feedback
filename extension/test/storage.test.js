@@ -607,33 +607,29 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
   });
 });
 
-// 고치기 전이라 it.fails로 둔다. 지금은 세션을 닫으면 기록한 참여자가 빠진다
 describe("endSession — 기록한 참여자", () => {
-  it.fails(
-    "세션을 닫아도 세션과 영상 기록에 기록한 참여자가 남는다",
-    async () => {
-      await global.chrome.storage.local.set({
-        currentSession: {
-          sessionId: "s1",
-          startTime: "2026-01-01T00:00:00.000Z",
-          anonymousId: "a1",
-        },
-        video__s1__e1: {
-          videoId: "v1",
-          watchedAt: "2026-01-01T00:00:00.000Z",
-          eventId: "e1",
-          sent: false,
-          anonymousId: "a1",
-        },
-      });
+  it("세션을 닫아도 세션과 영상 기록에 기록한 참여자가 남는다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: {
+        sessionId: "s1",
+        startTime: "2026-01-01T00:00:00.000Z",
+        anonymousId: "a1",
+      },
+      video__s1__e1: {
+        videoId: "v1",
+        watchedAt: "2026-01-01T00:00:00.000Z",
+        eventId: "e1",
+        sent: false,
+        anonymousId: "a1",
+      },
+    });
 
-      await endSession();
+    await endSession();
 
-      const [session] = await getAllSessions();
-      expect(session.anonymousId).toBe("a1");
-      expect(session.videos[0].anonymousId).toBe("a1");
-    },
-  );
+    const [session] = await getAllSessions();
+    expect(session.anonymousId).toBe("a1");
+    expect(session.videos[0].anonymousId).toBe("a1");
+  });
 });
 
 // 세션은 1분 주기 알람이 닫는데, 브라우저가 꺼져 있으면 알람이 늦게 돈다. 종료 시각은 닫은 순간이 아니라
