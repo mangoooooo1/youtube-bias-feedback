@@ -2761,6 +2761,129 @@ describe("content.js 온보딩 전(설치일 없음)에는 기록하지 않는�
   });
 });
 
+// 고치기 전이라 it.fails로 둔다. 지금은 기록에 기록한 참여자를 남기지 않고,
+// 열린 탭은 신원이 바뀌거나 지워져도 보던 영상을 계속 재서 바뀐 신원으로 보낸다
+describe("content.js 신원이 바뀌거나 지워지면 열린 탭은 앞 참여자의 기록을 더 재지 않는다", () => {
+  const SERVER = "https://srv.example";
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-26T10:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function createParticipantBrowser() {
+    const requests = [];
+    const browser = createTabBrowser({
+      initialStorage: {
+        anonymousId: "a1",
+        participantToken: "t1",
+        group: "TEST-EXP",
+        participantCode: "TEST-EXP",
+        serverUrl: SERVER,
+      },
+      fetch: (url, options = {}) => {
+        requests.push({
+          url,
+          method: options.method,
+          body: JSON.parse(options.body),
+        });
+        return Promise.resolve({ ok: true });
+      },
+    });
+    return { browser, requests };
+  }
+
+  // 앞 참여자 기록의 체크포인트·확정값이 신원이 바뀐 뒤의 재생 시간을 담지 않았는가
+  function expectStoppedAt(browser, record, seconds) {
+    const dump = browser.storage.dump();
+    expect(
+      dump[`watchcp__${record.eventId}`].watchedSeconds,
+    ).toBeLessThanOrEqual(seconds);
+    const [latest] = browser.recordsOf(record.videoId);
+    expect(latest.watchedSeconds ?? 0).toBeLessThanOrEqual(seconds);
+  }
+
+  it.fails("새 영상 기록과 현재 세션에 기록한 참여자를 남긴다", async () => {
+    const { browser } = createParticipantBrowser();
+    await browser.openPage({ videoId: "AAAA" });
+
+    const [record] = browser.recordsOf("AAAA");
+    expect(record.anonymousId).toBe("a1");
+    expect(browser.storage.dump().currentSession.anonymousId).toBe("a1");
+  });
+
+  it.fails(
+    "보던 중 리셋되면 그 뒤 재생 시간을 더하지 않고, 다음 영상으로 넘어가도 앞 영상의 확정을 보내지 않는다",
+    async () => {
+      const { browser, requests } = createParticipantBrowser();
+      const page = await browser.openPage({ videoId: "AAAA" });
+      await page.play(30);
+      const [record] = browser.recordsOf("AAAA");
+
+      // 리셋이 지우는 값 — 참여 정보와 참여자 ID·토큰
+      await browser.storage.remove([
+        "group",
+        "participantCode",
+        "installDate",
+        "participantSynced",
+        "anonymousId",
+        "participantToken",
+      ]);
+      requests.length = 0;
+      await page.play(30);
+      await page.goTo("BBBB");
+
+      expectStoppedAt(browser, record, 30);
+      expect(requests).toEqual([]);
+      expect(browser.recordsOf("BBBB")).toEqual([]);
+    },
+  );
+
+  it.fails(
+    "보던 중 다른 참여자로 바뀌면 앞 영상을 더 재지 않고 새 참여자 이름으로 보내지 않으며, 다음 영상은 새 참여자의 새 세션에 기록한다",
+    async () => {
+      const { browser, requests } = createParticipantBrowser();
+      const page = await browser.openPage({ videoId: "AAAA" });
+      await page.play(30);
+      const [record] = browser.recordsOf("AAAA");
+      const firstSessionId = browser.storage.dump().currentSession.sessionId;
+
+      await browser.storage.set({
+        anonymousId: "b1",
+        participantToken: "t2",
+        group: "TEST-CON",
+        participantCode: "TEST-CON",
+        installDate: new Date().toISOString(),
+      });
+      requests.length = 0;
+      await page.play(30);
+      await page.goTo("BBBB");
+
+      expectStoppedAt(browser, record, 30);
+      const [next] = browser.recordsOf("BBBB");
+      const { currentSession } = browser.storage.dump();
+      expect(next.anonymousId).toBe("b1");
+      expect(currentSession.anonymousId).toBe("b1");
+      expect(currentSession.sessionId).not.toBe(firstSessionId);
+      expect(requests).toEqual([
+        {
+          url: `${SERVER}/api/video-events`,
+          method: "POST",
+          body: expect.objectContaining({
+            anonymousId: "b1",
+            eventId: next.eventId,
+            sessionId: currentSession.sessionId,
+          }),
+        },
+      ]);
+    },
+  );
+});
+
 describe("content.js 같은 탭에서 다시 연 영상 — 마지막 재생 후 10분 안이면 같은 기록에 이어 쓴다", () => {
   const MINUTE = 60 * 1000;
   let browser;
