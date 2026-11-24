@@ -300,45 +300,60 @@ describe("오늘 — 다른 참여자가 남긴 기기 기록", () => {
     ],
   };
 
-  it.fails(
-    "다른 참여자의 세션과 진행 중 기록은 오늘 영상 목록에 보이지 않는다",
-    async () => {
-      const { root } = await boot(
-        stored({
-          sessions: [foreignSession],
-          ...ownLive,
-          "video__s-old2__o2": {
-            ...video(
-              "o2",
-              "2026-03-05T10:00:00+09:00",
-              "앞 참여자 진행 중 영상",
-            ),
-            anonymousId: "anon-old",
-            sent: true,
+  it("다른 참여자의 세션과 진행 중 기록은 오늘 영상 목록에 보이지 않는다", async () => {
+    const { root } = await boot(
+      stored({
+        sessions: [foreignSession],
+        ...ownLive,
+        "video__s-old2__o2": {
+          ...video("o2", "2026-03-05T10:00:00+09:00", "앞 참여자 진행 중 영상"),
+          anonymousId: "anon-old",
+          sent: true,
+        },
+      }),
+      opts,
+    );
+    await vi.waitFor(() => expect(root.textContent).toContain("내 영상"));
+
+    expect(root.textContent).not.toContain("앞 참여자 세션 영상");
+    expect(root.textContent).not.toContain("앞 참여자 진행 중 영상");
+  });
+
+  it("팝업을 연 채로 다른 참여자의 세션이 닫혀 들어와도 목록에 넣지 않는다", async () => {
+    const { root, emitChange } = await boot(stored(ownLive), opts);
+    await vi.waitFor(() => expect(root.textContent).toContain("내 영상"));
+
+    await emitChange({ sessions: { newValue: [foreignSession] } });
+    await settle();
+
+    expect(root.textContent).toContain("내 영상");
+    expect(root.textContent).not.toContain("앞 참여자 세션 영상");
+  });
+
+  it("기록한 참여자 표시가 없는 옛 기록은 지금 참여자의 것으로 보고 보여 준다", async () => {
+    const { root } = await boot(
+      stored({
+        sessions: [
+          {
+            sessionId: "s-legacy",
+            endTime: "2026-03-05T09:30:00+09:00",
+            syncedToServer: true,
+            videos: [video("g1", "2026-03-05T09:00:00+09:00", "옛 세션 영상")],
           },
-        }),
-        opts,
-      );
-      await vi.waitFor(() => expect(root.textContent).toContain("내 영상"));
+        ],
+        "video__s-legacy2__g2": {
+          ...video("g2", "2026-03-05T10:00:00+09:00", "옛 진행 중 영상"),
+          sent: true,
+        },
+        ...ownLive,
+      }),
+      opts,
+    );
+    await vi.waitFor(() => expect(root.textContent).toContain("내 영상"));
 
-      expect(root.textContent).not.toContain("앞 참여자 세션 영상");
-      expect(root.textContent).not.toContain("앞 참여자 진행 중 영상");
-    },
-  );
-
-  it.fails(
-    "팝업을 연 채로 다른 참여자의 세션이 닫혀 들어와도 목록에 넣지 않는다",
-    async () => {
-      const { root, emitChange } = await boot(stored(ownLive), opts);
-      await vi.waitFor(() => expect(root.textContent).toContain("내 영상"));
-
-      await emitChange({ sessions: { newValue: [foreignSession] } });
-      await settle();
-
-      expect(root.textContent).toContain("내 영상");
-      expect(root.textContent).not.toContain("앞 참여자 세션 영상");
-    },
-  );
+    expect(root.textContent).toContain("옛 세션 영상");
+    expect(root.textContent).toContain("옛 진행 중 영상");
+  });
 });
 
 describe("서버에서 받은 영상의 제목", () => {
