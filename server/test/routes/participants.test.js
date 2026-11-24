@@ -363,6 +363,173 @@ describe("POST /api/participants", () => {
   });
 });
 
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+// 서버 시각 기준으로 offsetMs만큼 떨어진 설치일
+function installDateFromNow(offsetMs) {
+  return new Date(Date.now() + offsetMs).toISOString();
+}
+
+function register(body) {
+  return request(app).post("/api/participants").send(body);
+}
+
+function participantRow(anonymousId) {
+  return db
+    .prepare(
+      "SELECT participantCode, group_code, installDate FROM participants WHERE anonymousId = ?",
+    )
+    .get(anonymousId);
+}
+
+function participantCount() {
+  return db.prepare("SELECT COUNT(*) AS c FROM participants").get().c;
+}
+
+// 고치기 전이라 it.fails로 둔다. 지금은 등록된 ID면 참여 코드를 보지 않고 성공 처리한다
+describe("POST /api/participants — 이미 등록된 ID로 다시 등록", () => {
+  const REGISTERED = {
+    participantCode: "REAL-CODE",
+    group_code: "CON",
+    installDate: "2026-08-13T00:00:00.000Z",
+  };
+
+  beforeEach(() => {
+    seedIssuedCode("REAL-CODE", "CON");
+    seedIssuedCode("OTHER-CODE", "EXP");
+    db.prepare(
+      "INSERT INTO participants (anonymousId, participantCode, group_code, installDate) VALUES (?, ?, ?, ?)",
+    ).run(
+      "a1",
+      REGISTERED.participantCode,
+      REGISTERED.group_code,
+      REGISTERED.installDate,
+    );
+  });
+
+  it.fails.each([
+    ["코드를 비우고", undefined],
+    ["명단에 없는 코드로", "UNKNOWN-CODE"],
+    ["등록 때와 다른 발급 코드로", "OTHER-CODE"],
+  ])(
+    "%s 보내면 400이고 등록 정보가 바뀌지 않는다",
+    async (_label, participantCode) => {
+      const res = await register({
+        anonymousId: "a1",
+        group_code: "CON",
+        installDate: REGISTERED.installDate,
+        participantCode,
+      });
+      expect(res.status).toBe(400);
+      expect(participantRow("a1")).toEqual(REGISTERED);
+    },
+  );
+
+  it.fails(
+    "TEST-EXP로 등록한 ID를 TEST-CON으로 다시 등록하면 400이고 서버의 집단·설치일은 처음 값 그대로다",
+    async () => {
+      const first = {
+        anonymousId: "t1",
+        group_code: "TEST-EXP",
+        installDate: installDateFromNow(-HOUR_MS),
+        participantCode: "TEST-EXP",
+      };
+      expect((await register(first)).status).toBe(200);
+
+      const res = await register({
+        anonymousId: "t1",
+        group_code: "TEST-CON",
+        installDate: installDateFromNow(0),
+        participantCode: "TEST-CON",
+      });
+      expect(res.status).toBe(400);
+      expect(participantRow("t1")).toEqual({
+        participantCode: "TEST-EXP",
+        group_code: "TEST-EXP",
+        installDate: first.installDate,
+      });
+    },
+  );
+});
+
+// 고치기 전이라 it.fails로 둔다. 지금은 TEST 코드면 보낸 집단 값을 그대로 저장한다
+describe("POST /api/participants — TEST 코드는 코드와 같은 집단으로만 등록된다", () => {
+  it.fails.each([
+    ["TEST-EXP", "EXP"],
+    ["TEST-EXP", "CON"],
+    ["TEST-EXP", "TEST-CON"],
+    ["TEST-CON", "TEST-EXP"],
+    ["TEST-CON", "ANY-GROUP"],
+  ])(
+    "%s 코드에 집단 %s를 보내면 400이고 저장하지 않는다",
+    async (participantCode, group_code) => {
+      const res = await register({
+        anonymousId: "a1",
+        group_code,
+        installDate: installDateFromNow(0),
+        participantCode,
+      });
+      expect(res.status).toBe(400);
+      expect(participantCount()).toBe(0);
+    },
+  );
+});
+
+// 고치기 전이라 it.fails로 둔다. 지금은 설치일의 형식만 보고 범위는 보지 않는다
+describe("POST /api/participants — 새 등록의 설치일은 서버 시각 기준 범위 안이어야 한다", () => {
+  it.fails.each([
+    ["한 달 전", -30 * DAY_MS],
+    ["2일 전", -2 * DAY_MS],
+    ["2시간 뒤", 2 * HOUR_MS],
+  ])("설치일이 %s이면 400이고 저장하지 않는다", async (_label, offsetMs) => {
+    const res = await register({
+      anonymousId: "a1",
+      group_code: "TEST-CON",
+      installDate: installDateFromNow(offsetMs),
+      participantCode: "TEST-CON",
+    });
+    expect(res.status).toBe(400);
+    expect(participantCount()).toBe(0);
+  });
+});
+
+describe("POST /api/participants — 확장이 실제로 보내는 값은 계속 등록된다", () => {
+  it.each([
+    ["TEST-EXP", "TEST-EXP"],
+    ["TEST-CON", "TEST-CON"],
+    ["REAL-CODE", "CON"],
+  ])(
+    "%s 코드와 집단 %s, 방금 만든 설치일로 등록된다",
+    async (participantCode, group_code) => {
+      seedIssuedCode("REAL-CODE", "CON");
+      const installDate = installDateFromNow(0);
+      const res = await register({
+        anonymousId: "a1",
+        group_code,
+        installDate,
+        participantCode,
+      });
+      expect(res.status).toBe(200);
+      expect(participantRow("a1")).toEqual({
+        participantCode,
+        group_code,
+        installDate,
+      });
+    },
+  );
+
+  it("PC 시계가 30초 빠른 설치일도 등록된다", async () => {
+    const res = await register({
+      anonymousId: "a1",
+      group_code: "TEST-CON",
+      installDate: installDateFromNow(30 * 1000),
+      participantCode: "TEST-CON",
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("GET /api/participants/validate", () => {
   it("code 파라미터가 없으면 400을 반환한다", async () => {
     const res = await request(app).get("/api/participants/validate");

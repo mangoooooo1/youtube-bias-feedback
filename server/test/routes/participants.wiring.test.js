@@ -340,6 +340,66 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
     );
   });
 
+  function insertRegisteredParticipant(anonymousId, installDate) {
+    db.prepare("INSERT INTO issued_codes (code, group_code) VALUES (?, ?)").run(
+      "WIRE-CODE",
+      "EXP",
+    );
+    db.prepare(
+      "INSERT INTO participants (anonymousId, participantCode, group_code, installDate) VALUES (?, ?, ?, ?)",
+    ).run(anonymousId, "WIRE-CODE", "EXP", installDate);
+  }
+
+  // 고치기 전이라 it.fails로 둔다. 지금은 등록된 ID면 참여 코드를 보지 않고 토큰을 다시 준다
+  it.fails.each([
+    ["틀린 코드로", "WRONG-CODE"],
+    ["코드를 비우고", undefined],
+  ])(
+    "등록된 ID로 %s 다시 등록하면 400이고 토큰이 나가지 않는다",
+    async (_label, participantCode) => {
+      process.env.PARTICIPANT_TOKEN_SECRET = "reg-test-secret";
+      insertRegisteredParticipant(
+        "registered-user",
+        "2026-08-13T00:00:00.000Z",
+      );
+
+      const res = await request(app).post("/api/participants").send({
+        anonymousId: "registered-user",
+        group_code: "EXP",
+        installDate: "2026-08-13T00:00:00.000Z",
+        participantCode,
+      });
+      expect(res.status).toBe(400);
+      const token = crypto
+        .createHmac("sha256", "reg-test-secret")
+        .update("registered-user")
+        .digest("hex");
+      expect(JSON.stringify(res.body)).not.toContain(token);
+    },
+  );
+
+  it("등록 때와 같은 코드로 재동기화하면 설치일이 한 달 전이어도 같은 토큰을 받는다", async () => {
+    process.env.PARTICIPANT_TOKEN_SECRET = "reg-test-secret";
+    const installDate = new Date(
+      Date.now() - 30 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    insertRegisteredParticipant("resync-old-user", installDate);
+
+    const res = await request(app).post("/api/participants").send({
+      anonymousId: "resync-old-user",
+      group_code: "EXP",
+      installDate,
+      participantCode: "WIRE-CODE",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.participantToken).toBe(
+      crypto
+        .createHmac("sha256", "reg-test-secret")
+        .update("resync-old-user")
+        .digest("hex"),
+    );
+  });
+
   it("재설치 복구(POST /recover) 응답에도 그 anonymousId로 검증 가능한 토큰이 실린다", async () => {
     process.env.PARTICIPANT_TOKEN_SECRET = "recover-test-secret";
     db.prepare(
