@@ -260,7 +260,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
     delete process.env.PARTICIPANT_TOKEN_SECRET;
     const res = await request(app).post("/api/participants").send({
       anonymousId: "no-token-user",
-      group_code: "EXP",
+      group_code: "TEST-EXP",
       installDate: "2026-08-13T00:00:00Z",
       participantCode: "TEST-EXP",
     });
@@ -272,7 +272,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
     process.env.PARTICIPANT_TOKEN_SECRET = "reg-test-secret";
     const res = await request(app).post("/api/participants").send({
       anonymousId: "token-user",
-      group_code: "EXP",
+      group_code: "TEST-EXP",
       installDate: "2026-08-13T00:00:00Z",
       participantCode: "TEST-EXP",
     });
@@ -292,7 +292,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
     process.env.PARTICIPANT_TOKEN_SECRET = "whitespace-test-secret";
     const res = await request(app).post("/api/participants").send({
       anonymousId: "  user-1  ",
-      group_code: "EXP",
+      group_code: "TEST-EXP",
       installDate: "2026-08-13T00:00:00Z",
       participantCode: "TEST-EXP",
     });
@@ -329,7 +329,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
     process.env.PARTICIPANT_TOKEN_SECRET = "reg-test-secret";
     const payload = {
       anonymousId: "resync-user",
-      group_code: "EXP",
+      group_code: "TEST-EXP",
       installDate: "2026-08-13T00:00:00Z",
       participantCode: "TEST-EXP",
     };

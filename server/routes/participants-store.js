@@ -15,6 +15,7 @@ const { normalizeIsoTimestamp } = require("./iso-timestamp");
  *         | {status: "invalid_install_date"}
  *         | {status: "missing_participant_code"}
  *         | {status: "invalid_participant_code"}
+ *         | {status: "invalid_group_code"}
  *         | {status: "registered", anonymousId: string}}
  *   "registered"는 신규 등록·이미 등록된 참여자(멱등 재동기화)·INSERT 시점 경쟁 조건(UNIQUE
  *   충돌) 세 경우 모두를 포함한다. 뒤의 두 경우는 등록 때와 같은 참여 코드여야 한다.
@@ -53,11 +54,16 @@ function registerParticipant(db, body) {
   }
 
   // 발급 코드 검증: 신규 등록은 참여 코드가 필수이며, 명단(issued_codes)에 있는 코드만 허용하고
-  // 그룹은 명단을 권위로 사용한다. TEST 코드는 예외.
+  // 그룹은 명단을 권위로 사용한다. TEST 코드는 명단에 없어 코드 자체가 그룹이다.
   if (!participantCode) {
     return { status: "missing_participant_code" };
   }
-  if (!TEST_CODES.has(participantCode)) {
+  if (TEST_CODES.has(participantCode)) {
+    // 서버와 확장이 다른 집단으로 동작하지 않게 코드와 다른 그룹은 받지 않는다
+    if (group_code !== participantCode) {
+      return { status: "invalid_group_code" };
+    }
+  } else {
     const issued = db
       .prepare("SELECT group_code FROM issued_codes WHERE code = ?")
       .get(participantCode);

@@ -82,6 +82,14 @@ function buildTestRouter() {
           "발급되지 않은 참여 코드입니다.",
           "participantCode",
         );
+      case "invalid_group_code":
+        return fail(
+          res,
+          400,
+          ERROR_CODES.INVALID_FIELD_VALUE,
+          "group_code 필드가 올바르지 않습니다.",
+          "group_code",
+        );
       default:
         return success(res);
     }
@@ -331,7 +339,7 @@ describe("POST /api/participants", () => {
       expect(row.group_code).toBe("CON"); // 명단이 권위
     });
 
-    it("TEST 코드는 명단 검증을 우회하고 클라이언트가 보낸 group_code를 그대로 저장한다", async () => {
+    it("TEST 코드는 명단 검증 없이 코드와 같은 집단으로 저장된다", async () => {
       const res = await request(app).post("/api/participants").send({
         anonymousId: "a1",
         group_code: "TEST-EXP",
@@ -450,9 +458,8 @@ describe("POST /api/participants — 이미 등록된 ID로 다시 등록", () =
   });
 });
 
-// 고치기 전이라 it.fails로 둔다. 지금은 TEST 코드면 보낸 집단 값을 그대로 저장한다
 describe("POST /api/participants — TEST 코드는 코드와 같은 집단으로만 등록된다", () => {
-  it.fails.each([
+  it.each([
     ["TEST-EXP", "EXP"],
     ["TEST-EXP", "CON"],
     ["TEST-EXP", "TEST-CON"],
