@@ -8,6 +8,18 @@ const { normalizeAnonymousId } = require("./anonymous-id");
 const { normalizeParticipantCode } = require("./participant-code");
 const { normalizeIsoTimestamp } = require("./iso-timestamp");
 
+// 새 등록의 설치일은 서버 수신 시각 기준 이 범위만 받는다. 미래 쪽은 PC 시계가 조금 빠른 경우를 위한 여유다
+const INSTALL_DATE_MAX_FUTURE_MS = 60 * 60 * 1000;
+const INSTALL_DATE_MAX_PAST_MS = 24 * 60 * 60 * 1000;
+
+function isInstallDateInRange(installDate, nowMs = Date.now()) {
+  const ms = Date.parse(installDate);
+  return (
+    ms - nowMs <= INSTALL_DATE_MAX_FUTURE_MS &&
+    nowMs - ms <= INSTALL_DATE_MAX_PAST_MS
+  );
+}
+
 /**
  * 참여자 등록.
  *
@@ -71,6 +83,12 @@ function registerParticipant(db, body) {
       return { status: "invalid_participant_code" };
     }
     group_code = issued.group_code;
+  }
+
+  // 확장을 고쳐 설치일을 옮겨 베이스라인을 건너뛰거나 종료를 앞당기지 못하게 한다.
+  // 재동기화는 처음 행을 그대로 두므로 보지 않는다(오래 지난 원래 설치일로 다시 보내는 정상 경우를 막지 않게)
+  if (!isInstallDateInRange(installDate)) {
+    return { status: "invalid_install_date" };
   }
 
   try {

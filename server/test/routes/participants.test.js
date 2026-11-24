@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  afterAll,
+  vi,
+} from "vitest";
 import request from "supertest";
 import express from "express";
 import Database from "better-sqlite3-multiple-ciphers";
@@ -82,6 +90,7 @@ function buildTestRouter() {
           "발급되지 않은 참여 코드입니다.",
           "participantCode",
         );
+
       case "invalid_group_code":
         return fail(
           res,
@@ -135,6 +144,16 @@ beforeEach(() => {
 });
 
 describe("POST /api/participants", () => {
+  // 새 등록은 서버 시각 기준 범위의 설치일만 받아, 고정 설치일 직후로 서버 시각을 맞춘다
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-13T01:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("발급 코드 명단이 비어 있어도 코드 없이는 등록되지 않는다", async () => {
     const res = await request(app).post("/api/participants").send({
       anonymousId: "a1",
@@ -240,6 +259,7 @@ describe("POST /api/participants", () => {
   ])(
     "installDate가 %s 형식이면 같은 순간의 UTC ISO로 정규화해 저장한다",
     async (_label, installDate, expected) => {
+      vi.setSystemTime(new Date("2026-09-01T04:00:00Z"));
       const res = await request(app).post("/api/participants").send({
         anonymousId: "a1",
         group_code: "TEST-CON",
@@ -256,6 +276,7 @@ describe("POST /api/participants", () => {
   );
 
   it("확장이 보내는 toISOString 형식은 입력 그대로 저장한다", async () => {
+    vi.setSystemTime(new Date("2026-09-01T04:00:00Z"));
     const installDate = new Date(
       Date.UTC(2026, 8, 1, 3, 4, 5, 678),
     ).toISOString();
@@ -480,9 +501,18 @@ describe("POST /api/participants — TEST 코드는 코드와 같은 집단으�
   );
 });
 
-// 고치기 전이라 it.fails로 둔다. 지금은 설치일의 형식만 보고 범위는 보지 않는다
 describe("POST /api/participants — 새 등록의 설치일은 서버 시각 기준 범위 안이어야 한다", () => {
-  it.fails.each([
+  // 경계값을 정확히 재려고 서버와 테스트가 같은 시각을 보게 고정한다
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-01T00:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
     ["한 달 전", -30 * DAY_MS],
     ["2일 전", -2 * DAY_MS],
     ["2시간 뒤", 2 * HOUR_MS],
@@ -494,6 +524,41 @@ describe("POST /api/participants — 새 등록의 설치일은 서버 시각 �
       participantCode: "TEST-CON",
     });
     expect(res.status).toBe(400);
+    expect(participantCount()).toBe(0);
+  });
+
+  it.each([
+    ["정확히 1일 전", -DAY_MS, 200],
+    ["1일 1초 전", -DAY_MS - 1000, 400],
+    ["정확히 1시간 뒤", HOUR_MS, 200],
+    ["1시간 1초 뒤", HOUR_MS + 1000, 400],
+  ])(
+    "설치일이 서버 시각보다 %s이면 %i",
+    async (_label, offsetMs, expectedStatus) => {
+      const res = await register({
+        anonymousId: "a1",
+        group_code: "TEST-CON",
+        installDate: installDateFromNow(offsetMs),
+        participantCode: "TEST-CON",
+      });
+      expect(res.status).toBe(expectedStatus);
+      expect(participantCount()).toBe(expectedStatus === 200 ? 1 : 0);
+    },
+  );
+
+  it("발급 코드로 등록할 때도 범위 밖 설치일은 400이고 저장하지 않는다", async () => {
+    seedIssuedCode("REAL-CODE", "CON");
+    const res = await register({
+      anonymousId: "a1",
+      group_code: "CON",
+      installDate: installDateFromNow(-30 * DAY_MS),
+      participantCode: "REAL-CODE",
+    });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({
+      code: "INVALID_FIELD_VALUE",
+      detail: "installDate",
+    });
     expect(participantCount()).toBe(0);
   });
 });

@@ -59,7 +59,21 @@ beforeEach(() => {
   db.exec("DELETE FROM issued_codes");
 });
 
+// 새 등록은 서버 시각 기준 범위의 설치일만 받아, 고정 설치일 직후로 서버 시각을 맞춘다
+function useServerTimeAfterFixedInstallDate() {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-13T01:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+}
+
 describe("실제 server/routes/participants.js 라우터 배선", () => {
+  useServerTimeAfterFixedInstallDate();
+
   it("POST /api/participants — 파일을 그대로 로드해도 정상 등록된다", async () => {
     db.prepare("INSERT INTO issued_codes (code, group_code) VALUES (?, ?)").run(
       "WIRE-CODE",
@@ -97,6 +111,25 @@ describe("실제 server/routes/participants.js 라우터 배선", () => {
       participantCode: "real-code",
     });
     expect(registerRes.status).toBe(200);
+  });
+
+  it("TEST 코드에 코드와 다른 집단을 보내면 400이고 등록되지 않는다", async () => {
+    const res = await request(app).post("/api/participants").send({
+      anonymousId: "wrong-group-user",
+      group_code: "EXP",
+      installDate: "2026-08-13T00:00:00Z",
+      participantCode: "TEST-EXP",
+    });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({
+      code: "INVALID_FIELD_VALUE",
+      detail: "group_code",
+    });
+    expect(
+      db
+        .prepare("SELECT 1 FROM participants WHERE anonymousId = ?")
+        .get("wrong-group-user"),
+    ).toBeUndefined();
   });
 
   it("GET /api/participants/validate — 실제 파일에 라우트가 등록돼 응답한다", async () => {
@@ -247,6 +280,7 @@ describe("실제 server/routes/participants.js 라우터 배선", () => {
 // requireParticipant로 강제하는 토큰의 발급 지점(IDOR 대응, 코드리뷰 지적).
 describe("실제 server/routes/participants.js — participantToken 발급", () => {
   const originalSecret = process.env.PARTICIPANT_TOKEN_SECRET;
+  useServerTimeAfterFixedInstallDate();
 
   afterEach(() => {
     if (originalSecret === undefined) {
