@@ -17,7 +17,7 @@ const { normalizeIsoTimestamp } = require("./iso-timestamp");
  *         | {status: "invalid_participant_code"}
  *         | {status: "registered", anonymousId: string}}
  *   "registered"는 신규 등록·이미 등록된 참여자(멱등 재동기화)·INSERT 시점 경쟁 조건(UNIQUE
- *   충돌) 세 경우 모두를 포함한다 — 원본 라우트가 셋 다 동일하게 success 처리하던 것과 동일.
+ *   충돌) 세 경우 모두를 포함한다. 뒤의 두 경우는 등록 때와 같은 참여 코드여야 한다.
  *   anonymousId는 normalizeAnonymousId를 거친 값 — 호출부(participants.js)가 토큰을
  *   발급할 때 이 값을 그대로 써야 DB에 저장된 값과 어긋나지 않는다.
  */
@@ -44,12 +44,12 @@ function registerParticipant(db, body) {
     return { status: "invalid_install_date" };
   }
 
-  // 이미 등록된 참여자면 재동기화로 간주하고 그대로 성공 처리(멱등성 보장)
+  // 이미 등록된 참여자면 재동기화로 간주한다(멱등성 보장)
   const alreadyRegistered = db
     .prepare("SELECT 1 AS x FROM participants WHERE anonymousId = ?")
     .get(anonymousId);
   if (alreadyRegistered) {
-    return { status: "registered", anonymousId };
+    return resyncParticipant(db, anonymousId, participantCode);
   }
 
   // 발급 코드 검증: 신규 등록은 참여 코드가 필수이며, 명단(issued_codes)에 있는 코드만 허용하고
@@ -81,11 +81,27 @@ function registerParticipant(db, body) {
     });
   } catch (err) {
     if (err.code === "SQLITE_CONSTRAINT_UNIQUE") {
-      return { status: "registered", anonymousId };
+      return resyncParticipant(db, anonymousId, participantCode);
     }
     throw err;
   }
 
+  return { status: "registered", anonymousId };
+}
+
+// ID만 알면 토큰을 다시 받지 못하게, 재동기화는 등록 때와 같은 참여 코드일 때만 성공한다.
+// 코드 없이 등록된 옛 행은 확인할 방법이 없어 거부한다.
+// 다르면 발급되지 않은 코드와 같은 응답을 줘, 그 ID가 등록돼 있는지 드러내지 않는다
+function resyncParticipant(db, anonymousId, participantCode) {
+  if (!participantCode) {
+    return { status: "missing_participant_code" };
+  }
+  const row = db
+    .prepare("SELECT participantCode FROM participants WHERE anonymousId = ?")
+    .get(anonymousId);
+  if (normalizeParticipantCode(row?.participantCode) !== participantCode) {
+    return { status: "invalid_participant_code" };
+  }
   return { status: "registered", anonymousId };
 }
 

@@ -350,8 +350,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
     ).run(anonymousId, "WIRE-CODE", "EXP", installDate);
   }
 
-  // 고치기 전이라 it.fails로 둔다. 지금은 등록된 ID면 참여 코드를 보지 않고 토큰을 다시 준다
-  it.fails.each([
+  it.each([
     ["틀린 코드로", "WRONG-CODE"],
     ["코드를 비우고", undefined],
   ])(

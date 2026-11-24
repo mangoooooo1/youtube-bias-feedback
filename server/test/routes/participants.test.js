@@ -265,19 +265,20 @@ describe("POST /api/participants", () => {
     ).toBe(installDate);
   });
 
-  it("이미 등록된 anonymousId는 발급 코드 검증 없이 그대로 성공 처리한다(멱등)", async () => {
+  it("참여 코드 없이 등록된 옛 행은 발급 코드를 보내도 재동기화되지 않는다", async () => {
     db.prepare(
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
     ).run("a1", "EXP", "2026-08-13T00:00:00Z");
     seedIssuedCode("REAL-CODE", "CON");
 
-    // 잘못된/미기재 참여 코드를 보내도(원래라면 400) 이미 등록된 사용자라 통과해야 한다
+    // 등록 때 코드가 없어 같은 코드인지 확인할 수 없다
     const res = await request(app).post("/api/participants").send({
       anonymousId: "a1",
       group_code: "EXP",
       installDate: "2026-08-13T00:00:00Z",
+      participantCode: "REAL-CODE",
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
     expect(db.prepare("SELECT COUNT(*) AS c FROM participants").get().c).toBe(
       1,
     );
@@ -387,7 +388,6 @@ function participantCount() {
   return db.prepare("SELECT COUNT(*) AS c FROM participants").get().c;
 }
 
-// 고치기 전이라 it.fails로 둔다. 지금은 등록된 ID면 참여 코드를 보지 않고 성공 처리한다
 describe("POST /api/participants — 이미 등록된 ID로 다시 등록", () => {
   const REGISTERED = {
     participantCode: "REAL-CODE",
@@ -408,7 +408,7 @@ describe("POST /api/participants — 이미 등록된 ID로 다시 등록", () =
     );
   });
 
-  it.fails.each([
+  it.each([
     ["코드를 비우고", undefined],
     ["명단에 없는 코드로", "UNKNOWN-CODE"],
     ["등록 때와 다른 발급 코드로", "OTHER-CODE"],
@@ -426,31 +426,28 @@ describe("POST /api/participants — 이미 등록된 ID로 다시 등록", () =
     },
   );
 
-  it.fails(
-    "TEST-EXP로 등록한 ID를 TEST-CON으로 다시 등록하면 400이고 서버의 집단·설치일은 처음 값 그대로다",
-    async () => {
-      const first = {
-        anonymousId: "t1",
-        group_code: "TEST-EXP",
-        installDate: installDateFromNow(-HOUR_MS),
-        participantCode: "TEST-EXP",
-      };
-      expect((await register(first)).status).toBe(200);
+  it("TEST-EXP로 등록한 ID를 TEST-CON으로 다시 등록하면 400이고 서버의 집단·설치일은 처음 값 그대로다", async () => {
+    const first = {
+      anonymousId: "t1",
+      group_code: "TEST-EXP",
+      installDate: installDateFromNow(-HOUR_MS),
+      participantCode: "TEST-EXP",
+    };
+    expect((await register(first)).status).toBe(200);
 
-      const res = await register({
-        anonymousId: "t1",
-        group_code: "TEST-CON",
-        installDate: installDateFromNow(0),
-        participantCode: "TEST-CON",
-      });
-      expect(res.status).toBe(400);
-      expect(participantRow("t1")).toEqual({
-        participantCode: "TEST-EXP",
-        group_code: "TEST-EXP",
-        installDate: first.installDate,
-      });
-    },
-  );
+    const res = await register({
+      anonymousId: "t1",
+      group_code: "TEST-CON",
+      installDate: installDateFromNow(0),
+      participantCode: "TEST-CON",
+    });
+    expect(res.status).toBe(400);
+    expect(participantRow("t1")).toEqual({
+      participantCode: "TEST-EXP",
+      group_code: "TEST-EXP",
+      installDate: first.installDate,
+    });
+  });
 });
 
 // 고치기 전이라 it.fails로 둔다. 지금은 TEST 코드면 보낸 집단 값을 그대로 저장한다
