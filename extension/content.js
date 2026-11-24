@@ -107,7 +107,8 @@ function captureWatchStatsSnapshot() {
  * 이 탭의 실행 컨텍스트 안에서만 사는 값이라, background.js의 세션 타임아웃이
  * storage의 lastRecordedVideo를 null로 지워도 영향받지 않는다.
  * rememberTrackedVideo(recordVideo 안에서 호출)가 갱신한다.
- * @type {{sessionId: string, eventId: string}|null}
+ * anonymousId는 그 기록을 기록한 참여자다(기록할 때 참여자 ID가 없었으면 없다).
+ * @type {{sessionId: string, eventId: string, anonymousId?: string}|null}
  */
 let trackedVideoIdentity = null;
 
@@ -239,27 +240,43 @@ function makeSessionId(ms, anonymousId) {
  * 이 값에 우선 의존하면 그 클로버링에 영향받지 않는다.
  * @type {{sessionId: string, eventId: string}|null}
  */
-function rememberTrackedVideo(sessionId, eventId, videoId = null) {
+function rememberTrackedVideo(
+  sessionId,
+  eventId,
+  videoId = null,
+  anonymousId = undefined,
+) {
   if (typeof trackedVideoIdentity === "undefined") return;
-  trackedVideoIdentity = { sessionId, eventId };
+  trackedVideoIdentity = {
+    sessionId,
+    eventId,
+    ...(anonymousId && { anonymousId }),
+  };
   // 체크포인트는 지금 재는 값(watchTracker)과 같은 영상에만 쓴다. 다음 영상으로 넘어가며
   // watchTracker가 리셋된 뒤 이 함수가 불리기 전까지는 대상이 없어 이전 영상 체크포인트를 덮지 않는다.
   if (typeof watchTracker !== "undefined" && watchTracker) {
     watchTracker.checkpointTarget = { sessionId, eventId };
     // 탭별 마지막 기록에 영상 ID를 남기는 용도
     watchTracker.videoId = videoId;
+    // 탭별 마지막 기록에 남겨, 신원이 바뀐 뒤 같은 영상을 다시 열어도 앞 참여자 기록에 이어 쓰지 않게 한다
+    watchTracker.recorder = anonymousId;
   }
 }
 
 /**
  * 같은 탭에서 다시 연 영상을 새로 기록하지 않고 이 탭의 마지막 기록에 이어 쓴다.
  * 시청 시간은 다시 연 뒤 이미 잰 값에 저장된 값을 더하고, 백그라운드 여부는 하나라도 백그라운드였으면 백그라운드다.
- * @param {{sessionId: string, eventId: string, watchedSeconds: number, wasBackgrounded: 0|1, endedAt: number}} saved - tabwatch__ 값
+ * @param {{sessionId: string, eventId: string, watchedSeconds: number, wasBackgrounded: 0|1, endedAt: number, anonymousId?: string}} saved - tabwatch__ 값
  * @param {string} videoId
  * @returns {void}
  */
 function resumeTrackedVideo(saved, videoId) {
-  rememberTrackedVideo(saved.sessionId, saved.eventId, videoId);
+  rememberTrackedVideo(
+    saved.sessionId,
+    saved.eventId,
+    videoId,
+    saved.anonymousId,
+  );
   if (typeof watchTracker === "undefined" || !watchTracker) return;
   if (Number.isFinite(saved.watchedSeconds)) {
     watchTracker.accumulatedMs += saved.watchedSeconds * 1000;
@@ -342,6 +359,16 @@ async function writeWatchStatsPatch(target, patch) {
  * @returns {Promise<void>}
  */
 async function finalizePreviousWatchStats(target, stats) {
+  const { anonymousId, serverUrl, participantToken, installDate } =
+    await chrome.storage.local.get([
+      "anonymousId",
+      "serverUrl",
+      "participantToken",
+      "installDate",
+    ]);
+  // 신원이 바뀐 직후 변경 알림보다 먼저 영상을 넘기면 측정이 아직 멈추지 않았다. 앞 참여자의 기록에는 더 쓰지 않는다
+  if (target.anonymousId && target.anonymousId !== anonymousId) return;
+
   // 라이브 키·sessions[] 어디에도 없으면(참여자가 데이터를 지웠거나 하는 극단적
   // 경우) 조용히 포기한다. 갱신할 대상 자체가 없다.
   // 최종값은 체크포인트로 대신 보낸 값보다 항상 우선한다(storage.js hasFinalWatchStats)
@@ -352,13 +379,6 @@ async function finalizePreviousWatchStats(target, stats) {
   });
   if (!applied) return;
 
-  const { anonymousId, serverUrl, participantToken, installDate } =
-    await chrome.storage.local.get([
-      "anonymousId",
-      "serverUrl",
-      "participantToken",
-      "installDate",
-    ]);
   if (!anonymousId || !serverUrl || serverUrl.startsWith("YOUR_")) return;
   if (ViewLensStudy.getParticipationState(installDate) === "ended") return;
 
@@ -479,7 +499,9 @@ function recordVideo(
         saved.eventId &&
         Number.isFinite(saved.endedAt) &&
         Date.parse(now) - saved.endedAt < SESSION_TIMEOUT_MS &&
-        ViewLensStudy.getParticipationState(installDate) === "active"
+        ViewLensStudy.getParticipationState(installDate) === "active" &&
+        // 신원이 바뀌었으면 앞 참여자의 기록이라 이어 쓰지 않고 새로 기록한다
+        (!saved.anonymousId || saved.anonymousId === anonymousId)
       ) {
         resumeTrackedVideo(saved, videoId);
         // 앞 구간을 떠날 때 남긴 최종값은 이어 쓰는 동안 더 커진다. 체크포인트로 대신 보낸 값처럼
@@ -499,15 +521,22 @@ function recordVideo(
         !!currentSession &&
         Number.isFinite(lastMs) &&
         Date.parse(now) - lastMs >= SESSION_TIMEOUT_MS;
+      // 신원이 바뀌었으면 앞 참여자의 세션에 새 기록을 넣지 않는다. 그 세션은 background 알람이 닫는다
+      const isForeignSession =
+        !!currentSession?.anonymousId &&
+        currentSession.anonymousId !== anonymousId;
       const session =
-        currentSession && !isStale
+        currentSession && !isStale && !isForeignSession
           ? currentSession
           : {
               sessionId: makeSessionId(
-                isStale ? lastMs + SESSION_TIMEOUT_MS : Date.now(),
+                isStale && !isForeignSession
+                  ? lastMs + SESSION_TIMEOUT_MS
+                  : Date.now(),
                 anonymousId,
               ),
               startTime: now,
+              ...(anonymousId && { anonymousId }),
             };
 
       // 직전 영상의 시청시간 스냅샷을 여기서 확정한다. 아래 새로고침 검사로 돌아가도 확정은 해야 한다.
@@ -541,7 +570,7 @@ function recordVideo(
 
       // uuid를 videoKey와 eventId 양쪽에 재사용한다.
       const eventId = crypto.randomUUID();
-      rememberTrackedVideo(session.sessionId, eventId, videoId);
+      rememberTrackedVideo(session.sessionId, eventId, videoId, anonymousId);
       const videoKey = `video__${session.sessionId}__${eventId}`;
       // sent:false로 시작 — 전송 실패 시 이 값이 남아 background.js의 재시도 큐가 찾아낸다.
       await chrome.storage.local.set({
@@ -573,6 +602,8 @@ function recordVideo(
           isShortsUrl: isShorts ? 1 : 0,
           resumedFromEventId,
           tabId,
+          // 신원이 바뀐 뒤 재시도 큐가 이 기록을 새 참여자 이름으로 보내지 않게 기록한 참여자를 남긴다
+          ...(anonymousId && { anonymousId }),
         },
         // 첫 체크포인트(15초) 전에 확장이 업데이트되면 옛 스크립트는 pagehide도 없이 끊긴다.
         // 기록할 때 탭별 기록을 바로 남겨야 다시 넣은 스크립트가 이 기록에 이어 쓴다
@@ -584,6 +615,7 @@ function recordVideo(
             watchedSeconds: 0,
             wasBackgrounded: watchTracker?.sawHidden ? 1 : 0,
             endedAt: Date.parse(now),
+            ...(anonymousId && { anonymousId }),
           },
         }),
       });
@@ -1018,6 +1050,7 @@ function writeWatchCheckpoint() {
       watchedSeconds: stats.watchedSeconds,
       wasBackgrounded: stats.wasBackgrounded,
       endedAt: lastPlayingAt(watchTracker),
+      ...(watchTracker.recorder && { anonymousId: watchTracker.recorder }),
     };
   }
   try {
@@ -1028,6 +1061,34 @@ function writeWatchCheckpoint() {
 }
 
 setInterval(writeWatchCheckpoint, WATCH_CHECKPOINT_INTERVAL_MS);
+
+/**
+ * 연구자 모드 초기화로 참여자 ID가 지워지거나 다른 참여자로 바뀌면, 보던 영상은 앞 참여자의 기록이라 더 재지 않는다.
+ * 지금 재는 기록을 비우면 체크포인트·다음 영상으로 넘어갈 때의 확정·탭을 닫을 때의 기록이 모두 멈춘다.
+ * @param {Object<string, {oldValue?: any, newValue?: any}>} changes
+ * @param {string} area
+ * @returns {void}
+ */
+function stopTrackingOnIdentityChange(changes, area) {
+  if (area !== "local" || !changes.anonymousId) return;
+  const identity = captureTrackedVideoIdentity();
+  if (!identity) return;
+  if (
+    identity.anonymousId &&
+    identity.anonymousId === changes.anonymousId.newValue
+  ) {
+    return;
+  }
+  clearTrackedVideo();
+  resetWatchTracker();
+}
+
+try {
+  // 테스트용 저장소처럼 변경 이벤트가 없는 환경에서도 로드되게 한다
+  chrome.storage.onChanged?.addListener(stopTrackingOnIdentityChange);
+} catch {
+  // 확장 리로드·업데이트로 컨텍스트가 무효화되면 chrome.* 접근이 예외를 던진다
+}
 
 // 탭 종료 시 마지막 영상의 시청시간을 최선노력으로 로컬에만 남긴다. sendBeacon은 POST만
 // 지원해 이 값을 반영할 PATCH를 못 쓰므로, background.js의 재시도 큐가 다음 기회에

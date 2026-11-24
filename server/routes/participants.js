@@ -67,6 +67,14 @@ router.post("/", (req, res, next) => {
         "발급되지 않은 참여 코드입니다.",
         "participantCode",
       );
+    case "invalid_group_code":
+      return fail(
+        res,
+        400,
+        ERROR_CODES.INVALID_FIELD_VALUE,
+        "group_code 필드가 올바르지 않습니다.",
+        "group_code",
+      );
     default:
       // result.anonymousId(정규화된 값)를 써야 registerParticipant가 DB에 저장한 값과
       // 정확히 같은 입력으로 토큰이 계산된다 — req.body.anonymousId(원본, 트림 전)를 쓰면

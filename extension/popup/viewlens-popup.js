@@ -137,6 +137,17 @@ function buildDataForDate(allSessions, targetDate) {
 }
 
 /**
+ * 연구자 모드 리셋은 기기 기록을 남긴다. 다른 참여자가 남긴 기록은 화면에 넣지 않는다.
+ * 기록한 참여자를 남기기 전에 쌓인 기록은 지금 참여자의 것으로 본다(background.js 재시도와 같은 규칙).
+ * @param {{anonymousId?: string}} record - 세션 또는 영상 기록
+ * @param {string|undefined} anonymousId - 지금 참여자
+ * @returns {boolean}
+ */
+function isOwnRecord(record, anonymousId) {
+  return !record?.anonymousId || record.anonymousId === anonymousId;
+}
+
+/**
  * 진행 중인 세션의 영상 기록(video__ 키). 세션이 끝나기 전에도 "오늘 재생한 영상" 목록에 보여 준다.
  * @returns {Promise<Array<object>>}
  */
@@ -144,7 +155,8 @@ async function loadLiveVideos() {
   const all = await chrome.storage.local.get(null);
   return Object.entries(all)
     .filter(([key]) => key.startsWith("video__"))
-    .map(([, video]) => video);
+    .map(([, video]) => video)
+    .filter((video) => isOwnRecord(video, all.anonymousId));
 }
 
 // ── Build VL.weeks ────────────────────────────────────────────────────────────
@@ -1235,7 +1247,9 @@ async function boot() {
     });
   }
 
-  const sessions = stored.sessions || [];
+  const sessions = (stored.sessions || []).filter((s) =>
+    isOwnRecord(s, stored.anonymousId),
+  );
   const installDate = stored.installDate || null;
   const toneName = stored.tone || DEFAULT_TONE;
   const darkMode = !!stored.dark;
@@ -1515,11 +1529,15 @@ async function boot() {
         });
       } else if (!ob) {
         // 연구자 모드 — 온보딩 초기화 (세션 데이터는 유지)
+        // 참여자 ID·토큰도 지워야 다시 온보딩할 때 새 ID를 받는다. 남기면 다른 코드로 들어가도 앞 참여자 이름으로 기록된다
         await chrome.storage.local.remove([
           "group",
           "participantCode",
           "installDate",
           "participantSynced",
+          "anonymousId",
+          "participantToken",
+          "participantSyncFailure",
         ]);
         window.location.reload();
       }
@@ -1660,7 +1678,11 @@ async function boot() {
       reloadViewingSummary().then((changed) => {
         if (changed) popup.render();
       });
-      const updatedSessions = changes.sessions.newValue || [];
+      // 리셋 뒤 이 팝업에서 다시 온보딩했을 수 있어 처음 읽은 값 대신 지금 참여자를 다시 읽는다
+      const { anonymousId } = await chrome.storage.local.get("anonymousId");
+      const updatedSessions = (changes.sessions.newValue || []).filter((s) =>
+        isOwnRecord(s, anonymousId),
+      );
       VL._allSessions = updatedSessions;
       const freshToday = buildDataForDate(updatedSessions, new Date());
       freshToday.collectingCount = localCurrentSession?.videoCount ?? 0;

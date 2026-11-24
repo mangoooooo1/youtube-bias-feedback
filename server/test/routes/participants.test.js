@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  afterAll,
+  vi,
+} from "vitest";
 import request from "supertest";
 import express from "express";
 import Database from "better-sqlite3-multiple-ciphers";
@@ -82,6 +90,15 @@ function buildTestRouter() {
           "발급되지 않은 참여 코드입니다.",
           "participantCode",
         );
+
+      case "invalid_group_code":
+        return fail(
+          res,
+          400,
+          ERROR_CODES.INVALID_FIELD_VALUE,
+          "group_code 필드가 올바르지 않습니다.",
+          "group_code",
+        );
       default:
         return success(res);
     }
@@ -127,6 +144,16 @@ beforeEach(() => {
 });
 
 describe("POST /api/participants", () => {
+  // 새 등록은 서버 시각 기준 범위의 설치일만 받아, 고정 설치일 직후로 서버 시각을 맞춘다
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-13T01:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("발급 코드 명단이 비어 있어도 코드 없이는 등록되지 않는다", async () => {
     const res = await request(app).post("/api/participants").send({
       anonymousId: "a1",
@@ -232,6 +259,7 @@ describe("POST /api/participants", () => {
   ])(
     "installDate가 %s 형식이면 같은 순간의 UTC ISO로 정규화해 저장한다",
     async (_label, installDate, expected) => {
+      vi.setSystemTime(new Date("2026-09-01T04:00:00Z"));
       const res = await request(app).post("/api/participants").send({
         anonymousId: "a1",
         group_code: "TEST-CON",
@@ -248,6 +276,7 @@ describe("POST /api/participants", () => {
   );
 
   it("확장이 보내는 toISOString 형식은 입력 그대로 저장한다", async () => {
+    vi.setSystemTime(new Date("2026-09-01T04:00:00Z"));
     const installDate = new Date(
       Date.UTC(2026, 8, 1, 3, 4, 5, 678),
     ).toISOString();
@@ -265,19 +294,20 @@ describe("POST /api/participants", () => {
     ).toBe(installDate);
   });
 
-  it("이미 등록된 anonymousId는 발급 코드 검증 없이 그대로 성공 처리한다(멱등)", async () => {
+  it("참여 코드 없이 등록된 옛 행은 발급 코드를 보내도 재동기화되지 않는다", async () => {
     db.prepare(
       "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, ?, ?)",
     ).run("a1", "EXP", "2026-08-13T00:00:00Z");
     seedIssuedCode("REAL-CODE", "CON");
 
-    // 잘못된/미기재 참여 코드를 보내도(원래라면 400) 이미 등록된 사용자라 통과해야 한다
+    // 등록 때 코드가 없어 같은 코드인지 확인할 수 없다
     const res = await request(app).post("/api/participants").send({
       anonymousId: "a1",
       group_code: "EXP",
       installDate: "2026-08-13T00:00:00Z",
+      participantCode: "REAL-CODE",
     });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
     expect(db.prepare("SELECT COUNT(*) AS c FROM participants").get().c).toBe(
       1,
     );
@@ -330,7 +360,7 @@ describe("POST /api/participants", () => {
       expect(row.group_code).toBe("CON"); // 명단이 권위
     });
 
-    it("TEST 코드는 명단 검증을 우회하고 클라이언트가 보낸 group_code를 그대로 저장한다", async () => {
+    it("TEST 코드는 명단 검증 없이 코드와 같은 집단으로 저장된다", async () => {
       const res = await request(app).post("/api/participants").send({
         anonymousId: "a1",
         group_code: "TEST-EXP",
@@ -360,6 +390,212 @@ describe("POST /api/participants", () => {
       expect(row.group_code).toBe("CON"); // 명단이 권위
       expect(row.participantCode).toBe("REAL-CODE"); // 정규화된 값으로 저장
     });
+  });
+});
+
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+// 서버 시각 기준으로 offsetMs만큼 떨어진 설치일
+function installDateFromNow(offsetMs) {
+  return new Date(Date.now() + offsetMs).toISOString();
+}
+
+function register(body) {
+  return request(app).post("/api/participants").send(body);
+}
+
+function participantRow(anonymousId) {
+  return db
+    .prepare(
+      "SELECT participantCode, group_code, installDate FROM participants WHERE anonymousId = ?",
+    )
+    .get(anonymousId);
+}
+
+function participantCount() {
+  return db.prepare("SELECT COUNT(*) AS c FROM participants").get().c;
+}
+
+describe("POST /api/participants — 이미 등록된 ID로 다시 등록", () => {
+  const REGISTERED = {
+    participantCode: "REAL-CODE",
+    group_code: "CON",
+    installDate: "2026-08-13T00:00:00.000Z",
+  };
+
+  beforeEach(() => {
+    seedIssuedCode("REAL-CODE", "CON");
+    seedIssuedCode("OTHER-CODE", "EXP");
+    db.prepare(
+      "INSERT INTO participants (anonymousId, participantCode, group_code, installDate) VALUES (?, ?, ?, ?)",
+    ).run(
+      "a1",
+      REGISTERED.participantCode,
+      REGISTERED.group_code,
+      REGISTERED.installDate,
+    );
+  });
+
+  it.each([
+    ["코드를 비우고", undefined],
+    ["명단에 없는 코드로", "UNKNOWN-CODE"],
+    ["등록 때와 다른 발급 코드로", "OTHER-CODE"],
+  ])(
+    "%s 보내면 400이고 등록 정보가 바뀌지 않는다",
+    async (_label, participantCode) => {
+      const res = await register({
+        anonymousId: "a1",
+        group_code: "CON",
+        installDate: REGISTERED.installDate,
+        participantCode,
+      });
+      expect(res.status).toBe(400);
+      expect(participantRow("a1")).toEqual(REGISTERED);
+    },
+  );
+
+  it("TEST-EXP로 등록한 ID를 TEST-CON으로 다시 등록하면 400이고 서버의 집단·설치일은 처음 값 그대로다", async () => {
+    const first = {
+      anonymousId: "t1",
+      group_code: "TEST-EXP",
+      installDate: installDateFromNow(-HOUR_MS),
+      participantCode: "TEST-EXP",
+    };
+    expect((await register(first)).status).toBe(200);
+
+    const res = await register({
+      anonymousId: "t1",
+      group_code: "TEST-CON",
+      installDate: installDateFromNow(0),
+      participantCode: "TEST-CON",
+    });
+    expect(res.status).toBe(400);
+    expect(participantRow("t1")).toEqual({
+      participantCode: "TEST-EXP",
+      group_code: "TEST-EXP",
+      installDate: first.installDate,
+    });
+  });
+});
+
+describe("POST /api/participants — TEST 코드는 코드와 같은 집단으로만 등록된다", () => {
+  it.each([
+    ["TEST-EXP", "EXP"],
+    ["TEST-EXP", "CON"],
+    ["TEST-EXP", "TEST-CON"],
+    ["TEST-CON", "TEST-EXP"],
+    ["TEST-CON", "ANY-GROUP"],
+  ])(
+    "%s 코드에 집단 %s를 보내면 400이고 저장하지 않는다",
+    async (participantCode, group_code) => {
+      const res = await register({
+        anonymousId: "a1",
+        group_code,
+        installDate: installDateFromNow(0),
+        participantCode,
+      });
+      expect(res.status).toBe(400);
+      expect(participantCount()).toBe(0);
+    },
+  );
+});
+
+describe("POST /api/participants — 새 등록의 설치일은 서버 시각 기준 범위 안이어야 한다", () => {
+  // 경계값을 정확히 재려고 서버와 테스트가 같은 시각을 보게 고정한다
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-01T00:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each([
+    ["한 달 전", -30 * DAY_MS],
+    ["2일 전", -2 * DAY_MS],
+    ["2시간 뒤", 2 * HOUR_MS],
+  ])("설치일이 %s이면 400이고 저장하지 않는다", async (_label, offsetMs) => {
+    const res = await register({
+      anonymousId: "a1",
+      group_code: "TEST-CON",
+      installDate: installDateFromNow(offsetMs),
+      participantCode: "TEST-CON",
+    });
+    expect(res.status).toBe(400);
+    expect(participantCount()).toBe(0);
+  });
+
+  it.each([
+    ["정확히 1일 전", -DAY_MS, 200],
+    ["1일 1초 전", -DAY_MS - 1000, 400],
+    ["정확히 1시간 뒤", HOUR_MS, 200],
+    ["1시간 1초 뒤", HOUR_MS + 1000, 400],
+  ])(
+    "설치일이 서버 시각보다 %s이면 %i",
+    async (_label, offsetMs, expectedStatus) => {
+      const res = await register({
+        anonymousId: "a1",
+        group_code: "TEST-CON",
+        installDate: installDateFromNow(offsetMs),
+        participantCode: "TEST-CON",
+      });
+      expect(res.status).toBe(expectedStatus);
+      expect(participantCount()).toBe(expectedStatus === 200 ? 1 : 0);
+    },
+  );
+
+  it("발급 코드로 등록할 때도 범위 밖 설치일은 400이고 저장하지 않는다", async () => {
+    seedIssuedCode("REAL-CODE", "CON");
+    const res = await register({
+      anonymousId: "a1",
+      group_code: "CON",
+      installDate: installDateFromNow(-30 * DAY_MS),
+      participantCode: "REAL-CODE",
+    });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({
+      code: "INVALID_FIELD_VALUE",
+      detail: "installDate",
+    });
+    expect(participantCount()).toBe(0);
+  });
+});
+
+describe("POST /api/participants — 확장이 실제로 보내는 값은 계속 등록된다", () => {
+  it.each([
+    ["TEST-EXP", "TEST-EXP"],
+    ["TEST-CON", "TEST-CON"],
+    ["REAL-CODE", "CON"],
+  ])(
+    "%s 코드와 집단 %s, 방금 만든 설치일로 등록된다",
+    async (participantCode, group_code) => {
+      seedIssuedCode("REAL-CODE", "CON");
+      const installDate = installDateFromNow(0);
+      const res = await register({
+        anonymousId: "a1",
+        group_code,
+        installDate,
+        participantCode,
+      });
+      expect(res.status).toBe(200);
+      expect(participantRow("a1")).toEqual({
+        participantCode,
+        group_code,
+        installDate,
+      });
+    },
+  );
+
+  it("PC 시계가 30초 빠른 설치일도 등록된다", async () => {
+    const res = await register({
+      anonymousId: "a1",
+      group_code: "TEST-CON",
+      installDate: installDateFromNow(30 * 1000),
+      participantCode: "TEST-CON",
+    });
+    expect(res.status).toBe(200);
   });
 });
 

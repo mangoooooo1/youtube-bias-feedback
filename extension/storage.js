@@ -153,10 +153,14 @@ function buildClosedSession(
   // 마지막 방어선: 같은 videoId가 짧은 시간 안에 다른 탭에서 다시 나오면(새로고침 중복 방지 값이
   // 탭 경합으로 드물게 못 걸렀거나, 같은 영상을 여러 탭에서 동시에 열어둔 경우) 하나로 합친다.
   const deduped = dedupeNearSimultaneous(videos, keptEventIds);
+  // 한 세션은 한 참여자가 기록한다(content.js가 신원이 바뀌면 새 세션을 연다)
+  const owner = deduped.find((v) => v.anonymousId)?.anonymousId;
   return {
     sessionId,
     startTime: startTime ?? deduped[0].watchedAt,
     endTime,
+    // 이미 닫힌 세션에 합칠 때 원래 값을 지우지 않게 있을 때만 넣는다
+    ...(owner && { anonymousId: owner }),
     // sent/eventId를 그대로 들고 간다 — 세션 종료로 video__ 키가 사라진 뒤에도
     // getUnsentVideoEvents()가 sessions[].videos에서 재시도 대상을 판단하고,
     // 재시도 시 같은 eventId로 보내야 서버가 중복을 걸러낸다.
@@ -179,6 +183,7 @@ function buildClosedSession(
         watchStatsSource,
         checkpointAt,
         tabId,
+        anonymousId,
       }) => ({
         videoId,
         title,
@@ -202,6 +207,8 @@ function buildClosedSession(
         checkpointAt,
         // 늦게 온 기록을 합칠 때 이 목록으로 중복 제거를 다시 하므로 함께 옮긴다
         tabId,
+        // 재시도 큐가 다른 참여자의 기록을 보내지 않게 세션이 닫힌 뒤에도 남긴다
+        anonymousId,
       }),
     ),
   };
@@ -317,6 +324,7 @@ function sessionStartedWhileClosing(all, closedSessionIds) {
       sessionId,
       startTime: first.watchedAt,
       videoCount: videos.length,
+      ...(latest.anonymousId && { anonymousId: latest.anonymousId }),
     },
     lastRecordedVideo: {
       videoId: latest.videoId,
@@ -444,6 +452,7 @@ export async function getUnsentVideoEvents() {
       navigationTrigger: v.navigationTrigger,
       isShortsUrl: v.isShortsUrl,
       resumedFromEventId: v.resumedFromEventId,
+      anonymousId: v.anonymousId,
     }));
 
   const fromSessions = (all.sessions ?? []).flatMap((session) =>
@@ -461,6 +470,7 @@ export async function getUnsentVideoEvents() {
         navigationTrigger: v.navigationTrigger,
         isShortsUrl: v.isShortsUrl,
         resumedFromEventId: v.resumedFromEventId,
+        anonymousId: v.anonymousId,
       })),
   );
 
@@ -607,6 +617,7 @@ export async function getUnsentWatchStats(now = Date.now()) {
       watchedSeconds: v.watchedSeconds,
       playbackRate: v.playbackRate,
       wasBackgrounded: v.wasBackgrounded,
+      anonymousId: v.anonymousId,
     }));
 
   const fromSessions = (all.sessions ?? []).flatMap((session) =>
@@ -617,6 +628,7 @@ export async function getUnsentWatchStats(now = Date.now()) {
       watchedSeconds: v.watchedSeconds,
       playbackRate: v.playbackRate,
       wasBackgrounded: v.wasBackgrounded,
+      anonymousId: v.anonymousId,
     })),
   );
 
@@ -668,6 +680,8 @@ function checkpointItem(entry, cp) {
     wasBackgrounded: cp.wasBackgrounded,
     at: cp.at,
     source: "checkpoint",
+    // 체크포인트는 영상 기록을 기록한 참여자의 것이다
+    anonymousId: entry.v.anonymousId,
   };
 }
 

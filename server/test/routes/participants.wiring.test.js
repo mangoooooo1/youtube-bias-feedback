@@ -59,7 +59,21 @@ beforeEach(() => {
   db.exec("DELETE FROM issued_codes");
 });
 
+// 새 등록은 서버 시각 기준 범위의 설치일만 받아, 고정 설치일 직후로 서버 시각을 맞춘다
+function useServerTimeAfterFixedInstallDate() {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-13T01:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+}
+
 describe("실제 server/routes/participants.js 라우터 배선", () => {
+  useServerTimeAfterFixedInstallDate();
+
   it("POST /api/participants — 파일을 그대로 로드해도 정상 등록된다", async () => {
     db.prepare("INSERT INTO issued_codes (code, group_code) VALUES (?, ?)").run(
       "WIRE-CODE",
@@ -97,6 +111,25 @@ describe("실제 server/routes/participants.js 라우터 배선", () => {
       participantCode: "real-code",
     });
     expect(registerRes.status).toBe(200);
+  });
+
+  it("TEST 코드에 코드와 다른 집단을 보내면 400이고 등록되지 않는다", async () => {
+    const res = await request(app).post("/api/participants").send({
+      anonymousId: "wrong-group-user",
+      group_code: "EXP",
+      installDate: "2026-08-13T00:00:00Z",
+      participantCode: "TEST-EXP",
+    });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({
+      code: "INVALID_FIELD_VALUE",
+      detail: "group_code",
+    });
+    expect(
+      db
+        .prepare("SELECT 1 FROM participants WHERE anonymousId = ?")
+        .get("wrong-group-user"),
+    ).toBeUndefined();
   });
 
   it("GET /api/participants/validate — 실제 파일에 라우트가 등록돼 응답한다", async () => {
@@ -247,6 +280,7 @@ describe("실제 server/routes/participants.js 라우터 배선", () => {
 // requireParticipant로 강제하는 토큰의 발급 지점(IDOR 대응, 코드리뷰 지적).
 describe("실제 server/routes/participants.js — participantToken 발급", () => {
   const originalSecret = process.env.PARTICIPANT_TOKEN_SECRET;
+  useServerTimeAfterFixedInstallDate();
 
   afterEach(() => {
     if (originalSecret === undefined) {
@@ -260,7 +294,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
     delete process.env.PARTICIPANT_TOKEN_SECRET;
     const res = await request(app).post("/api/participants").send({
       anonymousId: "no-token-user",
-      group_code: "EXP",
+      group_code: "TEST-EXP",
       installDate: "2026-08-13T00:00:00Z",
       participantCode: "TEST-EXP",
     });
@@ -272,7 +306,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
     process.env.PARTICIPANT_TOKEN_SECRET = "reg-test-secret";
     const res = await request(app).post("/api/participants").send({
       anonymousId: "token-user",
-      group_code: "EXP",
+      group_code: "TEST-EXP",
       installDate: "2026-08-13T00:00:00Z",
       participantCode: "TEST-EXP",
     });
@@ -292,7 +326,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
     process.env.PARTICIPANT_TOKEN_SECRET = "whitespace-test-secret";
     const res = await request(app).post("/api/participants").send({
       anonymousId: "  user-1  ",
-      group_code: "EXP",
+      group_code: "TEST-EXP",
       installDate: "2026-08-13T00:00:00Z",
       participantCode: "TEST-EXP",
     });
@@ -329,7 +363,7 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
     process.env.PARTICIPANT_TOKEN_SECRET = "reg-test-secret";
     const payload = {
       anonymousId: "resync-user",
-      group_code: "EXP",
+      group_code: "TEST-EXP",
       installDate: "2026-08-13T00:00:00Z",
       participantCode: "TEST-EXP",
     };
@@ -337,6 +371,65 @@ describe("실제 server/routes/participants.js — participantToken 발급", () 
     const second = await request(app).post("/api/participants").send(payload);
     expect(first.body.data.participantToken).toBe(
       second.body.data.participantToken,
+    );
+  });
+
+  function insertRegisteredParticipant(anonymousId, installDate) {
+    db.prepare("INSERT INTO issued_codes (code, group_code) VALUES (?, ?)").run(
+      "WIRE-CODE",
+      "EXP",
+    );
+    db.prepare(
+      "INSERT INTO participants (anonymousId, participantCode, group_code, installDate) VALUES (?, ?, ?, ?)",
+    ).run(anonymousId, "WIRE-CODE", "EXP", installDate);
+  }
+
+  it.each([
+    ["틀린 코드로", "WRONG-CODE"],
+    ["코드를 비우고", undefined],
+  ])(
+    "등록된 ID로 %s 다시 등록하면 400이고 토큰이 나가지 않는다",
+    async (_label, participantCode) => {
+      process.env.PARTICIPANT_TOKEN_SECRET = "reg-test-secret";
+      insertRegisteredParticipant(
+        "registered-user",
+        "2026-08-13T00:00:00.000Z",
+      );
+
+      const res = await request(app).post("/api/participants").send({
+        anonymousId: "registered-user",
+        group_code: "EXP",
+        installDate: "2026-08-13T00:00:00.000Z",
+        participantCode,
+      });
+      expect(res.status).toBe(400);
+      const token = crypto
+        .createHmac("sha256", "reg-test-secret")
+        .update("registered-user")
+        .digest("hex");
+      expect(JSON.stringify(res.body)).not.toContain(token);
+    },
+  );
+
+  it("등록 때와 같은 코드로 재동기화하면 설치일이 한 달 전이어도 같은 토큰을 받는다", async () => {
+    process.env.PARTICIPANT_TOKEN_SECRET = "reg-test-secret";
+    const installDate = new Date(
+      Date.now() - 30 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    insertRegisteredParticipant("resync-old-user", installDate);
+
+    const res = await request(app).post("/api/participants").send({
+      anonymousId: "resync-old-user",
+      group_code: "EXP",
+      installDate,
+      participantCode: "WIRE-CODE",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.participantToken).toBe(
+      crypto
+        .createHmac("sha256", "reg-test-secret")
+        .update("resync-old-user")
+        .digest("hex"),
     );
   });
 

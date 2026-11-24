@@ -374,6 +374,30 @@ async function isAwaitingSessionUpload(sessionId) {
 }
 
 /**
+ * 연구자 모드 초기화 뒤 다른 참여자로 들어가면 신원이 바뀐다. 옛 신원이 기록한 것은 새 신원으로 보내지 않는다.
+ * 기록한 참여자를 남기기 전에 쌓인 기록은 구분할 수 없어 지금 참여자의 것으로 본다.
+ * @param {{anonymousId?: string}} record - 영상 기록·시청 시간·세션
+ * @param {{anonymousId?: string}|null} onboarding
+ * @returns {boolean}
+ */
+function isForeignRecord(record, onboarding) {
+  return (
+    !!record?.anonymousId && record.anonymousId !== onboarding?.anonymousId
+  );
+}
+
+// 다시 보내도 같은 판정이라 큐에서 영구히 뺀다
+function foreignIdentityResult() {
+  return {
+    ok: false,
+    kind: "item",
+    status: null,
+    code: "foreign_identity",
+    data: null,
+  };
+}
+
+/**
  * 처치 노출 기록(알림 클릭 열람·피드백 확인·대조군 종료 이벤트)을 서버로 보낸다.
  * 한 번 실패하면 기록이 영구히 빠지던 문제를 다른 큐와 같은 재시도 규칙으로 막는다.
  * 서버는 받은 시각을 기록하므로, 다시 보낸 기록은 실제 시각보다 늦게 찍힌다.
@@ -481,9 +505,12 @@ async function sendSessionCheckpoints(session) {
   if (ViewLensStudy.getParticipationState(onboarding.installDate) === "ended") {
     return session;
   }
+  if (isForeignRecord(session, onboarding)) return session;
 
   const sent = new Map();
   for (const item of await getSessionCheckpointStats(session.sessionId)) {
+    // 건너뛴 것은 재시도 큐가 다시 판정한다
+    if (isForeignRecord(item, onboarding)) continue;
     const result = await postWatchStatsToServer(
       onboarding.anonymousId,
       onboarding.participantToken,
@@ -557,6 +584,8 @@ async function syncSessionToServer(
   // 알림 자격은 리뷰 생성 결과와 무관하게(그룹·베이스라인만으로) 미리 정해진다.
   // 이 값을 그대로 서버에 함께 보내 sessions.feedbackNotifiedAt에 기록한다.
   const onboarding = await getOnboarding();
+  // 세션을 닫자마자 보낼 때는 전송 대기로 남고, 재시도 큐가 같은 판정으로 뺀다
+  if (isForeignRecord(session, onboarding)) return foreignIdentityResult();
   // 알람 틱 밖(세션 종료 직후 최초 전송)에서도 전송 기간이 끝났으면 보내지 않는다
   if (
     ViewLensStudy.getParticipationState(onboarding?.installDate) === "ended"
@@ -736,14 +765,16 @@ export function retryUnsyncedSessions() {
  */
 export function retryUnsentVideoEvents() {
   return withQueueLock("video_events", async () => {
+    // 새 신원의 기록은 신원이 바뀐 뒤에만 들어온다. 큐를 먼저 읽어야 그 기록을 옛 신원 기준으로 빼지 않는다
+    const events = await getUnsentVideoEvents();
     const onboarding = await getOnboarding();
     if (!onboarding?.anonymousId) return;
 
-    const events = await getUnsentVideoEvents();
     await drainQueue(
       "video_events",
       events,
       async (event) => {
+        if (isForeignRecord(event, onboarding)) return foreignIdentityResult();
         const result = await postVideoEventToServer(
           onboarding.anonymousId,
           onboarding.participantToken,
@@ -764,15 +795,17 @@ export function retryUnsentVideoEvents() {
  */
 export function retryUnsentWatchStats() {
   return withQueueLock("watch_stats", async () => {
+    await pruneWatchCheckpoints();
+    // 새 신원의 기록은 신원이 바뀐 뒤에만 들어온다. 큐를 먼저 읽어야 그 기록을 옛 신원 기준으로 빼지 않는다
+    const items = await getUnsentWatchStats();
     const onboarding = await getOnboarding();
     if (!onboarding?.anonymousId) return;
 
-    await pruneWatchCheckpoints();
-    const items = await getUnsentWatchStats();
     await drainQueue(
       "watch_stats",
       items,
       async (item) => {
+        if (isForeignRecord(item, onboarding)) return foreignIdentityResult();
         const result = await postWatchStatsToServer(
           onboarding.anonymousId,
           onboarding.participantToken,
