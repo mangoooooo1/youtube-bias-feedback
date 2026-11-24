@@ -152,7 +152,7 @@ describe("온보딩 완료 후", () => {
     ]) {
       expect(data).not.toHaveProperty(key);
     }
-    expect(data).toMatchObject({ anonymousId: "anon-1", sessions: [] });
+    expect(data).toMatchObject({ sessions: [] });
   });
 
   async function resetResearcherOnboarding(stored) {
@@ -166,66 +166,58 @@ describe("온보딩 완료 후", () => {
     return data;
   }
 
-  // 고치기 전이라 it.fails로 둔다. 지금은 리셋해도 참여자 ID와 토큰을 남긴다
-  it.fails(
-    "연구자 모드에서 온보딩으로 돌아가면 참여자 ID·토큰·등록 실패 기록도 지운다",
-    async () => {
-      const data = await resetResearcherOnboarding(
-        participant({
-          group: "TEST-EXP",
-          participantCode: "TEST-EXP",
-          installDate: daysAgo(1),
-          participantSyncFailure: { kind: "permanent", httpStatus: 400 },
-        }),
-      );
+  it("연구자 모드에서 온보딩으로 돌아가면 참여자 ID·토큰·등록 실패 기록도 지운다", async () => {
+    const data = await resetResearcherOnboarding(
+      participant({
+        group: "TEST-EXP",
+        participantCode: "TEST-EXP",
+        installDate: daysAgo(1),
+        participantSyncFailure: { kind: "permanent", httpStatus: 400 },
+      }),
+    );
 
-      for (const key of [
-        "anonymousId",
-        "participantToken",
-        "participantSyncFailure",
-      ]) {
-        expect(data).not.toHaveProperty(key);
-      }
-    },
-  );
+    for (const key of [
+      "anonymousId",
+      "participantToken",
+      "participantSyncFailure",
+    ]) {
+      expect(data).not.toHaveProperty(key);
+    }
+  });
 
-  // 고치기 전이라 it.fails로 둔다. 지금은 리셋 뒤 다시 온보딩하면 남은 참여자 ID로 등록한다
-  it.fails(
-    "연구자 모드 리셋 뒤 다른 TEST 코드로 다시 온보딩하면 새 ID로 등록하고, 로컬 값이 등록 요청과 같다",
-    async () => {
-      const afterReset = await resetResearcherOnboarding(
-        participant({
-          group: "TEST-EXP",
-          participantCode: "TEST-EXP",
-          installDate: daysAgo(1),
-        }),
-      );
-      cleanupPopup();
+  it("연구자 모드 리셋 뒤 다른 TEST 코드로 다시 온보딩하면 새 ID로 등록하고, 로컬 값이 등록 요청과 같다", async () => {
+    const afterReset = await resetResearcherOnboarding(
+      participant({
+        group: "TEST-EXP",
+        participantCode: "TEST-EXP",
+        installDate: daysAgo(1),
+      }),
+    );
+    cleanupPopup();
 
-      const { root, data, server } = await bootPopup(
-        structuredClone(afterReset),
-        {
-          responses: {
-            "/api/participants/validate": {
-              data: { valid: true, group_code: "TEST-CON" },
-            },
+    const { root, data, server } = await bootPopup(
+      structuredClone(afterReset),
+      {
+        responses: {
+          "/api/participants/validate": {
+            data: { valid: true, group_code: "TEST-CON" },
           },
         },
-      );
-      await submitCode(root, "TEST-CON");
-      await vi.waitFor(() => expect(data.participantSynced).toBe(true));
+      },
+    );
+    await submitCode(root, "TEST-CON");
+    await vi.waitFor(() => expect(data.participantSynced).toBe(true));
 
-      const reg = server.calls.find((c) => c.path === "/api/participants");
-      expect(reg.body.anonymousId).toMatch(UUID);
-      expect(reg.body.anonymousId).not.toBe("anon-1");
-      expect(reg.body).toEqual({
-        anonymousId: data.anonymousId,
-        participantCode: "TEST-CON",
-        group_code: "TEST-CON",
-        installDate: data.installDate,
-      });
-    },
-  );
+    const reg = server.calls.find((c) => c.path === "/api/participants");
+    expect(reg.body.anonymousId).toMatch(UUID);
+    expect(reg.body.anonymousId).not.toBe("anon-1");
+    expect(reg.body).toEqual({
+      anonymousId: data.anonymousId,
+      participantCode: "TEST-CON",
+      group_code: "TEST-CON",
+      installDate: data.installDate,
+    });
+  });
 });
 
 describe("팝업을 닫을 때", () => {

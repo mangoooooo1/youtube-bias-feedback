@@ -3094,7 +3094,7 @@ describe("영구 실패는 그 요청 내용에만 적용된다 — 재온보딩
     expect(global.fetch).not.toHaveBeenCalled();
 
     // 팝업 재온보딩 경로는 participantSynced만 되돌리고 participantSyncFailure는 남긴다
-    // (viewlens-popup.js의 온보딩·연구자 리셋·재설치 복구 세 경로 모두 그렇다).
+    // (viewlens-popup.js의 온보딩·재설치 복구 두 경로가 그렇다. 연구자 리셋은 실패 기록까지 지운다).
     await global.chrome.storage.local.set({
       participantCode: "QWE-GOOD",
       installDate: new Date(2025, 0, 2).toISOString(),

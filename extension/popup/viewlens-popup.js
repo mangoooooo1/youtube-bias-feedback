@@ -1515,11 +1515,15 @@ async function boot() {
         });
       } else if (!ob) {
         // 연구자 모드 — 온보딩 초기화 (세션 데이터는 유지)
+        // 참여자 ID·토큰도 지워야 다시 온보딩할 때 새 ID를 받는다. 남기면 다른 코드로 들어가도 앞 참여자 이름으로 기록된다
         await chrome.storage.local.remove([
           "group",
           "participantCode",
           "installDate",
           "participantSynced",
+          "anonymousId",
+          "participantToken",
+          "participantSyncFailure",
         ]);
         window.location.reload();
       }
