@@ -272,6 +272,75 @@ describe("오늘 — 같은 날 재설치", () => {
   });
 });
 
+// 연구자 모드 리셋은 기기 기록을 남긴다. 다른 참여자가 남긴 기록은 지금 참여자 화면에 넣지 않는다
+describe("오늘 — 다른 참여자가 남긴 기기 기록", () => {
+  const foreignSession = {
+    sessionId: "s-old",
+    anonymousId: "anon-old",
+    endTime: "2026-03-05T09:30:00+09:00",
+    syncedToServer: true,
+    videos: [
+      {
+        ...video("o1", "2026-03-05T09:00:00+09:00", "앞 참여자 세션 영상"),
+        anonymousId: "anon-old",
+      },
+    ],
+  };
+  const ownLive = {
+    "video__s-mine__m1": {
+      ...video("m1", "2026-03-05T11:00:00+09:00", "내 영상"),
+      anonymousId: "anon-1",
+      sent: true,
+    },
+  };
+  const opts = {
+    days: { [TODAY]: 1 },
+    reviews: [
+      review(TODAY, { reviewSessionId: "s-mine", reviewConfirmed: true }),
+    ],
+  };
+
+  it.fails(
+    "다른 참여자의 세션과 진행 중 기록은 오늘 영상 목록에 보이지 않는다",
+    async () => {
+      const { root } = await boot(
+        stored({
+          sessions: [foreignSession],
+          ...ownLive,
+          "video__s-old2__o2": {
+            ...video(
+              "o2",
+              "2026-03-05T10:00:00+09:00",
+              "앞 참여자 진행 중 영상",
+            ),
+            anonymousId: "anon-old",
+            sent: true,
+          },
+        }),
+        opts,
+      );
+      await vi.waitFor(() => expect(root.textContent).toContain("내 영상"));
+
+      expect(root.textContent).not.toContain("앞 참여자 세션 영상");
+      expect(root.textContent).not.toContain("앞 참여자 진행 중 영상");
+    },
+  );
+
+  it.fails(
+    "팝업을 연 채로 다른 참여자의 세션이 닫혀 들어와도 목록에 넣지 않는다",
+    async () => {
+      const { root, emitChange } = await boot(stored(ownLive), opts);
+      await vi.waitFor(() => expect(root.textContent).toContain("내 영상"));
+
+      await emitChange({ sessions: { newValue: [foreignSession] } });
+      await settle();
+
+      expect(root.textContent).toContain("내 영상");
+      expect(root.textContent).not.toContain("앞 참여자 세션 영상");
+    },
+  );
+});
+
 describe("서버에서 받은 영상의 제목", () => {
   const opts = (videos) => ({
     days: { [YESTERDAY]: videos.length },
