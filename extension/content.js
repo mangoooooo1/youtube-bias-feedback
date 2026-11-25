@@ -91,14 +91,17 @@ let trackedVideoEl = null;
 /**
  * 지금까지 추적 중이던 영상의 시청시간 스냅샷을 반환한다(클릭성 이탈 판별용 원시 데이터).
  * typeof 가드는 이 함수만 격리 테스트할 때(watchTracker 자체가 선언 안 된 환경) 예외 대신 null을 반환하게 한다.
- * @returns {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1}|null} watchTracker가 없으면 null
+ * @returns {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1, playedSeconds: number|null}|null} watchTracker가 없으면 null
  */
 function captureWatchStatsSnapshot() {
   if (typeof watchTracker === "undefined" || !watchTracker) return null;
+  // 재생 중이면 지금 위치까지 반영한다. 다음 영상이 이미 실렸으면 위치가 뛰어 더하지 않는다
+  if (watchTracker.lastPosition != null) samplePlayedPosition();
   return {
     watchedSeconds: currentWatchedMs(watchTracker) / 1000,
     playbackRate: watchTracker.lastPlaybackRate ?? null,
     wasBackgrounded: watchTracker.sawHidden ? 1 : 0,
+    playedSeconds: currentPlayedSeconds(watchTracker),
   };
 }
 
@@ -355,7 +358,7 @@ async function writeWatchStatsPatch(target, patch) {
  * 방금 떠난 영상의 실제 시청시간·배속·백그라운드 여부를 서버 video_events 행에 반영한다.
  * 실패해도 로컬에 watchStatsSent:false로 남겨 background.js의 재시도 큐가 찾아내게 한다.
  * @param {{sessionId: string, eventId: string}} target - 방금 떠난 영상의 식별 정보
- * @param {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1}} stats - captureWatchStatsSnapshot 결과
+ * @param {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1, playedSeconds?: number|null}} stats - captureWatchStatsSnapshot 결과
  * @returns {Promise<void>}
  */
 async function finalizePreviousWatchStats(target, stats) {
@@ -439,7 +442,7 @@ function reportClientError(code, where) {
  * @param {string|null} entryPath - 직전 페이지 경로(유튜브 내부일 때만)
  * @param {"ended"|"interaction"|null} navigationTrigger - 전환 원인 추정값
  * @param {boolean} isShorts - 이 영상이 /shorts/ URL로 시청됐는지
- * @param {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1}|null} previousWatchStats - 직전 영상의 시청시간 스냅샷
+ * @param {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1, playedSeconds?: number|null}|null} previousWatchStats - 직전 영상의 시청시간 스냅샷
  * @param {{sessionId: string, eventId: string}|null} previousVideoIdentity - captureTrackedVideoIdentity 결과(이 탭 메모리 기준)
  * @param {string|null} [resumedFromEventId=null] - 10분 넘게 쉬었다가 다시 재생해 새로 기록하면 앞 기록의 eventId
  * @returns {Promise<void>}
@@ -814,6 +817,8 @@ window.addEventListener("popstate", handleVideoChange);
 // (2배속으로 실제 30초를 시청하면 60초로, 0.5배속이면 15초로 기록됨).
 // play/pause/seeking/seeked 이벤트로 "재생 중" 구간의 시작·끝을 감지해 그 구간의
 // Date.now() 차이만 더한다 — 배속과 무관하게 항상 실제 경과 시간이 나온다.
+// 광고·버퍼링·절전처럼 재생 위치가 움직이지 않은 시간을 뺀 실제 재생 시간(playedSeconds)은 재생 위치로
+// 따로 재 비교용으로만 남긴다.
 // 페이지에는 <video>가 여럿 남는다(일반 플레이어·Shorts 플레이어·홈 미리보기). 숨겨진 플레이어는
 // 크기가 0이고 DOM 순서는 탭에서 먼저 연 페이지 순이라, 첫 번째 <video>는 재생 중인 영상이 아닐 수 있다.
 // watchTracker/trackedVideoEl 선언은 파일 상단(captureWatchStatsSnapshot 앞)으로 옮겼다 — 이유는 그쪽 주석 참고.
@@ -865,6 +870,81 @@ function openWatchSegment() {
 }
 
 /**
+ * 실제로 재생이 진행된 시간(초). 시청 시간에서 광고·버퍼링·절전처럼 재생 위치가 움직이지 않은 시간을 뺀 값이고,
+ * 되감아 다시 본 부분도 센다. 재생 중 위치를 읽지 못한 적이 있으면 null(모름)이다.
+ * @param {object|null} tracker - watchTracker
+ * @returns {number|null}
+ */
+function currentPlayedSeconds(tracker) {
+  if (!tracker || tracker.playedUnknown) return null;
+  return tracker.playedSeconds;
+}
+
+/**
+ * 이어진 재생을 끊는다. 다음에 읽은 위치는 앞 위치와 이어 보지 않고 새 기준점이 된다.
+ * @returns {void}
+ */
+function breakPlayedRun() {
+  if (watchTracker) watchTracker.lastPosition = null;
+}
+
+/**
+ * 광고가 재생 중인가. 유튜브 플레이어가 광고 동안 붙이는 클래스로 보고, 확인할 수 없으면 광고가 아닌 것으로 본다.
+ * @param {HTMLVideoElement} videoEl
+ * @returns {boolean}
+ */
+function isAdShowing(videoEl) {
+  try {
+    return !!videoEl
+      .closest?.(".html5-video-player")
+      ?.classList.contains("ad-showing");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 재생 중인 <video>의 위치를 읽어, 앞에서 읽은 위치부터 움직인 만큼을 그때 배속으로 나눠 실제 재생 시간에 더한다.
+ * 재생 중일 때만 부른다. 광고 중에는 세지 않는다. 위치가 뒤로 가거나 흐른 시간보다 크게 앞서면(탐색 이벤트 없이
+ * 다음 영상이 같은 <video>에 실린 경우 등) 이어진 재생이 아니라서 더하지 않고 새 기준점으로 삼는다.
+ * 더하는 값은 흐른 시간을 넘지 않는다.
+ * @returns {void}
+ */
+function samplePlayedPosition() {
+  if (!watchTracker || !trackedVideoEl) return;
+  if (isAdShowing(trackedVideoEl)) {
+    breakPlayedRun();
+    return;
+  }
+  let position;
+  let rate;
+  try {
+    position = trackedVideoEl.currentTime;
+    rate = trackedVideoEl.playbackRate;
+  } catch {
+    position = NaN;
+  }
+  if (!Number.isFinite(position)) {
+    watchTracker.playedUnknown = true;
+    breakPlayedRun();
+    return;
+  }
+  const now = Date.now();
+  const tracker = watchTracker;
+  if (tracker.lastPosition != null) {
+    const elapsedSeconds = (now - tracker.lastPositionAt) / 1000;
+    const realSeconds =
+      (position - tracker.lastPosition) / (rate > 0 ? rate : 1);
+    // 1초는 이벤트 간격·배속 변경 오차 여유
+    if (realSeconds >= 0 && realSeconds <= elapsedSeconds + 1) {
+      tracker.playedSeconds += Math.min(realSeconds, elapsedSeconds);
+    }
+  }
+  tracker.lastPosition = position;
+  tracker.lastPositionAt = now;
+}
+
+/**
  * 마지막 재생 후 SESSION_TIMEOUT_MS 넘게 쉬었다가 다시 재생하면 앞 기록을 멈춘 시점 값으로 확정하고 새 시청으로 기록한다.
  * 같은 탭에서 10분 넘게 지나 영상을 다시 연 경우와 같은 규칙이다. 구간을 열기 전에 불러야 한다.
  * @returns {void}
@@ -903,21 +983,39 @@ function startNewWatchIfIdle() {
 function onTrackedVideoPlay() {
   startNewWatchIfIdle();
   openWatchSegment();
+  samplePlayedPosition();
 }
 
 function onTrackedVideoPause() {
   closeWatchSegment();
+  // 멈춘 위치까지 센 뒤 끊는다
+  if (watchTracker?.lastPosition != null) samplePlayedPosition();
+  breakPlayedRun();
 }
 
 // 탐색(스크럽바 드래그) 구간은 실제 시청이 아니므로 시작 시점에 열려 있던 구간을 닫는다.
+// 이때 위치는 이미 이동할 곳이라 읽지 않고, 실제 재생 시간은 마지막으로 읽은 위치까지만 센다.
 function onTrackedVideoSeeking() {
   closeWatchSegment();
+  breakPlayedRun();
 }
 
 // 탐색이 끝난 뒤에도 계속 재생 중이면(대부분의 경우) 새 구간을 연다. 탐색 도중
 // 일시정지해 뒀다면(paused=true) 열지 않는다 — 이후 실제 play 이벤트가 열어 줄 것이다.
 function onTrackedVideoSeeked() {
-  if (trackedVideoEl && !trackedVideoEl.paused) openWatchSegment();
+  if (trackedVideoEl && !trackedVideoEl.paused) {
+    openWatchSegment();
+    samplePlayedPosition();
+  }
+}
+
+// 재생 중 약 0.25초마다 온다
+function onTrackedVideoTimeUpdate() {
+  try {
+    if (trackedVideoEl && !trackedVideoEl.paused) samplePlayedPosition();
+  } catch {
+    // paused 접근 자체가 실패하는 비표준 플레이어 상태 — 조용히 무시.
+  }
 }
 
 function onTrackedVideoRateChange() {
@@ -965,6 +1063,10 @@ function attachVideoTracking(videoEl = pickVideoElement()) {
         "ratechange",
         onTrackedVideoRateChange,
       );
+      trackedVideoEl.removeEventListener(
+        "timeupdate",
+        onTrackedVideoTimeUpdate,
+      );
     }
     trackedVideoEl = videoEl;
     trackedVideoEl.addEventListener("play", onTrackedVideoPlay);
@@ -972,11 +1074,15 @@ function attachVideoTracking(videoEl = pickVideoElement()) {
     trackedVideoEl.addEventListener("seeking", onTrackedVideoSeeking);
     trackedVideoEl.addEventListener("seeked", onTrackedVideoSeeked);
     trackedVideoEl.addEventListener("ratechange", onTrackedVideoRateChange);
+    trackedVideoEl.addEventListener("timeupdate", onTrackedVideoTimeUpdate);
   }
   try {
     if (watchTracker)
       watchTracker.lastPlaybackRate = trackedVideoEl.playbackRate;
-    if (!trackedVideoEl.paused) openWatchSegment();
+    if (!trackedVideoEl.paused) {
+      openWatchSegment();
+      samplePlayedPosition();
+    }
   } catch {
     // playbackRate/paused 접근 자체가 실패하는 비표준 플레이어 상태 — 조용히 무시.
   }
@@ -994,6 +1100,11 @@ function resetWatchTracker() {
     sawHidden: document.hidden,
     startedAt: Date.now(),
     lastPlayedAt: null,
+    // 실제 재생 시간: 누적값, 마지막으로 읽은 위치와 그 시각(이어진 재생이 끊기면 위치는 null)
+    playedSeconds: 0,
+    lastPosition: null,
+    lastPositionAt: null,
+    playedUnknown: false,
   };
   attachVideoTracking();
 }
