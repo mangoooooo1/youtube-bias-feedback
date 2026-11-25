@@ -614,7 +614,7 @@ function recordVideo(
           // 신원이 바뀐 뒤 재시도 큐가 이 기록을 새 참여자 이름으로 보내지 않게 기록한 참여자를 남긴다
           ...(anonymousId && { anonymousId }),
         },
-        // 첫 체크포인트(15초) 전에 확장이 업데이트되면 옛 스크립트는 pagehide도 없이 끊긴다.
+        // 첫 체크포인트 전에 확장이 업데이트되면 옛 스크립트는 pagehide도 없이 끊긴다.
         // 기록할 때 탭별 기록을 바로 남겨야 다시 넣은 스크립트가 이 기록에 이어 쓴다
         ...(tabWatchKey && {
           [tabWatchKey]: {
@@ -1144,9 +1144,9 @@ resetWatchTracker();
 // background.js 재시도 큐가 오래된 체크포인트를 대신 보낸다. 접두사는 storage.js의
 // WATCH_CHECKPOINT_PREFIX와, 간격은 WATCH_CHECKPOINT_STALE_MS보다 짧게 맞춘다(classic script라 import 불가).
 const WATCH_CHECKPOINT_PREFIX = "watchcp__";
-const WATCH_CHECKPOINT_INTERVAL_MS = 15 * 1000;
+const WATCH_CHECKPOINT_INTERVAL_MS = 10 * 1000;
 // 같은 탭에서 같은 영상을 다시 열 때 이어 쓰려고 남기는 이 탭의 마지막 기록. storage.js의 TAB_WATCH_PREFIX와 맞춘다.
-// 체크포인트와 같은 시점(15초마다·영상을 떠날 때·탭을 닫을 때)에 한 번의 쓰기로 함께 남긴다.
+// 체크포인트와 같은 시점(체크포인트 간격마다·영상을 떠날 때·탭을 닫을 때)에 한 번의 쓰기로 함께 남긴다.
 const TAB_WATCH_PREFIX = "tabwatch__";
 
 function writeWatchCheckpoint() {

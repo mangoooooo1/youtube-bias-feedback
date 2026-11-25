@@ -1449,7 +1449,7 @@ async function loadPagehideHandler(sharedStorage, fetchMock) {
   };
 }
 
-// 재고 있는 영상의 시청시간을 15초마다·탭 종료 시 체크포인트 키에 남긴다
+// 재고 있는 영상의 시청시간을 체크포인트 간격마다·탭 종료 시 체크포인트 키에 남긴다
 async function loadCheckpointSection() {
   const store = {};
   let pagehide = null;
@@ -1507,49 +1507,56 @@ describe("content.js 시청시간 체크포인트", () => {
     );
   });
 
-  it("재고 있는 영상의 시청시간을 15초마다 그 영상의 체크포인트 키에 덮어쓴다", async () => {
+  it("재고 있는 영상의 시청시간을 체크포인트 간격마다 그 영상의 체크포인트 키에 덮어쓴다", async () => {
     const section = await loadCheckpointSection();
+    const INTERVAL = section.api.WATCH_CHECKPOINT_INTERVAL_MS;
     section.startVideo("e1");
 
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
     expect(section.store.watchcp__e1).toMatchObject({
       sessionId: "s1",
       eventId: "e1",
-      watchedSeconds: 15,
-      at: 15000,
+      watchedSeconds: INTERVAL / 1000,
+      at: INTERVAL,
     });
 
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
     expect(section.store.watchcp__e1).toMatchObject({
-      watchedSeconds: 30,
-      at: 30000,
+      watchedSeconds: (2 * INTERVAL) / 1000,
+      at: 2 * INTERVAL,
     });
   });
 
   it("다음 영상으로 넘어가 기록이 끝나기 전에는 이전 영상 체크포인트를 0에 가깝게 덮지 않는다", async () => {
     const section = await loadCheckpointSection();
+    const INTERVAL = section.api.WATCH_CHECKPOINT_INTERVAL_MS;
     section.startVideo("e1");
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
 
     section.startVideo(null); // 리셋됐지만 새 영상 기록 전
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
 
-    expect(section.store.watchcp__e1).toMatchObject({ watchedSeconds: 15 });
+    expect(section.store.watchcp__e1).toMatchObject({
+      watchedSeconds: INTERVAL / 1000,
+    });
     expect(Object.keys(section.store)).toEqual(["watchcp__e1"]);
   });
 
   it("다음 영상의 기록이 끝나면 새 eventId 키에 쓴다", async () => {
     const section = await loadCheckpointSection();
+    const INTERVAL = section.api.WATCH_CHECKPOINT_INTERVAL_MS;
     section.startVideo("e1");
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
 
     section.startVideo("e2");
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
 
-    expect(section.store.watchcp__e1).toMatchObject({ watchedSeconds: 15 });
+    expect(section.store.watchcp__e1).toMatchObject({
+      watchedSeconds: INTERVAL / 1000,
+    });
     expect(section.store.watchcp__e2).toMatchObject({
       eventId: "e2",
-      watchedSeconds: 15,
+      watchedSeconds: INTERVAL / 1000,
     });
   });
 
@@ -1637,45 +1644,47 @@ describe("content.js 탭별 마지막 기록(tabwatch__)", () => {
     expect(section.sendMessage).toHaveBeenCalledWith({ type: "get-tab-id" });
   });
 
-  it("15초마다 체크포인트와 한 번의 쓰기로 이 탭의 마지막 기록을 덮어쓴다", async () => {
+  it("체크포인트 간격마다 체크포인트와 한 번의 쓰기로 이 탭의 마지막 기록을 덮어쓴다", async () => {
     const section = await loadTabWatchSection();
+    const INTERVAL = section.api.WATCH_CHECKPOINT_INTERVAL_MS;
     section.startVideo();
 
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
 
     expect(section.store.tabwatch__7).toEqual({
       videoId: "v1",
       sessionId: "s1",
       eventId: "e1",
-      watchedSeconds: 15,
+      watchedSeconds: INTERVAL / 1000,
       wasBackgrounded: 0,
       // 이 테스트의 <video>는 재생 위치가 없어 실제 재생 시간은 모름이다
       playedSeconds: null,
-      endedAt: 15000,
+      endedAt: INTERVAL,
     });
     expect(section.setCalls).toEqual([["tabwatch__7", "watchcp__e1"]]);
 
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
     expect(section.store.tabwatch__7).toMatchObject({
-      watchedSeconds: 30,
-      endedAt: 30000,
+      watchedSeconds: (2 * INTERVAL) / 1000,
+      endedAt: 2 * INTERVAL,
     });
   });
 
   it("일시정지 중에는 마지막 재생 시각(endedAt)을 갱신하지 않는다", async () => {
     const section = await loadTabWatchSection();
+    const INTERVAL = section.api.WATCH_CHECKPOINT_INTERVAL_MS;
     const video = section.startVideo();
     await vi.advanceTimersByTimeAsync(20000);
     video.paused = true;
     video.dispatch("pause");
 
-    await vi.advanceTimersByTimeAsync(10000); // 30초 주기
+    await vi.advanceTimersByTimeAsync(INTERVAL); // 멈춘 뒤 첫 주기
     expect(section.store.tabwatch__7).toMatchObject({
       watchedSeconds: 20,
       endedAt: 20000,
     });
 
-    await vi.advanceTimersByTimeAsync(15000); // 45초 주기
+    await vi.advanceTimersByTimeAsync(INTERVAL); // 그다음 주기
     expect(section.store.tabwatch__7).toMatchObject({
       watchedSeconds: 20,
       endedAt: 20000,
@@ -1684,10 +1693,11 @@ describe("content.js 탭별 마지막 기록(tabwatch__)", () => {
 
   it("한 번도 재생하지 않았으면 영상에 들어온 시각을 endedAt으로 쓴다", async () => {
     const section = await loadTabWatchSection();
+    const INTERVAL = section.api.WATCH_CHECKPOINT_INTERVAL_MS;
     await vi.advanceTimersByTimeAsync(5000);
     section.startVideo({ playing: false });
 
-    await vi.advanceTimersByTimeAsync(10000); // 15초 주기
+    await vi.advanceTimersByTimeAsync(INTERVAL); // 들어온 뒤 첫 주기
 
     expect(section.store.tabwatch__7).toMatchObject({
       watchedSeconds: 0,
@@ -1717,7 +1727,7 @@ describe("content.js 탭별 마지막 기록(tabwatch__)", () => {
     });
     section.startVideo();
 
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(section.api.WATCH_CHECKPOINT_INTERVAL_MS);
 
     expect(section.setCalls).toEqual([["watchcp__e1"]]);
   });
@@ -1726,7 +1736,7 @@ describe("content.js 탭별 마지막 기록(tabwatch__)", () => {
     const section = await loadTabWatchSection({ sendMessage: null });
     section.startVideo();
 
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(section.api.WATCH_CHECKPOINT_INTERVAL_MS);
 
     expect(section.setCalls).toEqual([["watchcp__e1"]]);
   });
@@ -1738,7 +1748,9 @@ describe("content.js 탭별 마지막 기록(tabwatch__)", () => {
     const section = await loadTabWatchSection({ set });
     section.startVideo();
 
-    await vi.advanceTimersByTimeAsync(30000);
+    await vi.advanceTimersByTimeAsync(
+      2 * section.api.WATCH_CHECKPOINT_INTERVAL_MS,
+    );
 
     expect(set).toHaveBeenCalledTimes(2);
   });
@@ -3038,7 +3050,7 @@ function createTabBrowser({
     };
   }
 
-  // 닫힌 페이지의 15초 주기가 더 돌지 않게 한다. clearAllTimers는 가짜 시계를 실제 시각으로 되돌려 다시 맞춘다
+  // 닫힌 페이지의 체크포인트 주기가 더 돌지 않게 한다. clearAllTimers는 가짜 시계를 실제 시각으로 되돌려 다시 맞춘다
   function stopTimers() {
     const now = Date.now();
     vi.clearAllTimers();
@@ -3774,29 +3786,30 @@ describe("content.js 확장 업데이트로 다시 넣은 스크립트 — 첫 �
     vi.useRealTimers();
   });
 
-  it("기록 후 15초 전에 다시 넣어도 같은 eventId에 다시 넣은 뒤 본 시간이 남는다", async () => {
+  it("기록 후 첫 체크포인트 전에 다시 넣어도 같은 eventId에 다시 넣은 뒤 본 시간이 남는다", async () => {
     let page = await browser.openPage({ videoId: "AAAA" });
     const { eventId } = page.identity();
-    await page.play(10); // 첫 체크포인트(15초) 전
+    const intervalSeconds = page.api.WATCH_CHECKPOINT_INTERVAL_MS / 1000;
+    await page.play(intervalSeconds / 2); // 첫 체크포인트 전
 
     page = await page.reinject();
     expect(page.identity()).toEqual(expect.objectContaining({ eventId }));
     await page.play(60);
     await page.goTo("BBBB");
 
-    // 업데이트 전 10초는 끊긴 스크립트가 쓰지 못해 잃는다
+    // 업데이트 전에 본 시간은 끊긴 스크립트가 쓰지 못해 잃는다
     const records = browser.recordsOf("AAAA");
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({ eventId, watchedSeconds: 60 });
   });
 
-  it("다시 넣은 뒤 15초가 지나면 그 기록의 체크포인트를 쓴다", async () => {
+  it("다시 넣은 뒤 체크포인트 간격이 지나면 그 기록의 체크포인트를 쓴다", async () => {
     let page = await browser.openPage({ videoId: "AAAA" });
     const { eventId } = page.identity();
     await page.play(5);
 
     page = await page.reinject();
-    await page.play(20);
+    await page.play(page.api.WATCH_CHECKPOINT_INTERVAL_MS / 1000);
 
     expect(browser.storage.dump()[`watchcp__${eventId}`]).toEqual(
       expect.objectContaining({ eventId }),
@@ -3991,7 +4004,7 @@ describe("content.js 일시정지 후 다시 재생해 나눌 때 — 세션 종
     const page = await browser.openPage({ tabId: 7, videoId: "AAAA" });
     await page.play(60);
     await vi.advanceTimersByTimeAsync(11 * MINUTE);
-    await page.play(30); // 그 사이 15초 주기 체크포인트가 돈다
+    await page.play(30); // 그 사이 체크포인트 주기가 돈다
 
     const [first, second] = browser.recordsOf("AAAA");
     const dump = browser.storage.dump();
