@@ -157,8 +157,9 @@ function execSchema() {
       playbackRate   REAL, -- 이 영상을 떠날 때 마지막으로 관측된 재생 배속(기본 1). 배속 변경 이력
                            -- 전체가 아니라 최종값 1개만 남긴다(원시 로그 비대화 방지, 통제변수 용도로 충분).
       wasBackgrounded INTEGER, -- 이 영상 시청 중 탭이 한 번이라도 백그라운드로 전환된 적 있으면 1
-      playedSeconds  REAL, -- 실제 재생된 영상 구간의 합(초, 겹치면 한 번). 배속이면 영상 기준이라 watchedSeconds와 다르다.
-                           -- 측정 타당화·민감도 분석용이고 화면·리뷰에는 쓰지 않는다. 옛 확장·잘못된 값이면 NULL
+      playedSeconds  REAL, -- 실제로 재생이 진행된 시간(초). watchedSeconds에서 광고·버퍼링·절전처럼 재생 위치가 움직이지
+                           -- 않은 시간을 뺀 값이고, 되감아 다시 본 부분도 센다. 측정 타당화·민감도 분석용이고
+                           -- 화면·리뷰에는 쓰지 않는다. 옛 확장·잘못된 값이면 NULL
       -- durationSeconds를 통한 쇼츠 여부 판별이 신뢰성이 부족하다고 판단하여, URL 경로로 직접 판별한다.
       isShortsUrl INTEGER,
       -- 같은 탭에서 10분 넘게 멈췄다가 다시 재생해 새로 만든 기록이면 앞 기록의 eventId, 아니면 NULL
