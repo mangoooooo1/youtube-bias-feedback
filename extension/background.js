@@ -980,10 +980,10 @@ async function readJson(response) {
 }
 
 /**
- * 시청시간·배속·백그라운드 여부 하나를 PATCH로 서버에 반영한다.
+ * 시청시간·배속·백그라운드 여부·실제 재생 시간 하나를 PATCH로 서버에 반영한다.
  * @param {string} anonymousId
  * @param {string} participantToken
- * @param {{eventId: string, watchedSeconds: number, playbackRate: number, wasBackgrounded: 0|1}} item
+ * @param {{eventId: string, watchedSeconds: number, playbackRate: number, wasBackgrounded: 0|1, playedSeconds?: number|null}} item
  * @returns {ReturnType<typeof sendToServer>}
  */
 async function postWatchStatsToServer(anonymousId, participantToken, item) {
@@ -1007,6 +1007,7 @@ async function postWatchStatsToServer(anonymousId, participantToken, item) {
       watchedSeconds: item.watchedSeconds,
       playbackRate: item.playbackRate,
       wasBackgrounded: item.wasBackgrounded,
+      playedSeconds: item.playedSeconds,
     },
   );
 }

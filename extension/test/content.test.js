@@ -1649,6 +1649,8 @@ describe("content.js 탭별 마지막 기록(tabwatch__)", () => {
       eventId: "e1",
       watchedSeconds: 15,
       wasBackgrounded: 0,
+      // 이 테스트의 <video>는 재생 위치가 없어 실제 재생 시간은 모름이다
+      playedSeconds: null,
       endedAt: 15000,
     });
     expect(section.setCalls).toEqual([["tabwatch__7", "watchcp__e1"]]);
@@ -1798,6 +1800,8 @@ describe("content.js 탭별 마지막 기록 — 영상을 떠날 때 남긴다"
       eventId: eventIdA,
       watchedSeconds: 30,
       wasBackgrounded: 0,
+      // 이 테스트의 <video>는 재생 위치가 없어 실제 재생 시간은 모름이다
+      playedSeconds: null,
       endedAt: 30000,
     });
   });
@@ -3027,9 +3031,9 @@ function createTabBrowser({
         return openPage({ tabId, videoId: currentVideoId, ...options });
       },
       // 확장 업데이트: 옛 스크립트는 확장과 끊겨 pagehide도 없이 멈추고, 같은 탭에 새 스크립트가 들어온다
-      async reinject() {
+      async reinject(options = {}) {
         stopTimers();
-        return openPage({ tabId, videoId: currentVideoId });
+        return openPage({ tabId, videoId: currentVideoId, ...options });
       },
     };
   }
@@ -3357,6 +3361,55 @@ describe("content.js 실제 재생 시간 — 영상 기록의 확정·체크포
     const [latest] = browser.recordsOf("AAAA");
     expect(latest.playedSeconds ?? 0).toBeLessThanOrEqual(30);
     expect(patches).toEqual([]);
+  });
+
+  it("같은 탭에서 다시 연 영상은 앞서 잰 실제 재생 시간에 이어 더한다", async () => {
+    const { browser } = createParticipantBrowser();
+    let page = await browser.openPage({ videoId: "AAAA", position: 0 });
+    await page.play(30);
+    page = await page.reload({ position: 30 });
+    await page.play(20);
+    await page.goTo("BBBB");
+
+    const records = browser.recordsOf("AAAA");
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      watchedSeconds: 50,
+      playedSeconds: 50,
+    });
+  });
+
+  it("첫 체크포인트 전에 확장이 업데이트돼 스크립트가 다시 들어와도 이어 더한다", async () => {
+    const { browser } = createParticipantBrowser();
+    let page = await browser.openPage({ videoId: "AAAA", position: 0 });
+    await page.play(5); // 첫 체크포인트 전
+    page = await page.reinject({ position: 5 });
+    await page.play(30);
+    await page.goTo("BBBB");
+
+    // 업데이트 전 5초는 끊긴 스크립트가 쓰지 못해 시청 시간과 함께 잃는다
+    expect(browser.recordsOf("AAAA")[0]).toMatchObject({
+      watchedSeconds: 30,
+      playedSeconds: 30,
+    });
+  });
+
+  it("실제 재생 시간을 남기지 않던 버전의 탭 기록에 이어 쓰면 그 기록은 모름(null)으로 둔다", async () => {
+    const { browser } = createParticipantBrowser();
+    let page = await browser.openPage({ videoId: "AAAA", position: 0 });
+    await page.play(30);
+    // 업데이트 전 버전이 남긴 탭 기록처럼 이 값을 뺀다
+    const old = { ...browser.storage.dump().tabwatch__7 };
+    delete old.playedSeconds;
+    await browser.storage.set({ tabwatch__7: old });
+    page = await page.reinject({ position: 30 });
+    await page.play(10);
+    await page.goTo("BBBB");
+
+    expect(browser.recordsOf("AAAA")[0]).toMatchObject({
+      watchedSeconds: 40,
+      playedSeconds: null,
+    });
   });
 
   it("10분 넘게 쉬었다 다시 재생해 만든 새 기록은 그 뒤 재생한 시간만 센다", async () => {

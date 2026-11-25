@@ -1152,6 +1152,81 @@ describe("retryUnsentWatchStats — 시청시간 서버 장애 대비 재시도 
   });
 });
 
+describe("retryUnsentWatchStats — 실제 재생 시간(playedSeconds)도 함께 다시 보낸다", () => {
+  function captureWatchStatsPatches() {
+    const patches = [];
+    global.fetch = vi.fn(async (url, options = {}) => {
+      if (options.method === "PATCH") {
+        patches.push(JSON.parse(options.body));
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${url}`);
+    });
+    return patches;
+  }
+
+  it("확정값을 다시 보낼 때 PATCH 본문에 싣는다", async () => {
+    global.chrome = createChromeMock();
+    const patches = captureWatchStatsPatches();
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      video__s1__uuid1: {
+        videoId: "v1",
+        eventId: "uuid1",
+        watchedSeconds: 42,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        playedSeconds: 35,
+        watchStatsSent: false,
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentWatchStats();
+
+    expect(patches).toEqual([
+      expect.objectContaining({ watchedSeconds: 42, playedSeconds: 35 }),
+    ]);
+  });
+
+  it("탭을 닫아 체크포인트를 대신 보낼 때 PATCH 본문에 싣고 영상 기록에 남긴다", async () => {
+    global.chrome = createChromeMock();
+    const patches = captureWatchStatsPatches();
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      video__s1__uuid1: { videoId: "v1", eventId: "uuid1", sent: true },
+      watchcp__uuid1: {
+        sessionId: "s1",
+        eventId: "uuid1",
+        watchedSeconds: 37,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        playedSeconds: 30,
+        at: Date.now() - 3 * 60 * 1000,
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentWatchStats();
+
+    expect(patches).toEqual([
+      expect.objectContaining({ watchedSeconds: 37, playedSeconds: 30 }),
+    ]);
+    const all = await global.chrome.storage.local.get(null);
+    expect(all.video__s1__uuid1).toMatchObject({
+      watchedSeconds: 37,
+      playedSeconds: 30,
+      watchStatsSent: true,
+    });
+  });
+});
+
 // 세션 POST 페이로드에 시청시간 원시 데이터(watchedSecondsList)가 실려 가는지
 // 서버가 이 값으로 클릭성 이탈을 걸러내고 시간 가중 entropy를 계산한다.
 describe("analyzeSession — watchedSecondsList를 세션 페이로드에 함께 보낸다", () => {
@@ -1869,6 +1944,31 @@ describe("알람 핸들러 — 세션을 닫을 때 체크포인트를 세션보
 
     expect(order.filter((c) => c.startsWith("PATCH"))).toEqual([]);
     expect([...sessionPosts[0].watchedSecondsList].sort()).toEqual([30, null]);
+  });
+
+  it("세션을 닫으며 보내는 체크포인트 PATCH에 실제 재생 시간도 싣고, 닫힌 세션의 영상 기록에 남긴다", async () => {
+    const { sessionPosts } = mockServer();
+    const serve = global.fetch;
+    const patches = [];
+    global.fetch = vi.fn(async (url, options = {}) => {
+      if (options.method === "PATCH") patches.push(JSON.parse(options.body));
+      return serve(url, options);
+    });
+    await closeSession({
+      ...playing("e1"),
+      watchcp__e1: { ...checkpoint("e1").watchcp__e1, playedSeconds: 500 },
+    });
+    await vi.waitFor(() => expect(sessionPosts).toHaveLength(1));
+
+    expect(patches).toEqual([
+      expect.objectContaining({ watchedSeconds: 600, playedSeconds: 500 }),
+    ]);
+    const { sessions } = await global.chrome.storage.local.get("sessions");
+    expect(sessions[0].videos[0]).toMatchObject({
+      watchedSeconds: 600,
+      playedSeconds: 500,
+      watchStatsSource: "checkpoint",
+    });
   });
 
   it("체크포인트를 보낸 뒤 그 표시를 저장하지 못해도 서버에 반영한 값을 담아 세션을 보내고 전송 완료를 기록한다", async () => {

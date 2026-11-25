@@ -268,8 +268,8 @@ function rememberTrackedVideo(
 
 /**
  * 같은 탭에서 다시 연 영상을 새로 기록하지 않고 이 탭의 마지막 기록에 이어 쓴다.
- * 시청 시간은 다시 연 뒤 이미 잰 값에 저장된 값을 더하고, 백그라운드 여부는 하나라도 백그라운드였으면 백그라운드다.
- * @param {{sessionId: string, eventId: string, watchedSeconds: number, wasBackgrounded: 0|1, endedAt: number, anonymousId?: string}} saved - tabwatch__ 값
+ * 시청 시간과 실제 재생 시간은 다시 연 뒤 이미 잰 값에 저장된 값을 더하고, 백그라운드 여부는 하나라도 백그라운드였으면 백그라운드다.
+ * @param {{sessionId: string, eventId: string, watchedSeconds: number, wasBackgrounded: 0|1, endedAt: number, playedSeconds?: number|null, anonymousId?: string}} saved - tabwatch__ 값
  * @param {string} videoId
  * @returns {void}
  */
@@ -283,6 +283,12 @@ function resumeTrackedVideo(saved, videoId) {
   if (typeof watchTracker === "undefined" || !watchTracker) return;
   if (Number.isFinite(saved.watchedSeconds)) {
     watchTracker.accumulatedMs += saved.watchedSeconds * 1000;
+  }
+  if (Number.isFinite(saved.playedSeconds)) {
+    watchTracker.playedSeconds += saved.playedSeconds;
+  } else {
+    // 앞부분의 실제 재생 시간을 모르면(위치를 못 읽었거나 이 값이 없던 버전의 기록) 이 기록 전체가 모름이다
+    watchTracker.playedUnknown = true;
   }
   if (saved.wasBackgrounded) watchTracker.sawHidden = true;
   // 다시 연 뒤 재생하지 않으면 마지막 재생 시각은 앞 시청의 것이다
@@ -617,6 +623,7 @@ function recordVideo(
             eventId,
             watchedSeconds: 0,
             wasBackgrounded: watchTracker?.sawHidden ? 1 : 0,
+            playedSeconds: 0,
             endedAt: Date.parse(now),
             ...(anonymousId && { anonymousId }),
           },
@@ -1160,6 +1167,7 @@ function writeWatchCheckpoint() {
       eventId: target.eventId,
       watchedSeconds: stats.watchedSeconds,
       wasBackgrounded: stats.wasBackgrounded,
+      playedSeconds: stats.playedSeconds,
       endedAt: lastPlayingAt(watchTracker),
       ...(watchTracker.recorder && { anonymousId: watchTracker.recorder }),
     };
