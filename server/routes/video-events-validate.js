@@ -114,6 +114,7 @@ function validateVideoEvent(body) {
  * PATCH /api/video-events/:eventId 요청 본문을 검증한다.
  * anonymousId/participantToken은 requireParticipant가 이미 검증하므로 여기서는 다루지 않는다.
  * 세 필드 모두 선택이지만(계측 실패 시 일부만 보낼 수 있음), 값이 있다면 형식은 지킨다.
+ * playedSeconds는 거부하지 않는다(readPlayedSeconds 참고).
  * @param {unknown} body - 요청 본문
  * @returns {{code: string, field: string}|null} 검증 실패 시 에러 코드·필드, 통과하면 null
  */
@@ -158,4 +159,16 @@ function validateWatchStats(body) {
   return null;
 }
 
-module.exports = { validateVideoEvent, validateWatchStats };
+/**
+ * 저장할 playedSeconds를 돌려준다. 보조 값이라 잘못된 값으로 요청을 거부하면 확장이 그 기록의
+ * 시청 통계 전체를 다시 보내지 않아 watchedSeconds까지 잃는다. 그래서 유한한 0 이상이 아니면 null로 저장한다.
+ * @param {unknown} value
+ * @returns {number|null}
+ */
+function readPlayedSeconds(value) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+}
+
+module.exports = { validateVideoEvent, validateWatchStats, readPlayedSeconds };

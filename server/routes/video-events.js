@@ -4,6 +4,7 @@ const { success, fail, ERROR_CODES } = require("../middleware/responseHandler");
 const {
   validateVideoEvent,
   validateWatchStats,
+  readPlayedSeconds,
 } = require("./video-events-validate");
 const { classifyReferrerType } = require("./video-events-classify");
 const { normalizeIsoTimestamp } = require("./iso-timestamp");
@@ -109,15 +110,21 @@ router.patch("/:eventId", requireParticipant, (req, res, next) => {
   }
 
   const { eventId } = req.params;
-  const { anonymousId, watchedSeconds, playbackRate, wasBackgrounded } =
-    req.body;
+  const {
+    anonymousId,
+    watchedSeconds,
+    playbackRate,
+    wasBackgrounded,
+    playedSeconds,
+  } = req.body;
 
   let result;
   try {
     result = db
       .prepare(
         `UPDATE video_events SET watchedSeconds = @watchedSeconds,
-           playbackRate = @playbackRate, wasBackgrounded = @wasBackgrounded
+           playbackRate = @playbackRate, wasBackgrounded = @wasBackgrounded,
+           playedSeconds = @playedSeconds
          WHERE eventId = @eventId AND anonymousId = @anonymousId`,
       )
       .run({
@@ -126,6 +133,7 @@ router.patch("/:eventId", requireParticipant, (req, res, next) => {
         watchedSeconds: watchedSeconds ?? null,
         playbackRate: playbackRate ?? null,
         wasBackgrounded: wasBackgrounded === undefined ? null : wasBackgrounded,
+        playedSeconds: readPlayedSeconds(playedSeconds),
       });
   } catch (err) {
     return next(err);

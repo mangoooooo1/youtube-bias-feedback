@@ -328,6 +328,49 @@ describe("initializeDB — extensionVersion 소급 추가", () => {
   );
 });
 
+describe("initializeDB — video_events.playedSeconds 소급 추가", () => {
+  it("열이 없는 기존 video_events에 열을 추가하고, 기존 행은 값 없이 그대로 남긴다", () => {
+    // 지금 스키마에서 이 열만 뺀 표 — 인덱스가 쓰는 열은 남겨야 initializeDB가 돈다
+    const keep = db
+      .prepare("PRAGMA table_info(video_events)")
+      .all()
+      .map((c) => c.name)
+      .filter((name) => name !== "playedSeconds")
+      .join(", ");
+    db.exec(
+      `CREATE TABLE old_video_events AS SELECT ${keep} FROM video_events WHERE 0`,
+    );
+    db.exec("DROP TABLE video_events");
+    db.exec("ALTER TABLE old_video_events RENAME TO video_events");
+    db.prepare(
+      `INSERT INTO video_events (eventId, anonymousId, videoId, watchedAt, watchedSeconds)
+       VALUES ('e1', 'a1', 'v1', '2026-11-25T12:00:00.000Z', 42)`,
+    ).run();
+    try {
+      initializeDB();
+
+      expect(db.prepare("SELECT * FROM video_events").all()).toEqual([
+        expect.objectContaining({
+          eventId: "e1",
+          watchedSeconds: 42,
+          playedSeconds: null,
+        }),
+      ]);
+    } finally {
+      db.exec("DROP TABLE video_events");
+      initializeDB();
+    }
+  });
+
+  it("새로 만든 DB의 video_events에도 열이 있다", () => {
+    const columns = db
+      .prepare("PRAGMA table_info(video_events)")
+      .all()
+      .map((c) => c.name);
+    expect(columns).toContain("playedSeconds");
+  });
+});
+
 describe("initializeDB — 예전 스키마 DB 감지", () => {
   // 인덱스가 없는 새 열은 CREATE TABLE IF NOT EXISTS로 추가되지 않고 오류도 나지 않는다.
   // 재생성을 잊고 배포하면 서버는 뜨고 오늘 리뷰만 조용히 실패하므로, 시작 단계에서 막는다.
