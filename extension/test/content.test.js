@@ -1356,6 +1356,22 @@ describe("content.js 실제 재생 시간(playedSeconds) — 재생 위치로 �
     expect(played()).toBe(70);
   });
 
+  // 탐색 중에는 시청 구간이 닫혀 있다. seeked 전에 온 timeupdate로 기준점을 만들면, 그 뒤 진행분이 시청 시간에는 없이 실제 재생 시간에만 들어간다
+  it("탐색 중 seeked 전에 온 timeupdate로는 기준점을 만들지 않아 시청 시간을 넘지 않는다", async () => {
+    const { videoEl, played, watched } = await startSection();
+    startPlaying(videoEl);
+    playFor(videoEl, 10);
+    videoEl.currentTime = 30;
+    videoEl.dispatch("seeking");
+    videoEl.dispatch("timeupdate");
+    vi.setSystemTime(Date.now() + 100); // seeked 전에 위치가 진행한다
+    videoEl.dispatch("seeked");
+    playFor(videoEl, 1);
+
+    expect(watched()).toBe(11);
+    expect(played()).toBe(11);
+  });
+
   it("탐색 이벤트 없이 위치가 크게 앞으로 뛰면(다음 영상이 같은 <video>에 실림 등) 그 사이는 세지 않는다", async () => {
     const { videoEl, played } = await startSection();
     startPlaying(videoEl);
