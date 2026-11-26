@@ -487,3 +487,64 @@ describe("PATCH /api/video-events/:eventId — 시청시간 확정", () => {
     expect(row.wasBackgrounded).toBe(0);
   });
 });
+
+describe("PATCH /api/video-events/:eventId — 재생 구간 합(playedSeconds)", () => {
+  function storedRow(eventId) {
+    return db
+      .prepare(
+        "SELECT watchedSeconds, playedSeconds FROM video_events WHERE eventId = ?",
+      )
+      .get(eventId);
+  }
+
+  it("보낸 재생 구간 합을 시청 시간과 함께 저장한다", async () => {
+    await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ eventId: "played-1" }));
+
+    const res = await request(app).patch("/api/video-events/played-1").send({
+      anonymousId: "wiring-user",
+      watchedSeconds: 30,
+      playedSeconds: 60,
+    });
+
+    expect(res.status).toBe(200);
+    expect(storedRow("played-1")).toEqual({
+      watchedSeconds: 30,
+      playedSeconds: 60,
+    });
+  });
+
+  it("보내지 않는 옛 확장이면 null로 둔다", async () => {
+    await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ eventId: "played-2" }));
+
+    await request(app)
+      .patch("/api/video-events/played-2")
+      .send({ anonymousId: "wiring-user", watchedSeconds: 30 });
+
+    expect(storedRow("played-2")).toEqual({
+      watchedSeconds: 30,
+      playedSeconds: null,
+    });
+  });
+
+  it("값이 잘못돼도 요청은 받아 시청 시간은 저장하고 재생 구간 합만 null로 둔다", async () => {
+    await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ eventId: "played-3" }));
+
+    const res = await request(app).patch("/api/video-events/played-3").send({
+      anonymousId: "wiring-user",
+      watchedSeconds: 30,
+      playedSeconds: -5,
+    });
+
+    expect(res.status).toBe(200);
+    expect(storedRow("played-3")).toEqual({
+      watchedSeconds: 30,
+      playedSeconds: null,
+    });
+  });
+});

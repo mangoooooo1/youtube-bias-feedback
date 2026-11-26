@@ -1941,3 +1941,119 @@ describe("참여자 등록 게이트 상태", () => {
     expect((await getParticipantSyncState()).synced).toBe(false);
   });
 });
+
+// 필드를 하나씩 적어 옮기는 곳마다 빠지면, 그 경로로 보낸 기록만 서버에서 조용히 비게 된다
+describe("실제 재생 시간(playedSeconds) — 세션을 닫거나 다시 보낼 때도 함께 옮긴다", () => {
+  const NOW = Date.parse("2026-10-20T12:00:00Z");
+  const STALE = NOW - WATCH_CHECKPOINT_STALE_MS - 1000;
+
+  it("세션을 닫아 sessions[]로 옮겨도 남는다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      video__s1__v1: {
+        videoId: "v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: true,
+        eventId: "e1",
+        watchedSeconds: 300,
+        playedSeconds: 240,
+        watchStatsSent: false,
+      },
+    });
+    await endSession();
+
+    const [session] = await getAllSessions();
+    expect(session.videos[0]).toMatchObject({
+      eventId: "e1",
+      watchedSeconds: 300,
+      playedSeconds: 240,
+    });
+  });
+
+  it("재시도 큐 항목에 열린 기록과 닫힌 세션 기록 모두 실린다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__e1: {
+        eventId: "e1",
+        sent: true,
+        watchedSeconds: 30,
+        playedSeconds: 25,
+        watchStatsSent: false,
+      },
+      sessions: [
+        {
+          sessionId: "s0",
+          videos: [
+            {
+              eventId: "e0",
+              sent: true,
+              watchedSeconds: 60,
+              playedSeconds: 50,
+              watchStatsSent: false,
+            },
+          ],
+        },
+      ],
+    });
+
+    const items = await getUnsentWatchStats(NOW);
+    expect(items).toHaveLength(2);
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          location: "live",
+          eventId: "e1",
+          playedSeconds: 25,
+        }),
+        expect.objectContaining({
+          location: "session",
+          eventId: "e0",
+          playedSeconds: 50,
+        }),
+      ]),
+    );
+  });
+
+  it("탭을 닫아 대신 보내는 체크포인트 항목에 실리고, 보낸 뒤 영상 기록에도 남는다", async () => {
+    await global.chrome.storage.local.set({
+      video__s1__e1: { eventId: "e1", sent: true },
+      watchcp__e1: {
+        sessionId: "s1",
+        eventId: "e1",
+        watchedSeconds: 37,
+        playbackRate: 1,
+        wasBackgrounded: 0,
+        playedSeconds: 30,
+        at: STALE,
+      },
+    });
+
+    const [item] = await getUnsentWatchStats(NOW);
+    expect(item).toMatchObject({ source: "checkpoint", playedSeconds: 30 });
+
+    await markWatchStatsSent(item);
+    const { video__s1__e1: record } =
+      await global.chrome.storage.local.get("video__s1__e1");
+    expect(record).toMatchObject({
+      watchedSeconds: 37,
+      playedSeconds: 30,
+      watchStatsSource: "checkpoint",
+      watchStatsSent: true,
+    });
+  });
+
+  it("방금 닫은 세션의 체크포인트 항목에도 실린다", async () => {
+    await global.chrome.storage.local.set({
+      sessions: [{ sessionId: "s1", videos: [{ eventId: "e1", sent: true }] }],
+      watchcp__e1: {
+        sessionId: "s1",
+        eventId: "e1",
+        watchedSeconds: 37,
+        playedSeconds: 30,
+        at: NOW,
+      },
+    });
+
+    const [item] = await getSessionCheckpointStats("s1");
+    expect(item).toMatchObject({ eventId: "e1", playedSeconds: 30 });
+  });
+});

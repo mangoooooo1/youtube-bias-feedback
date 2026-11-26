@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   validateVideoEvent,
   validateWatchStats,
+  readPlayedSeconds,
 } from "../../routes/video-events-validate.js";
 import { ERROR_CODES } from "../../middleware/responseHandler.js";
 
@@ -405,4 +406,30 @@ describe("validateWatchStats — wasBackgrounded", () => {
       field: "wasBackgrounded",
     });
   });
+});
+
+// 보조 값이 잘못돼 요청이 거부되면 확장은 그 기록의 시청 통계를 다시 보내지 않는다
+describe("playedSeconds — 거부하지 않고 저장할 값만 고른다", () => {
+  it.each([-1, "30", Infinity, NaN, true, {}])(
+    "잘못된 값(%s)이 있어도 요청은 통과한다",
+    (value) => {
+      expect(
+        validateWatchStats({ watchedSeconds: 30, playedSeconds: value }),
+      ).toBeNull();
+    },
+  );
+
+  it.each([
+    [0, 0],
+    [12.5, 12.5],
+  ])("유한한 0 이상(%s)이면 그 값을 저장한다", (value, expected) => {
+    expect(readPlayedSeconds(value)).toBe(expected);
+  });
+
+  it.each([undefined, null, -1, "30", Infinity, NaN, true, {}])(
+    "없거나 잘못된 값(%s)이면 null로 저장한다",
+    (value) => {
+      expect(readPlayedSeconds(value)).toBeNull();
+    },
+  );
 });

@@ -179,6 +179,7 @@ function buildClosedSession(
         watchedSeconds,
         playbackRate,
         wasBackgrounded,
+        playedSeconds,
         watchStatsSent,
         watchStatsSource,
         checkpointAt,
@@ -201,6 +202,7 @@ function buildClosedSession(
         watchedSeconds,
         playbackRate,
         wasBackgrounded,
+        playedSeconds,
         watchStatsSent,
         // 체크포인트로 대신 보낸 값인지 — 세션이 닫힌 뒤에도 더 새로운 체크포인트를 보낼 수 있게 함께 옮긴다
         watchStatsSource,
@@ -617,6 +619,7 @@ export async function getUnsentWatchStats(now = Date.now()) {
       watchedSeconds: v.watchedSeconds,
       playbackRate: v.playbackRate,
       wasBackgrounded: v.wasBackgrounded,
+      playedSeconds: v.playedSeconds,
       anonymousId: v.anonymousId,
     }));
 
@@ -628,6 +631,7 @@ export async function getUnsentWatchStats(now = Date.now()) {
       watchedSeconds: v.watchedSeconds,
       playbackRate: v.playbackRate,
       wasBackgrounded: v.wasBackgrounded,
+      playedSeconds: v.playedSeconds,
       anonymousId: v.anonymousId,
     })),
   );
@@ -678,6 +682,7 @@ function checkpointItem(entry, cp) {
     watchedSeconds: cp.watchedSeconds,
     playbackRate: cp.playbackRate,
     wasBackgrounded: cp.wasBackgrounded,
+    playedSeconds: cp.playedSeconds,
     at: cp.at,
     source: "checkpoint",
     // 체크포인트는 영상 기록을 기록한 참여자의 것이다
@@ -717,6 +722,7 @@ function withWatchStatsSent(v, item, value) {
       watchedSeconds: item.watchedSeconds,
       playbackRate: item.playbackRate,
       wasBackgrounded: item.wasBackgrounded,
+      playedSeconds: item.playedSeconds,
       watchStatsSent: value,
       watchStatsSource: "checkpoint",
       checkpointAt: item.at,

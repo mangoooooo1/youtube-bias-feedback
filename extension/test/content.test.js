@@ -762,9 +762,11 @@ function createFakeVideoElement({
   playbackRate = 1,
   width = 640,
   height = 360,
+  // 숫자를 주면 재생 위치(currentTime)와 광고 표시를 흉내 낸다
+  position,
 } = {}) {
   const listeners = {};
-  return {
+  const el = {
     paused,
     playbackRate,
     getBoundingClientRect: () => ({ width, height }),
@@ -778,6 +780,78 @@ function createFakeVideoElement({
       for (const cb of listeners[type] || []) cb();
     },
   };
+  if (position !== undefined) simulatePlaybackPosition(el, position);
+  return el;
+}
+
+// 재생 중에는 흐른 시간 × 배속만큼 위치가 앞으로 간다. 멈추면 그 자리에 선다.
+// 광고 중에는 실제 유튜브처럼 감싸는 플레이어에 ad-showing 클래스가 붙는다(el.player.ad)
+function simulatePlaybackPosition(el, start) {
+  let base = start;
+  let playingSince = el.paused ? null : Date.now();
+  const now = () =>
+    playingSince == null
+      ? base
+      : base + ((Date.now() - playingSince) / 1000) * el.playbackRate;
+  Object.defineProperty(el, "paused", {
+    get: () => playingSince == null,
+    set(value) {
+      if (value && playingSince != null) {
+        base = now();
+        playingSince = null;
+      } else if (!value && playingSince == null) {
+        playingSince = Date.now();
+      }
+    },
+  });
+  Object.defineProperty(el, "currentTime", {
+    get: now,
+    set(value) {
+      base = value;
+      if (playingSince != null) playingSince = Date.now();
+    },
+  });
+  const player = {
+    ad: false,
+    classList: { contains: (name) => name === "ad-showing" && player.ad },
+  };
+  el.player = player;
+  el.closest = (selector) =>
+    selector === ".html5-video-player" ? player : null;
+}
+
+// 재생 중 실제 브라우저처럼 0.25초마다 timeupdate를 보내며 시간을 흘린다
+function playFor(el, seconds) {
+  for (let i = 0; i < seconds * 4; i++) {
+    vi.setSystemTime(Date.now() + 250);
+    el.dispatch("timeupdate");
+  }
+}
+
+function startPlaying(el) {
+  el.paused = false;
+  el.dispatch("play");
+}
+
+function pausePlaying(el) {
+  el.paused = true;
+  el.dispatch("pause");
+}
+
+// 지금 위치에서부터 새 배속으로 움직이게 바꾼다
+function changeRate(el, rate) {
+  const position = el.currentTime;
+  el.currentTime = position;
+  el.playbackRate = rate;
+  el.dispatch("ratechange");
+}
+
+// 실제 브라우저 순서: 위치가 먼저 바뀌고 seeking → timeupdate → seeked
+function seekTo(el, position) {
+  el.currentTime = position;
+  el.dispatch("seeking");
+  el.dispatch("timeupdate");
+  el.dispatch("seeked");
 }
 
 // 불러오는 순간의 최상위 resetWatchTracker()는 <video>가 없는 페이지로 지나가게 하고,
@@ -976,6 +1050,7 @@ async function loadMultiVideoSection(href) {
       for (const cb of documentListeners.play || []) cb({ target: videoEl });
       videoEl.dispatch("play");
     },
+    snapshot: api.captureWatchStatsSnapshot,
     currentWatchedMs: () =>
       api.captureWatchStatsSnapshot().watchedSeconds * 1000,
   };
@@ -1065,6 +1140,316 @@ describe("content.js 비디오 엘리먼트 계측 — <video>가 여럿인 페�
   });
 });
 
+// 시청 시간에서 광고·버퍼링·절전처럼 재생 위치가 움직이지 않은 시간을 뺀 실제 재생 시간. 되감아 다시 본 부분도 센다
+describe("content.js 실제 재생 시간(playedSeconds) — 재생 위치로 잰다", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function startSection(options = {}) {
+    const videoEl = createFakeVideoElement({ position: 0, ...options });
+    const section = await loadVideoTrackingSection(videoEl);
+    section.reset();
+    return {
+      videoEl,
+      played: () => section.snapshot().playedSeconds,
+      watched: () => section.snapshot().watchedSeconds,
+    };
+  }
+
+  it("끊김 없이 재생하면 시청 시간과 같다", async () => {
+    const { videoEl, played, watched } = await startSection();
+    startPlaying(videoEl);
+    playFor(videoEl, 30);
+
+    expect(played()).toBe(30);
+    expect(watched()).toBe(30);
+  });
+
+  it("재생하지 않았으면 0이다", async () => {
+    const { played } = await startSection();
+    vi.setSystemTime(20000);
+
+    expect(played()).toBe(0);
+  });
+
+  it("되감아 다시 본 부분도 센다", async () => {
+    const { videoEl, played, watched } = await startSection();
+    startPlaying(videoEl);
+    playFor(videoEl, 60);
+    seekTo(videoEl, 30);
+    playFor(videoEl, 60); // 30초 → 90초
+
+    expect(played()).toBe(120);
+    expect(watched()).toBe(120);
+  });
+
+  it("반복 재생한 만큼 센다", async () => {
+    const DURATION = 20;
+    const { videoEl, played, watched } = await startSection();
+    startPlaying(videoEl);
+    for (let i = 0; i < 3; i++) {
+      playFor(videoEl, DURATION);
+      seekTo(videoEl, 0); // 반복 재생은 끝에서 처음으로 탐색한다
+    }
+
+    expect(played()).toBe(60);
+    expect(watched()).toBe(60);
+  });
+
+  it("탐색 이벤트 없이 처음으로 돌아가며 반복해도 되돌아간 위치를 빼지 않는다", async () => {
+    const DURATION = 20;
+    const { videoEl, played } = await startSection();
+    startPlaying(videoEl);
+    for (let i = 0; i < 3; i++) {
+      playFor(videoEl, DURATION);
+      videoEl.currentTime = 0;
+      videoEl.dispatch("timeupdate");
+    }
+
+    expect(played()).toBe(60);
+  });
+
+  it("배속이어도 실제로 흐른 시간으로 센다(2배속으로 영상 30초 분량을 보면 15초)", async () => {
+    const { videoEl, played, watched } = await startSection({
+      playbackRate: 2,
+    });
+    startPlaying(videoEl);
+    playFor(videoEl, 15);
+
+    expect(videoEl.currentTime).toBe(30);
+    expect(played()).toBe(15);
+    expect(watched()).toBe(15);
+  });
+
+  // 마지막 배속 하나로 나누면 30초 위치 ÷ 2 = 15초가 된다
+  it("재생 중 배속을 바꿔도 그때 배속으로 나눠 실제 시간으로 센다", async () => {
+    const { videoEl, played, watched } = await startSection();
+    startPlaying(videoEl);
+    playFor(videoEl, 10);
+    changeRate(videoEl, 2);
+    playFor(videoEl, 10);
+
+    expect(videoEl.currentTime).toBe(30);
+    expect(played()).toBe(20);
+    expect(watched()).toBe(20);
+  });
+
+  // 앞 125ms는 1배속, 뒤 125ms는 2배속이다. 위치 변화 0.375초를 모두 새 배속 2로 나누면 0.1875초로 덜 센다
+  it("두 timeupdate 사이에 배속을 높여도 바꾸기 전 구간은 그 전 배속으로 센다", async () => {
+    const { videoEl, played } = await startSection();
+    startPlaying(videoEl);
+    playFor(videoEl, 10);
+    vi.setSystemTime(Date.now() + 125);
+    changeRate(videoEl, 2);
+    vi.setSystemTime(Date.now() + 125);
+    videoEl.dispatch("timeupdate");
+
+    expect(played()).toBe(10.25);
+  });
+
+  // 배속이 바뀌는 순간 그 전 배속(2)으로 먼저 센다. 위치 변화를 모두 낮아진 배속(1)으로 나누면 흐른 시간보다 커진다
+  it("두 timeupdate 사이에 배속을 낮춰도 흐른 시간보다 많이 세지 않는다", async () => {
+    const { videoEl, played } = await startSection({ playbackRate: 2 });
+    startPlaying(videoEl);
+    playFor(videoEl, 10);
+    vi.setSystemTime(Date.now() + 125);
+    changeRate(videoEl, 1);
+    vi.setSystemTime(Date.now() + 125);
+    videoEl.dispatch("timeupdate");
+
+    expect(played()).toBe(10.25);
+  });
+
+  // 배속이 바뀐 것을 알리는 ratechange를 받지 못하면 2배속으로 움직인 위치까지 1로 나눈다. 흐른 시간 상한이 막는다
+  it("배속 변경 이벤트를 놓쳐도 흐른 시간보다 많이 세지 않는다", async () => {
+    const { videoEl, played } = await startSection({ playbackRate: 2 });
+    startPlaying(videoEl);
+    playFor(videoEl, 10);
+    vi.setSystemTime(Date.now() + 125);
+    const position = videoEl.currentTime;
+    videoEl.currentTime = position; // 이 시점부터 새 배속으로 움직인다
+    videoEl.playbackRate = 1; // ratechange는 보내지 않는다
+    vi.setSystemTime(Date.now() + 125);
+    videoEl.dispatch("timeupdate");
+
+    expect(played()).toBe(10.25);
+  });
+
+  it("시작 전 광고는 세지 않는다", async () => {
+    const { videoEl, played, watched } = await startSection();
+    videoEl.player.ad = true;
+    startPlaying(videoEl);
+    playFor(videoEl, 15);
+    // 광고가 끝나면 본 영상이 처음부터 실리며 위치가 바뀐다
+    videoEl.player.ad = false;
+    videoEl.currentTime = 0;
+    videoEl.dispatch("timeupdate");
+    playFor(videoEl, 10);
+
+    expect(played()).toBe(10);
+    expect(watched()).toBe(25);
+  });
+
+  it("중간 광고는 세지 않고, 광고 뒤 이어 본 부분은 센다", async () => {
+    const { videoEl, played, watched } = await startSection();
+    startPlaying(videoEl);
+    playFor(videoEl, 20);
+    videoEl.player.ad = true;
+    videoEl.currentTime = 0; // 광고 영상의 위치
+    videoEl.dispatch("timeupdate");
+    playFor(videoEl, 10);
+    videoEl.player.ad = false;
+    videoEl.currentTime = 20;
+    videoEl.dispatch("timeupdate");
+    playFor(videoEl, 10);
+
+    expect(played()).toBe(30);
+    expect(watched()).toBe(40);
+  });
+
+  it("일시정지한 동안은 늘지 않고, 멈춘 위치까지는 센다", async () => {
+    const { videoEl, played } = await startSection();
+    startPlaying(videoEl);
+    playFor(videoEl, 10);
+    vi.setSystemTime(Date.now() + 125); // 다음 timeupdate 전에 멈춘다
+    pausePlaying(videoEl);
+    vi.setSystemTime(Date.now() + 60000);
+
+    expect(played()).toBe(10.125);
+
+    startPlaying(videoEl);
+    playFor(videoEl, 5);
+    expect(played()).toBe(15.125);
+  });
+
+  it("멈춤 이벤트 없이 벽시계만 흐르면(절전 등) 위치가 움직인 만큼만 센다", async () => {
+    const { videoEl, played, watched } = await startSection();
+    startPlaying(videoEl);
+    playFor(videoEl, 10);
+    vi.setSystemTime(Date.now() + 60 * 60 * 1000);
+    // 깨어난 뒤 위치는 잠들기 전 자리에서 이어진다
+    videoEl.currentTime = 10.25;
+    videoEl.dispatch("timeupdate");
+
+    expect(played()).toBe(10.25);
+    expect(watched()).toBe(3610);
+  });
+
+  it("탐색에 시간이 걸려도 그동안과 건너뛴 구간은 세지 않는다", async () => {
+    const { videoEl, played } = await startSection();
+    startPlaying(videoEl);
+    playFor(videoEl, 60);
+    videoEl.currentTime = 61;
+    videoEl.dispatch("seeking");
+    vi.setSystemTime(Date.now() + 2000);
+    videoEl.currentTime = 61; // 탐색이 끝날 때까지 위치는 움직이지 않는다
+    videoEl.dispatch("timeupdate");
+    videoEl.dispatch("seeked");
+    playFor(videoEl, 10);
+
+    expect(played()).toBe(70);
+  });
+
+  // 탐색 중에는 시청 구간이 닫혀 있다. seeked 전에 온 timeupdate로 기준점을 만들면, 그 뒤 진행분이 시청 시간에는 없이 실제 재생 시간에만 들어간다
+  it("탐색 중 seeked 전에 온 timeupdate로는 기준점을 만들지 않아 시청 시간을 넘지 않는다", async () => {
+    const { videoEl, played, watched } = await startSection();
+    startPlaying(videoEl);
+    playFor(videoEl, 10);
+    videoEl.currentTime = 30;
+    videoEl.dispatch("seeking");
+    videoEl.dispatch("timeupdate");
+    vi.setSystemTime(Date.now() + 100); // seeked 전에 위치가 진행한다
+    videoEl.dispatch("seeked");
+    playFor(videoEl, 1);
+
+    expect(watched()).toBe(11);
+    expect(played()).toBe(11);
+  });
+
+  it("탐색 이벤트 없이 위치가 크게 앞으로 뛰면(다음 영상이 같은 <video>에 실림 등) 그 사이는 세지 않는다", async () => {
+    const { videoEl, played } = await startSection();
+    startPlaying(videoEl);
+    playFor(videoEl, 10);
+    vi.setSystemTime(Date.now() + 2000); // 다음 영상이 실리는 데 걸린 시간
+    videoEl.currentTime = 1800;
+    videoEl.dispatch("timeupdate");
+    playFor(videoEl, 1);
+
+    expect(played()).toBe(11);
+  });
+
+  it("배속 변경·탐색·광고·절전이 섞여도 시청 시간을 넘지 않는다", async () => {
+    const { videoEl, played, watched } = await startSection({
+      playbackRate: 2,
+    });
+    startPlaying(videoEl);
+    playFor(videoEl, 10);
+    seekTo(videoEl, 5);
+    changeRate(videoEl, 0.5);
+    playFor(videoEl, 10);
+    videoEl.player.ad = true;
+    videoEl.currentTime = 0;
+    videoEl.dispatch("timeupdate");
+    playFor(videoEl, 5);
+    videoEl.player.ad = false;
+    videoEl.currentTime = 10;
+    videoEl.dispatch("timeupdate");
+    vi.setSystemTime(Date.now() + 60000);
+    videoEl.currentTime = 10.25;
+    videoEl.dispatch("timeupdate");
+
+    expect(played()).toBe(20.5);
+    expect(played()).toBeLessThanOrEqual(watched());
+  });
+
+  it("재생 중 위치를 읽지 못하면 모름(null)이고, 시청 시간은 그대로 잰다", async () => {
+    const videoEl = createFakeVideoElement({ paused: false });
+    const section = await loadVideoTrackingSection(videoEl);
+    section.reset();
+    vi.setSystemTime(10000);
+
+    expect(section.snapshot().playedSeconds).toBeNull();
+    expect(section.snapshot().watchedSeconds).toBe(10);
+  });
+
+  it("다음 영상으로 리셋하면 0부터 다시 센다", async () => {
+    const videoEl = createFakeVideoElement({ position: 0 });
+    const section = await loadVideoTrackingSection(videoEl);
+    section.reset();
+    startPlaying(videoEl);
+    playFor(videoEl, 10);
+
+    section.reset();
+    playFor(videoEl, 5);
+    expect(section.snapshot().playedSeconds).toBe(5);
+  });
+
+  it("재고 있지 않던 <video>가 재생을 시작하면 그 <video>의 위치부터 센다", async () => {
+    const section = await loadMultiVideoSection(
+      "https://www.youtube.com/watch?v=abc",
+    );
+    const first = createFakeVideoElement({ position: 0 });
+    section.page.videos = [first];
+    section.reset();
+    section.play(first);
+    playFor(first, 10);
+    pausePlaying(first);
+
+    const second = createFakeVideoElement({ position: 100 });
+    section.page.videos = [first, second];
+    section.play(second);
+    playFor(second, 5);
+
+    expect(section.snapshot().playedSeconds).toBe(15);
+  });
+});
+
 async function loadTrackedVideoIdentityHelpers() {
   const { api } = await loadContent();
   return {
@@ -1108,7 +1493,7 @@ async function loadPagehideHandler(sharedStorage, fetchMock) {
   };
 }
 
-// 재고 있는 영상의 시청시간을 15초마다·탭 종료 시 체크포인트 키에 남긴다
+// 재고 있는 영상의 시청시간을 체크포인트 간격마다·탭 종료 시 체크포인트 키에 남긴다
 async function loadCheckpointSection() {
   const store = {};
   let pagehide = null;
@@ -1166,49 +1551,56 @@ describe("content.js 시청시간 체크포인트", () => {
     );
   });
 
-  it("재고 있는 영상의 시청시간을 15초마다 그 영상의 체크포인트 키에 덮어쓴다", async () => {
+  it("재고 있는 영상의 시청시간을 체크포인트 간격마다 그 영상의 체크포인트 키에 덮어쓴다", async () => {
     const section = await loadCheckpointSection();
+    const INTERVAL = section.api.WATCH_CHECKPOINT_INTERVAL_MS;
     section.startVideo("e1");
 
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
     expect(section.store.watchcp__e1).toMatchObject({
       sessionId: "s1",
       eventId: "e1",
-      watchedSeconds: 15,
-      at: 15000,
+      watchedSeconds: INTERVAL / 1000,
+      at: INTERVAL,
     });
 
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
     expect(section.store.watchcp__e1).toMatchObject({
-      watchedSeconds: 30,
-      at: 30000,
+      watchedSeconds: (2 * INTERVAL) / 1000,
+      at: 2 * INTERVAL,
     });
   });
 
   it("다음 영상으로 넘어가 기록이 끝나기 전에는 이전 영상 체크포인트를 0에 가깝게 덮지 않는다", async () => {
     const section = await loadCheckpointSection();
+    const INTERVAL = section.api.WATCH_CHECKPOINT_INTERVAL_MS;
     section.startVideo("e1");
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
 
     section.startVideo(null); // 리셋됐지만 새 영상 기록 전
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
 
-    expect(section.store.watchcp__e1).toMatchObject({ watchedSeconds: 15 });
+    expect(section.store.watchcp__e1).toMatchObject({
+      watchedSeconds: INTERVAL / 1000,
+    });
     expect(Object.keys(section.store)).toEqual(["watchcp__e1"]);
   });
 
   it("다음 영상의 기록이 끝나면 새 eventId 키에 쓴다", async () => {
     const section = await loadCheckpointSection();
+    const INTERVAL = section.api.WATCH_CHECKPOINT_INTERVAL_MS;
     section.startVideo("e1");
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
 
     section.startVideo("e2");
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
 
-    expect(section.store.watchcp__e1).toMatchObject({ watchedSeconds: 15 });
+    expect(section.store.watchcp__e1).toMatchObject({
+      watchedSeconds: INTERVAL / 1000,
+    });
     expect(section.store.watchcp__e2).toMatchObject({
       eventId: "e2",
-      watchedSeconds: 15,
+      watchedSeconds: INTERVAL / 1000,
     });
   });
 
@@ -1296,43 +1688,47 @@ describe("content.js 탭별 마지막 기록(tabwatch__)", () => {
     expect(section.sendMessage).toHaveBeenCalledWith({ type: "get-tab-id" });
   });
 
-  it("15초마다 체크포인트와 한 번의 쓰기로 이 탭의 마지막 기록을 덮어쓴다", async () => {
+  it("체크포인트 간격마다 체크포인트와 한 번의 쓰기로 이 탭의 마지막 기록을 덮어쓴다", async () => {
     const section = await loadTabWatchSection();
+    const INTERVAL = section.api.WATCH_CHECKPOINT_INTERVAL_MS;
     section.startVideo();
 
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
 
     expect(section.store.tabwatch__7).toEqual({
       videoId: "v1",
       sessionId: "s1",
       eventId: "e1",
-      watchedSeconds: 15,
+      watchedSeconds: INTERVAL / 1000,
       wasBackgrounded: 0,
-      endedAt: 15000,
+      // 이 테스트의 <video>는 재생 위치가 없어 실제 재생 시간은 모름이다
+      playedSeconds: null,
+      endedAt: INTERVAL,
     });
     expect(section.setCalls).toEqual([["tabwatch__7", "watchcp__e1"]]);
 
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(INTERVAL);
     expect(section.store.tabwatch__7).toMatchObject({
-      watchedSeconds: 30,
-      endedAt: 30000,
+      watchedSeconds: (2 * INTERVAL) / 1000,
+      endedAt: 2 * INTERVAL,
     });
   });
 
   it("일시정지 중에는 마지막 재생 시각(endedAt)을 갱신하지 않는다", async () => {
     const section = await loadTabWatchSection();
+    const INTERVAL = section.api.WATCH_CHECKPOINT_INTERVAL_MS;
     const video = section.startVideo();
     await vi.advanceTimersByTimeAsync(20000);
     video.paused = true;
     video.dispatch("pause");
 
-    await vi.advanceTimersByTimeAsync(10000); // 30초 주기
+    await vi.advanceTimersByTimeAsync(INTERVAL); // 멈춘 뒤 첫 주기
     expect(section.store.tabwatch__7).toMatchObject({
       watchedSeconds: 20,
       endedAt: 20000,
     });
 
-    await vi.advanceTimersByTimeAsync(15000); // 45초 주기
+    await vi.advanceTimersByTimeAsync(INTERVAL); // 그다음 주기
     expect(section.store.tabwatch__7).toMatchObject({
       watchedSeconds: 20,
       endedAt: 20000,
@@ -1341,10 +1737,11 @@ describe("content.js 탭별 마지막 기록(tabwatch__)", () => {
 
   it("한 번도 재생하지 않았으면 영상에 들어온 시각을 endedAt으로 쓴다", async () => {
     const section = await loadTabWatchSection();
+    const INTERVAL = section.api.WATCH_CHECKPOINT_INTERVAL_MS;
     await vi.advanceTimersByTimeAsync(5000);
     section.startVideo({ playing: false });
 
-    await vi.advanceTimersByTimeAsync(10000); // 15초 주기
+    await vi.advanceTimersByTimeAsync(INTERVAL); // 들어온 뒤 첫 주기
 
     expect(section.store.tabwatch__7).toMatchObject({
       watchedSeconds: 0,
@@ -1374,7 +1771,7 @@ describe("content.js 탭별 마지막 기록(tabwatch__)", () => {
     });
     section.startVideo();
 
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(section.api.WATCH_CHECKPOINT_INTERVAL_MS);
 
     expect(section.setCalls).toEqual([["watchcp__e1"]]);
   });
@@ -1383,7 +1780,7 @@ describe("content.js 탭별 마지막 기록(tabwatch__)", () => {
     const section = await loadTabWatchSection({ sendMessage: null });
     section.startVideo();
 
-    await vi.advanceTimersByTimeAsync(15000);
+    await vi.advanceTimersByTimeAsync(section.api.WATCH_CHECKPOINT_INTERVAL_MS);
 
     expect(section.setCalls).toEqual([["watchcp__e1"]]);
   });
@@ -1395,7 +1792,9 @@ describe("content.js 탭별 마지막 기록(tabwatch__)", () => {
     const section = await loadTabWatchSection({ set });
     section.startVideo();
 
-    await vi.advanceTimersByTimeAsync(30000);
+    await vi.advanceTimersByTimeAsync(
+      2 * section.api.WATCH_CHECKPOINT_INTERVAL_MS,
+    );
 
     expect(set).toHaveBeenCalledTimes(2);
   });
@@ -1457,6 +1856,8 @@ describe("content.js 탭별 마지막 기록 — 영상을 떠날 때 남긴다"
       eventId: eventIdA,
       watchedSeconds: 30,
       wasBackgrounded: 0,
+      // 이 테스트의 <video>는 재생 위치가 없어 실제 재생 시간은 모름이다
+      playedSeconds: null,
       endedAt: 30000,
     });
   });
@@ -2589,8 +2990,12 @@ function createTabBrowser({
     storageGetFails = false,
     // false면 페이지를 열 때 <video>가 아직 없다(뒤에 열어 둔 탭에서 플레이어가 늦게 생기는 경우)
     withVideo = true,
+    // 숫자를 주면 <video>가 재생 위치를 흉내 낸다(실제 재생 시간 확인용)
+    position,
   }) {
-    let video = withVideo ? createFakeVideoElement({ paused: true }) : null;
+    let video = withVideo
+      ? createFakeVideoElement({ paused: true, position })
+      : null;
     const location = {
       href: videoId
         ? `https://www.youtube.com/watch?v=${videoId}`
@@ -2682,14 +3087,14 @@ function createTabBrowser({
         return openPage({ tabId, videoId: currentVideoId, ...options });
       },
       // 확장 업데이트: 옛 스크립트는 확장과 끊겨 pagehide도 없이 멈추고, 같은 탭에 새 스크립트가 들어온다
-      async reinject() {
+      async reinject(options = {}) {
         stopTimers();
-        return openPage({ tabId, videoId: currentVideoId });
+        return openPage({ tabId, videoId: currentVideoId, ...options });
       },
     };
   }
 
-  // 닫힌 페이지의 15초 주기가 더 돌지 않게 한다. clearAllTimers는 가짜 시계를 실제 시각으로 되돌려 다시 맞춘다
+  // 닫힌 페이지의 체크포인트 주기가 더 돌지 않게 한다. clearAllTimers는 가짜 시계를 실제 시각으로 되돌려 다시 맞춘다
   function stopTimers() {
     const now = Date.now();
     vi.clearAllTimers();
@@ -2920,6 +3325,163 @@ describe("content.js 신원이 바뀌거나 지워지면 열린 탭은 앞 참�
       anonymousId: "b1",
       watchedSeconds: 20,
       resumedFromEventId: null,
+    });
+  });
+});
+
+describe("content.js 실제 재생 시간 — 영상 기록의 확정·체크포인트·신원 변경과 함께", () => {
+  const SERVER = "https://srv.example";
+  const MINUTE = 60 * 1000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-26T10:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function createParticipantBrowser() {
+    const patches = [];
+    const browser = createTabBrowser({
+      initialStorage: {
+        anonymousId: "a1",
+        participantToken: "t1",
+        group: "TEST-EXP",
+        participantCode: "TEST-EXP",
+        serverUrl: SERVER,
+      },
+      fetch: (url, options = {}) => {
+        if (options.method === "PATCH") {
+          patches.push({ url, body: JSON.parse(options.body) });
+        }
+        return Promise.resolve({ ok: true });
+      },
+    });
+    return { browser, patches };
+  }
+
+  it("영상을 떠나면 확정값과 시청 통계 PATCH에 실제 재생 시간이 실린다", async () => {
+    const { browser, patches } = createParticipantBrowser();
+    const page = await browser.openPage({ videoId: "AAAA", position: 0 });
+    await page.play(30);
+    const [record] = browser.recordsOf("AAAA");
+    await page.goTo("BBBB");
+
+    expect(browser.recordsOf("AAAA")[0]).toMatchObject({
+      watchedSeconds: 30,
+      playedSeconds: 30,
+    });
+    expect(patches).toEqual([
+      {
+        url: `${SERVER}/api/video-events/${record.eventId}`,
+        body: expect.objectContaining({
+          watchedSeconds: 30,
+          playedSeconds: 30,
+        }),
+      },
+    ]);
+  });
+
+  it("체크포인트에도 실제 재생 시간을 남긴다", async () => {
+    const { browser } = createParticipantBrowser();
+    const page = await browser.openPage({ videoId: "AAAA", position: 0 });
+    await page.play(30);
+    const [record] = browser.recordsOf("AAAA");
+
+    expect(browser.storage.dump()[`watchcp__${record.eventId}`]).toMatchObject({
+      watchedSeconds: 30,
+      playedSeconds: 30,
+    });
+  });
+
+  it("보던 중 다른 참여자로 바뀌면 앞 기록의 실제 재생 시간도 더 늘지 않는다", async () => {
+    const { browser, patches } = createParticipantBrowser();
+    const page = await browser.openPage({ videoId: "AAAA", position: 0 });
+    await page.play(30);
+    const [record] = browser.recordsOf("AAAA");
+
+    await browser.storage.set({
+      anonymousId: "b1",
+      participantToken: "t2",
+      group: "TEST-CON",
+      participantCode: "TEST-CON",
+      installDate: new Date().toISOString(),
+    });
+    await page.play(30);
+    await page.goTo("BBBB");
+
+    const dump = browser.storage.dump();
+    expect(dump[`watchcp__${record.eventId}`].playedSeconds).toBe(30);
+    const [latest] = browser.recordsOf("AAAA");
+    expect(latest.playedSeconds ?? 0).toBeLessThanOrEqual(30);
+    expect(patches).toEqual([]);
+  });
+
+  it("같은 탭에서 다시 연 영상은 앞서 잰 실제 재생 시간에 이어 더한다", async () => {
+    const { browser } = createParticipantBrowser();
+    let page = await browser.openPage({ videoId: "AAAA", position: 0 });
+    await page.play(30);
+    page = await page.reload({ position: 30 });
+    await page.play(20);
+    await page.goTo("BBBB");
+
+    const records = browser.recordsOf("AAAA");
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      watchedSeconds: 50,
+      playedSeconds: 50,
+    });
+  });
+
+  it("첫 체크포인트 전에 확장이 업데이트돼 스크립트가 다시 들어와도 이어 더한다", async () => {
+    const { browser } = createParticipantBrowser();
+    let page = await browser.openPage({ videoId: "AAAA", position: 0 });
+    await page.play(5); // 첫 체크포인트 전
+    page = await page.reinject({ position: 5 });
+    await page.play(30);
+    await page.goTo("BBBB");
+
+    // 업데이트 전 5초는 끊긴 스크립트가 쓰지 못해 시청 시간과 함께 잃는다
+    expect(browser.recordsOf("AAAA")[0]).toMatchObject({
+      watchedSeconds: 30,
+      playedSeconds: 30,
+    });
+  });
+
+  it("실제 재생 시간을 남기지 않던 버전의 탭 기록에 이어 쓰면 그 기록은 모름(null)으로 둔다", async () => {
+    const { browser } = createParticipantBrowser();
+    let page = await browser.openPage({ videoId: "AAAA", position: 0 });
+    await page.play(30);
+    // 업데이트 전 버전이 남긴 탭 기록처럼 이 값을 뺀다
+    const old = { ...browser.storage.dump().tabwatch__7 };
+    delete old.playedSeconds;
+    await browser.storage.set({ tabwatch__7: old });
+    page = await page.reinject({ position: 30 });
+    await page.play(10);
+    await page.goTo("BBBB");
+
+    expect(browser.recordsOf("AAAA")[0]).toMatchObject({
+      watchedSeconds: 40,
+      playedSeconds: null,
+    });
+  });
+
+  it("10분 넘게 쉬었다 다시 재생해 만든 새 기록은 그 뒤 재생한 시간만 센다", async () => {
+    const { browser } = createParticipantBrowser();
+    const page = await browser.openPage({ videoId: "AAAA", position: 0 });
+    await page.play(60);
+    await vi.advanceTimersByTimeAsync(11 * MINUTE);
+    await page.play(30);
+    await page.goTo("BBBB");
+
+    const [first, second] = browser.recordsOf("AAAA");
+    expect(first).toMatchObject({ watchedSeconds: 60, playedSeconds: 60 });
+    expect(second).toMatchObject({
+      watchedSeconds: 30,
+      playedSeconds: 30,
+      resumedFromEventId: first.eventId,
     });
   });
 });
@@ -3268,29 +3830,30 @@ describe("content.js 확장 업데이트로 다시 넣은 스크립트 — 첫 �
     vi.useRealTimers();
   });
 
-  it("기록 후 15초 전에 다시 넣어도 같은 eventId에 다시 넣은 뒤 본 시간이 남는다", async () => {
+  it("기록 후 첫 체크포인트 전에 다시 넣어도 같은 eventId에 다시 넣은 뒤 본 시간이 남는다", async () => {
     let page = await browser.openPage({ videoId: "AAAA" });
     const { eventId } = page.identity();
-    await page.play(10); // 첫 체크포인트(15초) 전
+    const intervalSeconds = page.api.WATCH_CHECKPOINT_INTERVAL_MS / 1000;
+    await page.play(intervalSeconds / 2); // 첫 체크포인트 전
 
     page = await page.reinject();
     expect(page.identity()).toEqual(expect.objectContaining({ eventId }));
     await page.play(60);
     await page.goTo("BBBB");
 
-    // 업데이트 전 10초는 끊긴 스크립트가 쓰지 못해 잃는다
+    // 업데이트 전에 본 시간은 끊긴 스크립트가 쓰지 못해 잃는다
     const records = browser.recordsOf("AAAA");
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({ eventId, watchedSeconds: 60 });
   });
 
-  it("다시 넣은 뒤 15초가 지나면 그 기록의 체크포인트를 쓴다", async () => {
+  it("다시 넣은 뒤 체크포인트 간격이 지나면 그 기록의 체크포인트를 쓴다", async () => {
     let page = await browser.openPage({ videoId: "AAAA" });
     const { eventId } = page.identity();
     await page.play(5);
 
     page = await page.reinject();
-    await page.play(20);
+    await page.play(page.api.WATCH_CHECKPOINT_INTERVAL_MS / 1000);
 
     expect(browser.storage.dump()[`watchcp__${eventId}`]).toEqual(
       expect.objectContaining({ eventId }),
@@ -3485,7 +4048,7 @@ describe("content.js 일시정지 후 다시 재생해 나눌 때 — 세션 종
     const page = await browser.openPage({ tabId: 7, videoId: "AAAA" });
     await page.play(60);
     await vi.advanceTimersByTimeAsync(11 * MINUTE);
-    await page.play(30); // 그 사이 15초 주기 체크포인트가 돈다
+    await page.play(30); // 그 사이 체크포인트 주기가 돈다
 
     const [first, second] = browser.recordsOf("AAAA");
     const dump = browser.storage.dump();
