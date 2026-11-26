@@ -1017,10 +1017,16 @@ function onTrackedVideoSeeked() {
   }
 }
 
-// 재생 중 약 0.25초마다 온다
+// 재생 중 약 0.25초마다 온다. 탐색 중처럼 시청 구간이 닫혀 있으면 읽지 않는다(seeked에서 다시 연 뒤부터 센다)
 function onTrackedVideoTimeUpdate() {
   try {
-    if (trackedVideoEl && !trackedVideoEl.paused) samplePlayedPosition();
+    if (
+      trackedVideoEl &&
+      !trackedVideoEl.paused &&
+      watchTracker?.segmentStartAt != null
+    ) {
+      samplePlayedPosition();
+    }
   } catch {
     // paused 접근 자체가 실패하는 비표준 플레이어 상태 — 조용히 무시.
   }
