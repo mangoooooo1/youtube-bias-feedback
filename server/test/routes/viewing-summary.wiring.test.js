@@ -431,6 +431,44 @@ describe("getViewingSummary — 날짜·구간 나눔과 화면용 값", () => {
     });
   });
 
+  it("백그라운드로 틀어 둔 기록은 날짜·구간 그래프 시간에 3시간까지만 들어간다", () => {
+    const HOUR = 3600;
+    addParticipant("background", "TEST-EXP", INSTALL);
+    const add = (
+      categoryId,
+      durationSeconds,
+      watchedSeconds,
+      bg,
+      watchedAt,
+    ) => {
+      seq += 1;
+      db.prepare(
+        "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, ?)",
+      ).run(`vb-${seq}`, categoryId, durationSeconds);
+      db.prepare(
+        `INSERT INTO video_events (eventId, anonymousId, videoId, title, watchedAt, watchedSeconds, wasBackgrounded)
+         VALUES (?, 'background', ?, ?, ?, ?, ?)`,
+      ).run(
+        `ev-${seq}`,
+        `vb-${seq}`,
+        `vb-${seq}`,
+        watchedAt,
+        watchedSeconds,
+        bg,
+      );
+    };
+    // 백그라운드 게임 10시간(길이 7시간) + 화면 음악 1시간 → 3시간 : 1시간
+    add("20", 7 * HOUR, 10 * HOUR, 1, "2026-03-05T01:00:00+09:00");
+    add("10", 2 * HOUR, 1 * HOUR, 0, "2026-03-05T12:00:00+09:00");
+
+    const { days, periods } = getViewingSummary(db, "background", NOW);
+
+    expect(days[0].chartSeconds).toBe(4 * HOUR);
+    expect(days[0].timeDistribution).toEqual({ 게임: 0.75, 음악: 0.25 });
+    expect(periods[1].chartSeconds).toBe(4 * HOUR);
+    expect(periods[1].timeDistribution).toEqual({ 게임: 0.75, 음악: 0.25 });
+  });
+
   it("시청 시간 합이 유한하지 않으면 null로 돌려준다(영상 길이를 모르는 극단값)", () => {
     addParticipant("overflow", "TEST-EXP", INSTALL);
     for (let i = 0; i < 3; i++) {

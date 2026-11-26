@@ -16,7 +16,8 @@ function createTestDb() {
       sessionId TEXT,
       title TEXT,
       watchedAt TEXT,
-      watchedSeconds REAL
+      watchedSeconds REAL,
+      wasBackgrounded INTEGER
     );
     CREATE TABLE video_metadata (
       videoId TEXT PRIMARY KEY,
@@ -917,5 +918,39 @@ describe("generateAndStoreTodayReview — 정수 %가 바뀌면 다시 생성", 
     expect(result).toBeNull();
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(storedRow(db, "legacy").genCount).toBe(1);
+  });
+});
+
+describe("generateAndStoreTodayReview — 백그라운드 전환 기록의 시간 상한", () => {
+  it("백그라운드로 틀어 둔 기록은 저장하는 분야별 %에 3시간까지만 들어간다", async () => {
+    const HOUR = 3600;
+    const db = createTestDb();
+    const add = (eventId, categoryId, durationSeconds, seconds, bg) => {
+      db.prepare(
+        "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, ?)",
+      ).run(`vid-${eventId}`, categoryId, durationSeconds);
+      db.prepare(
+        `INSERT INTO video_events (eventId, anonymousId, videoId, sessionId, title, watchedAt, watchedSeconds, wasBackgrounded)
+         VALUES (?, 'bg', ?, 's1', '영상', '2026-03-10T10:00:00+09:00', ?, ?)`,
+      ).run(eventId, `vid-${eventId}`, seconds, bg);
+    };
+    // 백그라운드 게임 10시간(길이 7시간) + 화면 음악 1시간 → 3시간 : 1시간
+    add("bg-game", "20", 7 * HOUR, 10 * HOUR, 1);
+    add("bg-music", "10", 2 * HOUR, 1 * HOUR, 0);
+
+    await generateAndStoreTodayReview(db, {
+      anonymousId: "bg",
+      apiKey: undefined,
+      now: new Date("2026-03-10T20:00:00+09:00"),
+      recordMetric: vi.fn(),
+    });
+
+    const row = db
+      .prepare(
+        "SELECT timeSharePercents FROM today_reviews WHERE anonymousId = ?",
+      )
+      .get("bg");
+    expect(JSON.parse(row.timeSharePercents)).toEqual({ 게임: 75, 음악: 25 });
+    db.close();
   });
 });

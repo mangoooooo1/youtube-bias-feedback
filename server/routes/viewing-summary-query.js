@@ -113,8 +113,8 @@ function getViewingSummary(db, anonymousId, now = new Date()) {
 
   const events = db
     .prepare(
-      `SELECT e.eventId, e.resumedFromEventId, e.watchedAt, e.watchedSeconds, m.categoryId, m.durationSeconds,
-              e.title AS sentTitle, TRIM(m.title) AS metadataTitle
+      `SELECT e.eventId, e.resumedFromEventId, e.watchedAt, e.watchedSeconds, e.wasBackgrounded,
+              m.categoryId, m.durationSeconds, e.title AS sentTitle, TRIM(m.title) AS metadataTitle
        FROM video_events e
        LEFT JOIN video_metadata m ON m.videoId = e.videoId
        WHERE e.anonymousId = ?

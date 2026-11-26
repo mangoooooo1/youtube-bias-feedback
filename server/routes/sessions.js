@@ -49,7 +49,8 @@ function computeSessionAnalysis(
     ? watchedSecondsList
     : videoIds.map(() => null);
 
-  // 유효 시청 판정·영상 길이 상한·분포 계산은 기간·오늘 집계와 같은 공통 모듈을 쓴다
+  // 유효 시청 판정·영상 길이 상한·분포 계산은 기간·오늘 집계와 같은 공통 모듈을 쓴다.
+  // 세션 요청에는 백그라운드 여부가 없어 백그라운드 상한은 빠지고 영상 길이 상한만 둔다
   const aggregate = aggregateViewing(
     videoIds.map((_, i) => ({
       // 위치를 기록 ID로 써서 이어진 기록을 한 시청으로 합친다
