@@ -7,6 +7,7 @@
 // - 화면(도넛 두 개): 시청 시간을 알고 + 카테고리가 있는 유효 영상만. 두 도넛이 같은 영상
 //   묶음을 그려야 시청 시간·영상 개수 비교가 성립한다.
 // - 분석(entropy·weightedEntropy): 시청 시간을 모르는 영상도 유효로 세고 (entropy), 시청 시간은 영상 길이로 상한을 둔다(weightedEntropy).
+// 시간 가중치는 화면·리뷰·분석 모두 watchSecondsOf 하나로 정한다(백그라운드 전환 기록은 3시간 상한도 둔다).
 const {
   isValidWatch,
   calculateDistribution,
@@ -21,13 +22,43 @@ const EXCLUDED_REASONS = {
   PENDING_TIME: "pending_time", // 유효 시청이지만 시청 시간을 아직 모름(대부분 보고 있는 영상)
 };
 
-/** 영상 하나의 시청 시간을 그 영상 길이로 자른다. 길이를 모르면 그대로 쓴다. */
-function cappedWatchSeconds(watchedSeconds, durationSeconds) {
+// 백그라운드 전환 기록(wasBackgrounded = 1)의 시간 기여 상한. 틀어 두고 자리를 비운 재생이 시간 가중치를 차지하지 않게 한다
+const BACKGROUND_WATCH_CAP_SECONDS = 3 * 60 * 60;
+
+/**
+ * 영상 하나의 시청 시간을 그 영상 길이로 자른다. 길이를 모르면 길이로는 자르지 않는다.
+ * extraCapSeconds를 주면 그 값으로도 자른다.
+ */
+function cappedWatchSeconds(watchedSeconds, durationSeconds, extraCapSeconds) {
   if (watchedSeconds == null) return null;
+  let seconds = watchedSeconds;
   if (durationSeconds && durationSeconds > 0) {
-    return Math.min(watchedSeconds, durationSeconds);
+    seconds = Math.min(seconds, durationSeconds);
   }
-  return watchedSeconds;
+  if (extraCapSeconds != null) seconds = Math.min(seconds, extraCapSeconds);
+  return seconds;
+}
+
+/**
+ * 집계에 쓰는 영상 하나의 시청 시간. 백그라운드 전환 기록이면 backgroundCapSeconds로도 자르고,
+ * 백그라운드 여부를 모르면(NULL) 화면에 띄운 기록처럼 길이로만 자른다. capWatchSeconds가 false면 기록된 값 그대로다.
+ * 이어 본 기록은 합친 뒤에 넘긴다(합친 시청 전체에 상한을 둔다).
+ * @param {{watchedSeconds: number|null, durationSeconds: number|null, wasBackgrounded?: number|null}} entry
+ * @param {{capWatchSeconds?: boolean, backgroundCapSeconds?: number}} [options]
+ */
+function watchSecondsOf(
+  entry,
+  {
+    capWatchSeconds = true,
+    backgroundCapSeconds = BACKGROUND_WATCH_CAP_SECONDS,
+  } = {},
+) {
+  if (!capWatchSeconds) return entry.watchedSeconds;
+  return cappedWatchSeconds(
+    entry.watchedSeconds,
+    entry.durationSeconds,
+    entry.wasBackgrounded === 1 ? backgroundCapSeconds : null,
+  );
 }
 
 function watchedAtMs(entry) {
@@ -118,15 +149,21 @@ function excludedReason(entry, minRelativeRatio) {
 
 /**
  * @param {Array<{eventId?: string, categoryId: number|null, durationSeconds: number|null,
- *   watchedSeconds: number|null, watchedAt?: string, resumedFromEventId?: string|null}>} entries
+ *   watchedSeconds: number|null, watchedAt?: string, resumedFromEventId?: string|null,
+ *   wasBackgrounded?: number|null}>} entries
  *   - 영상 기록(재시청은 별도 항목, 멈췄다 이어 본 기록은 mergeResumedWatches로 합친다)
- * @param {{capWatchSeconds?: boolean, minRelativeRatio?: number}} [options] - 민감도 분석용.
- *   시청 시간 상한 적용 여부(기본 true)와 유효 시청 상대 기준(기본 isValidWatch 값). 화면·리뷰는 넘기지 않는다
+ * @param {{capWatchSeconds?: boolean, backgroundCapSeconds?: number, minRelativeRatio?: number}} [options]
+ *   민감도 분석용. 시청 시간 상한 적용 여부(기본 true, false면 두 상한 모두 끔), 백그라운드 전환 기록 상한
+ *   (기본 3시간, 0이면 시간 가중치에서 빠짐), 유효 시청 상대 기준(기본 isValidWatch 값). 화면·리뷰는 넘기지 않는다
  * @returns {object} 집계 결과 — 필드 설명은 본문 주석 참고
  */
 function aggregateViewing(
   entries,
-  { capWatchSeconds = true, minRelativeRatio } = {},
+  {
+    capWatchSeconds = true,
+    backgroundCapSeconds = BACKGROUND_WATCH_CAP_SECONDS,
+    minRelativeRatio,
+  } = {},
 ) {
   const withReason = mergeResumedWatches(entries, { minRelativeRatio }).map(
     (e) => ({
@@ -139,10 +176,9 @@ function aggregateViewing(
   const countOf = (reason) =>
     withReason.filter((e) => e.reason === reason).length;
 
+  // 유효 시청 판정은 위에서 원래 시청 시간으로 했고, 상한은 시간 가중치에만 쓴다
   const capped = (e) =>
-    capWatchSeconds
-      ? cappedWatchSeconds(e.watchedSeconds, e.durationSeconds)
-      : e.watchedSeconds;
+    watchSecondsOf(e, { capWatchSeconds, backgroundCapSeconds });
   const chartSeconds = chart.reduce((sum, e) => sum + capped(e), 0);
 
   // 분석용: 사전등록 정의. 상한 적용한 시청 시간이 양수인 영상이 없으면 null(기존 동작과 같음).
@@ -216,7 +252,9 @@ function aggregateViewingByDay(entries) {
 
 module.exports = {
   EXCLUDED_REASONS,
+  BACKGROUND_WATCH_CAP_SECONDS,
   cappedWatchSeconds,
+  watchSecondsOf,
   mergeResumedWatches,
   aggregateViewing,
   aggregateViewingByDay,

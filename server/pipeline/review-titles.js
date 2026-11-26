@@ -3,10 +3,7 @@
 // 비중이 큰 카테고리 안에서 무엇을 주로 봤는지 짚으려면 그 카테고리의 제목을 전부 봐야 한다.
 // 그래서 일부만 뽑지 않고 유효 시청 영상 제목을 전부 넘기고, 비정상적으로 많은 날만 상한으로 줄인다.
 const { isValidWatch, getCategoryName } = require("./category-diversity");
-const {
-  cappedWatchSeconds,
-  mergeResumedWatches,
-} = require("./viewing-aggregate");
+const { watchSecondsOf, mergeResumedWatches } = require("./viewing-aggregate");
 const { MAX_TITLES_PER_DAY } = require("./study-constants");
 
 // 카테고리를 못 가져온 유효 영상 묶음 이름. 분포에서는 빠지지만 제목은 넘긴다.
@@ -61,7 +58,7 @@ function allocateQuota(sizes, max) {
 
 /**
  * @param {Array<{title?: string, watchedAt?: string, categoryId: number|null,
- *   watchedSeconds: number|null, durationSeconds: number|null}>} entries 영상 기록
+ *   watchedSeconds: number|null, durationSeconds: number|null, wasBackgrounded?: number|null}>} entries 영상 기록
  * @param {{maxTitles?: number}} [options]
  * @returns {Array<{category: string, videoCount: number, titles: Array<{title: string, count: number}>,
  *   omittedCount: number}>} 시청 시간이 많은 카테고리 순, "분야 미확인"은 마지막
@@ -84,12 +81,9 @@ function groupTitlesByCategory(
     groups.get(category).push(e);
   }
 
+  // 그래프·분석과 같은 시간 가중치(영상 길이·백그라운드 상한)로 순서를 정한다
   const seconds = (list) =>
-    list.reduce(
-      (sum, e) =>
-        sum + (cappedWatchSeconds(e.watchedSeconds, e.durationSeconds) ?? 0),
-      0,
-    );
+    list.reduce((sum, e) => sum + (watchSecondsOf(e) ?? 0), 0);
   const ordered = [...groups]
     .map(([category, list]) => ({
       category,
