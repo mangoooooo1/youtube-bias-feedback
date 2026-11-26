@@ -2,14 +2,12 @@
 /**
  * 유입 경로 기준 H2 민감도 분석
  *
- * 참여자 × 완료된 기간마다 weightedEntropy를 세 가지로 계산한다.
+ * 참여자 × 완료된 기간마다 weightedEntropy를 두 가지로 계산한다.
  * - 주 분석: 기간 안의 영상 전부
- * - backgroundAutoplay 제외: 탭이 한 번이라도 가려졌고(wasBackgrounded = 1) 앞 영상이 끝나
- *   자동으로 넘어온(relatedTrigger = 'autoplay') 영상을 뺌. 틀어 두고 소리로 들은 시청을 빼도
- *   결론이 같은지 본다. 둘 중 하나만 해당하거나 값을 모르면(NULL) 빼지 않는다.
  * - directSearch 제외: 검색 결과에서 들어온(referrerType = 'direct_search') 영상을 뺌.
  *   효과가 추천 피드 안의 선택 변화인지, 직접 검색한 시청에서만 나온 것인지 구분한다.
- * 세 값 모두 aggregateViewing으로 계산해 유효 시청·시청시간 상한 정의를 주 분석과 맞춘다.
+ * 백그라운드 전환 기록 제외는 유입 경로와 무관해 측정 정의 민감도의 backgroundZero로 계산한다(weightedEntropy가 같다).
+ * 두 값 모두 aggregateViewing으로 계산해 유효 시청·시청시간 상한 정의를 주 분석과 맞춘다.
  * 주 분석 값도 저장값(period_reviews)이 아니라 같은 원본에서 다시 계산해, 차이가 제외 조건에서만 생기게 한다.
  * 라벨 품질은 check-referrer-trigger-quality.js로 먼저 확인한다.
  *
@@ -48,8 +46,6 @@ const {
 const DEFAULT_GROUPS = ["EXP", "CON"];
 
 const EXCLUSIONS = {
-  backgroundAutoplay: (e) =>
-    e.wasBackgrounded === 1 && e.relatedTrigger === "autoplay",
   directSearch: (e) => e.referrerType === "direct_search",
 };
 

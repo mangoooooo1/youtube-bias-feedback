@@ -130,6 +130,31 @@ describe("computePeriodMeasurementSensitivity — 백그라운드 전환 기록 
   });
 });
 
+describe("computePeriodMeasurementSensitivity — 멈췄다 이어 본 기록", () => {
+  it("이어 본 조각 하나만 백그라운드였어도 합친 시청 전체가 backgroundZero의 시간 가중치에서 빠진다", () => {
+    const r = computePeriodMeasurementSensitivity([
+      { ...entry("10", 100, 600), wasBackgrounded: 0 },
+      {
+        ...entry("20", 100, 600),
+        eventId: "e1",
+        watchedAt: "2026-09-02T10:00:00+09:00",
+        wasBackgrounded: 0,
+      },
+      {
+        ...entry("20", 100, 600),
+        eventId: "e2",
+        resumedFromEventId: "e1",
+        watchedAt: "2026-09-02T10:30:00+09:00",
+        wasBackgrounded: 1,
+      },
+    ]);
+
+    expect(r.backgroundZero.validCount).toBe(2);
+    // 남는 건 음악 하나뿐이라 entropy 0
+    expect(r.backgroundZero.weightedEntropy).toBe(0);
+  });
+});
+
 describe("run — DB 조회", () => {
   let db;
   beforeEach(() => {
