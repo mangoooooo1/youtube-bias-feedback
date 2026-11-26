@@ -44,7 +44,8 @@ function createTestDb() {
       videoId TEXT,
       title TEXT,
       watchedAt TEXT NOT NULL,
-      watchedSeconds REAL
+      watchedSeconds REAL,
+      wasBackgrounded INTEGER
     );
     CREATE TABLE video_metadata (
       videoId TEXT PRIMARY KEY,
@@ -393,6 +394,58 @@ describe("generate-period-reviews.js — run()", () => {
     expect(row.validVideoCount).toBe(1);
     expect(row.weightedEntropy).toBe(0);
     expect(JSON.parse(row.weightedCategoryDistribution)).toEqual({ 음악: 1 });
+  });
+
+  it("백그라운드로 틀어 둔 기록은 저장하는 시간 가중 분포에 3시간까지만 들어간다", async () => {
+    const HOUR = 3600;
+    db.prepare(
+      "INSERT INTO participants (anonymousId, group_code, installDate) VALUES (?, 'EXP', ?)",
+    ).run("bg-user", INSTALL_DATE);
+    db.prepare(
+      "INSERT INTO sessions (anonymousId, categoryDistribution, videoCount, endTime) VALUES (?, ?, ?, ?)",
+    ).run(
+      "bg-user",
+      JSON.stringify({ 게임: 0.5, 음악: 0.5 }),
+      2,
+      "2026-06-01T12:00:00+09:00",
+    );
+    const add = (videoId, categoryId, durationSeconds, seconds, bg, time) => {
+      db.prepare(
+        "INSERT INTO video_metadata (videoId, categoryId, durationSeconds) VALUES (?, ?, ?)",
+      ).run(videoId, categoryId, durationSeconds);
+      db.prepare(
+        "INSERT INTO video_events (anonymousId, videoId, title, watchedAt, watchedSeconds, wasBackgrounded) VALUES ('bg-user', ?, ?, ?, ?, ?)",
+      ).run(videoId, videoId, `2026-06-01T${time}+09:00`, seconds, bg);
+    };
+    // 백그라운드 게임 10시간(길이 7시간) + 화면 음악 1시간 → 3시간 : 1시간
+    add("vid-bg-game", "20", 7 * HOUR, 10 * HOUR, 1, "01:00:00");
+    add("vid-fg-music", "10", 2 * HOUR, 1 * HOUR, 0, "12:00:00");
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: '{"topic":"게임","feedback":"문장"}' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    await run(db, "fake-key");
+
+    const row = db
+      .prepare(
+        "SELECT * FROM period_reviews WHERE anonymousId = ? AND periodIndex = 1",
+      )
+      .get("bg-user");
+    expect(row.validVideoCount).toBe(2);
+    expect(JSON.parse(row.weightedCategoryDistribution)).toEqual({
+      게임: 0.75,
+      음악: 0.25,
+    });
   });
 
   // 세션 분포를 전체 영상 수로 병합하던 방식은 이 예시를 음악 83% / 게임 17%로 만들었다

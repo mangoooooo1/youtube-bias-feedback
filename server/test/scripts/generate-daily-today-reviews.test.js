@@ -24,7 +24,8 @@ function createTestDb() {
       sessionId TEXT,
       title TEXT,
       watchedAt TEXT,
-      watchedSeconds REAL
+      watchedSeconds REAL,
+      wasBackgrounded INTEGER
     );
     CREATE TABLE video_metadata (
       videoId TEXT PRIMARY KEY,

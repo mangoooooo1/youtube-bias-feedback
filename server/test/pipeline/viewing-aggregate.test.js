@@ -284,6 +284,137 @@ describe("aggregateViewing — 민감도 분석용 측정 정의 옵션", () => 
   });
 });
 
+describe("aggregateViewing — 백그라운드 전환 기록의 시간 상한", () => {
+  const HOUR = 3600;
+  const bg = (props) => ({ ...video(props), wasBackgrounded: 1 });
+  const screen = (props) => ({ ...video(props), wasBackgrounded: 0 });
+  // 백그라운드 게임 10시간(길이 7시간) + 화면 음악 1시간
+  const leftPlaying = () => [
+    bg({
+      eventId: "g",
+      categoryId: GAME,
+      durationSeconds: 7 * HOUR,
+      watchedSeconds: 10 * HOUR,
+    }),
+    screen({
+      eventId: "m",
+      categoryId: MUSIC,
+      durationSeconds: 2 * HOUR,
+      watchedSeconds: 1 * HOUR,
+    }),
+  ];
+
+  it("cappedWatchSeconds는 세 번째 인자를 주면 그 값으로도 자르고, 주지 않으면 영상 길이로만 자른다", () => {
+    expect(cappedWatchSeconds(10 * HOUR, 7 * HOUR, 3 * HOUR)).toBe(3 * HOUR);
+    expect(cappedWatchSeconds(2.5 * HOUR, 2 * HOUR, 3 * HOUR)).toBe(2 * HOUR);
+    expect(cappedWatchSeconds(5 * HOUR, null, 3 * HOUR)).toBe(3 * HOUR);
+    expect(cappedWatchSeconds(5 * HOUR, null)).toBe(5 * HOUR);
+    expect(cappedWatchSeconds(null, 100, 3 * HOUR)).toBeNull();
+  });
+
+  it("백그라운드 전환 기록은 시청 시간을 영상 길이와 3시간 중 작은 값으로 자른다", () => {
+    const result = aggregateViewing(leftPlaying());
+
+    // 게임 3시간 : 음악 1시간
+    expect(result.chartSeconds).toBe(4 * HOUR);
+    expect(result.timeDistribution).toEqual({ 게임: 0.75, 음악: 0.25 });
+    expect(result.weightedDistribution).toEqual({ 게임: 0.75, 음악: 0.25 });
+  });
+
+  it("영상 길이를 몰라도 백그라운드 전환 기록은 3시간으로 자른다", () => {
+    const result = aggregateViewing([
+      bg({ categoryId: GAME, durationSeconds: null, watchedSeconds: 5 * HOUR }),
+    ]);
+
+    expect(result.chartSeconds).toBe(3 * HOUR);
+  });
+
+  it("3시간보다 짧은 백그라운드 전환 기록은 영상 길이로만 자른다", () => {
+    const result = aggregateViewing([
+      bg({ durationSeconds: 2 * HOUR, watchedSeconds: 2.5 * HOUR }),
+    ]);
+
+    expect(result.chartSeconds).toBe(2 * HOUR);
+  });
+
+  it("화면에 띄워 둔 기록과 백그라운드 여부를 모르는 기록은 3시간을 넘어도 영상 길이로만 자른다", () => {
+    const long = { durationSeconds: 5 * HOUR, watchedSeconds: 4 * HOUR };
+    const result = aggregateViewing([
+      screen({ categoryId: GAME, ...long }),
+      { ...video({ categoryId: MUSIC, ...long }), wasBackgrounded: null },
+      video({ categoryId: SPORTS, ...long }), // 구버전 기록처럼 칸이 없음
+    ]);
+
+    expect(result.chartSeconds).toBe(12 * HOUR);
+  });
+
+  it("멈췄다 이어 본 기록은 합친 뒤 자른다 — 조각 하나만 백그라운드여도 합친 시청이 3시간을 넘지 않는다", () => {
+    const result = aggregateViewing([
+      screen({
+        eventId: "e1",
+        categoryId: GAME,
+        durationSeconds: 6 * HOUR,
+        watchedSeconds: 2 * HOUR,
+        watchedAt: "2026-03-10T01:00:00Z",
+      }),
+      {
+        ...bg({
+          eventId: "e2",
+          categoryId: GAME,
+          durationSeconds: 6 * HOUR,
+          watchedSeconds: 2 * HOUR,
+          watchedAt: "2026-03-10T03:30:00Z",
+        }),
+        resumedFromEventId: "e1",
+      },
+    ]);
+
+    expect(result.validCount).toBe(1);
+    expect(result.chartSeconds).toBe(3 * HOUR);
+  });
+
+  it("상한은 시간 가중치에만 쓰이고, 유효 영상 수·영상 수 분포·entropy는 바뀌지 않는다", () => {
+    const capped = aggregateViewing(leftPlaying());
+    const asScreen = aggregateViewing(
+      leftPlaying().map((e) => ({ ...e, wasBackgrounded: 0 })),
+    );
+
+    expect(capped.validCount).toBe(asScreen.validCount);
+    expect(capped.countDistribution).toEqual(asScreen.countDistribution);
+    expect(capped.entropy).toBe(asScreen.entropy);
+    expect(capped.weightedEntropy).not.toBe(asScreen.weightedEntropy);
+  });
+
+  it("backgroundCapSeconds로 상한을 바꿀 수 있고, 0이면 백그라운드 전환 기록이 시간 가중치에서만 빠진다", () => {
+    expect(
+      aggregateViewing(leftPlaying(), { backgroundCapSeconds: 1 * HOUR })
+        .weightedDistribution,
+    ).toEqual({ 게임: 0.5, 음악: 0.5 });
+
+    const zero = aggregateViewing(leftPlaying(), { backgroundCapSeconds: 0 });
+    expect(zero.weightedDistribution).toEqual({ 음악: 1 });
+    expect(zero.weightedEntropy).toBe(0);
+    expect(zero.validCount).toBe(2);
+    expect(zero.countDistribution).toEqual({ 게임: 0.5, 음악: 0.5 });
+  });
+
+  it("capWatchSeconds: false면 영상 길이 상한과 백그라운드 상한을 모두 끄고 기록된 시청 시간을 그대로 쓴다", () => {
+    const raw = aggregateViewing(leftPlaying(), { capWatchSeconds: false });
+
+    // 게임 10시간 : 음악 1시간
+    expect(raw.chartSeconds).toBe(11 * HOUR);
+  });
+
+  it("옵션이 없으면 3시간 상한을 직접 넘긴 것과 결과가 완전히 같다", () => {
+    expect(aggregateViewing(leftPlaying())).toEqual(
+      aggregateViewing(leftPlaying(), {
+        capWatchSeconds: true,
+        backgroundCapSeconds: 3 * HOUR,
+      }),
+    );
+  });
+});
+
 describe("aggregateViewing — 엔트로피 정밀도", () => {
   it("엔트로피는 반올림 전 비율로 계산하고, 저장·화면용 분포는 반올림된 값 그대로다", () => {
     // 세 분야 같은 시간 → 원래 비율 1/3, 반올림 비율 0.333

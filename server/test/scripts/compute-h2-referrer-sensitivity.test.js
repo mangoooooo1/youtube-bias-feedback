@@ -40,21 +40,8 @@ const bgAutoplay = {
 };
 
 describe("EXCLUSIONS — 제외 조건", () => {
-  it("backgroundAutoplay는 백그라운드 그리고 자동재생일 때만 뺀다", () => {
-    const { backgroundAutoplay } = EXCLUSIONS;
-    expect(backgroundAutoplay(entry("10", bgAutoplay))).toBe(true);
-    expect(
-      backgroundAutoplay(entry("10", { ...bgAutoplay, wasBackgrounded: 0 })),
-    ).toBe(false);
-    expect(
-      backgroundAutoplay(
-        entry("10", { ...bgAutoplay, relatedTrigger: "click" }),
-      ),
-    ).toBe(false);
-    // 값을 모르면 빼지 않는다
-    expect(
-      backgroundAutoplay(entry("10", { ...bgAutoplay, wasBackgrounded: null })),
-    ).toBe(false);
+  it("유입 경로 제외 조건은 directSearch 하나다 — 백그라운드 전환 기록은 측정 민감도의 backgroundZero가 맡는다", () => {
+    expect(Object.keys(EXCLUSIONS)).toEqual(["directSearch"]);
   });
 
   it("directSearch는 검색 유입만 뺀다", () => {
@@ -87,10 +74,6 @@ describe("computePeriodSensitivity — 기간 하나의 계산", () => {
     ];
     const r = computePeriodSensitivity(entries);
     expect(r.weightedEntropy).toBeGreaterThan(0);
-    expect(r.backgroundAutoplay.excludedCount).toBe(1);
-    expect(r.backgroundAutoplay.weightedEntropy).toBe(
-      aggregateViewing([entries[0], entries[2]]).weightedEntropy,
-    );
     expect(r.directSearch.excludedCount).toBe(1);
     expect(r.directSearch.weightedEntropy).toBe(
       aggregateViewing([entries[0], entries[1]]).weightedEntropy,
@@ -100,17 +83,16 @@ describe("computePeriodSensitivity — 기간 하나의 계산", () => {
   it("excludedCount는 잠깐 본 영상도 센다", () => {
     const r = computePeriodSensitivity([
       entry("10"),
-      entry("20", { ...bgAutoplay, watchedSeconds: 5 }),
+      entry("20", { referrerType: "direct_search", watchedSeconds: 5 }),
     ]);
     expect(r.validCount).toBe(1);
-    expect(r.backgroundAutoplay.excludedCount).toBe(1);
+    expect(r.directSearch.excludedCount).toBe(1);
   });
 
   it("영상이 없으면 weightedEntropy는 null이다", () => {
     expect(computePeriodSensitivity([])).toEqual({
       validCount: 0,
       weightedEntropy: null,
-      backgroundAutoplay: { excludedCount: 0, weightedEntropy: null },
       directSearch: { excludedCount: 0, weightedEntropy: null },
     });
   });
@@ -221,10 +203,6 @@ describe("run — DB 조회", () => {
     const [p1, p2] = report().rows;
     expect(p1.validCount).toBe(2);
     expect(p1.weightedEntropy).toBeGreaterThan(0);
-    expect(p1.backgroundAutoplay).toEqual({
-      excludedCount: 1,
-      weightedEntropy: 0,
-    });
     expect(p2.validCount).toBe(1);
     expect(p2.directSearch).toEqual({
       excludedCount: 1,
@@ -323,19 +301,5 @@ describe("computePeriodSensitivity — 멈췄다 이어 본 기록", () => {
     expect(r.directSearch.excludedCount).toBe(1);
     // 남는 건 음악 하나뿐이라 entropy 0
     expect(r.directSearch.weightedEntropy).toBe(0);
-  });
-
-  it("맨 앞 기록이 자동재생이고 이어 본 조각이 백그라운드였으면 백그라운드 자동재생으로 뺀다", () => {
-    const entries = [
-      entry("10"),
-      ...split(
-        { referrerType: "related", relatedTrigger: "autoplay" },
-        { wasBackgrounded: 1 },
-      ),
-    ];
-    const r = computePeriodSensitivity(entries);
-
-    expect(r.backgroundAutoplay.excludedCount).toBe(1);
-    expect(r.backgroundAutoplay.weightedEntropy).toBe(0);
   });
 });

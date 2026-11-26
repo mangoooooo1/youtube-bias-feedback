@@ -65,6 +65,96 @@ describe("computePeriodMeasurementSensitivity — 기간 하나의 계산", () =
   });
 });
 
+describe("computePeriodMeasurementSensitivity — 백그라운드 전환 기록 상한 조건", () => {
+  const HOUR = 3600;
+  // 백그라운드 게임 5시간(길이 6시간) + 화면 음악 1시간
+  const entries = [
+    {
+      categoryId: "20",
+      watchedSeconds: 5 * HOUR,
+      durationSeconds: 6 * HOUR,
+      wasBackgrounded: 1,
+    },
+    {
+      categoryId: "10",
+      watchedSeconds: 1 * HOUR,
+      durationSeconds: 2 * HOUR,
+      wasBackgrounded: 0,
+    },
+  ];
+
+  it("조건 이름은 사전등록한 민감도 분석 목록과 같다", () => {
+    expect(Object.keys(VARIANTS)).toEqual([
+      "noWatchCap",
+      "relativeCutoff10",
+      "relativeCutoff50",
+      "backgroundCap1h",
+      "backgroundCap2h",
+      "backgroundCap4h",
+      "backgroundZero",
+    ]);
+  });
+
+  it("각 조건은 그 옵션을 넘긴 aggregateViewing 값과 같고, 유효 영상 수는 모두 같다", () => {
+    const r = computePeriodMeasurementSensitivity(entries);
+    for (const [name, options] of Object.entries(VARIANTS)) {
+      const expected = aggregateViewing(entries, options);
+      expect(r[name]).toEqual({
+        validCount: expected.validCount,
+        weightedEntropy: expected.weightedEntropy,
+      });
+      expect(r[name].validCount).toBe(2);
+    }
+  });
+
+  it("백그라운드 상한이 낮을수록 시간 가중치가 고르고, 시간 기여 0은 그 기록을 뺀 값과 같다", () => {
+    const r = computePeriodMeasurementSensitivity(entries);
+    // 게임 비중: 1시간 50% · 2시간 67% · 3시간(주 분석) 75% · 4시간 80% · 상한 없음 83%
+    expect(r.backgroundCap1h.weightedEntropy).toBeGreaterThan(
+      r.backgroundCap2h.weightedEntropy,
+    );
+    expect(r.backgroundCap2h.weightedEntropy).toBeGreaterThan(
+      r.weightedEntropy,
+    );
+    expect(r.weightedEntropy).toBeGreaterThan(
+      r.backgroundCap4h.weightedEntropy,
+    );
+    expect(r.backgroundCap4h.weightedEntropy).toBeGreaterThan(
+      r.noWatchCap.weightedEntropy,
+    );
+    expect(r.backgroundZero.weightedEntropy).toBe(
+      aggregateViewing(entries.filter((e) => e.wasBackgrounded !== 1))
+        .weightedEntropy,
+    );
+    expect(r.backgroundZero.weightedEntropy).toBe(0);
+  });
+});
+
+describe("computePeriodMeasurementSensitivity — 멈췄다 이어 본 기록", () => {
+  it("이어 본 조각 하나만 백그라운드였어도 합친 시청 전체가 backgroundZero의 시간 가중치에서 빠진다", () => {
+    const r = computePeriodMeasurementSensitivity([
+      { ...entry("10", 100, 600), wasBackgrounded: 0 },
+      {
+        ...entry("20", 100, 600),
+        eventId: "e1",
+        watchedAt: "2026-09-02T10:00:00+09:00",
+        wasBackgrounded: 0,
+      },
+      {
+        ...entry("20", 100, 600),
+        eventId: "e2",
+        resumedFromEventId: "e1",
+        watchedAt: "2026-09-02T10:30:00+09:00",
+        wasBackgrounded: 1,
+      },
+    ]);
+
+    expect(r.backgroundZero.validCount).toBe(2);
+    // 남는 건 음악 하나뿐이라 entropy 0
+    expect(r.backgroundZero.weightedEntropy).toBe(0);
+  });
+});
+
 describe("run — DB 조회", () => {
   let db;
   beforeEach(() => {
@@ -194,5 +284,44 @@ describe("run — 멈췄다 이어 본 기록", () => {
     for (const name of Object.keys(VARIANTS)) {
       expect(rows[0][name].validCount).toBe(1);
     }
+  });
+});
+
+describe("run — 백그라운드 전환 기록", () => {
+  it("DB의 백그라운드 전환 여부를 읽어 상한 조건마다 값이 갈린다", () => {
+    const HOUR = 3600;
+    const db = new Database(":memory:");
+    db.exec(SCHEMA);
+    db.prepare("INSERT INTO participants VALUES (?,?,?)").run(
+      "anon-exp",
+      "EXP",
+      "2026-08-31T15:00:00.000Z",
+    );
+    db.prepare("INSERT INTO video_metadata VALUES (?,?,?)").run(
+      "game",
+      "20",
+      6 * HOUR,
+    );
+    db.prepare("INSERT INTO video_metadata VALUES (?,?,?)").run(
+      "music",
+      "10",
+      2 * HOUR,
+    );
+    const insert = db.prepare(
+      "INSERT INTO video_events (anonymousId, videoId, watchedAt, watchedSeconds, wasBackgrounded) VALUES (?,?,?,?,?)",
+    );
+    insert.run("anon-exp", "game", "2026-09-02T01:00:00+09:00", 5 * HOUR, 1);
+    insert.run("anon-exp", "music", "2026-09-02T12:00:00+09:00", 1 * HOUR, 0);
+
+    const { rows } = run(db, {
+      groups: ["EXP"],
+      now: new Date("2026-09-10T12:00:00+09:00"),
+    });
+    db.close();
+
+    expect(rows[0].backgroundCap1h.weightedEntropy).toBeGreaterThan(
+      rows[0].weightedEntropy,
+    );
+    expect(rows[0].backgroundZero.weightedEntropy).toBe(0);
   });
 });

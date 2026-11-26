@@ -89,7 +89,7 @@ async function generateOnce(
   const events = db
     .prepare(
       `SELECT e.eventId, e.resumedFromEventId, e.sessionId, ${PREFERRED_TITLE_SQL} AS title, e.watchedAt, e.watchedSeconds,
-              m.categoryId, m.durationSeconds
+              e.wasBackgrounded, m.categoryId, m.durationSeconds
        FROM video_events e
        LEFT JOIN video_metadata m ON m.videoId = e.videoId
        WHERE e.anonymousId = ?

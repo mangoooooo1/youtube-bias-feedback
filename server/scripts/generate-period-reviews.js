@@ -83,7 +83,7 @@ function aggregatePeriodEvents(entries, periodDays) {
 /**
  * video_events에 카테고리·영상 길이를 붙여 집계용 영상 기록으로 바꾼다.
  * @param {import("better-sqlite3").Database} db - DB 커넥션
- * @param {{videoId: string, title: string|null, watchedAt: string, watchedSeconds: number|null}[]} events
+ * @param {{videoId: string, title: string|null, watchedAt: string, watchedSeconds: number|null, wasBackgrounded: number|null}[]} events
  */
 function toEntries(db, events) {
   const videoIds = events.map((e) => e.videoId);
@@ -97,6 +97,8 @@ function toEntries(db, events) {
     categoryId: categoryIds[i],
     durationSeconds: durations[i],
     watchedSeconds: e.watchedSeconds ?? null,
+    // 시간 가중치의 백그라운드 상한에 쓴다(viewing-aggregate.js)
+    wasBackgrounded: e.wasBackgrounded ?? null,
   }));
 }
 
@@ -274,7 +276,8 @@ async function run(db, apiKey, { recordMetric } = {}) {
   // 여기서 title 없는 이벤트를 미리 제외하면 실제로는 유효한 시청인데도 validVideoCount·가중 분포·가중 엔트로피가
   // 과소 산정된다. title 필터는 Gemini 프롬프트용 titlesInRange를 만들 때만 적용한다.
   const selectVideoEvents = db.prepare(`
-    SELECT e.eventId, e.resumedFromEventId, e.videoId, ${PREFERRED_TITLE_SQL} AS title, e.watchedAt, e.watchedSeconds
+    SELECT e.eventId, e.resumedFromEventId, e.videoId, ${PREFERRED_TITLE_SQL} AS title, e.watchedAt, e.watchedSeconds,
+           e.wasBackgrounded
     FROM video_events e
     LEFT JOIN video_metadata m ON m.videoId = e.videoId
     WHERE e.anonymousId = ?

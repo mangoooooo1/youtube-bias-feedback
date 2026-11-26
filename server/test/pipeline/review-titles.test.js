@@ -86,6 +86,30 @@ describe("groupTitlesByCategory", () => {
     expect(groups.map((g) => g.category)).toEqual(["스포츠", "게임"]);
   });
 
+  it("백그라운드로 틀어 둔 기록은 3시간까지만 세서 순서를 정한다", () => {
+    const HOUR = 3600;
+    const groups = groupTitlesByCategory([
+      {
+        ...video({
+          categoryId: GAME,
+          watchedSeconds: 10 * HOUR,
+          durationSeconds: 10 * HOUR,
+        }),
+        wasBackgrounded: 1,
+      },
+      {
+        ...video({
+          categoryId: MUSIC,
+          watchedSeconds: 4 * HOUR,
+          durationSeconds: 5 * HOUR,
+        }),
+        wasBackgrounded: 0,
+      },
+    ]);
+
+    expect(groups.map((g) => g.category)).toEqual(["음악", "게임"]);
+  });
+
   it("묶음 안은 최근에 본 순서이고, 다시 본 제목은 횟수와 함께 한 줄로 합친다", () => {
     const groups = groupTitlesByCategory([
       video({ title: "A", watchedAt: "2026-03-10T09:00:00+09:00" }),
