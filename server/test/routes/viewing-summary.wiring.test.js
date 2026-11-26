@@ -469,6 +469,38 @@ describe("getViewingSummary — 날짜·구간 나눔과 화면용 값", () => {
     expect(periods[1].timeDistribution).toEqual({ 게임: 0.75, 음악: 0.25 });
   });
 
+  it("화면용 시간 분포는 반올림하지 않은 비율이라 확장이 리뷰와 같은 정수 %를 낸다(12.496% → 12%)", () => {
+    addParticipant("percent", "TEST-EXP", INSTALL);
+    addVideo("percent", {
+      watchedAt: "2026-03-05T10:00:00+09:00",
+      categoryId: "10",
+      watchedSeconds: 1249.6,
+      durationSeconds: 9000,
+    });
+    addVideo("percent", {
+      watchedAt: "2026-03-05T11:00:00+09:00",
+      categoryId: "20",
+      watchedSeconds: 8750.4,
+      durationSeconds: 9000,
+    });
+
+    const { days, periods } = getViewingSummary(db, "percent", NOW);
+    // 확장은 받은 비율을 Math.round(p * 100)으로 한 번 반올림한다
+    const percents = (distribution) =>
+      Object.fromEntries(
+        Object.entries(distribution).map(([name, p]) => [
+          name,
+          Math.round(p * 100),
+        ]),
+      );
+
+    expect(percents(days[0].timeDistribution)).toEqual({ 음악: 12, 게임: 88 });
+    expect(percents(periods[1].timeDistribution)).toEqual({
+      음악: 12,
+      게임: 88,
+    });
+  });
+
   it("시청 시간 합이 유한하지 않으면 null로 돌려준다(영상 길이를 모르는 극단값)", () => {
     addParticipant("overflow", "TEST-EXP", INSTALL);
     for (let i = 0; i < 3; i++) {

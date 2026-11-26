@@ -206,8 +206,10 @@ function aggregateViewing(
     chartCount: chart.length,
     chartSeconds,
     countDistribution: calculateDistribution(chart.map((e) => e.categoryId)),
+    // 원래 비율. 화면·리뷰가 정수 %로 한 번만 반올림한다(먼저 0.001로 자르면 1%p 어긋난다)
     timeDistribution: calculateWeightedDistribution(
       chart.map((e) => ({ categoryId: e.categoryId, weight: capped(e) })),
+      { round: false },
     ),
     // 분석·저장용. 엔트로피는 반올림 전 비율로 계산한다
     analysisDistribution,

@@ -39,7 +39,7 @@ function getCategoryName(categoryId) {
   return CATEGORY_NAMES[String(categoryId)] ?? "기타";
 }
 
-// 분포 비율은 화면·저장용으로 소수 셋째 자리까지 반올림한다. 엔트로피 계산은 round: false로 원래 비율을 쓴다
+// 분포 비율은 저장용·영상 개수 화면용으로 소수 셋째 자리까지 반올림한다. 엔트로피 계산과 화면·리뷰의 시간 비중은 round: false로 원래 비율을 쓴다
 const roundShare = (x) => Math.round(x * 1000) / 1000;
 
 function calculateDistribution(categoryIds, { round = true } = {}) {
