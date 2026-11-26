@@ -125,6 +125,35 @@ describe("buildPeriodComparison — 직전 구간 대비 변화", () => {
   });
 });
 
+describe("buildPeriodComparison — 비중 퍼센트는 원래 비율에서 한 번만 반올림", () => {
+  const repeat = (categoryId, seconds) =>
+    Array.from({ length: 10 }, () => watch(categoryId, seconds));
+
+  it("구간 비중은 원래 비율을 한 번만 반올림해 합이 100이다(12.496% → 12%, 87.504% → 88%)", () => {
+    const result = buildPeriodComparison([
+      period(1, [...repeat(MUSIC, 124.96), ...repeat(GAME, 875.04)]),
+      period(2, shares({ [MUSIC]: 100 })),
+    ]);
+
+    expect(result.previousPeriods[0].shares).toEqual([
+      { category: "게임", percent: 88 },
+      { category: "음악", percent: 12 },
+    ]);
+  });
+
+  it("직전 0%에서 실제 4.496%가 된 분야는 5%로 올라가지 않아 새로 본 분야가 아니다", () => {
+    const result = buildPeriodComparison([
+      period(1, shares({ [MUSIC]: 100 })),
+      period(2, [...repeat(SPORTS, 44.96), ...repeat(MUSIC, 955.04)]),
+    ]);
+
+    expect(
+      result.changeFromPrevious.changes.find((c) => c.category === "스포츠"),
+    ).toEqual({ category: "스포츠", from: 0, to: 4, delta: 4 });
+    expect(result.changeFromPrevious.newCategories).toEqual([]);
+  });
+});
+
 describe("buildPeriodComparison — 평소 변화 폭", () => {
   it("3구간까지는 이전 구간 쌍이 2개 미만이라 평소 변화 폭이 없다", () => {
     const result = buildPeriodComparison([

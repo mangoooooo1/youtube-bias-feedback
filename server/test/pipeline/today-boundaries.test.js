@@ -2,6 +2,7 @@ process.env.TZ = "Asia/Seoul";
 
 import { describe, it, expect } from "vitest";
 import { aggregateTodayCumulative } from "../../pipeline/today-boundaries.js";
+import { sharePercents } from "../../pipeline/review-prompt-format.js";
 
 // "오늘" 집계는 세션 분포를 병합하지 않고 영상 기록(video_events + video_metadata)에서 직접
 // 계산한다. 날짜는 영상을 본 시각(watchedAt, KST) 기준이다.
@@ -250,5 +251,28 @@ describe("aggregateTodayCumulative", () => {
     });
     expect(result.videoCount).toBe(2);
     expect(result.videoTitles).toEqual([]);
+  });
+});
+
+describe("aggregateTodayCumulative — 리뷰의 정수 퍼센트", () => {
+  it("오늘 리뷰에 넣는 정수 %는 원래 비율을 한 번만 반올림한다(12.496% → 12%)", () => {
+    const result = aggregateTodayCumulative({
+      events: [
+        video({
+          watchedAt: "2026-03-10T09:00:00+09:00",
+          watchedSeconds: 1249.6,
+          durationSeconds: 9000,
+        }),
+        video({
+          watchedAt: "2026-03-10T10:00:00+09:00",
+          categoryId: GAME,
+          watchedSeconds: 8750.4,
+          durationSeconds: 9000,
+        }),
+      ],
+      now: NOW,
+    });
+
+    expect(sharePercents(result)).toEqual({ 음악: 12, 게임: 88 });
   });
 });

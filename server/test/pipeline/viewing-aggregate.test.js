@@ -415,6 +415,33 @@ describe("aggregateViewing — 백그라운드 전환 기록의 시간 상한", 
   });
 });
 
+describe("aggregateViewing — 화면·리뷰의 시간 비중 퍼센트는 원래 비율에서 한 번만 반올림", () => {
+  it("시간 분포는 반올림하지 않은 비율이라 정수 퍼센트가 원래 비율 기준이다(12.496% → 12%)", () => {
+    // 0.001로 먼저 반올림하면 0.125 → 13%가 되어 합이 101%가 된다
+    const result = aggregateViewing([
+      video({
+        categoryId: MUSIC,
+        durationSeconds: 9000,
+        watchedSeconds: 1249.6,
+      }),
+      video({
+        categoryId: GAME,
+        durationSeconds: 9000,
+        watchedSeconds: 8750.4,
+      }),
+    ]);
+    const percents = Object.fromEntries(
+      Object.entries(result.timeDistribution).map(([name, p]) => [
+        name,
+        Math.round(p * 100),
+      ]),
+    );
+
+    expect(result.timeDistribution.음악).toBeCloseTo(0.12496, 10);
+    expect(percents).toEqual({ 음악: 12, 게임: 88 });
+  });
+});
+
 describe("aggregateViewing — 엔트로피 정밀도", () => {
   it("엔트로피는 반올림 전 비율로 계산하고, 저장·화면용 분포는 반올림된 값 그대로다", () => {
     // 세 분야 같은 시간 → 원래 비율 1/3, 반올림 비율 0.333
