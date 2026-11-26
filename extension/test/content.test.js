@@ -1240,6 +1240,19 @@ describe("content.js 실제 재생 시간(playedSeconds) — 재생 위치로 �
     expect(watched()).toBe(20);
   });
 
+  // 앞 125ms는 1배속, 뒤 125ms는 2배속이다. 위치 변화 0.375초를 모두 새 배속 2로 나누면 0.1875초로 덜 센다
+  it("두 timeupdate 사이에 배속을 높여도 바꾸기 전 구간은 그 전 배속으로 센다", async () => {
+    const { videoEl, played } = await startSection();
+    startPlaying(videoEl);
+    playFor(videoEl, 10);
+    vi.setSystemTime(Date.now() + 125);
+    changeRate(videoEl, 2);
+    vi.setSystemTime(Date.now() + 125);
+    videoEl.dispatch("timeupdate");
+
+    expect(played()).toBe(10.25);
+  });
+
   // 2배속으로 움직인 위치를 낮아진 배속(1)으로 나누면 흐른 시간보다 커진다
   it("두 timeupdate 사이에 배속을 낮춰도 흐른 시간보다 많이 세지 않는다", async () => {
     const { videoEl, played } = await startSection({ playbackRate: 2 });
