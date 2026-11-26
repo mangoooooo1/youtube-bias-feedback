@@ -3,9 +3,12 @@
  * 측정 정의 기준 H2 민감도 분석
  *
  * 참여자 × 완료된 기간마다 weightedEntropy를 측정 정의만 바꿔 다시 계산한다.
- * - 주 분석: 시청 시간을 영상 길이로 자르고, 유효 시청 상대 기준 25%
- * - noWatchCap: 시청 시간 상한 없이. 방치·잠자기 등으로 부푼 시청 시간을 자르는 처리가 결론을 바꾸는지 본다
- * - relativeCutoff10 / relativeCutoff50: 유효 시청 상대 기준을 10%·50%로. 절대 기준 30초는 그대로다
+ * - 주 분석: 시청 시간을 영상 길이로 자르고 백그라운드 전환 기록은 3시간으로도 자른다. 유효 시청 상대 기준 25%
+ * - noWatchCap: 두 상한 모두 없이 기록된 시청 시간 그대로. 방치·잠자기 등으로 부푼 시청 시간을 자르는 처리가 결론을 바꾸는지 본다
+ * - relativeCutoff10 / relativeCutoff50: 유효 시청 상대 기준을 10%·50%로. 절대 기준 30초와 두 상한은 그대로다
+ * - backgroundCap1h / 2h / 4h: 백그라운드 전환 기록 상한을 1·2·4시간으로
+ * - backgroundZero: 백그라운드 전환 기록의 시간 기여 0. 그 기록을 뺀 것과 weightedEntropy가 같고 유효 영상 수에는 남는다.
+ *   wasBackgrounded는 잠깐의 탭 전환도 1이라 틀어 둔 재생보다 훨씬 넓게 빠진다(극단값)
  * 유효 시청 기준이 바뀌면 유효 영상 수도 달라지므로 조건마다 validCount를 함께 남긴다.
  * 기간·영상 기록·출력 형식은 유입 경로 기준 민감도 분석(compute-h2-referrer-sensitivity.js)과 같다.
  *
@@ -28,11 +31,17 @@ const {
 } = require("./compute-h2-referrer-sensitivity");
 const { aggregateViewing } = require("../pipeline/viewing-aggregate");
 
+const HOUR = 60 * 60;
+
 // aggregateViewing에 넘기는 측정 정의. 넘기지 않은 값은 주 분석 정의 그대로다
 const VARIANTS = {
   noWatchCap: { capWatchSeconds: false },
   relativeCutoff10: { minRelativeRatio: 0.1 },
   relativeCutoff50: { minRelativeRatio: 0.5 },
+  backgroundCap1h: { backgroundCapSeconds: 1 * HOUR },
+  backgroundCap2h: { backgroundCapSeconds: 2 * HOUR },
+  backgroundCap4h: { backgroundCapSeconds: 4 * HOUR },
+  backgroundZero: { backgroundCapSeconds: 0 },
 };
 
 /** 한 기간의 영상 기록으로 주 분석과 측정 정의별 weightedEntropy를 계산한다. 순수 함수. */
