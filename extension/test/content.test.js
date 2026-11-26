@@ -1215,7 +1215,7 @@ describe("content.js 실제 재생 시간(playedSeconds) — 재생 위치로 �
     expect(played()).toBe(60);
   });
 
-  it("배속이어도 실제 시간으로 센다(2배속으로 15초 보면 15초)", async () => {
+  it("배속이어도 실제로 흐른 시간으로 센다(2배속으로 영상 30초 분량을 보면 15초)", async () => {
     const { videoEl, played, watched } = await startSection({
       playbackRate: 2,
     });
