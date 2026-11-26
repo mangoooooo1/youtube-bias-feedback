@@ -915,9 +915,10 @@ function isAdShowing(videoEl) {
  * 재생 중일 때만 부른다. 광고 중에는 세지 않는다. 위치가 뒤로 가거나 흐른 시간보다 크게 앞서면(탐색 이벤트 없이
  * 다음 영상이 같은 <video>에 실린 경우 등) 이어진 재생이 아니라서 더하지 않고 새 기준점으로 삼는다.
  * 더하는 값은 흐른 시간을 넘지 않는다.
+ * @param {number} [rateOverride] - 나눌 배속. 배속이 바뀌는 순간 그 전 배속으로 정산할 때 준다
  * @returns {void}
  */
-function samplePlayedPosition() {
+function samplePlayedPosition(rateOverride) {
   if (!watchTracker || !trackedVideoEl) return;
   if (isAdShowing(trackedVideoEl)) {
     breakPlayedRun();
@@ -927,7 +928,7 @@ function samplePlayedPosition() {
   let rate;
   try {
     position = trackedVideoEl.currentTime;
-    rate = trackedVideoEl.playbackRate;
+    rate = rateOverride ?? trackedVideoEl.playbackRate;
   } catch {
     position = NaN;
   }
@@ -1027,6 +1028,10 @@ function onTrackedVideoTimeUpdate() {
 
 function onTrackedVideoRateChange() {
   if (!watchTracker || !trackedVideoEl) return;
+  // 이벤트 때는 이미 새 배속이라, 지금까지 움직인 만큼은 바뀌기 전 배속으로 먼저 센다
+  if (watchTracker.lastPosition != null) {
+    samplePlayedPosition(watchTracker.lastPlaybackRate);
+  }
   try {
     watchTracker.lastPlaybackRate = trackedVideoEl.playbackRate;
   } catch {
