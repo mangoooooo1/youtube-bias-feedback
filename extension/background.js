@@ -1032,6 +1032,8 @@ async function postVideoEventToServer(anonymousId, participantToken, event) {
     entryHost: event.entryHost,
     entryPath: event.entryPath,
     navigationTrigger: event.navigationTrigger,
+    entryHasList: event.entryHasList,
+    watchHasList: event.watchHasList,
     isShortsUrl: event.isShortsUrl,
     resumedFromEventId: event.resumedFromEventId,
   });
