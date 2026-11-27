@@ -39,6 +39,8 @@ function initializeDB() {
     addColumn("video_events", "extensionVersion", "TEXT");
     addColumn("sessions", "extensionVersion", "TEXT");
     addColumn("video_events", "playedSeconds", "REAL");
+    addColumn("video_events", "entryHasList", "INTEGER");
+    addColumn("video_events", "watchHasList", "INTEGER");
     assertLatestColumns();
     backfillPeriodReviewVersions();
   } catch (err) {
@@ -145,10 +147,14 @@ function execSchema() {
       entryHost      TEXT,
       entryPath      TEXT,
       -- entryHost/entryPath/navigationTrigger로부터 서버가 분류한 결과
-      referrerType   TEXT,  -- 'direct_search' | 'home_feed' | 'related' | 'external' | 'unknown'
+      referrerType   TEXT,  -- 'direct_search' | 'home_feed' | 'related' | 'playlist' | 'external' | 'unknown'
       -- referrerType='related'일 때만 의미 있음(그 외엔 NULL) — 자동재생(ended)/사용자 조작(click·keydown) 구분,
       -- 판단 근거가 부족하면 'unknown'
       relatedTrigger TEXT,  -- 'autoplay' | 'click' | 'unknown' | NULL
+      -- 직전·현재 URL에 재생목록(list 파라미터)이 있었는지(1/0). 목록 ID와 쿼리 원문은 저장하지 않는다.
+      -- 옛 확장·잘못된 값이면 NULL
+      entryHasList   INTEGER,
+      watchHasList   INTEGER,
       -- 시청시간 원시 데이터 — 클릭만 하고 이탈한 영상을 다양성 계산에서 걸러내기
       -- 위한 근거 데이터. 확장이 <video> 엘리먼트를 계측해 산출하며, 계측 실패·구버전 확장 등으로
       -- 값을 못 구했으면 NULL(= "모름", "0초 시청"과 구분해야 하므로 0으로 채우지 않는다).
