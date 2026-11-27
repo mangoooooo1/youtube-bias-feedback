@@ -368,6 +368,20 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     expect(session.videos.map((v) => v.eventId)).toEqual(["a1", "a2"]);
   });
 
+  it("탭 번호 없는 기록이 사이에 끼어도 10초 안의 두 탭 기록은 모두 남는다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      ...tabVideo("a0", "A", 0, 7),
+      ...tabVideo("u", "A", 1),
+      ...tabVideo("a2", "A", 2, 8),
+    });
+    await endSession();
+
+    // 탭 번호 없는 u만 a0과 합친다. 지워진 u가 a2의 비교 대상이 되면 탭 8 기록까지 빠진다
+    const [session] = await getAllSessions();
+    expect(session.videos.map((v) => v.eventId)).toEqual(["a0", "a2"]);
+  });
+
   it("세션이 닫힌 뒤 두 번째 탭이 남긴 시청 시간도 기록을 찾아 재시도 대상에 남는다", async () => {
     await global.chrome.storage.local.set({
       currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
