@@ -148,7 +148,7 @@ function execSchema() {
       entryPath      TEXT,
       -- entryHost/entryPath/navigationTrigger로부터 서버가 분류한 결과
       referrerType   TEXT,  -- 'direct_search' | 'home_feed' | 'related' | 'playlist' | 'external' | 'unknown'
-      -- referrerType='related'일 때만 의미 있음(그 외엔 NULL) — 자동재생(ended)/사용자 조작(click·keydown) 구분,
+      -- referrerType이 'related'·'playlist'일 때만 의미 있음(그 외엔 NULL) — 자동재생(ended)/사용자 조작(click·keydown) 구분,
       -- 판단 근거가 부족하면 'unknown'
       relatedTrigger TEXT,  -- 'autoplay' | 'click' | 'unknown' | NULL
       -- 직전·현재 URL에 재생목록(list 파라미터)이 있었는지(1/0). 목록 ID와 쿼리 원문은 저장하지 않는다.

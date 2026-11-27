@@ -8,7 +8,7 @@ const YOUTUBE_HOSTS = new Set([
 /**
  * 직전 URL(entryHost/entryPath), 자동재생/클릭 원시 신호(navigationTrigger), 재생목록 여부를 받아
  * referrerType(direct_search/home_feed/related/playlist/external/unknown)과
- * relatedTrigger(related일 때만 의미 있는 세부 원인)로 분류한다.
+ * relatedTrigger(related·playlist일 때 자동으로 넘어갔는지 직접 눌렀는지)로 분류한다.
  *
  * @param {string|null} entryHost - 직전 페이지 도메인
  * @param {string|null} entryPath - 직전 페이지 경로(유튜브 내부 페이지일 때만 존재)
@@ -52,21 +52,32 @@ function classifyReferrerType(
   // 재생목록 페이지에서 왔거나 재생목록 안에서 다음 영상으로 넘어간 경우.
   // 홈·검색에서 연 재생목록의 첫 영상은 찾은 곳 그대로 두고, 옆 추천으로 빠져나가면 related다
   if (entryPath === "/playlist" || (entryHasList === 1 && watchHasList === 1)) {
-    return { referrerType: "playlist", relatedTrigger: null };
+    return {
+      referrerType: "playlist",
+      relatedTrigger: triggerOf(navigationTrigger),
+    };
   }
 
   if (entryPath === "/watch" || entryPath.startsWith("/shorts/")) {
-    const relatedTrigger =
-      navigationTrigger === "ended"
-        ? "autoplay"
-        : navigationTrigger === "interaction"
-          ? "click"
-          : "unknown";
-    return { referrerType: "related", relatedTrigger };
+    return {
+      referrerType: "related",
+      relatedTrigger: triggerOf(navigationTrigger),
+    };
   }
 
   // 채널/피드 등 분류 밖의 경로 — 억지로 끼워맞추지 않고 알 수 없음으로 남긴다.
   return { referrerType: "unknown", relatedTrigger: null };
+}
+
+/**
+ * 이동 직전 원시 신호를 자동재생/클릭으로 바꾼다. 판단할 신호가 없으면 unknown이다.
+ * @param {"ended"|"interaction"|null} navigationTrigger
+ * @returns {"autoplay"|"click"|"unknown"}
+ */
+function triggerOf(navigationTrigger) {
+  if (navigationTrigger === "ended") return "autoplay";
+  if (navigationTrigger === "interaction") return "click";
+  return "unknown";
 }
 
 module.exports = { classifyReferrerType };
