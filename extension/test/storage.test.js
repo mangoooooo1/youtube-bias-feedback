@@ -11,6 +11,7 @@ import {
   getUnsentWatchStats,
   getSessionCheckpointStats,
   markWatchStatsSent,
+  patchVideoRecord,
   pruneWatchCheckpoints,
   pruneTabWatches,
   WATCH_CHECKPOINT_STALE_MS,
@@ -350,6 +351,42 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
         location: "session",
         eventId: "a2",
         watchedSeconds: 600,
+      }),
+    ]);
+  });
+
+  it("탭 번호가 있는 두 탭이 10초 안에 같은 영상을 기록하면 두 기록이 모두 남는다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      ...tabVideo("a1", "A", 0, 7),
+      ...tabVideo("a2", "A", 2, 8),
+    });
+    await endSession();
+
+    const [session] = await getAllSessions();
+    expect(session.videos.map((v) => v.eventId)).toEqual(["a1", "a2"]);
+  });
+
+  it("세션이 닫힌 뒤 두 번째 탭이 남긴 시청 시간도 기록을 찾아 재시도 대상에 남는다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      ...tabVideo("a1", "A", 0, 7),
+      ...tabVideo("a2", "A", 2, 8),
+    });
+    await endSession();
+
+    // 세션은 기록 10분 뒤 닫혀, 긴 영상을 보던 두 번째 탭은 닫힌 뒤에 최종값을 남긴다
+    const applied = await patchVideoRecord(
+      { sessionId: "s1", eventId: "a2" },
+      { watchedSeconds: 900, watchStatsSent: false, watchStatsSource: "final" },
+    );
+
+    expect(applied).toBe(true);
+    expect(await getUnsentWatchStats()).toEqual([
+      expect.objectContaining({
+        location: "session",
+        eventId: "a2",
+        watchedSeconds: 900,
       }),
     ]);
   });
