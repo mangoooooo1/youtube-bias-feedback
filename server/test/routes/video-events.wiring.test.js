@@ -266,6 +266,98 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
     expect(row.relatedTrigger).toBeNull();
   });
 
+  const savedRow = () =>
+    db.prepare("SELECT * FROM video_events WHERE videoId = ?").get("wiring-v1");
+
+  it("확장이 실제로 보내는 외부 유입(경로 없음)이면 external로 저장하고 경로는 비워 둔다", async () => {
+    const res = await request(app)
+      .post("/api/video-events")
+      .send(basePayload({ entryHost: "www.google.com", entryPath: null }));
+    expect(res.status).toBe(200);
+
+    const row = savedRow();
+    expect(row.entryHost).toBe("www.google.com");
+    expect(row.entryPath).toBeNull();
+    expect(row.referrerType).toBe("external");
+  });
+
+  it("재생목록 페이지에서 오면 playlist로 저장하고 경로 /playlist와 재생목록 값을 남긴다", async () => {
+    const res = await request(app)
+      .post("/api/video-events")
+      .send(
+        basePayload({
+          entryHost: "www.youtube.com",
+          entryPath: "/playlist",
+          entryHasList: 1,
+          watchHasList: 1,
+        }),
+      );
+    expect(res.status).toBe(200);
+
+    const row = savedRow();
+    expect(row.referrerType).toBe("playlist");
+    expect(row.relatedTrigger).toBeNull();
+    expect(row.entryPath).toBe("/playlist");
+    expect(row.entryHasList).toBe(1);
+    expect(row.watchHasList).toBe(1);
+  });
+
+  it("재생목록 안에서 넘어간 영상은 자동으로 넘어가도 playlist로 저장한다", async () => {
+    await request(app)
+      .post("/api/video-events")
+      .send(
+        basePayload({
+          entryHost: "www.youtube.com",
+          entryPath: "/watch",
+          navigationTrigger: "ended",
+          entryHasList: 1,
+          watchHasList: 1,
+        }),
+      );
+
+    const row = savedRow();
+    expect(row.referrerType).toBe("playlist");
+    expect(row.relatedTrigger).toBeNull();
+    expect(row.entryPath).toBe("/watch");
+  });
+
+  it("재생목록 값이 0·1이 아니면 기록은 저장하고 그 값만 비워 둔다", async () => {
+    const res = await request(app)
+      .post("/api/video-events")
+      .send(
+        basePayload({
+          entryHost: "www.youtube.com",
+          entryPath: "/watch",
+          entryHasList: 2,
+          watchHasList: "1",
+        }),
+      );
+    expect(res.status).toBe(200);
+
+    const row = savedRow();
+    expect(row.entryHasList).toBeNull();
+    expect(row.watchHasList).toBeNull();
+    expect(row.referrerType).toBe("related");
+  });
+
+  it("재생목록 값을 보내지 않는 옛 확장은 그 칸을 비워 두고 지금처럼 분류한다", async () => {
+    await request(app)
+      .post("/api/video-events")
+      .send(
+        basePayload({
+          entryHost: "www.youtube.com",
+          entryPath: "/watch",
+          navigationTrigger: "ended",
+        }),
+      );
+
+    const row = savedRow();
+    expect(row.entryHasList).toBeNull();
+    expect(row.watchHasList).toBeNull();
+    expect(row.referrerType).toBe("related");
+    expect(row.relatedTrigger).toBe("autoplay");
+  });
+
   it("다시 재생해 새로 만든 기록은 앞 기록의 eventId를 저장하고, 유입 경로는 unknown으로 둔다", async () => {
     const res = await request(app)
       .post("/api/video-events")

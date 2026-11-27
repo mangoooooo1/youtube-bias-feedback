@@ -76,4 +76,25 @@ describe("compositionByPeriod — 기간별 유입 경로 구성", () => {
     });
     expect(byPeriod[2]).toBeNull();
   });
+
+  it("재생목록 유입은 unknown과 따로 센다", () => {
+    const events = [
+      {
+        eventId: "e1",
+        referrerType: "playlist",
+        watchedAt: "2026-09-01T10:00:00+09:00",
+      },
+      {
+        eventId: "e2",
+        referrerType: "unknown",
+        watchedAt: "2026-09-01T10:30:00+09:00",
+      },
+    ];
+
+    expect(compositionByPeriod(events, INSTALL)[1]).toMatchObject({
+      total: 2,
+      playlist: 0.5,
+      unknown: 0.5,
+    });
+  });
 });
