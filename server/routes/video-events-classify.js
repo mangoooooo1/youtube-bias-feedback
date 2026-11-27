@@ -49,9 +49,13 @@ function classifyReferrerType(
     return { referrerType: "home_feed", relatedTrigger: null };
   }
 
-  // 재생목록 페이지에서 왔거나 재생목록 안에서 다음 영상으로 넘어간 경우.
-  // 홈·검색에서 연 재생목록의 첫 영상은 찾은 곳 그대로 두고, 옆 추천으로 빠져나가면 related다
-  if (entryPath === "/playlist" || (entryHasList === 1 && watchHasList === 1)) {
+  // 재생목록 페이지에서 왔거나 재생목록의 시청 화면에서 다음 영상으로 넘어간 경우.
+  // 홈·검색에서 연 재생목록의 첫 영상은 찾은 곳 그대로 두고, 옆 추천으로 빠져나가면 related다.
+  // 경로를 /watch로 한정해야 playlist의 저장 경로가 /playlist·/watch로만 남는다
+  if (
+    entryPath === "/playlist" ||
+    (entryPath === "/watch" && entryHasList === 1 && watchHasList === 1)
+  ) {
     return {
       referrerType: "playlist",
       relatedTrigger: triggerOf(navigationTrigger),

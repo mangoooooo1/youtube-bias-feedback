@@ -80,9 +80,13 @@ router.post("/", requireParticipant, (req, res, next) => {
     { entryHasList, watchHasList },
   );
 
-  const storedEntryPath = SAFE_ENTRY_PATH_REFERRER_TYPES.has(referrerType)
-    ? (entryPath ?? null)
-    : null;
+  // 확장은 쿼리·해시가 없는 pathname만 보낸다. 섞여 오면 분류와 관계없이 경로를 버린다(쿼리 원문 미저장)
+  const storedEntryPath =
+    SAFE_ENTRY_PATH_REFERRER_TYPES.has(referrerType) &&
+    typeof entryPath === "string" &&
+    !/[?#]/.test(entryPath)
+      ? entryPath
+      : null;
 
   try {
     insertEvent.run({
