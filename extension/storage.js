@@ -30,35 +30,43 @@ function tabVideoKey(v) {
 }
 
 /**
- * NEAR_SIMULTANEOUS_MS 이내에 같은 videoId가 다시 나오고 둘 중 하나라도 탭 번호가 없으면 같은 시청으로 보고 합친다.
- * 둘 다 탭 번호가 있으면 다른 탭이 따로 연 시청이라 남긴다. 탭마다 기록하고 시청 시간도 탭마다 잰다.
- * 같은 탭이 이 시간 안에 같은 영상을 기록한 적이 있으면(A → B → 뒤로 가기 A) 사이에 탭 번호 없는 기록이 끼어도 새 시청으로 남긴다.
+ * NEAR_SIMULTANEOUS_MS 이내에 같은 videoId가 다시 나오면 같은 시청으로 보고 합친다. 합치는 것은 탭 번호를 모르는 기록과의 중복뿐이다.
+ * 탭 번호가 있는 기록은 이 시간 안에 탭 번호가 있는 같은 영상 기록이 앞에 있으면, 사이에 탭 번호 없는 기록이 끼어도 남긴다.
+ * 다른 탭이 따로 연 시청은 탭마다 기록하고 시청 시간도 탭마다 잰다.
+ * 같은 탭이 이 시간 안에 같은 영상을 기록한 적이 있으면(A → B → 뒤로 가기 A) 새 시청으로 남긴다.
  * 이미 닫힌 세션에 남은 기록은 다시 판정하지 않는다. 지워진 기록이 목록에 없어 다시 판정하면 결과가 달라진다.
  * @param {Array<{videoId: string, watchedAt: string, tabId?: number|null, eventId?: string}>} videos - watchedAt 오름차순으로 정렬된 목록
  * @param {Set<string>} [keptEventIds] - 판정 없이 남길 기록의 eventId
  * @returns {Array} 중복 제거된 목록
  */
 function dedupeNearSimultaneous(videos, keptEventIds = new Set()) {
-  const lastSeen = new Map(); // videoId -> 탭과 관계없이 직전에 나온 같은 영상의 ms·탭 번호 유무
+  const lastSeenAt = new Map(); // videoId -> 탭과 관계없이 직전에 나온 같은 영상의 ms
+  const lastSeenWithTabAt = new Map(); // videoId -> 탭 번호가 있는 직전 같은 영상 기록의 ms
   const lastSeenInTabAt = new Map(); // 영상·탭 키 -> 그 탭이 직전에 기록한 같은 영상의 ms
   const result = [];
   for (const v of videos) {
     const t = new Date(v.watchedAt).getTime();
-    const prev = lastSeen.get(v.videoId);
+    const prev = lastSeenAt.get(v.videoId);
     const tabKey = tabVideoKey(v);
     const prevInTab = tabKey ? lastSeenInTabAt.get(tabKey) : undefined;
+    const prevWithTab = tabKey ? lastSeenWithTabAt.get(v.videoId) : undefined;
     // 건너뛴 기록도 직전 값으로 남겨, 임계값 안에서 이어지는 여러 건을 전부 하나로 묶는다
-    lastSeen.set(v.videoId, { at: t, hasTab: tabKey !== null });
-    if (tabKey) lastSeenInTabAt.set(tabKey, t);
+    lastSeenAt.set(v.videoId, t);
+    if (tabKey) {
+      lastSeenInTabAt.set(tabKey, t);
+      lastSeenWithTabAt.set(v.videoId, t);
+    }
     const rewatchedInTab =
       prevInTab !== undefined && t - prevInTab <= NEAR_SIMULTANEOUS_MS;
-    const bothTabsKnown = tabKey !== null && prev?.hasTab === true;
+    // 지워진 탭 번호 없는 기록이 바로 앞에 있어도 탭 번호가 있는 기록끼리 비교한다
+    const knownTabNearby =
+      prevWithTab !== undefined && t - prevWithTab <= NEAR_SIMULTANEOUS_MS;
     if (
       !keptEventIds.has(v.eventId) &&
       !rewatchedInTab &&
-      !bothTabsKnown &&
+      !knownTabNearby &&
       prev !== undefined &&
-      t - prev.at <= NEAR_SIMULTANEOUS_MS
+      t - prev <= NEAR_SIMULTANEOUS_MS
     ) {
       continue;
     }
