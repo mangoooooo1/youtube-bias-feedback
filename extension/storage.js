@@ -17,7 +17,7 @@ function enqueue(task) {
 // background.js의 종료 판정과 content.js의 새 세션 판정이 같은 값을 쓴다
 export const SESSION_TIMEOUT_MS = 10 * 60 * 1000;
 
-// 다른 탭에서 같은 영상이 이 값 안에 다시 감지되면 "같은 시청"으로 보고 합친다.
+// 탭 번호를 모르는 기록에서 같은 영상이 이 값 안에 다시 감지되면 "같은 시청"으로 보고 합친다.
 // 10초는 비동기 storage 왕복 시간차보다는 넉넉하고, 사람이 같은 영상을 일부러 다시 재생하는 데 걸리는 시간보다는 짧게 잡은 값이다.
 const NEAR_SIMULTANEOUS_MS = 10000;
 
@@ -30,8 +30,10 @@ function tabVideoKey(v) {
 }
 
 /**
- * NEAR_SIMULTANEOUS_MS 이내에 다른 탭에서 같은 videoId가 다시 나오면 같은 시청으로 보고 합친다.
- * 같은 탭이 이 시간 안에 같은 영상을 기록한 적이 있으면(A → B → 뒤로 가기 A) 사이에 다른 탭 기록이 끼어도 새 시청으로 남긴다.
+ * NEAR_SIMULTANEOUS_MS 이내에 같은 videoId가 다시 나오면 같은 시청으로 보고 합친다. 합치는 것은 탭 번호를 모르는 기록과의 중복뿐이다.
+ * 탭 번호가 있는 기록은 이 시간 안에 탭 번호가 있는 같은 영상 기록이 앞에 있으면, 사이에 탭 번호 없는 기록이 끼어도 남긴다.
+ * 다른 탭이 따로 연 시청은 탭마다 기록하고 시청 시간도 탭마다 잰다.
+ * 같은 탭이 이 시간 안에 같은 영상을 기록한 적이 있으면(A → B → 뒤로 가기 A) 새 시청으로 남긴다.
  * 이미 닫힌 세션에 남은 기록은 다시 판정하지 않는다. 지워진 기록이 목록에 없어 다시 판정하면 결과가 달라진다.
  * @param {Array<{videoId: string, watchedAt: string, tabId?: number|null, eventId?: string}>} videos - watchedAt 오름차순으로 정렬된 목록
  * @param {Set<string>} [keptEventIds] - 판정 없이 남길 기록의 eventId
@@ -39,6 +41,7 @@ function tabVideoKey(v) {
  */
 function dedupeNearSimultaneous(videos, keptEventIds = new Set()) {
   const lastSeenAt = new Map(); // videoId -> 탭과 관계없이 직전에 나온 같은 영상의 ms
+  const lastSeenWithTabAt = new Map(); // videoId -> 탭 번호가 있는 직전 같은 영상 기록의 ms
   const lastSeenInTabAt = new Map(); // 영상·탭 키 -> 그 탭이 직전에 기록한 같은 영상의 ms
   const result = [];
   for (const v of videos) {
@@ -46,14 +49,22 @@ function dedupeNearSimultaneous(videos, keptEventIds = new Set()) {
     const prev = lastSeenAt.get(v.videoId);
     const tabKey = tabVideoKey(v);
     const prevInTab = tabKey ? lastSeenInTabAt.get(tabKey) : undefined;
-    // 건너뛴 기록도 직전 값으로 남겨, 임계값 안에서 이어지는 여러 건(예: 세 탭)을 전부 하나로 묶는다
+    const prevWithTab = tabKey ? lastSeenWithTabAt.get(v.videoId) : undefined;
+    // 건너뛴 기록도 직전 값으로 남겨, 임계값 안에서 이어지는 여러 건을 전부 하나로 묶는다
     lastSeenAt.set(v.videoId, t);
-    if (tabKey) lastSeenInTabAt.set(tabKey, t);
+    if (tabKey) {
+      lastSeenInTabAt.set(tabKey, t);
+      lastSeenWithTabAt.set(v.videoId, t);
+    }
     const rewatchedInTab =
       prevInTab !== undefined && t - prevInTab <= NEAR_SIMULTANEOUS_MS;
+    // 지워진 탭 번호 없는 기록이 바로 앞에 있어도 탭 번호가 있는 기록끼리 비교한다
+    const knownTabNearby =
+      prevWithTab !== undefined && t - prevWithTab <= NEAR_SIMULTANEOUS_MS;
     if (
       !keptEventIds.has(v.eventId) &&
       !rewatchedInTab &&
+      !knownTabNearby &&
       prev !== undefined &&
       t - prev <= NEAR_SIMULTANEOUS_MS
     ) {
@@ -150,8 +161,8 @@ function buildClosedSession(
   keptEventIds,
 ) {
   videos.sort((a, b) => new Date(a.watchedAt) - new Date(b.watchedAt));
-  // 마지막 방어선: 같은 videoId가 짧은 시간 안에 다른 탭에서 다시 나오면(새로고침 중복 방지 값이
-  // 탭 경합으로 드물게 못 걸렀거나, 같은 영상을 여러 탭에서 동시에 열어둔 경우) 하나로 합친다.
+  // 마지막 방어선: 탭 번호를 모르는 기록은 모든 탭이 함께 쓰는 새로고침 검사가 탭 경합으로 드물게
+  // 놓칠 수 있어, 짧은 시간 안에 다시 나온 같은 videoId를 하나로 합친다.
   const deduped = dedupeNearSimultaneous(videos, keptEventIds);
   // 한 세션은 한 참여자가 기록한다(content.js가 신원이 바뀌면 새 세션을 연다)
   const owner = deduped.find((v) => v.anonymousId)?.anonymousId;

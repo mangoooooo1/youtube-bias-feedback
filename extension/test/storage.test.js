@@ -11,6 +11,7 @@ import {
   getUnsentWatchStats,
   getSessionCheckpointStats,
   markWatchStatsSent,
+  patchVideoRecord,
   pruneWatchCheckpoints,
   pruneTabWatches,
   WATCH_CHECKPOINT_STALE_MS,
@@ -280,7 +281,8 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     expect(sessions[0].videos.map((v) => v.videoId)).toEqual(["v1"]);
   });
 
-  // 같은 탭의 새 기록은 실제 이동이라 10초 안이어도 남기고, 다른 탭의 동시 기록만 합친다
+  // 탭 번호가 있는 기록끼리는 10초 안이어도 남기고(같은 탭은 실제 이동, 다른 탭은 따로 연 시청),
+  // 한쪽이라도 탭 번호를 모르면 합친다
   const tabVideo = (eventId, videoId, second, tabId, extra = {}) => ({
     [`video__s1__${eventId}`]: {
       videoId,
@@ -306,10 +308,10 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     expect(session.videos.map((v) => v.eventId)).toEqual(["a1", "b", "a2"]);
   });
 
-  it("다른 탭에서 10초 안에 같은 영상이 기록되면 사이에 다른 영상이 있어도 하나로 합친다", async () => {
+  it("탭 번호가 없는 기록 뒤 10초 안에 다른 탭이 같은 영상을 기록하면 사이에 다른 영상이 있어도 하나로 합친다", async () => {
     await global.chrome.storage.local.set({
       currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
-      ...tabVideo("a1", "A", 0, 7),
+      ...tabVideo("a1", "A", 0),
       ...tabVideo("b", "B", 1, 8),
       ...tabVideo("a2", "A", 2, 8),
     });
@@ -354,6 +356,56 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     ]);
   });
 
+  it("탭 번호가 있는 두 탭이 10초 안에 같은 영상을 기록하면 두 기록이 모두 남는다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      ...tabVideo("a1", "A", 0, 7),
+      ...tabVideo("a2", "A", 2, 8),
+    });
+    await endSession();
+
+    const [session] = await getAllSessions();
+    expect(session.videos.map((v) => v.eventId)).toEqual(["a1", "a2"]);
+  });
+
+  it("탭 번호 없는 기록이 사이에 끼어도 10초 안의 두 탭 기록은 모두 남는다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      ...tabVideo("a0", "A", 0, 7),
+      ...tabVideo("u", "A", 1),
+      ...tabVideo("a2", "A", 2, 8),
+    });
+    await endSession();
+
+    // 탭 번호 없는 u만 a0과 합친다. 지워진 u가 a2의 비교 대상이 되면 탭 8 기록까지 빠진다
+    const [session] = await getAllSessions();
+    expect(session.videos.map((v) => v.eventId)).toEqual(["a0", "a2"]);
+  });
+
+  it("세션이 닫힌 뒤 두 번째 탭이 남긴 시청 시간도 기록을 찾아 재시도 대상에 남는다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      ...tabVideo("a1", "A", 0, 7),
+      ...tabVideo("a2", "A", 2, 8),
+    });
+    await endSession();
+
+    // 세션은 기록 10분 뒤 닫혀, 긴 영상을 보던 두 번째 탭은 닫힌 뒤에 최종값을 남긴다
+    const applied = await patchVideoRecord(
+      { sessionId: "s1", eventId: "a2" },
+      { watchedSeconds: 900, watchStatsSent: false, watchStatsSource: "final" },
+    );
+
+    expect(applied).toBe(true);
+    expect(await getUnsentWatchStats()).toEqual([
+      expect.objectContaining({
+        location: "session",
+        eventId: "a2",
+        watchedSeconds: 900,
+      }),
+    ]);
+  });
+
   it("늦게 온 기록을 합쳐 세션을 다시 정리해도 같은 탭에서 다시 본 A는 남는다", async () => {
     await global.chrome.storage.local.set({
       currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
@@ -385,27 +437,27 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     ]);
   });
 
-  it("다른 탭 기록이 사이에 끼어도 같은 탭에서 10초 안에 다시 본 영상은 남긴다", async () => {
+  it("탭 번호 없는 중복 기록이 사이에 끼어도 같은 탭에서 10초 안에 다시 본 영상은 남긴다", async () => {
     await global.chrome.storage.local.set({
       currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
       ...tabVideo("a0", "A", 0, 7),
       ...tabVideo("b1", "B", 1, 8),
-      ...tabVideo("a2", "A", 2, 8),
-      ...tabVideo("b3", "B", 3, 7),
+      ...tabVideo("a2", "A", 2),
+      ...tabVideo("b3", "B", 3),
       ...tabVideo("a6", "A", 6, 7),
     });
     await endSession();
 
-    // 탭8의 A·탭7의 B는 다른 탭에 같은 영상이 열린 중복이라 합친다
+    // 탭 번호 없는 A·B는 10초 안의 같은 영상이라 합친다
     const [session] = await getAllSessions();
     expect(session.videos.map((v) => v.eventId)).toEqual(["a0", "b1", "a6"]);
   });
 
-  it("다른 탭이 같은 영상을 기록한 뒤 같은 탭에서 A → B → 뒤로 가기 A를 해도 두 번째 A는 남긴다", async () => {
+  it("탭 번호 없는 같은 영상 기록이 끼어도 같은 탭에서 A → B → 뒤로 가기 A를 하면 두 번째 A는 남긴다", async () => {
     await global.chrome.storage.local.set({
       currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
       ...tabVideo("a0", "A", 0, 1),
-      ...tabVideo("a1", "A", 1, 2),
+      ...tabVideo("a1", "A", 1),
       ...tabVideo("b3", "B", 3, 1),
       ...tabVideo("a6", "A", 6, 1),
     });
@@ -415,7 +467,7 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     expect(session.videos.map((v) => v.eventId)).toEqual(["a0", "b3", "a6"]);
   });
 
-  it("같은 탭의 같은 영상 기록이 10초보다 오래됐으면 다른 탭 중복은 지금처럼 합친다", async () => {
+  it("같은 탭의 같은 영상 기록이 10초보다 오래됐으면 탭 번호 없는 기록과의 중복은 지금처럼 합친다", async () => {
     await global.chrome.storage.local.set({
       currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
       video__s1__old: {
@@ -430,7 +482,6 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
         watchedAt: "2026-01-01T00:05:00.000Z",
         eventId: "other",
         sent: true,
-        tabId: 7,
       },
       video__s1__again: {
         videoId: "A",
@@ -469,10 +520,10 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     return { afterFirst, afterMerge };
   };
 
-  it("다른 탭 중복이 지워진 뒤 같은 탭에서 다시 본 기록은 늦은 기록을 합쳐도 남는다", async () => {
+  it("탭 번호 없는 기록과의 중복이 지워진 뒤 같은 탭에서 다시 본 기록은 늦은 기록을 합쳐도 남는다", async () => {
     const { afterFirst, afterMerge } = await closeThenMergeLate(
       {
-        ...tabVideo("a0", "A", 0, 7),
+        ...tabVideo("a0", "A", 0),
         ...tabVideo("b1", "B", 1, 8),
         ...tabVideo("a2", "A", 2, 8),
         ...tabVideo("b3", "B", 3, 8),
@@ -485,10 +536,10 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
     expect(afterMerge).toEqual(["a0", "b1", "b3", "a6", "late"]);
   });
 
-  it("늦게 온 기록이 저장된 기록과 다른 탭 중복이면 합친다", async () => {
+  it("늦게 온 탭 번호 없는 기록이 저장된 기록과 10초 안 중복이면 합친다", async () => {
     const { afterMerge } = await closeThenMergeLate(
       { ...tabVideo("a0", "A", 0, 7), ...tabVideo("b1", "B", 1, 7) },
-      tabVideo("late", "A", 2, 8),
+      tabVideo("late", "A", 2),
     );
 
     expect(afterMerge).toEqual(["a0", "b1"]);
@@ -496,7 +547,7 @@ describe("endSession — 세션 종료 큐 (P0 ⑦)", () => {
 
   it("닫는 중 영상 키 삭제가 끊겨 같은 기록이 다시 들어와도 처음 닫은 결과와 같다", async () => {
     const records = {
-      ...tabVideo("a0", "A", 0, 7),
+      ...tabVideo("a0", "A", 0),
       ...tabVideo("b1", "B", 1, 8),
       ...tabVideo("a2", "A", 2, 8),
       ...tabVideo("b3", "B", 3, 8),
