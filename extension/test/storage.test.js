@@ -1099,6 +1099,64 @@ describe("getUnsentVideoEvents / markVideoEventSent", () => {
     expect(event.isShortsUrl).toBe(0);
   });
 
+  it("재시도 대상은 세션 종료 전후 모두 재생목록 여부를 그대로 들고 간다", async () => {
+    await global.chrome.storage.local.set({
+      "video__s2__v1-2": {
+        videoId: "v1",
+        watchedAt: "2026-01-01T00:20:00Z",
+        sent: false,
+        eventId: "v1-2",
+        entryHasList: 1,
+        watchHasList: 0,
+      },
+      sessions: [
+        {
+          sessionId: "s1",
+          videos: [
+            {
+              videoId: "v1",
+              watchedAt: "2026-01-01T00:00:00Z",
+              sent: false,
+              eventId: "v1-3",
+              entryHasList: 0,
+              watchHasList: 1,
+            },
+          ],
+        },
+      ],
+    });
+
+    const events = await getUnsentVideoEvents();
+    expect(
+      events.map((e) => [e.location, e.entryHasList, e.watchHasList]),
+    ).toEqual([
+      ["live", 1, 0],
+      ["session", 0, 1],
+    ]);
+  });
+
+  it("세션을 닫아도 재생목록 여부를 세션 기록으로 옮겨 재시도 때 보낸다", async () => {
+    await global.chrome.storage.local.set({
+      currentSession: { sessionId: "s1", startTime: "2026-01-01T00:00:00Z" },
+      "video__s1__v1-1": {
+        videoId: "v1",
+        watchedAt: "2026-01-01T00:00:00Z",
+        sent: false,
+        eventId: "v1-1",
+        entryHasList: 1,
+        watchHasList: 1,
+      },
+    });
+    await endSession();
+
+    const [event] = await getUnsentVideoEvents();
+    expect(event).toMatchObject({
+      location: "session",
+      entryHasList: 1,
+      watchHasList: 1,
+    });
+  });
+
   it("다시 재생해 새로 만든 기록이면 재시도 대상에 앞 기록의 eventId(resumedFromEventId)를 그대로 들고 간다", async () => {
     await global.chrome.storage.local.set({
       "video__s2__v1-2": {

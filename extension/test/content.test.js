@@ -2992,13 +2992,17 @@ function createTabBrowser({
     withVideo = true,
     // 숫자를 주면 <video>가 재생 위치를 흉내 낸다(실제 재생 시간 확인용)
     position,
+    // 영상 주소 뒤에 붙일 쿼리(예: 재생목록 "&list=…")
+    query = "",
+    // 이 탭을 연 페이지(document.referrer)
+    referrer = "",
   }) {
     let video = withVideo
       ? createFakeVideoElement({ paused: true, position })
       : null;
     const location = {
       href: videoId
-        ? `https://www.youtube.com/watch?v=${videoId}`
+        ? `https://www.youtube.com/watch?v=${videoId}${query}`
         : "https://www.youtube.com/",
     };
     let pagehide = null;
@@ -3026,6 +3030,7 @@ function createTabBrowser({
       document: {
         title: videoId ? `영상 ${videoId} - YouTube` : "YouTube",
         hidden,
+        referrer,
         querySelector: (sel) => (sel === "video" ? video : null),
       },
       window: {
@@ -3061,10 +3066,10 @@ function createTabBrowser({
         video.paused = true;
         video.dispatch("pause");
       },
-      async goTo(nextVideoId) {
+      async goTo(nextVideoId, { query = "" } = {}) {
         currentVideoId = nextVideoId;
         location.href = nextVideoId
-          ? `https://www.youtube.com/watch?v=${nextVideoId}`
+          ? `https://www.youtube.com/watch?v=${nextVideoId}${query}`
           : "https://www.youtube.com/";
         globalThis.document.title = nextVideoId
           ? `영상 ${nextVideoId} - YouTube`
@@ -4161,6 +4166,121 @@ describe("content.js 영상 기록의 탭 번호 — 세션을 닫을 때 다른
     expect(browser.recordsOf("AAAA")).toEqual([
       expect.objectContaining({ tabId: null }),
     ]);
+  });
+});
+
+describe("content.js 재생목록 여부 — 직전·현재 URL에 재생목록이 있었는지만 보낸다", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse("2026-10-26T10:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const LIST = "&list=PLsecret123&index=2";
+
+  function browserWithPosts() {
+    const posts = [];
+    const browser = createTabBrowser({
+      initialStorage: { anonymousId: "a1", serverUrl: "https://srv.example" },
+      fetch: (_url, options = {}) => {
+        if (options.method === "POST") posts.push(JSON.parse(options.body));
+        return Promise.resolve({ ok: true });
+      },
+    });
+    return { browser, posts };
+  }
+
+  it("재생목록 안에서 다음 영상으로 넘어가면 직전·현재 모두 1을 보내고 기록에도 남긴다", async () => {
+    const { browser, posts } = browserWithPosts();
+    const page = await browser.openPage({ videoId: "AAAA", query: LIST });
+    await page.goTo("BBBB", { query: LIST });
+
+    expect(posts.at(-1)).toMatchObject({
+      videoId: "BBBB",
+      entryPath: "/watch",
+      entryHasList: 1,
+      watchHasList: 1,
+    });
+    expect(browser.recordsOf("BBBB")[0]).toMatchObject({
+      entryHasList: 1,
+      watchHasList: 1,
+    });
+  });
+
+  it("재생목록 페이지에서 연 영상은 /playlist와 함께 1을 보낸다", async () => {
+    const { browser, posts } = browserWithPosts();
+    await browser.openPage({
+      videoId: "AAAA",
+      query: LIST,
+      referrer: "https://www.youtube.com/playlist?list=PLsecret123",
+    });
+
+    expect(posts[0]).toMatchObject({
+      entryPath: "/playlist",
+      entryHasList: 1,
+      watchHasList: 1,
+    });
+  });
+
+  it("재생목록에서 옆 추천으로 빠져나가면 현재 URL은 0을 보낸다", async () => {
+    const { browser, posts } = browserWithPosts();
+    const page = await browser.openPage({ videoId: "AAAA", query: LIST });
+    await page.goTo("CCCC");
+
+    expect(posts.at(-1)).toMatchObject({
+      videoId: "CCCC",
+      entryHasList: 1,
+      watchHasList: 0,
+    });
+  });
+
+  it("직전 페이지를 모르면 직전 값은 비워 둔다", async () => {
+    const { browser, posts } = browserWithPosts();
+    await browser.openPage({ videoId: "AAAA" });
+
+    expect(posts[0]).toMatchObject({ entryHasList: null, watchHasList: 0 });
+  });
+
+  it("같은 영상에 재생목록이 붙은 뒤 다음 영상으로 넘어가면 직전 값도 1이다", async () => {
+    const { browser, posts } = browserWithPosts();
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.goTo("AAAA", { query: LIST });
+    await page.goTo("BBBB", { query: LIST });
+
+    // 같은 영상에서 주소만 바뀐 것은 새 기록이 아니다
+    expect(posts.map((p) => p.videoId)).toEqual(["AAAA", "BBBB"]);
+    expect(posts.at(-1)).toMatchObject({ entryHasList: 1, watchHasList: 1 });
+  });
+
+  it("같은 영상에서 재생목록이 빠진 뒤 다른 재생목록 영상으로 가면 직전 값은 0이다", async () => {
+    const { browser, posts } = browserWithPosts();
+    const page = await browser.openPage({ videoId: "AAAA", query: LIST });
+    await page.goTo("AAAA");
+    await page.goTo("BBBB", { query: "&list=PLother456" });
+
+    expect(posts.map((p) => p.videoId)).toEqual(["AAAA", "BBBB"]);
+    expect(posts.at(-1)).toMatchObject({ entryHasList: 0, watchHasList: 1 });
+  });
+
+  it("목록 ID와 쿼리 원문은 전송 본문과 로컬 저장소 어디에도 남지 않는다", async () => {
+    const { browser, posts } = browserWithPosts();
+    const page = await browser.openPage({
+      videoId: "AAAA",
+      query: LIST,
+      referrer: "https://www.youtube.com/playlist?list=PLsecret123",
+    });
+    await page.goTo("BBBB", { query: LIST });
+
+    for (const text of [
+      JSON.stringify(posts),
+      JSON.stringify(browser.storage.dump()),
+    ]) {
+      expect(text).not.toContain("PLsecret123");
+      expect(text).not.toContain("list=");
+    }
   });
 });
 

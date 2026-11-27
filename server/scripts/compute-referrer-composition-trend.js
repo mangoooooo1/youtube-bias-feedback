@@ -33,6 +33,7 @@ const REFERRER_TYPES = [
   "direct_search",
   "home_feed",
   "related",
+  "playlist",
   "external",
   "unknown",
 ];

@@ -66,6 +66,20 @@ function parseEntryLocation(href) {
 }
 
 /**
+ * URL에 재생목록(`list` 파라미터)이 있는지. 목록 ID와 쿼리 원문은 읽지도 보내지도 않는다.
+ * @param {string|null} href
+ * @returns {0|1|null} 주소를 모르거나 읽을 수 없으면 null
+ */
+function listFlagOf(href) {
+  if (!href) return null;
+  try {
+    return new URL(href).searchParams.has("list") ? 1 : 0;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 문서 제목에서 유튜브 특유의 접두사(안 읽은 알림 수)·접미사(" - YouTube")를 제거한다.
  * @returns {string|null} 정제된 제목, placeholder("YouTube")이거나 없으면 null
  */
@@ -451,6 +465,7 @@ function reportClientError(code, where) {
  * @param {{watchedSeconds: number|null, playbackRate: number|null, wasBackgrounded: 0|1, playedSeconds?: number|null}|null} previousWatchStats - 직전 영상의 시청시간 스냅샷
  * @param {{sessionId: string, eventId: string}|null} previousVideoIdentity - captureTrackedVideoIdentity 결과(이 탭 메모리 기준)
  * @param {string|null} [resumedFromEventId=null] - 10분 넘게 쉬었다가 다시 재생해 새로 기록하면 앞 기록의 eventId
+ * @param {{entryHasList?: 0|1|null, watchHasList?: 0|1|null}} [lists] - 직전·현재 URL에 재생목록이 있었는지(이동으로 생긴 기록만)
  * @returns {Promise<void>}
  */
 function recordVideo(
@@ -463,6 +478,7 @@ function recordVideo(
   previousWatchStats,
   previousVideoIdentity,
   resumedFromEventId = null,
+  { entryHasList = null, watchHasList = null } = {},
 ) {
   writeQueue = writeQueue.then(async () => {
     // 확장 리로드/업데이트 후 남은 탭은 새로고침 전까지 컨텍스트가 무효화돼 chrome.*
@@ -608,6 +624,8 @@ function recordVideo(
           entryHost,
           entryPath,
           navigationTrigger,
+          entryHasList,
+          watchHasList,
           isShortsUrl: isShorts ? 1 : 0,
           resumedFromEventId,
           tabId,
@@ -650,6 +668,8 @@ function recordVideo(
             entryHost,
             entryPath,
             navigationTrigger,
+            entryHasList,
+            watchHasList,
             isShortsUrl: isShorts ? 1 : 0,
             resumedFromEventId,
           }),
@@ -767,7 +787,11 @@ async function handleVideoChange() {
 
   // 같은 영상이 계속되는 중(스퓨리어스 재이벤트 등)
   // resetWatchTracker를 호출하면 안 된다. 호출하면 진행 중인 시청 시간이 그대로 사라진다.
-  if (videoId === lastVideoId) return;
+  // 주소만 바뀌었을 수 있어(재생목록이 붙거나 빠짐) 다음 영상의 직전 주소는 갱신한다.
+  if (videoId === lastVideoId) {
+    previousLocationHref = location.href;
+    return;
+  }
 
   // resetWatchTracker보다 먼저 캡처해야 "막 떠나는 영상"의 스냅샷을 얻는다.
   const previousWatchStats = captureWatchStatsSnapshot();
@@ -776,6 +800,10 @@ async function handleVideoChange() {
 
   // 덮어쓰기 전에 먼저 읽어야 "이 영상 직전 페이지"를 알 수 있다.
   const { entryHost, entryPath } = parseEntryLocation(previousLocationHref);
+  const lists = {
+    entryHasList: listFlagOf(previousLocationHref),
+    watchHasList: listFlagOf(location.href),
+  };
   const navigationTrigger = classifyNavigationTrigger(Date.now());
   const isShorts = isShortsUrl(location.href);
   previousLocationHref = location.href;
@@ -809,6 +837,8 @@ async function handleVideoChange() {
     isShorts,
     previousWatchStats,
     previousVideoIdentity,
+    null,
+    lists,
   );
 }
 

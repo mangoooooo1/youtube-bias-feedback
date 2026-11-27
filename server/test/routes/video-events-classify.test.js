@@ -82,6 +82,84 @@ describe("classifyReferrerType — 관련 동영상 추천(자동재생/클릭 �
   });
 });
 
+describe("classifyReferrerType — 확장이 실제로 보내는 외부 유입", () => {
+  // 확장은 외부 사이트의 경로를 보내지 않아 entryPath가 null로 온다
+  it("유튜브가 아닌 도메인이면 경로가 없어도 external을 반환한다", () => {
+    expect(classifyReferrerType("www.google.com", null, null)).toEqual({
+      referrerType: "external",
+      relatedTrigger: null,
+    });
+  });
+});
+
+describe("classifyReferrerType — 재생목록", () => {
+  it("/playlist 페이지에서 영상을 누르면 playlist/click을 반환한다", () => {
+    expect(
+      classifyReferrerType("www.youtube.com", "/playlist", "interaction"),
+    ).toEqual({ referrerType: "playlist", relatedTrigger: "click" });
+  });
+
+  it.each([
+    ["ended", "autoplay"],
+    ["interaction", "click"],
+    [null, "unknown"],
+  ])(
+    "직전·현재 URL 모두 재생목록이면 navigationTrigger=%s일 때 playlist/%s를 반환한다",
+    (trigger, relatedTrigger) => {
+      expect(
+        classifyReferrerType("www.youtube.com", "/watch", trigger, {
+          entryHasList: 1,
+          watchHasList: 1,
+        }),
+      ).toEqual({ referrerType: "playlist", relatedTrigger });
+    },
+  );
+
+  it("재생목록에서 옆 추천을 눌러 빠져나가면(현재 URL에 재생목록 없음) related를 반환한다", () => {
+    expect(
+      classifyReferrerType("www.youtube.com", "/watch", "interaction", {
+        entryHasList: 1,
+        watchHasList: 0,
+      }),
+    ).toEqual({ referrerType: "related", relatedTrigger: "click" });
+  });
+
+  it.each([
+    ["/", { referrerType: "home_feed", relatedTrigger: null }],
+    ["/results", { referrerType: "direct_search", relatedTrigger: null }],
+    ["/watch", { referrerType: "related", relatedTrigger: "click" }],
+  ])(
+    "%s에서 재생목록을 열면 첫 영상은 찾은 곳 그대로 분류한다",
+    (entryPath, expected) => {
+      expect(
+        classifyReferrerType("www.youtube.com", entryPath, "interaction", {
+          entryHasList: 0,
+          watchHasList: 1,
+        }),
+      ).toEqual(expected);
+    },
+  );
+
+  it.each(["/@someChannel", "/watch?list=PL_PRIVATE"])(
+    "%s처럼 /watch가 아닌 경로는 재생목록 값이 1이어도 playlist가 아니다",
+    (entryPath) => {
+      expect(
+        classifyReferrerType("www.youtube.com", entryPath, "interaction", {
+          entryHasList: 1,
+          watchHasList: 1,
+        }),
+      ).toEqual({ referrerType: "unknown", relatedTrigger: null });
+    },
+  );
+
+  it("재생목록 값을 보내지 않는 옛 확장은 지금처럼 분류한다", () => {
+    expect(classifyReferrerType("www.youtube.com", "/watch", "ended")).toEqual({
+      referrerType: "related",
+      relatedTrigger: "autoplay",
+    });
+  });
+});
+
 describe("classifyReferrerType — 4분류 밖의 경로", () => {
   it.each(["/feed/subscriptions", "/channel/UCxxxx", "/@someChannel"])(
     "%s처럼 매핑되지 않는 경로는 unknown을 반환한다",

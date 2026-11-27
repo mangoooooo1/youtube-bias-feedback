@@ -227,6 +227,20 @@ describe("validateVideoEvent — entryPath (옵션 필드, 유입 경로 판별�
   });
 });
 
+describe("validateVideoEvent — entryHasList·watchHasList (옵션 필드, 재생목록 여부)", () => {
+  // 400이면 확장이 그 영상 기록 전체를 버린다. 0·1이 아닌 값은 저장할 때 비워 둔다
+  it.each([undefined, null, 0, 1, 2, true, "1"])(
+    "%s여도 거부하지 않는다",
+    (value) => {
+      expect(
+        validateVideoEvent(
+          basePayload({ entryHasList: value, watchHasList: value }),
+        ),
+      ).toBeNull();
+    },
+  );
+});
+
 describe("validateVideoEvent — navigationTrigger (옵션 필드, 정해진 값만 허용)", () => {
   it.each([undefined, null])("%s이면 통과한다(알 수 없음)", (value) => {
     expect(

@@ -770,6 +770,47 @@ describe("retryUnsentVideoEvents — 영상 이벤트 서버 장애 대비 재�
     });
   });
 
+  it("재전송 본문에 직전·현재 URL의 재생목록 여부도 함께 보낸다", async () => {
+    global.chrome = createChromeMock();
+    const calls = { videoEvents: [] };
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const href = String(url);
+      if (href.endsWith("/api/video-events")) {
+        calls.videoEvents.push(JSON.parse(options.body));
+        return { ok: true, json: async () => ({ success: true }) };
+      }
+      throw new Error(`예상치 못한 fetch 호출: ${href}`);
+    });
+
+    await global.chrome.storage.local.set({
+      anonymousId: "a1",
+      group: "EXP",
+      installDate: ACTIVE_INSTALL_DATE,
+      currentSession: { sessionId: "s3", startTime: "2026-01-10T11:30:00Z" },
+      video__s3__uuid3: {
+        videoId: "v3",
+        watchedAt: "2026-01-10T11:30:00Z",
+        sent: false,
+        eventId: "uuid3",
+        entryHost: "www.youtube.com",
+        entryPath: "/watch",
+        entryHasList: 1,
+        watchHasList: 1,
+      },
+    });
+
+    vi.resetModules();
+    const mod = await import("../background.js");
+    await mod.retryUnsentVideoEvents();
+
+    expect(calls.videoEvents).toHaveLength(1);
+    expect(calls.videoEvents[0]).toMatchObject({
+      eventId: "uuid3",
+      entryHasList: 1,
+      watchHasList: 1,
+    });
+  });
+
   it("세션 종료 후(sessions[].videos)에 남은 미전송 영상도 재전송하고 sent:true로 표시한다", async () => {
     global.chrome = createChromeMock();
     const calls = { videoEvents: [] };
