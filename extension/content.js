@@ -787,7 +787,11 @@ async function handleVideoChange() {
 
   // 같은 영상이 계속되는 중(스퓨리어스 재이벤트 등)
   // resetWatchTracker를 호출하면 안 된다. 호출하면 진행 중인 시청 시간이 그대로 사라진다.
-  if (videoId === lastVideoId) return;
+  // 주소만 바뀌었을 수 있어(재생목록이 붙거나 빠짐) 다음 영상의 직전 주소는 갱신한다.
+  if (videoId === lastVideoId) {
+    previousLocationHref = location.href;
+    return;
+  }
 
   // resetWatchTracker보다 먼저 캡처해야 "막 떠나는 영상"의 스냅샷을 얻는다.
   const previousWatchStats = captureWatchStatsSnapshot();
