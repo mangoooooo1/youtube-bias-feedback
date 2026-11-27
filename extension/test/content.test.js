@@ -4244,6 +4244,27 @@ describe("content.js 재생목록 여부 — 직전·현재 URL에 재생목록�
     expect(posts[0]).toMatchObject({ entryHasList: null, watchHasList: 0 });
   });
 
+  it("같은 영상에 재생목록이 붙은 뒤 다음 영상으로 넘어가면 직전 값도 1이다", async () => {
+    const { browser, posts } = browserWithPosts();
+    const page = await browser.openPage({ videoId: "AAAA" });
+    await page.goTo("AAAA", { query: LIST });
+    await page.goTo("BBBB", { query: LIST });
+
+    // 같은 영상에서 주소만 바뀐 것은 새 기록이 아니다
+    expect(posts.map((p) => p.videoId)).toEqual(["AAAA", "BBBB"]);
+    expect(posts.at(-1)).toMatchObject({ entryHasList: 1, watchHasList: 1 });
+  });
+
+  it("같은 영상에서 재생목록이 빠진 뒤 다른 재생목록 영상으로 가면 직전 값은 0이다", async () => {
+    const { browser, posts } = browserWithPosts();
+    const page = await browser.openPage({ videoId: "AAAA", query: LIST });
+    await page.goTo("AAAA");
+    await page.goTo("BBBB", { query: "&list=PLother456" });
+
+    expect(posts.map((p) => p.videoId)).toEqual(["AAAA", "BBBB"]);
+    expect(posts.at(-1)).toMatchObject({ entryHasList: 0, watchHasList: 1 });
+  });
+
   it("목록 ID와 쿼리 원문은 전송 본문과 로컬 저장소 어디에도 남지 않는다", async () => {
     const { browser, posts } = browserWithPosts();
     const page = await browser.openPage({
