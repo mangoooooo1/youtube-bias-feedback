@@ -359,6 +359,46 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
     expect(row.relatedTrigger).toBe("autoplay");
   });
 
+  it.each(["/watch?list=PL_PRIVATE", "/@someChannelHandle"])(
+    "재생목록 값이 1이어도 %s 같은 경로는 저장하지 않는다",
+    async (entryPath) => {
+      await request(app)
+        .post("/api/video-events")
+        .send(
+          basePayload({
+            entryHost: "www.youtube.com",
+            entryPath,
+            entryHasList: 1,
+            watchHasList: 1,
+          }),
+        );
+
+      const row = savedRow();
+      expect(row.referrerType).toBe("unknown");
+      expect(row.entryPath).toBeNull();
+    },
+  );
+
+  // 확장은 쿼리·해시가 없는 pathname만 보낸다. 섞여 오면 분류와 관계없이 경로를 버린다
+  it.each(["/shorts/abc123?list=PL_PRIVATE", "/shorts/abc123#t=10"])(
+    "%s처럼 쿼리나 해시가 붙은 경로는 분류와 관계없이 저장하지 않는다",
+    async (entryPath) => {
+      await request(app)
+        .post("/api/video-events")
+        .send(
+          basePayload({
+            entryHost: "www.youtube.com",
+            entryPath,
+            navigationTrigger: "ended",
+          }),
+        );
+
+      const row = savedRow();
+      expect(row.referrerType).toBe("related");
+      expect(row.entryPath).toBeNull();
+    },
+  );
+
   it("다시 재생해 새로 만든 기록은 앞 기록의 eventId를 저장하고, 유입 경로는 unknown으로 둔다", async () => {
     const res = await request(app)
       .post("/api/video-events")

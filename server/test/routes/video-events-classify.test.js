@@ -140,6 +140,18 @@ describe("classifyReferrerType — 재생목록", () => {
     },
   );
 
+  it.each(["/@someChannel", "/watch?list=PL_PRIVATE"])(
+    "%s처럼 /watch가 아닌 경로는 재생목록 값이 1이어도 playlist가 아니다",
+    (entryPath) => {
+      expect(
+        classifyReferrerType("www.youtube.com", entryPath, "interaction", {
+          entryHasList: 1,
+          watchHasList: 1,
+        }),
+      ).toEqual({ referrerType: "unknown", relatedTrigger: null });
+    },
+  );
+
   it("재생목록 값을 보내지 않는 옛 확장은 지금처럼 분류한다", () => {
     expect(classifyReferrerType("www.youtube.com", "/watch", "ended")).toEqual({
       referrerType: "related",
