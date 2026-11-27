@@ -281,13 +281,14 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
     expect(row.referrerType).toBe("external");
   });
 
-  it("재생목록 페이지에서 오면 playlist로 저장하고 경로 /playlist와 재생목록 값을 남긴다", async () => {
+  it("재생목록 페이지에서 영상을 누르면 playlist/click으로 저장하고 경로 /playlist와 재생목록 값을 남긴다", async () => {
     const res = await request(app)
       .post("/api/video-events")
       .send(
         basePayload({
           entryHost: "www.youtube.com",
           entryPath: "/playlist",
+          navigationTrigger: "interaction",
           entryHasList: 1,
           watchHasList: 1,
         }),
@@ -296,13 +297,13 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
 
     const row = savedRow();
     expect(row.referrerType).toBe("playlist");
-    expect(row.relatedTrigger).toBeNull();
+    expect(row.relatedTrigger).toBe("click");
     expect(row.entryPath).toBe("/playlist");
     expect(row.entryHasList).toBe(1);
     expect(row.watchHasList).toBe(1);
   });
 
-  it("재생목록 안에서 넘어간 영상은 자동으로 넘어가도 playlist로 저장한다", async () => {
+  it("재생목록 안에서 자동으로 넘어간 영상은 playlist/autoplay로 저장한다", async () => {
     await request(app)
       .post("/api/video-events")
       .send(
@@ -317,7 +318,7 @@ describe("실제 server/routes/video-events.js 라우터 배선", () => {
 
     const row = savedRow();
     expect(row.referrerType).toBe("playlist");
-    expect(row.relatedTrigger).toBeNull();
+    expect(row.relatedTrigger).toBe("autoplay");
     expect(row.entryPath).toBe("/watch");
   });
 

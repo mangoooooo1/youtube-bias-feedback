@@ -93,21 +93,27 @@ describe("classifyReferrerType — 확장이 실제로 보내는 외부 유입",
 });
 
 describe("classifyReferrerType — 재생목록", () => {
-  it("/playlist 페이지에서 왔으면 playlist를 반환한다", () => {
-    expect(classifyReferrerType("www.youtube.com", "/playlist", null)).toEqual({
-      referrerType: "playlist",
-      relatedTrigger: null,
-    });
+  it("/playlist 페이지에서 영상을 누르면 playlist/click을 반환한다", () => {
+    expect(
+      classifyReferrerType("www.youtube.com", "/playlist", "interaction"),
+    ).toEqual({ referrerType: "playlist", relatedTrigger: "click" });
   });
 
-  it("직전·현재 URL 모두 재생목록이면 자동으로 넘어가도 playlist를 반환한다", () => {
-    expect(
-      classifyReferrerType("www.youtube.com", "/watch", "ended", {
-        entryHasList: 1,
-        watchHasList: 1,
-      }),
-    ).toEqual({ referrerType: "playlist", relatedTrigger: null });
-  });
+  it.each([
+    ["ended", "autoplay"],
+    ["interaction", "click"],
+    [null, "unknown"],
+  ])(
+    "직전·현재 URL 모두 재생목록이면 navigationTrigger=%s일 때 playlist/%s를 반환한다",
+    (trigger, relatedTrigger) => {
+      expect(
+        classifyReferrerType("www.youtube.com", "/watch", trigger, {
+          entryHasList: 1,
+          watchHasList: 1,
+        }),
+      ).toEqual({ referrerType: "playlist", relatedTrigger });
+    },
+  );
 
   it("재생목록에서 옆 추천을 눌러 빠져나가면(현재 URL에 재생목록 없음) related를 반환한다", () => {
     expect(
