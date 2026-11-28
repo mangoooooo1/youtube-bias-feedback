@@ -718,12 +718,24 @@ document.addEventListener(
   },
   true,
 );
-document.addEventListener("click", () => {
-  lastInteractionAt = Date.now();
-});
-document.addEventListener("keydown", () => {
-  lastInteractionAt = Date.now();
-});
+// 유튜브는 영상 제목 링크·재생목록 패널 등에서 클릭 전파를 막아, 클릭·키 입력도 캡처 단계에서 듣는다
+document.addEventListener(
+  "click",
+  () => {
+    lastInteractionAt = Date.now();
+  },
+  true,
+);
+// 보조 키 하나로는 영상을 넘길 수 없다. 창 전환(Alt+Tab)의 Alt 등은 조작으로 세지 않는다
+const MODIFIER_KEYS = new Set(["Alt", "AltGraph", "Control", "Meta", "Shift"]);
+document.addEventListener(
+  "keydown",
+  (event) => {
+    if (MODIFIER_KEYS.has(event?.key)) return;
+    lastInteractionAt = Date.now();
+  },
+  true,
+);
 
 /**
  * 영상 전환 직전 lastEndedAt/lastInteractionAt 중 더 최근 신호를 전환 원인으로 추정한다.
