@@ -13,12 +13,17 @@ const CONTENT_PATH = path.join(__dirname, "../content.js");
 async function loadContent(env = {}) {
   vi.resetModules();
   const documentListeners = {};
+  // 이벤트 종류별로 캡처 단계에서 등록했는지(세 번째 인자)
+  const documentCapture = {};
   const doc = {
     referrer: "",
     title: "",
     hidden: false,
-    addEventListener: (type, cb) => {
+    addEventListener: (type, cb, options) => {
       (documentListeners[type] ??= []).push(cb);
+      (documentCapture[type] ??= []).push(
+        options === true || options?.capture === true,
+      );
     },
     querySelector: () => null,
     ...env.document,
@@ -42,7 +47,7 @@ async function loadContent(env = {}) {
   vi.stubGlobal("fetch", env.fetch ?? (() => Promise.resolve()));
   if (env.console) vi.stubGlobal("console", env.console);
   const api = (await import("../content.js")).default;
-  return { api, documentListeners };
+  return { api, documentListeners, documentCapture };
 }
 
 afterEach(() => {
@@ -180,20 +185,23 @@ describe("content.js parseTitle", () => {
 
 describe("content.js classifyNavigationTrigger", () => {
   let trigger;
+  let capture;
 
   // lastEndedAt/lastInteractionAt은 모듈 내부 상태라, 그 시각으로 시계를 맞춘 뒤 content.js가
-  // 실제로 등록한 ended/click 리스너를 실행해 기록하게 한다.
+  // 실제로 등록한 ended/click/keydown 리스너를 실행해 기록하게 한다.
   beforeEach(async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    const { api, documentListeners } = await loadContent();
-    const fire = (type, at) => {
+    const { api, documentListeners, documentCapture } = await loadContent();
+    capture = documentCapture;
+    const fire = (type, at, event) => {
       vi.setSystemTime(at);
-      for (const cb of documentListeners[type]) cb();
+      for (const cb of documentListeners[type]) cb(event);
     };
     trigger = {
       classify: api.classifyNavigationTrigger,
       setEndedAt: (t) => fire("ended", t),
       setInteractionAt: (t) => fire("click", t),
+      keydownAt: (t, event) => fire("keydown", t, event),
     };
   });
 
@@ -241,6 +249,28 @@ describe("content.js classifyNavigationTrigger", () => {
     trigger.setInteractionAt(1000);
     expect(trigger.classify(1500)).toBe("interaction");
     expect(trigger.classify(3000)).toBeNull();
+  });
+
+  // 유튜브는 영상 제목 링크·재생목록 패널·아이콘 등에서 클릭 전파를 막아 버블 단계까지 오지 않는다
+  it("클릭과 키 입력은 영상 끝남처럼 캡처 단계에서 듣는다", () => {
+    expect(capture.click).toEqual([true]);
+    expect(capture.keydown).toEqual([true]);
+    expect(capture.ended).toEqual([true]);
+  });
+
+  it.each(["Alt", "AltGraph", "Control", "Meta", "Shift"])(
+    "영상이 끝난 뒤 %s만 눌러도(창 전환 등) 자동 넘김으로 판정한다",
+    (key) => {
+      trigger.setEndedAt(1000);
+      trigger.keydownAt(1200, { key });
+      expect(trigger.classify(1500)).toBe("ended");
+    },
+  );
+
+  it("영상이 끝난 뒤 Shift+N처럼 다른 키를 함께 누르면 조작으로 판정한다", () => {
+    trigger.setEndedAt(1000);
+    trigger.keydownAt(1200, { key: "N", shiftKey: true });
+    expect(trigger.classify(1500)).toBe("interaction");
   });
 });
 
